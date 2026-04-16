@@ -184,43 +184,53 @@ export default function GroupDetail() {
               <p className="text-sm">No expenses yet</p>
             </div>
           )}
-          {[...group.expenses].reverse().map((e) => (
-            <div key={e.id} className="card flex items-center gap-3">
-              <div className="w-8 h-8 bg-amber-50 border border-amber-100 flex items-center justify-center flex-shrink-0">
-                <svg className="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" />
-                </svg>
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-bold text-gray-900 leading-tight" style={{wordBreak:'break-word'}}>{e.title || e.category || 'Expense'}</p>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  {e.paid_by} ·{' '}
-                  {e.split_json ? (
-                    <span className="text-purple-500 font-semibold">custom</span>
-                  ) : (
-                    `${e.divider} ppl`
-                  )}{' '}
-                  · {e.date || '—'}
-                </p>
-              </div>
-              <div className="text-right flex-shrink-0">
-                <p className="text-sm font-black text-gray-900">{INR(e.amount)}</p>
-                {!e.split_json && (
-                  <p className="text-xs text-brand-600">{INR(e.individual_amount)}/ea</p>
+          {[...group.expenses].reverse().map((e) => {
+            const memberCount = group.members.length
+            // Uneven split = not everyone in the group shared this expense
+            const isPartialSplit = !e.split_json && e.divider < memberCount && e.divider > 0
+            return (
+              <div key={e.id} className="card flex items-start gap-3">
+                <div className="w-8 h-8 bg-amber-50 border border-amber-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <svg className="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" />
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-gray-900 leading-tight" style={{wordBreak:'break-word'}}>{e.title || e.category || 'Expense'}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {e.paid_by} ·{' '}
+                    {e.split_json ? (
+                      <span className="text-purple-500 font-semibold">custom split</span>
+                    ) : (
+                      `${e.divider} ppl`
+                    )}{' '}
+                    · {e.date || '—'}
+                  </p>
+                  {isPartialSplit && (
+                    <span className="inline-block mt-1 text-[10px] font-bold text-orange-600 bg-orange-50 border border-orange-200 px-1.5 py-0.5 tracking-wide">
+                      {e.divider}/{memberCount} split
+                    </span>
+                  )}
+                </div>
+                <div className="text-right flex-shrink-0">
+                  <p className="text-sm font-black text-gray-900">{INR(e.amount)}</p>
+                  {!e.split_json && (
+                    <p className="text-xs text-brand-600">{INR(e.individual_amount)}/ea</p>
+                  )}
+                </div>
+                {!group.is_historical && (
+                  <button
+                    onClick={() => handleDeleteExpense(e.id)}
+                    className="text-gray-300 hover:text-red-400 transition-colors ml-1 mt-0.5"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
                 )}
               </div>
-              {!group.is_historical && (
-                <button
-                  onClick={() => handleDeleteExpense(e.id)}
-                  className="text-gray-300 hover:text-red-400 transition-colors ml-1"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              )}
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 

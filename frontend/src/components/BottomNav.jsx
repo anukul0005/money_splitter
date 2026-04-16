@@ -12,7 +12,11 @@ function GroupIcon()   { return <svg className="w-6 h-6" fill="none" stroke="cur
 function AddIcon()     { return <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg> }
 function HistoryIcon() { return <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> }
 
-export default function BottomNav() {
+export default function BottomNav({ user, onLogout }) {
+  const handleLogout = () => {
+    if (window.confirm('Sign out?')) onLogout()
+  }
+
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-field-950 border-t border-field-800 pb-safe z-50 md:hidden">
       <div className="flex items-center justify-around h-16 px-2">
@@ -43,6 +47,17 @@ export default function BottomNav() {
             }
           </NavLink>
         ))}
+
+        {/* User / logout */}
+        <button
+          onClick={handleLogout}
+          className="flex flex-col items-center gap-0.5 flex-1 py-2 text-green-200/40 active:scale-95 transition-transform"
+        >
+          <span className="w-6 h-6 bg-brand-400/15 border border-brand-400/30 flex items-center justify-center font-black text-brand-400 text-xs">
+            {user?.name?.[0]?.toUpperCase() || '?'}
+          </span>
+          <span className="text-[10px] font-semibold text-green-200/40">Sign out</span>
+        </button>
       </div>
     </nav>
   )

@@ -21,6 +21,10 @@
     text-transform: none;
     letter-spacing: normal;
     font-family: inherit;
+    /* 16px prevents iOS Safari from zooming in when an input is focused */
+    font-size: 16px;
+    /* Disable double-tap zoom on interactive elements */
+    touch-action: manipulation;
   }
 }
 

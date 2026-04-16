@@ -38,7 +38,7 @@ SHEET_META = {
         "members": ["Anubhav", "Anukul"],
     },
     "Sheet5": {
-        "name": "Mumbai Trip (Apr 25)",
+        "name": "Mumbai Trip (Oct 25)",
         "emoji": "",
         "description": "Anukul, Apoorv & Akshat – 2025",
         "members": ["Anukul", "Apoorv", "Akshat"],

@@ -33,27 +33,47 @@ export default function History() {
 
   const historical = groups.filter((g) => g.is_historical)
 
+  // Wrap long group names into 2-word lines so nothing is truncated
+  const wrapLabel = (name) => {
+    const words = name.split(' ')
+    const lines = []
+    for (let i = 0; i < words.length; i += 2) lines.push(words.slice(i, i + 2).join(' '))
+    return lines
+  }
+
   const barData = {
-    labels: overview.map((g) => g.name.split(' ').slice(0, 2).join(' ')),
+    labels: overview.map((g) => wrapLabel(g.name.toUpperCase())),
     datasets: [{
-      label: 'Total Spent (₹)',
+      label: 'Total Spent',
       data: overview.map((g) => g.total),
       backgroundColor: PALETTE,
-      borderRadius: 8,
+      borderRadius: 0,        // strictly rectangular
       borderSkipped: false,
     }],
   }
 
   const barOptions = {
-    indexAxis: 'y',
     responsive: true,
     plugins: {
       legend: { display: false },
-      tooltip: { callbacks: { label: (c) => ` ${INR(c.parsed.x)}` } },
+      tooltip: { callbacks: { label: (c) => ` ${INR(c.parsed.y)}` } },
     },
     scales: {
-      x: { ticks: { callback: (v) => `₹${(v/1000).toFixed(0)}k`, font: { size: 10 } }, grid: { color: '#f1f5f9' } },
-      y: { ticks: { font: { size: 10 } }, grid: { display: false } },
+      x: {
+        ticks: {
+          font: { size: 9, family: "'Barlow Condensed', sans-serif" },
+          maxRotation: 0,   // no rotation — let wrapping handle readability
+          autoSkip: false,  // never hide a label
+        },
+        grid: { display: false },
+      },
+      y: {
+        ticks: {
+          callback: (v) => `₹${(v / 1000).toFixed(0)}k`,
+          font: { size: 10, family: "'Barlow Condensed', sans-serif" },
+        },
+        grid: { color: '#f1f5f9' },
+      },
     },
     onClick: (_, elements) => {
       if (elements.length > 0) nav(`/groups/${overview[elements[0].index]?.id}`)

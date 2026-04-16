@@ -50,7 +50,10 @@ export default function App() {
         </div>
 
         {/* Mobile bottom nav */}
-        <BottomNav />
+        <BottomNav user={user} onLogout={() => {
+          localStorage.removeItem(SESSION_KEY)
+          setUser(null)
+        }} />
       </div>
     </BrowserRouter>
   )
