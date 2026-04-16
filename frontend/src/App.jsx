@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import BottomNav  from './components/BottomNav'
 import Sidebar    from './components/Sidebar'
@@ -8,13 +9,30 @@ import AddExpense  from './pages/AddExpense'
 import NewGroup    from './pages/NewGroup'
 import EditGroup   from './pages/EditGroup'
 import History     from './pages/History'
+import Login       from './pages/Login'
+
+const SESSION_KEY = 'splitter_session'
+
+function getStoredUser() {
+  try {
+    const s = localStorage.getItem(SESSION_KEY)
+    return s ? JSON.parse(s) : null
+  } catch { return null }
+}
 
 export default function App() {
+  const [user, setUser] = useState(getStoredUser)
+
+  if (!user) return <Login onLogin={setUser} />
+
   return (
     <BrowserRouter>
       <div className="flex min-h-screen bg-field-900">
         {/* Desktop sidebar */}
-        <Sidebar />
+        <Sidebar user={user} onLogout={() => {
+          localStorage.removeItem(SESSION_KEY)
+          setUser(null)
+        }} />
 
         {/* Main content — offset by sidebar width on desktop */}
         <div className="flex-1 min-w-0 md:ml-56">

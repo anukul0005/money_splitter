@@ -1,88 +1,99 @@
 """
-Run once to seed Supabase with historical data from Expenditure.xlsx.
+Seed Supabase with historical data from Expenditure.xlsx.
 Usage:
     cd backend
     python seed.py
 """
 
-import asyncio
 import os
+import re
 import datetime
 from pathlib import Path
-import openpyxl
+
 from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent / ".env")
 
-load_dotenv()
-
-# must be set before importing app modules
-from database import get_session_factory, create_tables
+import openpyxl
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from models import Group, Member, Expense
 
 XLSX_PATH = Path(__file__).parent.parent / "Expenditure.xlsx"
 
-# ── Sheet → trip metadata ────────────────────────────────────────────────────
+engine = create_engine(os.environ["DATABASE_URL"], pool_pre_ping=True)
+Session = sessionmaker(bind=engine)
+
+# ── Group / sheet config (Sheet2 and Bike excluded per user request) ──────────
 SHEET_META = {
     "Sheet1": {
-        "name": "Friends Outings",
-        "emoji": "🍻",
+        "name": "Friends Outings (Mar 25)",
+        "emoji": "",
         "description": "Ajay, Anukul & Anubhav – Mar to Jun 2025",
         "members": ["Ajay", "Anukul", "Anubhav"],
     },
     "Sheet4": {
-        "name": "Anubhav & Me",
-        "emoji": "🤝",
+        "name": "Anubhav & Me (Mar 25)",
+        "emoji": "",
         "description": "Anubhav & Anukul – Mar to Jun 2025",
         "members": ["Anubhav", "Anukul"],
     },
     "Sheet5": {
-        "name": "Goa / Mumbai Trip",
-        "emoji": "🌊",
-        "description": "Anukul, Apoorv & Akshat – Oct 3–5, 2025",
+        "name": "Mumbai Trip (Apr 25)",
+        "emoji": "",
+        "description": "Anukul, Apoorv & Akshat – 2025",
         "members": ["Anukul", "Apoorv", "Akshat"],
     },
     "Sheet6": {
-        "name": "Mumbai with Apoorv",
-        "emoji": "🎬",
-        "description": "Apoorv & Anukul – Oct 1–2, 2025",
+        "name": "Mumbai with Apoorv (Jan 25)",
+        "emoji": "",
+        "description": "Apoorv & Anukul – Jan–Feb 2025",
         "members": ["Apoorv", "Anukul"],
     },
     "Sheet8": {
-        "name": "Mumbai + Diwali Trip",
-        "emoji": "🪔",
-        "description": "Anubhav & Anukul – Nov 2025",
+        "name": "Mumbai + Diwali Trip (Oct 25)",
+        "emoji": "",
+        "description": "Anubhav & Anukul – Oct–Nov 2025",
         "members": ["Anubhav", "Anukul"],
     },
-    "Sheet2": {
-        "name": "Jupyter Card (Personal)",
-        "emoji": "💳",
-        "description": "Personal card expenses – Apr–May 2025",
-        "members": ["Anukul"],
-    },
 }
+
+
+# ── Parsers ───────────────────────────────────────────────────────────────────
+
+def _parse_amount(value) -> float | None:
+    """Parse a cell value that may be a number, a plain string, or an Excel
+    formula string like '=830', '=205+35+180', '=(10150/5)*3'."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    s = str(value).strip()
+    if not s:
+        return None
+    # Strip leading '='
+    expr = s[1:] if s.startswith("=") else s
+    # Skip cell-reference formulas (contain letters: D2, F3, etc.)
+    if re.search(r"[A-Za-z]", expr):
+        return None
+    try:
+        result = eval(expr, {"__builtins__": {}}, {})  # safe: no builtins
+        return float(result)
+    except Exception:
+        return None
 
 
 def _parse_date(value) -> str | None:
     if value is None:
         return None
     if isinstance(value, (datetime.datetime, datetime.date)):
-        return value.strftime("%Y-%m-%d")
+        return (value if isinstance(value, datetime.date) else value.date()).strftime("%Y-%m-%d")
     raw = str(value).strip()
-    # try DD-MM-YY
     for fmt in ("%d-%m-%y", "%d-%m-%Y", "%d/%m/%Y", "%d/%m/%y"):
         try:
             return datetime.datetime.strptime(raw, fmt).strftime("%Y-%m-%d")
         except ValueError:
             continue
-    return raw
-
-
-def _parse_amount(value) -> float | None:
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
+    return None  # unparseable — store as NULL
 
 
 def _load_expenses(ws, members: list[str]) -> list[dict]:
@@ -92,128 +103,102 @@ def _load_expenses(ws, members: list[str]) -> list[dict]:
 
     header = [str(c).strip().lower() if c else "" for c in rows[0]]
 
-    # column index helpers
     def col(name: str) -> int | None:
         for i, h in enumerate(header):
             if name in h:
                 return i
         return None
 
-    ci_date = col("date")
-    ci_type = col("type")
-    ci_title = col("title")
+    ci_date   = col("date")
+    ci_type   = col("type")
+    ci_title  = col("title")
     ci_amount = col("amount")
-    ci_name = col("name")
-    ci_div = col("divider")
-    ci_ind = col("individual")
+    ci_name   = col("name")
+    ci_div    = col("divider")
+
+    skip_names = {"none", "paid", "p.p", "indivdual", "individual", "total"}
 
     expenses = []
     for row in rows[1:]:
-        # stop at summary / blank rows
         if all(v is None for v in row):
             continue
-        amount_raw = row[ci_amount] if ci_amount is not None else None
-        amount = _parse_amount(amount_raw)
+
+        amount = _parse_amount(row[ci_amount] if ci_amount is not None else None)
         if amount is None or amount <= 0:
             continue
 
-        paid_by = str(row[ci_name]).strip() if ci_name is not None and row[ci_name] else ""
-        if not paid_by or paid_by.lower() in ("none", "paid", "p.p", "indivdual", "individual"):
+        raw_name = row[ci_name] if ci_name is not None else None
+        paid_by  = str(raw_name).strip() if raw_name else ""
+        if not paid_by or paid_by.lower() in skip_names:
             continue
 
-        divider_raw = row[ci_div] if ci_div is not None else None
-        divider = int(_parse_amount(divider_raw) or len(members))
-        individual_raw = row[ci_ind] if ci_ind is not None else None
-        individual = _parse_amount(individual_raw) if individual_raw is not None else round(amount / divider, 2)
+        div_raw  = row[ci_div] if ci_div is not None else None
+        div_val  = _parse_amount(div_raw)
+        divider  = max(1, int(div_val)) if div_val and div_val >= 1 else len(members)
+        individual = round(amount / divider, 2)
 
         expenses.append({
-            "date": _parse_date(row[ci_date] if ci_date is not None else None),
-            "category": str(row[ci_type]).strip() if ci_type is not None and row[ci_type] else None,
-            "title": str(row[ci_title]).strip() if ci_title is not None and row[ci_title] else None,
-            "amount": round(amount, 2),
-            "paid_by": paid_by,
-            "divider": divider,
-            "individual_amount": round(individual, 2) if individual else None,
+            "date":              _parse_date(row[ci_date] if ci_date is not None else None),
+            "category":          str(row[ci_type]).strip() if ci_type is not None and row[ci_type] else None,
+            "title":             str(row[ci_title]).strip() if ci_title is not None and row[ci_title] else None,
+            "amount":            round(amount, 2),
+            "paid_by":           paid_by,
+            "divider":           divider,
+            "individual_amount": individual,
         })
 
     return expenses
 
 
-def _load_sheet2(ws) -> list[dict]:
-    """Sheet2 is a simple list of amounts – no payer column, treated as personal."""
-    expenses = []
-    rows = list(ws.iter_rows(values_only=True))
-    date_label = None
-    for row in rows[1:]:
-        v = row[0]
-        if v is None:
-            continue
-        if isinstance(v, str):
-            date_label = v   # e.g. "16apr-16may"
-            continue
-        amount = _parse_amount(v)
-        if amount and amount > 0:
-            expenses.append({
-                "date": None,
-                "category": date_label,
-                "title": None,
-                "amount": round(amount, 2),
-                "paid_by": "Anukul",
-                "divider": 1,
-                "individual_amount": round(amount, 2),
-            })
-    return expenses
+# ── Main ──────────────────────────────────────────────────────────────────────
 
+def seed():
+    wb = openpyxl.load_workbook(XLSX_PATH, data_only=False)
+    db = Session()
 
-async def seed():
-    await create_tables()
-    factory = get_session_factory()
-
-    wb = openpyxl.load_workbook(XLSX_PATH, data_only=True)
-
-    async with factory() as db:
+    total = 0
+    try:
         for sheet_name, meta in SHEET_META.items():
             if sheet_name not in wb.sheetnames:
-                print(f"  skip {sheet_name} (not found)")
+                print(f"  skip {sheet_name} (sheet not found in workbook)")
+                continue
+
+            # Idempotent – skip if group already exists
+            if db.query(Group).filter_by(name=meta["name"]).first():
+                print(f"  skip '{meta['name']}' (already in DB)")
                 continue
 
             print(f"\nSeeding {sheet_name} -> '{meta['name']}'")
 
-            group = Group(
+            grp = Group(
                 name=meta["name"],
                 description=meta["description"],
                 emoji=meta["emoji"],
                 is_historical=True,
             )
-            db.add(group)
-            await db.flush()
+            db.add(grp)
+            db.flush()
 
             for name in meta["members"]:
-                db.add(Member(group_id=group.id, name=name))
+                db.add(Member(group_id=grp.id, name=name))
 
-            ws = wb[sheet_name]
-            expense_rows = (
-                _load_sheet2(ws) if sheet_name == "Sheet2"
-                else _load_expenses(ws, meta["members"])
-            )
+            expenses = _load_expenses(wb[sheet_name], meta["members"])
+            for e in expenses:
+                db.add(Expense(group_id=grp.id, **e))
 
-            for er in expense_rows:
-                db.add(Expense(
-                    group_id=group.id,
-                    date=er["date"],
-                    category=er["category"],
-                    title=er["title"],
-                    amount=er["amount"],
-                    paid_by=er["paid_by"],
-                    divider=er["divider"],
-                    individual_amount=er["individual_amount"],
-                ))
+            total += len(expenses)
+            print(f"  {len(meta['members'])} members, {len(expenses)} expenses")
 
-            print(f"  {len(expense_rows)} expenses added")
+        db.commit()
+        print(f"\nDone. {total} expenses imported across {len(SHEET_META)} groups.")
 
-        await db.commit()
-        print("\nDone.")
+    except Exception as exc:
+        db.rollback()
+        print(f"Error: {exc}")
+        raise
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":
-    asyncio.run(seed())
+    seed()

@@ -12,7 +12,7 @@ const items = [
   { to: '/history', label: 'History',     icon: HistoryIcon, exact: false },
 ]
 
-export default function Sidebar() {
+export default function Sidebar({ user, onLogout }) {
   return (
     <aside className="hidden md:flex flex-col fixed left-0 top-0 h-screen w-56 bg-field-950 border-r border-field-800 z-40">
       {/* Logo */}
@@ -53,9 +53,25 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* Footer */}
-      <div className="px-5 py-4 border-t border-field-800">
-        <p className="text-xs text-green-200/20 font-medium tracking-wide">MONEY SPLITTER v1.0</p>
+      {/* User + logout */}
+      <div className="px-4 py-4 border-t border-field-800 space-y-2">
+        {user && (
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 bg-brand-400/20 border border-brand-400/30 flex items-center justify-center text-brand-400 text-xs font-black flex-shrink-0">
+              {user.name[0]?.toUpperCase()}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-bold text-white truncate">{user.name}</p>
+              <p className="text-xs text-green-200/30 font-medium">{user.key}</p>
+            </div>
+          </div>
+        )}
+        <button
+          onClick={onLogout}
+          className="w-full text-left text-xs text-green-200/30 hover:text-red-400 font-semibold transition-colors tracking-widest py-1"
+        >
+          Sign out
+        </button>
       </div>
     </aside>
   )

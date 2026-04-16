@@ -3,12 +3,19 @@
 @tailwind utilities;
 
 @layer base {
+  html {
+    height: 100%;
+    /* iOS Safari: use fill-available so vh doesn't jump with keyboard */
+    height: -webkit-fill-available;
+  }
   * { -webkit-tap-highlight-color: transparent; }
   body {
     @apply bg-field-900 text-gray-900 font-sans;
     text-transform: uppercase;
     letter-spacing: 0.04em;
     overscroll-behavior: none;
+    min-height: 100%;
+    min-height: -webkit-fill-available;
   }
   input, textarea, select, option {
     text-transform: none;
