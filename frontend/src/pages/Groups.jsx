@@ -1,0 +1,61 @@
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { getGroups } from '../api'
+import GroupCard from '../components/GroupCard'
+import LoadingSpinner from '../components/LoadingSpinner'
+
+export default function Groups() {
+  const nav = useNavigate()
+  const [groups, setGroups] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [filter, setFilter] = useState('all')
+
+  useEffect(() => {
+    getGroups().then((r) => setGroups(r.data)).finally(() => setLoading(false))
+  }, [])
+
+  const filtered = groups.filter((g) =>
+    filter === 'all' ? true : filter === 'historical' ? g.is_historical : !g.is_historical
+  )
+
+  if (loading) return <LoadingSpinner />
+
+  return (
+    <div className="pb-24">
+      <div className="px-5 pt-12 pb-4 bg-white sticky top-0 z-10 border-b border-gray-100">
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-bold">Groups</h1>
+          <button
+            className="text-brand-600 text-sm font-semibold"
+            onClick={() => nav('/groups/new')}
+          >
+            + New
+          </button>
+        </div>
+        <div className="flex gap-2 mt-3">
+          {['all','active','historical'].map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors capitalize ${
+                filter === f ? 'bg-brand-600 text-white' : 'bg-gray-100 text-gray-500'
+              }`}
+            >
+              {f}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="px-5 mt-4 space-y-3">
+        {filtered.map((g) => <GroupCard key={g.id} group={g} />)}
+        {filtered.length === 0 && (
+          <div className="text-center py-16 text-gray-400">
+            <p className="text-4xl mb-2">🗂️</p>
+            <p className="text-sm">No groups in this category</p>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
