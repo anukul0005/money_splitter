@@ -7,7 +7,7 @@ from routers import groups, expenses, settlements, stats
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await create_tables()
+    create_tables()
     yield
 
 
@@ -31,5 +31,5 @@ app.include_router(stats.router)
 
 
 @app.get("/health")
-async def health():
+def health():
     return {"status": "ok"}

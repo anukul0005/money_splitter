@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy.orm import Session
 from collections import defaultdict
 from database import get_db
 from models import Group
@@ -10,9 +9,8 @@ router = APIRouter(prefix="/stats", tags=["stats"])
 
 
 @router.get("/{group_id}", response_model=GroupStats)
-async def get_group_stats(group_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Group).where(Group.id == group_id))
-    group = result.scalar_one_or_none()
+def get_group_stats(group_id: int, db: Session = Depends(get_db)):
+    group = db.query(Group).filter(Group.id == group_id).first()
     if not group:
         raise HTTPException(404, "Group not found")
 
@@ -43,10 +41,9 @@ async def get_group_stats(group_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/overview/all", response_model=list[dict])
-async def get_overview(db: AsyncSession = Depends(get_db)):
+def get_overview(db: Session = Depends(get_db)):
     """Returns per-group totals for the homepage chart."""
-    result = await db.execute(select(Group))
-    groups = result.scalars().all()
+    groups = db.query(Group).all()
     return [
         {
             "id": g.id,

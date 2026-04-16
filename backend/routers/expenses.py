@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy.orm import Session
 from database import get_db
 from models import Group, Expense
 from schemas import ExpenseCreate, ExpenseOut
@@ -13,22 +12,16 @@ def _compute_individual(amount: float, divider: int) -> float:
 
 
 @router.get("/group/{group_id}", response_model=list[ExpenseOut])
-async def list_expenses(group_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(Expense).where(Expense.group_id == group_id).order_by(Expense.date, Expense.id)
-    )
-    return result.scalars().all()
+def list_expenses(group_id: int, db: Session = Depends(get_db)):
+    return db.query(Expense).filter(Expense.group_id == group_id).order_by(Expense.date, Expense.id).all()
 
 
 @router.post("/", response_model=ExpenseOut, status_code=201)
-async def create_expense(payload: ExpenseCreate, db: AsyncSession = Depends(get_db)):
-    # verify group exists
-    g = await db.execute(select(Group).where(Group.id == payload.group_id))
-    if not g.scalar_one_or_none():
+def create_expense(payload: ExpenseCreate, db: Session = Depends(get_db)):
+    if not db.query(Group).filter(Group.id == payload.group_id).first():
         raise HTTPException(404, "Group not found")
 
     individual = payload.individual_amount or _compute_individual(payload.amount, payload.divider)
-
     expense = Expense(
         group_id=payload.group_id,
         date=payload.date,
@@ -42,20 +35,18 @@ async def create_expense(payload: ExpenseCreate, db: AsyncSession = Depends(get_
         notes=payload.notes,
     )
     db.add(expense)
-    await db.commit()
-    await db.refresh(expense)
+    db.commit()
+    db.refresh(expense)
     return expense
 
 
 @router.put("/{expense_id}", response_model=ExpenseOut)
-async def update_expense(expense_id: int, payload: ExpenseCreate, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Expense).where(Expense.id == expense_id))
-    expense = result.scalar_one_or_none()
+def update_expense(expense_id: int, payload: ExpenseCreate, db: Session = Depends(get_db)):
+    expense = db.query(Expense).filter(Expense.id == expense_id).first()
     if not expense:
         raise HTTPException(404, "Expense not found")
 
     individual = payload.individual_amount or _compute_individual(payload.amount, payload.divider)
-
     expense.date = payload.date
     expense.category = payload.category
     expense.title = payload.title
@@ -66,16 +57,15 @@ async def update_expense(expense_id: int, payload: ExpenseCreate, db: AsyncSessi
     expense.individual_amount = individual
     expense.notes = payload.notes
 
-    await db.commit()
-    await db.refresh(expense)
+    db.commit()
+    db.refresh(expense)
     return expense
 
 
 @router.delete("/{expense_id}", status_code=204)
-async def delete_expense(expense_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Expense).where(Expense.id == expense_id))
-    expense = result.scalar_one_or_none()
+def delete_expense(expense_id: int, db: Session = Depends(get_db)):
+    expense = db.query(Expense).filter(Expense.id == expense_id).first()
     if not expense:
         raise HTTPException(404, "Expense not found")
-    await db.delete(expense)
-    await db.commit()
+    db.delete(expense)
+    db.commit()

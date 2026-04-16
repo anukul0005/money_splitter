@@ -1,5 +1,5 @@
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy import create_engine
+from sqlalchemy.orm import DeclarativeBase, sessionmaker, Session
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -22,35 +22,31 @@ class Base(DeclarativeBase):
 
 
 _engine = None
-_session_factory = None
+_SessionLocal = None
 
 
 def get_engine():
     global _engine
     if _engine is None:
         settings = get_settings()
-        _engine = create_async_engine(
-            settings.database_url,
-            echo=False,
-            pool_size=5,
-            max_overflow=10,
-            connect_args={"ssl": "require"},
-        )
+        _engine = create_engine(settings.database_url, pool_pre_ping=True, pool_size=5, max_overflow=10)
     return _engine
 
 
 def get_session_factory():
-    global _session_factory
-    if _session_factory is None:
-        _session_factory = async_sessionmaker(get_engine(), expire_on_commit=False)
-    return _session_factory
+    global _SessionLocal
+    if _SessionLocal is None:
+        _SessionLocal = sessionmaker(bind=get_engine(), autocommit=False, autoflush=False)
+    return _SessionLocal
 
 
-async def get_db() -> AsyncSession:
-    async with get_session_factory()() as session:
-        yield session
+def get_db() -> Session:
+    db = get_session_factory()()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
-async def create_tables():
-    async with get_engine().begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+def create_tables():
+    Base.metadata.create_all(bind=get_engine())

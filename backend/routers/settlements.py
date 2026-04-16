@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy.orm import Session
 from database import get_db
 from models import Group
 from schemas import SettlementOut, BalanceEntry, Transaction
@@ -22,11 +21,9 @@ def _calculate(group: Group) -> SettlementOut:
         divider = exp.divider or len(member_names)
         individual = exp.individual_amount or round(amount / divider, 2)
 
-        # Determine participants for this expense
         if exp.participants:
             participants = [p.strip() for p in exp.participants.split(",")]
         else:
-            # Use first `divider` members — keeps historical data consistent
             participants = member_names[:divider]
 
         if payer in paid:
@@ -42,16 +39,10 @@ def _calculate(group: Group) -> SettlementOut:
     for m in member_names:
         net = round(paid[m] - share[m], 2)
         net_map[m] = net
-        balances.append(BalanceEntry(
-            member=m,
-            paid=round(paid[m], 2),
-            share=round(share[m], 2),
-            net=net,
-        ))
+        balances.append(BalanceEntry(member=m, paid=round(paid[m], 2), share=round(share[m], 2), net=net))
 
-    # Minimize transactions using greedy creditor-debtor matching
     creditors = sorted([(n, v) for n, v in net_map.items() if v > 0.01], key=lambda x: -x[1])
-    debtors = sorted([(n, -v) for n, v in net_map.items() if v < -0.01], key=lambda x: -x[1])
+    debtors   = sorted([(n, -v) for n, v in net_map.items() if v < -0.01], key=lambda x: -x[1])
 
     cred = list(creditors)
     debt = list(debtors)
@@ -74,9 +65,8 @@ def _calculate(group: Group) -> SettlementOut:
 
 
 @router.get("/{group_id}", response_model=SettlementOut)
-async def get_settlement(group_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Group).where(Group.id == group_id))
-    group = result.scalar_one_or_none()
+def get_settlement(group_id: int, db: Session = Depends(get_db)):
+    group = db.query(Group).filter(Group.id == group_id).first()
     if not group:
         raise HTTPException(404, "Group not found")
     return _calculate(group)
