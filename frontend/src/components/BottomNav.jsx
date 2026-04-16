@@ -29,7 +29,7 @@ export default function BottomNav() {
           >
             {({ isActive }) =>
               highlight ? (
-                <span className="bg-brand-400 rounded-full p-2 -mt-5 shadow-lg shadow-brand-400/40 ring-4 ring-field-950">
+                <span className="bg-brand-400 p-2 -mt-5 shadow-lg shadow-brand-400/40 ring-4 ring-field-950">
                   <Icon />
                 </span>
               ) : (

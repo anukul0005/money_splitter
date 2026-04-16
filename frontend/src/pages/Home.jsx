@@ -7,6 +7,7 @@ import GroupCard from '../components/GroupCard'
 import LoadingSpinner from '../components/LoadingSpinner'
 
 Chart.register(ArcElement, Tooltip, Legend, DoughnutController)
+Chart.defaults.font.family = "'Barlow Condensed', sans-serif"
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 
@@ -97,16 +98,16 @@ export default function Home() {
                 <div className="w-36 h-36 flex-shrink-0">
                   <Doughnut data={chartData} options={chartOptions} />
                 </div>
-                <ul className="flex-1 space-y-2 overflow-hidden">
+                <ul className="flex-1 space-y-2">
                   {overview.map((g, i) => (
                     <li
                       key={g.id}
-                      className="flex items-center gap-2 cursor-pointer"
+                      className="flex items-start gap-2 cursor-pointer"
                       onClick={() => nav(`/groups/${g.id}`)}
                     >
-                      <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: PALETTE[i % PALETTE.length] }} />
-                      <span className="text-xs text-gray-600 truncate flex-1">{g.name}</span>
-                      <span className="text-xs font-semibold text-gray-800 whitespace-nowrap">{INR(g.total)}</span>
+                      <span className="w-2 h-2 flex-shrink-0 mt-1.5" style={{ background: PALETTE[i % PALETTE.length] }} />
+                      <span className="text-xs text-gray-600 flex-1 leading-tight">{g.name}</span>
+                      <span className="text-xs font-black text-gray-800 whitespace-nowrap">{INR(g.total)}</span>
                     </li>
                   ))}
                 </ul>
@@ -121,7 +122,7 @@ export default function Home() {
                 + New Group
               </button>
               <button
-                className="bg-cream border border-amber-200 hover:bg-cream-200 active:scale-95 text-gray-800 font-bold px-4 py-3 rounded-xl transition-all duration-150 w-full text-center text-sm"
+                className="bg-cream border border-amber-200 hover:bg-cream-200 active:scale-95 text-gray-800 font-bold px-4 py-3 transition-all duration-150 w-full text-center text-sm"
                 onClick={() => nav('/add')}
               >
                 + Add Expense
@@ -138,7 +139,7 @@ export default function Home() {
                     className="flex items-center gap-2 cursor-pointer hover:bg-amber-50 rounded-lg px-1 py-1 transition-colors"
                     onClick={() => nav(`/groups/${g.id}`)}
                   >
-                    <div className="w-7 h-7 rounded-lg bg-brand-400/10 flex items-center justify-center font-bold text-brand-600 text-xs flex-shrink-0 border border-brand-400/20">
+                    <div className="w-7 h-7 bg-brand-400/10 flex items-center justify-center font-bold text-brand-600 text-xs flex-shrink-0 border border-brand-400/20">
                       {g.name[0]?.toUpperCase() || 'G'}
                     </div>
                     <span className="text-sm font-medium text-gray-700 flex-1 truncate">{g.name}</span>

@@ -86,7 +86,7 @@ export default function NewGroup() {
             <button
               type="button"
               onClick={addMember}
-              className="bg-brand-400 text-gray-900 px-4 rounded-xl font-bold text-sm shadow-sm"
+              className="bg-brand-400 text-gray-900 px-4 font-bold text-sm shadow-sm"
             >
               Add
             </button>
@@ -97,7 +97,7 @@ export default function NewGroup() {
               {members.map((m) => (
                 <span
                   key={m}
-                  className="flex items-center gap-1.5 bg-brand-400/15 text-brand-700 border border-brand-400/30 px-3 py-1.5 rounded-full text-sm font-semibold"
+                  className="flex items-center gap-1.5 bg-brand-400/15 text-brand-700 border border-brand-400/30 px-3 py-1.5 text-sm font-bold"
                 >
                   {m}
                   <button type="button" onClick={() => removeMember(m)} className="text-brand-400 hover:text-brand-700">
@@ -109,7 +109,7 @@ export default function NewGroup() {
           )}
         </div>
 
-        {error && <p className="text-sm text-red-500 bg-red-50 rounded-xl px-4 py-3">{error}</p>}
+        {error && <p className="text-sm text-red-500 bg-red-50 border border-red-100 px-4 py-3">{error}</p>}
 
         <button type="submit" className="btn-primary" disabled={submitting}>
           {submitting ? 'Creating…' : `Create Group with ${members.length} member${members.length !== 1 ? 's' : ''}`}

@@ -124,7 +124,7 @@ export default function EditGroup() {
               return (
                 <div
                   key={m.id ?? `new-${m.name}`}
-                  className={`flex items-center justify-between px-4 py-2.5 rounded-xl border transition-colors ${
+                  className={`flex items-center justify-between px-4 py-2.5 border transition-colors ${
                     markedForRemoval
                       ? 'bg-red-50 border-red-200 text-red-400 line-through'
                       : isPending
@@ -135,7 +135,7 @@ export default function EditGroup() {
                   <span className="text-sm font-semibold">{m.name}</span>
                   <div className="flex items-center gap-2">
                     {isPending && (
-                      <span className="text-xs text-brand-600 font-medium bg-brand-400/10 px-2 py-0.5 rounded-full">new</span>
+                      <span className="text-xs text-brand-600 font-medium bg-brand-400/10 px-2 py-0.5 ">new</span>
                     )}
                     <button
                       type="button"
@@ -163,14 +163,14 @@ export default function EditGroup() {
             <button
               type="button"
               onClick={addNew}
-              className="bg-brand-400 text-gray-900 px-4 rounded-xl font-bold text-sm shadow-sm"
+              className="bg-brand-400 text-gray-900 px-4 font-bold text-sm shadow-sm"
             >
               Add
             </button>
           </div>
         </div>
 
-        {error && <p className="text-sm text-red-500 bg-red-50 rounded-xl px-4 py-3">{error}</p>}
+        {error && <p className="text-sm text-red-500 bg-red-50 border border-red-100 px-4 py-3">{error}</p>}
 
         <button type="submit" className="btn-primary" disabled={submitting}>
           {submitting ? 'Saving…' : 'Save Changes'}

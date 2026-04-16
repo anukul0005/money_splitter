@@ -34,8 +34,8 @@ export default function Groups() {
             <button
               key={f}
               onClick={() => setFilter(f)}
-              className={`px-3 py-1 rounded-full text-xs font-bold transition-colors capitalize ${
-                filter === f ? 'bg-brand-400 text-gray-900' : 'bg-amber-50 border border-amber-200 text-gray-500'
+              className={`px-3 py-1 text-xs font-bold transition-colors border ${
+                filter === f ? 'bg-brand-400 text-gray-900 border-brand-400' : 'bg-amber-50 border-amber-200 text-gray-500'
               }`}
             >
               {f}

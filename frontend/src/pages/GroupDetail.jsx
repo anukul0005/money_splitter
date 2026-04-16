@@ -5,10 +5,11 @@ import {
   ArcElement, DoughnutController, BarController,
 } from 'chart.js'
 import { Bar, Doughnut } from 'react-chartjs-2'
-import { getGroup, getSettlement, getGroupStats, deleteExpense } from '../api'
+import { getGroup, getSettlement, getGroupStats, deleteExpense, deleteGroup } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 
 Chart.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend, ArcElement, DoughnutController, BarController)
+Chart.defaults.font.family = "'Barlow Condensed', sans-serif"
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 const PALETTE = ['#ef4444','#f97316','#eab308','#22c55e','#06b6d4','#3b82f6','#8b5cf6','#ec4899']
@@ -43,23 +44,30 @@ export default function GroupDetail() {
     reload()
   }
 
+  const handleDeleteGroup = async () => {
+    if (!confirm(`Delete group "${group.name}" and all its expenses? This cannot be undone.`)) return
+    await deleteGroup(id)
+    nav('/groups')
+  }
+
   if (loading) return <LoadingSpinner />
   if (!group)  return <p className="p-5 text-gray-500">Group not found.</p>
 
+  // Horizontal bar chart (member names on y-axis — no label suppression)
   const memberChartData = {
-    labels: stats?.by_member.map((x) => x.member) || [],
+    labels: stats?.by_member.map((x) => x.member.toUpperCase()) || [],
     datasets: [{
-      label: 'Paid (₹)',
+      label: 'Paid',
       data: stats?.by_member.map((x) => x.total_paid) || [],
       backgroundColor: PALETTE,
-      borderRadius: 8,
+      borderRadius: 0,
       borderSkipped: false,
     }],
   }
 
   const catData = stats?.by_category.slice(0, 8) || []
   const catChartData = {
-    labels: catData.map((c) => c.category),
+    labels: catData.map((c) => c.category.toUpperCase()),
     datasets: [{
       data: catData.map((c) => c.total),
       backgroundColor: PALETTE,
@@ -68,12 +76,16 @@ export default function GroupDetail() {
     }],
   }
 
-  const barOptions = {
+  const hBarOptions = {
+    indexAxis: 'y',
     responsive: true,
-    plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ` ${INR(c.parsed.y)}` } } },
+    plugins: {
+      legend: { display: false },
+      tooltip: { callbacks: { label: (c) => ` ${INR(c.parsed.x)}` } },
+    },
     scales: {
-      y: { ticks: { callback: (v) => `₹${(v/1000).toFixed(0)}k`, font: { size: 11 } }, grid: { color: '#f1f5f9' } },
-      x: { ticks: { font: { size: 11 } }, grid: { display: false } },
+      x: { ticks: { callback: (v) => `₹${(v/1000).toFixed(0)}k`, font: { size: 11, family: "'Barlow Condensed'" } }, grid: { color: '#f1f5f9' } },
+      y: { ticks: { font: { size: 12, family: "'Barlow Condensed'" } }, grid: { display: false } },
     },
   }
 
@@ -86,34 +98,45 @@ export default function GroupDetail() {
     <div className="pb-24 md:pb-8">
       {/* Header */}
       <div className="bg-cream border-b border-amber-100/60 px-5 pt-10 md:pt-6 pb-3 sticky top-0 z-10">
-        <div className="flex items-center gap-3">
-          <button onClick={() => nav(-1)} className="btn-ghost">
+        <div className="flex items-start gap-3">
+          <button onClick={() => nav(-1)} className="btn-ghost mt-1">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
           </button>
-          <div className="w-9 h-9 rounded-xl bg-brand-400/15 flex items-center justify-center font-black text-brand-600 text-base flex-shrink-0 border border-brand-400/20">
+          <div className="w-9 h-9 bg-brand-400/15 flex items-center justify-center font-black text-brand-600 text-base flex-shrink-0 border border-brand-400/20 mt-0.5">
             {group.name[0]?.toUpperCase() || 'G'}
           </div>
           <div className="flex-1 min-w-0">
-            <h1 className="text-lg font-bold truncate">{group.name}</h1>
-            <p className="text-xs text-gray-400 truncate">{group.members.map((m) => m.name).join(' · ')}</p>
+            <h1 className="text-lg font-bold leading-tight">{group.name}</h1>
+            <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">{group.members.map((m) => m.name).join(' · ')}</p>
           </div>
-          <button
-            className="text-gray-400 hover:text-gray-600 transition-colors p-1"
-            onClick={() => nav(`/groups/${id}/edit`)}
-            title="Edit group"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-            </svg>
-          </button>
-          <button
-            className="bg-brand-400 text-gray-900 text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm"
-            onClick={() => nav(`/add?group=${id}`)}
-          >
-            + Add
-          </button>
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <button
+              className="text-gray-400 hover:text-gray-600 transition-colors p-1"
+              onClick={() => nav(`/groups/${id}/edit`)}
+              title="Edit group"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+            </button>
+            <button
+              className="text-gray-400 hover:text-red-500 transition-colors p-1"
+              onClick={handleDeleteGroup}
+              title="Delete group"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </button>
+            <button
+              className="bg-brand-400 text-gray-900 text-xs font-bold px-3 py-1.5 shadow-sm ml-1"
+              onClick={() => nav(`/add?group=${id}`)}
+            >
+              + Add
+            </button>
+          </div>
         </div>
 
         {/* Tabs */}
@@ -122,8 +145,10 @@ export default function GroupDetail() {
             <button
               key={v}
               onClick={() => setTab(v)}
-              className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-colors ${
-                tab === v ? 'bg-brand-400 text-gray-900 font-bold' : 'text-gray-500 hover:bg-amber-50'
+              className={`flex-1 py-2 text-xs font-bold transition-colors border ${
+                tab === v
+                  ? 'bg-brand-400 text-gray-900 border-brand-400'
+                  : 'text-gray-500 border-transparent hover:bg-amber-50'
               }`}
             >
               {label}
@@ -133,18 +158,18 @@ export default function GroupDetail() {
       </div>
 
       {/* Summary strip */}
-      <div className="px-5 py-3 flex gap-3">
+      <div className="px-5 py-3 flex gap-2">
         <div className="card flex-1 text-center py-3">
           <p className="text-xs text-gray-400">Total</p>
-          <p className="text-lg font-bold text-brand-600">{INR(stats?.total || 0)}</p>
+          <p className="text-base font-black text-brand-600">{INR(stats?.total || 0)}</p>
         </div>
         <div className="card flex-1 text-center py-3">
           <p className="text-xs text-gray-400">Expenses</p>
-          <p className="text-lg font-bold">{group.expenses.length}</p>
+          <p className="text-base font-black">{group.expenses.length}</p>
         </div>
         <div className="card flex-1 text-center py-3">
           <p className="text-xs text-gray-400">People</p>
-          <p className="text-lg font-bold">{group.members.length}</p>
+          <p className="text-base font-black">{group.members.length}</p>
         </div>
       </div>
 
@@ -160,39 +185,37 @@ export default function GroupDetail() {
             </div>
           )}
           {[...group.expenses].reverse().map((e) => (
-            <div key={e.id} className="card flex items-start gap-3">
-              <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center flex-shrink-0">
+            <div key={e.id} className="card flex items-center gap-3">
+              <div className="w-8 h-8 bg-amber-50 border border-amber-100 flex items-center justify-center flex-shrink-0">
                 <svg className="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" />
                 </svg>
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-gray-900 truncate">{e.title || e.category || 'Expense'}</p>
+                <p className="text-sm font-bold text-gray-900 leading-tight" style={{wordBreak:'break-word'}}>{e.title || e.category || 'Expense'}</p>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  {e.paid_by} paid ·{' '}
+                  {e.paid_by} ·{' '}
                   {e.split_json ? (
-                    <span className="text-purple-500 font-medium">custom split</span>
+                    <span className="text-purple-500 font-semibold">custom</span>
                   ) : (
-                    `${e.divider} people`
+                    `${e.divider} ppl`
                   )}{' '}
                   · {e.date || '—'}
                 </p>
               </div>
               <div className="text-right flex-shrink-0">
-                <p className="text-sm font-bold text-gray-900">{INR(e.amount)}</p>
-                {e.split_json ? (
-                  <p className="text-xs text-purple-500">split</p>
-                ) : (
+                <p className="text-sm font-black text-gray-900">{INR(e.amount)}</p>
+                {!e.split_json && (
                   <p className="text-xs text-brand-600">{INR(e.individual_amount)}/ea</p>
                 )}
               </div>
               {!group.is_historical && (
                 <button
                   onClick={() => handleDeleteExpense(e.id)}
-                  className="text-gray-300 hover:text-red-400 transition-colors ml-1 mt-0.5"
+                  className="text-gray-300 hover:text-red-400 transition-colors ml-1"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 </button>
               )}
@@ -203,14 +226,16 @@ export default function GroupDetail() {
 
       {/* Charts tab */}
       {tab === 'chart' && stats && (
-        <div className="px-5 space-y-4">
+        <div className="px-5 space-y-4 mt-2">
           <div className="flex gap-2">
             {[['member','By Person'],['category','By Category']].map(([v, label]) => (
               <button
                 key={v}
                 onClick={() => setChartView(v)}
-                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                  chartView === v ? 'bg-brand-400 text-gray-900 font-bold' : 'bg-amber-50 border border-amber-200 text-gray-500'
+                className={`px-3 py-1.5 text-xs font-bold transition-colors border ${
+                  chartView === v
+                    ? 'bg-brand-400 text-gray-900 border-brand-400'
+                    : 'bg-amber-50 border-amber-200 text-gray-500'
                 }`}
               >
                 {label}
@@ -220,24 +245,24 @@ export default function GroupDetail() {
 
           {chartView === 'member' && (
             <div className="card">
-              <h3 className="text-sm font-semibold text-gray-600 mb-3">Who paid how much?</h3>
-              <Bar data={memberChartData} options={barOptions} />
+              <h3 className="text-xs font-bold text-gray-500 mb-3">Who paid how much?</h3>
+              <Bar data={memberChartData} options={hBarOptions} />
             </div>
           )}
 
           {chartView === 'category' && catData.length > 0 && (
             <div className="card">
-              <h3 className="text-sm font-semibold text-gray-600 mb-3">Spending by category</h3>
-              <div className="flex items-center gap-4">
-                <div className="w-40 h-40 flex-shrink-0">
+              <h3 className="text-xs font-bold text-gray-500 mb-3">Spending by category</h3>
+              <div className="flex items-start gap-4">
+                <div className="w-36 h-36 flex-shrink-0">
                   <Doughnut data={catChartData} options={donutOptions} />
                 </div>
-                <ul className="flex-1 space-y-1.5 overflow-hidden">
+                <ul className="flex-1 space-y-2">
                   {catData.map((c, i) => (
-                    <li key={c.category} className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: PALETTE[i % PALETTE.length] }} />
-                      <span className="text-xs text-gray-600 truncate flex-1">{c.category}</span>
-                      <span className="text-xs font-semibold">{INR(c.total)}</span>
+                    <li key={c.category} className="flex items-start gap-2">
+                      <span className="w-2 h-2 flex-shrink-0 mt-1.5" style={{ background: PALETTE[i % PALETTE.length] }} />
+                      <span className="text-xs text-gray-600 flex-1 leading-tight">{c.category}</span>
+                      <span className="text-xs font-black flex-shrink-0">{INR(c.total)}</span>
                     </li>
                   ))}
                 </ul>
@@ -249,21 +274,21 @@ export default function GroupDetail() {
 
       {/* Settle Up tab */}
       {tab === 'settle' && settlement && (
-        <div className="px-5 md:grid md:grid-cols-2 md:gap-4 space-y-4 md:space-y-0">
+        <div className="px-5 mt-2 md:grid md:grid-cols-2 md:gap-4 space-y-3 md:space-y-0">
           {/* Balances */}
           <div className="card">
-            <h3 className="text-sm font-semibold text-gray-600 mb-3">Individual balances</h3>
+            <h3 className="text-xs font-bold text-gray-500 mb-3">Individual balances</h3>
             <div className="space-y-3">
               {settlement.balances.map((b) => (
                 <div key={b.member} className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center font-semibold text-gray-600 text-sm flex-shrink-0">
+                  <div className="w-8 h-8 bg-gray-100 flex items-center justify-center font-black text-gray-600 text-sm flex-shrink-0">
                     {b.member[0].toUpperCase()}
                   </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-semibold">{b.member}</p>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold truncate">{b.member}</p>
                     <p className="text-xs text-gray-400">Paid {INR(b.paid)} · Share {INR(b.share)}</p>
                   </div>
-                  <div className={`text-sm font-bold ${b.net >= 0 ? 'text-brand-600' : 'text-red-500'}`}>
+                  <div className={`text-sm font-black flex-shrink-0 ${b.net >= 0 ? 'text-brand-600' : 'text-red-500'}`}>
                     {b.net >= 0 ? `+${INR(b.net)}` : `-${INR(Math.abs(b.net))}`}
                   </div>
                 </div>
@@ -273,19 +298,19 @@ export default function GroupDetail() {
 
           {/* Transactions */}
           <div className="card">
-            <h3 className="text-sm font-semibold text-gray-600 mb-3">Who pays whom?</h3>
+            <h3 className="text-xs font-bold text-gray-500 mb-3">Who pays whom?</h3>
             {settlement.transactions.length === 0 ? (
-              <p className="text-sm text-brand-600 font-semibold text-center py-4">All settled</p>
+              <p className="text-sm text-brand-600 font-black text-center py-4">All settled</p>
             ) : (
               <div className="space-y-2">
                 {settlement.transactions.map((t, i) => (
-                  <div key={i} className="flex items-center gap-2 bg-red-50 rounded-xl px-3 py-2.5">
-                    <span className="font-semibold text-sm text-red-700">{t.from_member}</span>
+                  <div key={i} className="flex items-center gap-2 bg-red-50 border border-red-100 px-3 py-2.5">
+                    <span className="font-bold text-sm text-red-700 flex-shrink-0">{t.from_member}</span>
                     <svg className="w-4 h-4 text-red-400 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
                     </svg>
-                    <span className="font-semibold text-sm text-red-700 flex-1">{t.to_member}</span>
-                    <span className="font-bold text-brand-700 text-sm">{INR(t.amount)}</span>
+                    <span className="font-bold text-sm text-red-700 flex-1 min-w-0 truncate">{t.to_member}</span>
+                    <span className="font-black text-brand-700 text-sm flex-shrink-0">{INR(t.amount)}</span>
                   </div>
                 ))}
               </div>
@@ -296,4 +321,3 @@ export default function GroupDetail() {
     </div>
   )
 }
-

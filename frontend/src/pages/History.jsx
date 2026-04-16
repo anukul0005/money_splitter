@@ -8,6 +8,7 @@ import { getGroups, getOverview } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 
 Chart.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend, BarController)
+Chart.defaults.font.family = "'Barlow Condensed', sans-serif"
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 const PALETTE = ['#ef4444','#f97316','#eab308','#22c55e','#06b6d4','#3b82f6','#8b5cf6','#ec4899']
@@ -97,7 +98,7 @@ export default function History() {
                 className="card flex items-center gap-4 cursor-pointer active:scale-[0.98] transition-transform"
                 onClick={() => nav(`/groups/${g.id}`)}
               >
-                <div className="w-12 h-12 rounded-xl bg-brand-400/10 flex items-center justify-center font-black text-brand-600 text-lg border border-brand-400/20">
+                <div className="w-12 h-12 bg-brand-400/10 flex items-center justify-center font-black text-brand-600 text-lg border border-brand-400/20">
                   {g.name[0]?.toUpperCase() || 'G'}
                 </div>
                 <div className="flex-1 min-w-0">

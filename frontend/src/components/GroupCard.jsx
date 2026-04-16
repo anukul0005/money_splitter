@@ -10,7 +10,7 @@ export default function GroupCard({ group }) {
       className="card flex items-center gap-4 cursor-pointer active:scale-[0.98] transition-transform"
       onClick={() => nav(`/groups/${group.id}`)}
     >
-      <div className="w-14 h-14 rounded-2xl bg-brand-400/10 flex items-center justify-center font-black text-brand-600 text-xl flex-shrink-0 border border-brand-400/20">
+      <div className="w-12 h-12 bg-brand-400/10 flex items-center justify-center font-black text-brand-600 text-lg flex-shrink-0 border border-brand-400/20">
         {group.name[0]?.toUpperCase() || 'G'}
       </div>
       <div className="flex-1 min-w-0">
