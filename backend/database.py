@@ -29,7 +29,13 @@ def get_engine():
     global _engine
     if _engine is None:
         settings = get_settings()
-        _engine = create_async_engine(settings.database_url, echo=False, pool_size=5, max_overflow=10)
+        _engine = create_async_engine(
+            settings.database_url,
+            echo=False,
+            pool_size=5,
+            max_overflow=10,
+            connect_args={"ssl": "require"},
+        )
     return _engine
 
 
