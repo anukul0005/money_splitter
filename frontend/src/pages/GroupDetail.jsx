@@ -186,8 +186,31 @@ export default function GroupDetail() {
           )}
           {[...group.expenses].reverse().map((e) => {
             const memberCount = group.members.length
-            // Uneven split = not everyone in the group shared this expense
             const isPartialSplit = !e.split_json && e.divider < memberCount && e.divider > 0
+
+            // Parse split_json and detect if it's a gentleman's (65/35) or fully custom split
+            let splitEntries = null
+            let splitLabel   = null
+            if (e.split_json) {
+              try {
+                const obj = JSON.parse(e.split_json)
+                splitEntries = Object.entries(obj)   // [[name, amount], ...]
+                // Detect gentleman's: check if ratios are close to 65/35
+                if (splitEntries.length === 2) {
+                  const [, a0] = splitEntries[0]
+                  const [, a1] = splitEntries[1]
+                  const r0 = Math.round((a0 / e.amount) * 100)
+                  const r1 = Math.round((a1 / e.amount) * 100)
+                  const lo = Math.min(r0, r1), hi = Math.max(r0, r1)
+                  splitLabel = (lo === 35 && hi === 65)
+                    ? "Gentleman's 65/35"
+                    : `Custom ${r0}/${r1}`
+                } else {
+                  splitLabel = 'Custom split'
+                }
+              } catch { /* ignore parse error */ }
+            }
+
             return (
               <div key={e.id} className="card flex items-start gap-3">
                 <div className="w-8 h-8 bg-amber-50 border border-amber-100 flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -195,29 +218,49 @@ export default function GroupDetail() {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" />
                   </svg>
                 </div>
+
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-gray-900 leading-tight" style={{wordBreak:'break-word'}}>{e.title || e.category || 'Expense'}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    {e.paid_by} ·{' '}
-                    {e.split_json ? (
-                      <span className="text-purple-500 font-semibold">custom split</span>
-                    ) : (
-                      `${e.divider} ppl`
-                    )}{' '}
-                    · {e.date || '—'}
+                  <p className="text-sm font-bold text-gray-900 leading-tight" style={{wordBreak:'break-word'}}>
+                    {e.title || e.category || 'Expense'}
                   </p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {e.paid_by} · {e.date || '—'}
+                  </p>
+
+                  {/* Custom / gentleman's split — show per-member amounts */}
+                  {splitEntries && (
+                    <div className="mt-1.5 border border-amber-300 bg-amber-50/60 px-2 py-1.5 space-y-1">
+                      <p className="text-[10px] font-black text-amber-700 tracking-widest mb-0.5">
+                        {splitLabel}
+                      </p>
+                      {splitEntries.map(([name, amt]) => {
+                        const pct = Math.round((amt / e.amount) * 100)
+                        return (
+                          <div key={name} className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-bold text-gray-700">{name}</span>
+                            <span className="text-xs text-gray-400">{pct}%</span>
+                            <span className="text-xs font-black text-gray-900">{INR(amt)}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {/* Partial equal split badge */}
                   {isPartialSplit && (
                     <span className="inline-block mt-1 text-[10px] font-bold text-orange-600 bg-orange-50 border border-orange-200 px-1.5 py-0.5 tracking-wide">
                       {e.divider}/{memberCount} split
                     </span>
                   )}
                 </div>
+
                 <div className="text-right flex-shrink-0">
                   <p className="text-sm font-black text-gray-900">{INR(e.amount)}</p>
                   {!e.split_json && (
                     <p className="text-xs text-brand-600">{INR(e.individual_amount)}/ea</p>
                   )}
                 </div>
+
                 {!group.is_historical && (
                   <button
                     onClick={() => handleDeleteExpense(e.id)}

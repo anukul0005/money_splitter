@@ -97,6 +97,8 @@ def _parse_date(value) -> str | None:
 
 
 def _load_expenses(ws, members: list[str]) -> list[dict]:
+    import json as _json
+
     rows = list(ws.iter_rows(values_only=True))
     if not rows:
         return []
@@ -115,6 +117,8 @@ def _load_expenses(ws, members: list[str]) -> list[dict]:
     ci_amount = col("amount")
     ci_name   = col("name")
     ci_div    = col("divider")
+    # "Divider 2" column = gentleman's agreement ratio (e.g. 0.35 means non-payer pays 35%)
+    ci_div2   = col("divider 2")
 
     skip_names = {"none", "paid", "p.p", "indivdual", "individual", "total"}
 
@@ -137,6 +141,25 @@ def _load_expenses(ws, members: list[str]) -> list[dict]:
         divider  = max(1, int(div_val)) if div_val and div_val >= 1 else len(members)
         individual = round(amount / divider, 2)
 
+        # Gentleman's agreement: "Divider 2" holds a decimal ratio (0 < r < 1)
+        # meaning the non-payer covers that fraction; payer covers (1 - r).
+        # Only applied for 2-member groups where we can unambiguously identify non-payer.
+        split_json = None
+        if ci_div2 is not None and len(members) == 2:
+            ratio = _parse_amount(row[ci_div2])
+            if ratio and 0 < ratio < 1:
+                payer_name = paid_by
+                other_name = next(
+                    (m for m in members if m.lower() != payer_name.lower()), None
+                )
+                if other_name:
+                    split_json = _json.dumps({
+                        payer_name: round(amount * (1 - ratio), 2),
+                        other_name: round(amount * ratio, 2),
+                    })
+                    divider = 2
+                    individual = None   # per-member amounts live in split_json
+
         expenses.append({
             "date":              _parse_date(row[ci_date] if ci_date is not None else None),
             "category":          str(row[ci_type]).strip() if ci_type is not None and row[ci_type] else None,
@@ -145,6 +168,7 @@ def _load_expenses(ws, members: list[str]) -> list[dict]:
             "paid_by":           paid_by,
             "divider":           divider,
             "individual_amount": individual,
+            "split_json":        split_json,
         })
 
     return expenses
