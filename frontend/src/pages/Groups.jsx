@@ -21,14 +21,11 @@ export default function Groups() {
   if (loading) return <LoadingSpinner />
 
   return (
-    <div className="pb-24">
-      <div className="px-5 pt-12 pb-4 bg-white sticky top-0 z-10 border-b border-gray-100">
+    <div className="pb-24 md:pb-8">
+      <div className="px-5 pt-10 md:pt-6 pb-4 bg-white sticky top-0 z-10 border-b border-gray-100">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-bold">Groups</h1>
-          <button
-            className="text-brand-600 text-sm font-semibold"
-            onClick={() => nav('/groups/new')}
-          >
+          <button className="text-brand-600 text-sm font-semibold" onClick={() => nav('/groups/new')}>
             + New
           </button>
         </div>
@@ -47,10 +44,10 @@ export default function Groups() {
         </div>
       </div>
 
-      <div className="px-5 mt-4 space-y-3">
+      <div className="px-5 mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
         {filtered.map((g) => <GroupCard key={g.id} group={g} />)}
         {filtered.length === 0 && (
-          <div className="text-center py-16 text-gray-400">
+          <div className="col-span-2 text-center py-16 text-gray-400">
             <p className="text-4xl mb-2">🗂️</p>
             <p className="text-sm">No groups in this category</p>
           </div>

@@ -56,45 +56,45 @@ export default function History() {
   if (loading) return <LoadingSpinner />
 
   return (
-    <div className="pb-24">
-      <div className="px-5 pt-12 pb-4 bg-white border-b border-gray-100 sticky top-0 z-10">
+    <div className="pb-24 md:pb-8">
+      <div className="px-5 pt-10 md:pt-6 pb-4 bg-white border-b border-gray-100 sticky top-0 z-10">
         <h1 className="text-xl font-bold">History & Stats</h1>
         <p className="text-xs text-gray-400 mt-0.5">Tap a bar to drill into that group</p>
       </div>
 
-      {/* Overall bar chart */}
-      {overview.length > 0 && (
-        <div className="px-5 mt-4">
-          <div className="card">
+      <div className="px-5 mt-4 md:grid md:grid-cols-2 md:gap-6 md:items-start">
+        {/* Overall bar chart */}
+        {overview.length > 0 && (
+          <div className="card mb-4 md:mb-0">
             <h2 className="text-sm font-semibold text-gray-600 mb-3">Spending across all groups</h2>
             <Bar data={barData} options={barOptions} />
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Historical groups */}
-      <div className="px-5 mt-4">
-        <h2 className="text-sm font-semibold text-gray-500 mb-3 uppercase tracking-wide">Historical trips</h2>
-        <div className="space-y-3">
-          {historical.map((g) => (
-            <div
-              key={g.id}
-              className="card flex items-center gap-4 cursor-pointer active:scale-[0.98] transition-transform"
-              onClick={() => nav(`/groups/${g.id}`)}
-            >
-              <div className="w-12 h-12 rounded-xl bg-amber-50 flex items-center justify-center text-2xl">
-                {g.emoji}
+        {/* Historical groups */}
+        <div>
+          <h2 className="text-sm font-semibold text-gray-500 mb-3 uppercase tracking-wide">Historical trips</h2>
+          <div className="space-y-3">
+            {historical.map((g) => (
+              <div
+                key={g.id}
+                className="card flex items-center gap-4 cursor-pointer active:scale-[0.98] transition-transform"
+                onClick={() => nav(`/groups/${g.id}`)}
+              >
+                <div className="w-12 h-12 rounded-xl bg-amber-50 flex items-center justify-center text-2xl">
+                  {g.emoji}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-sm truncate">{g.name}</p>
+                  <p className="text-xs text-gray-400">{g.expense_count} expenses · {g.member_count} people</p>
+                </div>
+                <span className="font-bold text-gray-900 text-sm whitespace-nowrap">{INR(g.total_amount)}</span>
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold text-sm truncate">{g.name}</p>
-                <p className="text-xs text-gray-400">{g.expense_count} expenses · {g.member_count} people</p>
-              </div>
-              <span className="font-bold text-gray-900 text-sm whitespace-nowrap">{INR(g.total_amount)}</span>
-            </div>
-          ))}
-          {historical.length === 0 && (
-            <p className="text-sm text-gray-400 text-center py-8">No historical data yet</p>
-          )}
+            ))}
+            {historical.length === 0 && (
+              <p className="text-sm text-gray-400 text-center py-8">No historical data yet</p>
+            )}
+          </div>
         </div>
       </div>
     </div>

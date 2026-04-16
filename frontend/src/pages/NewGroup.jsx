@@ -6,11 +6,11 @@ const EMOJIS = ['💰','🍻','🚀','🌊','🎬','🏖️','🎉','🍕','🚗
 
 export default function NewGroup() {
   const nav = useNavigate()
-  const [form, setForm]           = useState({ name: '', description: '', emoji: '💰' })
-  const [memberInput, setMInput]  = useState('')
-  const [members, setMembers]     = useState([])
+  const [form, setForm]             = useState({ name: '', description: '', emoji: '💰' })
+  const [memberInput, setMInput]    = useState('')
+  const [members, setMembers]       = useState([])
   const [submitting, setSubmitting] = useState(false)
-  const [error, setError]         = useState('')
+  const [error, setError]           = useState('')
 
   const addMember = () => {
     const name = memberInput.trim()
@@ -39,8 +39,8 @@ export default function NewGroup() {
   }
 
   return (
-    <div className="pb-28">
-      <div className="px-5 pt-12 pb-4 bg-white border-b border-gray-100 sticky top-0 z-10">
+    <div className="pb-28 md:pb-10">
+      <div className="px-5 pt-10 md:pt-6 pb-4 bg-white border-b border-gray-100 sticky top-0 z-10">
         <div className="flex items-center gap-3">
           <button onClick={() => nav(-1)} className="btn-ghost">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
@@ -51,7 +51,7 @@ export default function NewGroup() {
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="px-5 mt-5 space-y-5">
+      <form onSubmit={handleSubmit} className="px-5 mt-5 space-y-5 max-w-2xl">
         {/* Emoji */}
         <div>
           <label className="label">Pick an emoji</label>
@@ -121,11 +121,7 @@ export default function NewGroup() {
                   className="flex items-center gap-1.5 bg-brand-50 text-brand-700 px-3 py-1.5 rounded-full text-sm font-medium"
                 >
                   {m}
-                  <button
-                    type="button"
-                    onClick={() => removeMember(m)}
-                    className="text-brand-400 hover:text-brand-700"
-                  >
+                  <button type="button" onClick={() => removeMember(m)} className="text-brand-400 hover:text-brand-700">
                     ×
                   </button>
                 </span>

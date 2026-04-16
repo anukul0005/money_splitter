@@ -21,8 +21,8 @@ export default function GroupDetail() {
   const [settlement, setSettlement] = useState(null)
   const [stats, setStats]           = useState(null)
   const [loading, setLoading]       = useState(true)
-  const [tab, setTab]               = useState('expenses')  // expenses | chart | settle
-  const [chartView, setChartView]   = useState('member')    // member | category
+  const [tab, setTab]               = useState('expenses')
+  const [chartView, setChartView]   = useState('member')
 
   const reload = () => {
     setLoading(true)
@@ -46,7 +46,6 @@ export default function GroupDetail() {
   if (loading) return <LoadingSpinner />
   if (!group)  return <p className="p-5 text-gray-500">Group not found.</p>
 
-  // ── Chart: spending by member ───────────────────────────────────────────────
   const memberChartData = {
     labels: stats?.by_member.map((x) => x.member) || [],
     datasets: [{
@@ -58,7 +57,6 @@ export default function GroupDetail() {
     }],
   }
 
-  // ── Chart: category doughnut ────────────────────────────────────────────────
   const catData = stats?.by_category.slice(0, 8) || []
   const catChartData = {
     labels: catData.map((c) => c.category),
@@ -85,9 +83,9 @@ export default function GroupDetail() {
   }
 
   return (
-    <div className="pb-24">
-      {/* ── Header ── */}
-      <div className="bg-white border-b border-gray-100 px-5 pt-12 pb-3 sticky top-0 z-10">
+    <div className="pb-24 md:pb-8">
+      {/* Header */}
+      <div className="bg-white border-b border-gray-100 px-5 pt-10 md:pt-6 pb-3 sticky top-0 z-10">
         <div className="flex items-center gap-3">
           <button onClick={() => nav(-1)} className="btn-ghost">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
@@ -123,7 +121,7 @@ export default function GroupDetail() {
         </div>
       </div>
 
-      {/* ── Summary strip ── */}
+      {/* Summary strip */}
       <div className="px-5 py-3 flex gap-3">
         <div className="card flex-1 text-center py-3">
           <p className="text-xs text-gray-400">Total</p>
@@ -139,11 +137,11 @@ export default function GroupDetail() {
         </div>
       </div>
 
-      {/* ── Expenses tab ── */}
+      {/* Expenses tab */}
       {tab === 'expenses' && (
-        <div className="px-5 space-y-2">
+        <div className="px-5 grid grid-cols-1 md:grid-cols-2 gap-2">
           {group.expenses.length === 0 && (
-            <div className="text-center py-12 text-gray-400">
+            <div className="col-span-2 text-center py-12 text-gray-400">
               <p className="text-4xl mb-2">🧾</p>
               <p className="text-sm">No expenses yet</p>
             </div>
@@ -178,7 +176,7 @@ export default function GroupDetail() {
         </div>
       )}
 
-      {/* ── Charts tab ── */}
+      {/* Charts tab */}
       {tab === 'chart' && stats && (
         <div className="px-5 space-y-4">
           <div className="flex gap-2">
@@ -224,9 +222,9 @@ export default function GroupDetail() {
         </div>
       )}
 
-      {/* ── Settle Up tab ── */}
+      {/* Settle Up tab */}
       {tab === 'settle' && settlement && (
-        <div className="px-5 space-y-4">
+        <div className="px-5 md:grid md:grid-cols-2 md:gap-4 space-y-4 md:space-y-0">
           {/* Balances */}
           <div className="card">
             <h3 className="text-sm font-semibold text-gray-600 mb-3">Individual balances</h3>

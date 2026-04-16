@@ -13,11 +13,11 @@ export default function AddExpense() {
   const [params] = useSearchParams()
   const defaultGroup = params.get('group') || ''
 
-  const [groups, setGroups]       = useState([])
-  const [loading, setLoading]     = useState(true)
+  const [groups, setGroups]         = useState([])
+  const [loading, setLoading]       = useState(true)
   const [submitting, setSubmitting] = useState(false)
-  const [error, setError]         = useState('')
-  const [members, setMembers]     = useState([])
+  const [error, setError]           = useState('')
+  const [members, setMembers]       = useState([])
 
   const [form, setForm] = useState({
     group_id: defaultGroup,
@@ -31,20 +31,14 @@ export default function AddExpense() {
   })
 
   useEffect(() => {
-    getGroups().then((r) => {
-      setGroups(r.data)
-      setLoading(false)
-    })
+    getGroups()
+      .then((r) => setGroups(r.data))
+      .catch(() => setError('Could not reach server. Please try again.'))
+      .finally(() => setLoading(false))
   }, [])
 
-  // When group changes, load its members
   useEffect(() => {
     if (!form.group_id) { setMembers([]); return }
-    const g = groups.find((x) => String(x.id) === String(form.group_id))
-    // GroupSummary doesn't have members — we'll need getGroup() OR embed
-    // For now derive count from member_count and let user type name
-    setMembers([])
-    // Load full group members via separate call
     import('../api').then(({ getGroup }) =>
       getGroup(form.group_id).then((r) => {
         setMembers(r.data.members || [])
@@ -83,12 +77,12 @@ export default function AddExpense() {
     }
   }
 
-  if (loading) return <LoadingSpinner />
+  if (loading) return <LoadingSpinner text="Loading groups…" />
 
   return (
-    <div className="pb-28">
+    <div className="pb-28 md:pb-10">
       {/* Header */}
-      <div className="px-5 pt-12 pb-4 bg-white border-b border-gray-100 sticky top-0 z-10">
+      <div className="px-5 pt-10 md:pt-6 pb-4 bg-white border-b border-gray-100 sticky top-0 z-10">
         <div className="flex items-center gap-3">
           <button onClick={() => nav(-1)} className="btn-ghost">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
@@ -99,7 +93,7 @@ export default function AddExpense() {
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="px-5 mt-5 space-y-4">
+      <form onSubmit={handleSubmit} className="px-5 mt-5 space-y-4 max-w-2xl">
         {/* Group */}
         <div>
           <label className="label">Group *</label>
@@ -136,9 +130,7 @@ export default function AddExpense() {
                   key={m.id}
                   onClick={() => setForm((f) => ({ ...f, paid_by: m.name }))}
                   className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
-                    form.paid_by === m.name
-                      ? 'bg-brand-600 text-white'
-                      : 'bg-gray-100 text-gray-700'
+                    form.paid_by === m.name ? 'bg-brand-600 text-white' : 'bg-gray-100 text-gray-700'
                   }`}
                 >
                   {m.name}
@@ -150,7 +142,7 @@ export default function AddExpense() {
           )}
         </div>
 
-        {/* Split between (divider) */}
+        {/* Split between */}
         <div>
           <label className="label">Split between (# people)</label>
           <div className="flex gap-2 flex-wrap">
@@ -160,9 +152,7 @@ export default function AddExpense() {
                 key={n}
                 onClick={() => setForm((f) => ({ ...f, divider: String(n) }))}
                 className={`w-12 h-12 rounded-xl text-sm font-bold transition-colors ${
-                  String(form.divider) === String(n)
-                    ? 'bg-brand-600 text-white'
-                    : 'bg-gray-100 text-gray-700'
+                  String(form.divider) === String(n) ? 'bg-brand-600 text-white' : 'bg-gray-100 text-gray-700'
                 }`}
               >
                 {n}
