@@ -11,9 +11,9 @@ Chart.register(ArcElement, Tooltip, Legend, DoughnutController)
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 
 const PALETTE = [
-  '#16a34a','#22c55e','#4ade80','#86efac',
-  '#f59e0b','#f97316','#ef4444','#8b5cf6',
-  '#06b6d4','#0ea5e9','#ec4899','#64748b',
+  '#ef4444','#f97316','#eab308','#22c55e',
+  '#06b6d4','#3b82f6','#8b5cf6','#ec4899',
+  '#14b8a6','#f59e0b','#84cc16','#6366f1',
 ]
 
 export default function Home() {
@@ -105,7 +105,7 @@ export default function Home() {
                       onClick={() => nav(`/groups/${g.id}`)}
                     >
                       <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: PALETTE[i % PALETTE.length] }} />
-                      <span className="text-xs text-gray-600 truncate flex-1">{g.emoji} {g.name}</span>
+                      <span className="text-xs text-gray-600 truncate flex-1">{g.name}</span>
                       <span className="text-xs font-semibold text-gray-800 whitespace-nowrap">{INR(g.total)}</span>
                     </li>
                   ))}
@@ -138,7 +138,9 @@ export default function Home() {
                     className="flex items-center gap-2 cursor-pointer hover:bg-amber-50 rounded-lg px-1 py-1 transition-colors"
                     onClick={() => nav(`/groups/${g.id}`)}
                   >
-                    <span className="text-xl">{g.emoji}</span>
+                    <div className="w-7 h-7 rounded-lg bg-brand-400/10 flex items-center justify-center font-bold text-brand-600 text-xs flex-shrink-0 border border-brand-400/20">
+                      {g.name[0]?.toUpperCase() || 'G'}
+                    </div>
                     <span className="text-sm font-medium text-gray-700 flex-1 truncate">{g.name}</span>
                     <span className="text-sm font-bold text-brand-600 whitespace-nowrap">
                       {INR(g.total_amount)}
@@ -168,7 +170,9 @@ export default function Home() {
           </div>
           {groups.length === 0 && (
             <div className="text-center py-12 text-gray-400">
-              <p className="text-4xl mb-2">🪹</p>
+              <svg className="w-10 h-10 mx-auto mb-2 text-gray-300" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m9-4.13a4 4 0 11-8 0 4 4 0 018 0zm6 0a4 4 0 11-8 0 4 4 0 018 0z" />
+              </svg>
               <p className="text-sm">No groups yet. Create one!</p>
             </div>
           )}

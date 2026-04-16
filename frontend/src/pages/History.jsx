@@ -10,7 +10,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 Chart.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend, BarController)
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
-const PALETTE = ['#16a34a','#22c55e','#4ade80','#f59e0b','#f97316','#8b5cf6','#06b6d4','#ef4444']
+const PALETTE = ['#ef4444','#f97316','#eab308','#22c55e','#06b6d4','#3b82f6','#8b5cf6','#ec4899']
 
 export default function History() {
   const nav = useNavigate()
@@ -97,8 +97,8 @@ export default function History() {
                 className="card flex items-center gap-4 cursor-pointer active:scale-[0.98] transition-transform"
                 onClick={() => nav(`/groups/${g.id}`)}
               >
-                <div className="w-12 h-12 rounded-xl bg-amber-50 flex items-center justify-center text-2xl">
-                  {g.emoji}
+                <div className="w-12 h-12 rounded-xl bg-brand-400/10 flex items-center justify-center font-black text-brand-600 text-lg border border-brand-400/20">
+                  {g.name[0]?.toUpperCase() || 'G'}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-sm truncate">{g.name}</p>
@@ -108,7 +108,12 @@ export default function History() {
               </div>
             ))}
             {historical.length === 0 && (
-              <p className="text-sm text-gray-400 text-center py-8">No historical data yet</p>
+              <div className="text-center py-8 text-gray-400">
+                <svg className="w-8 h-8 mx-auto mb-2 text-gray-300" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p className="text-sm">No historical data yet</p>
+              </div>
             )}
           </div>
         </div>

@@ -2,11 +2,9 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createGroup } from '../api'
 
-const EMOJIS = ['💰','🍻','🚀','🌊','🎬','🏖️','🎉','🍕','🚗','🏕️','🛒','🪔','🎮','✈️','🤝']
-
 export default function NewGroup() {
   const nav = useNavigate()
-  const [form, setForm]             = useState({ name: '', description: '', emoji: '💰' })
+  const [form, setForm]             = useState({ name: '', description: '' })
   const [memberInput, setMInput]    = useState('')
   const [members, setMembers]       = useState([])
   const [submitting, setSubmitting] = useState(false)
@@ -29,7 +27,7 @@ export default function NewGroup() {
 
     setSubmitting(true)
     try {
-      const r = await createGroup({ ...form, members })
+      const r = await createGroup({ ...form, emoji: '', members })
       nav(`/groups/${r.data.id}`)
     } catch (err) {
       setError(err?.response?.data?.detail || 'Something went wrong')
@@ -52,25 +50,6 @@ export default function NewGroup() {
       </div>
 
       <form onSubmit={handleSubmit} className="px-5 mt-5 space-y-5 max-w-2xl">
-        {/* Emoji */}
-        <div>
-          <label className="label">Pick an emoji</label>
-          <div className="flex flex-wrap gap-2">
-            {EMOJIS.map((e) => (
-              <button
-                type="button"
-                key={e}
-                onClick={() => setForm((f) => ({ ...f, emoji: e }))}
-                className={`w-11 h-11 rounded-xl text-xl transition-colors ${
-                  form.emoji === e ? 'bg-brand-400/20 ring-2 ring-brand-400' : 'bg-amber-50 border border-amber-200'
-                }`}
-              >
-                {e}
-              </button>
-            ))}
-          </div>
-        </div>
-
         {/* Name */}
         <div>
           <label className="label">Group name *</label>

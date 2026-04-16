@@ -48,7 +48,9 @@ export default function Groups() {
         {filtered.map((g) => <GroupCard key={g.id} group={g} />)}
         {filtered.length === 0 && (
           <div className="col-span-2 text-center py-16 text-gray-400">
-            <p className="text-4xl mb-2">🗂️</p>
+            <svg className="w-10 h-10 mx-auto mb-2 text-gray-300" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+            </svg>
             <p className="text-sm">No groups in this category</p>
           </div>
         )}

@@ -6,6 +6,7 @@ import Groups      from './pages/Groups'
 import GroupDetail from './pages/GroupDetail'
 import AddExpense  from './pages/AddExpense'
 import NewGroup    from './pages/NewGroup'
+import EditGroup   from './pages/EditGroup'
 import History     from './pages/History'
 
 export default function App() {
@@ -23,6 +24,7 @@ export default function App() {
               <Route path="/groups"     element={<Groups />} />
               <Route path="/groups/new" element={<NewGroup />} />
               <Route path="/groups/:id" element={<GroupDetail />} />
+              <Route path="/groups/:id/edit" element={<EditGroup />} />
               <Route path="/add"        element={<AddExpense />} />
               <Route path="/history"    element={<History />} />
             </Routes>

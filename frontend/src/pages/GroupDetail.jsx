@@ -11,7 +11,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 Chart.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend, ArcElement, DoughnutController, BarController)
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
-const PALETTE = ['#16a34a','#22c55e','#4ade80','#f59e0b','#f97316','#8b5cf6','#06b6d4','#ef4444']
+const PALETTE = ['#ef4444','#f97316','#eab308','#22c55e','#06b6d4','#3b82f6','#8b5cf6','#ec4899']
 
 export default function GroupDetail() {
   const { id } = useParams()
@@ -92,11 +92,22 @@ export default function GroupDetail() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
           </button>
-          <span className="text-2xl">{group.emoji}</span>
+          <div className="w-9 h-9 rounded-xl bg-brand-400/15 flex items-center justify-center font-black text-brand-600 text-base flex-shrink-0 border border-brand-400/20">
+            {group.name[0]?.toUpperCase() || 'G'}
+          </div>
           <div className="flex-1 min-w-0">
             <h1 className="text-lg font-bold truncate">{group.name}</h1>
-            <p className="text-xs text-gray-400">{group.members.map((m) => m.name).join(' · ')}</p>
+            <p className="text-xs text-gray-400 truncate">{group.members.map((m) => m.name).join(' · ')}</p>
           </div>
+          <button
+            className="text-gray-400 hover:text-gray-600 transition-colors p-1"
+            onClick={() => nav(`/groups/${id}/edit`)}
+            title="Edit group"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+          </button>
           <button
             className="bg-brand-400 text-gray-900 text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm"
             onClick={() => nav(`/add?group=${id}`)}
@@ -142,14 +153,18 @@ export default function GroupDetail() {
         <div className="px-5 grid grid-cols-1 md:grid-cols-2 gap-2">
           {group.expenses.length === 0 && (
             <div className="col-span-2 text-center py-12 text-gray-400">
-              <p className="text-4xl mb-2">🧾</p>
+              <svg className="w-10 h-10 mx-auto mb-2 text-gray-300" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" />
+              </svg>
               <p className="text-sm">No expenses yet</p>
             </div>
           )}
           {[...group.expenses].reverse().map((e) => (
             <div key={e.id} className="card flex items-start gap-3">
-              <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center text-lg flex-shrink-0">
-                {categoryEmoji(e.category)}
+              <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center flex-shrink-0">
+                <svg className="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" />
+                </svg>
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-gray-900 truncate">{e.title || e.category || 'Expense'}</p>
@@ -260,7 +275,7 @@ export default function GroupDetail() {
           <div className="card">
             <h3 className="text-sm font-semibold text-gray-600 mb-3">Who pays whom?</h3>
             {settlement.transactions.length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-4">✅ All settled!</p>
+              <p className="text-sm text-brand-600 font-semibold text-center py-4">All settled</p>
             ) : (
               <div className="space-y-2">
                 {settlement.transactions.map((t, i) => (
@@ -282,16 +297,3 @@ export default function GroupDetail() {
   )
 }
 
-function categoryEmoji(cat) {
-  if (!cat) return '💸'
-  const c = cat.toLowerCase()
-  if (c.includes('food') || c.includes('snack') || c.includes('meal') || c.includes('bf')) return '🍽️'
-  if (c.includes('drink') || c.includes('beer') || c.includes('whiskey') || c.includes('vodka') || c.includes('monk')) return '🍺'
-  if (c.includes('cab') || c.includes('auto') || c.includes('taxi') || c.includes('rapido') || c.includes('ola')) return '🚕'
-  if (c.includes('train') || c.includes('rail') || c.includes('irctc')) return '🚆'
-  if (c.includes('hotel') || c.includes('stay')) return '🏨'
-  if (c.includes('movie') || c.includes('cinema') || c.includes('pvr')) return '🎬'
-  if (c.includes('shop') || c.includes('market') || c.includes('amazon') || c.includes('swiggy')) return '🛒'
-  if (c.includes('diwali') || c.includes('patakhe')) return '🪔'
-  return '💸'
-}

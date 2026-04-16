@@ -210,7 +210,7 @@ export default function AddExpense() {
                       : 'bg-amber-50 text-gray-600 border border-amber-200'
                   }`}
                 >
-                  🤝 Gentleman's (65/35)
+                  Gentleman's (65/35)
                 </button>
               )}
               <button
@@ -284,7 +284,8 @@ export default function AddExpense() {
                 onClick={() => setGentlemanFlipped((f) => !f)}
                 className="text-xs text-amber-600 font-semibold flex items-center gap-1 mt-1 hover:text-amber-700"
               >
-                ⇄ Swap ratios
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4" /></svg>
+                Swap ratios
               </button>
             </div>
           )}

@@ -18,7 +18,11 @@ export default function Sidebar() {
       {/* Logo */}
       <div className="px-5 py-6 border-b border-field-800">
         <div className="flex items-center gap-2.5">
-          <span className="text-2xl">💰</span>
+          <div className="w-8 h-8 rounded-lg bg-brand-400 flex items-center justify-center flex-shrink-0">
+            <svg className="w-4 h-4 text-gray-900" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h11M9 21V3m0 0l-3 3m3-3l3 3M14 14h7m-3.5-3.5L21 14l-3.5 3.5" />
+            </svg>
+          </div>
           <div>
             <p className="text-base font-black text-white leading-tight tracking-tight">SPLITTER</p>
             <p className="text-xs text-brand-400/70">Group expenses</p>

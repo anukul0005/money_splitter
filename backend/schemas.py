@@ -66,6 +66,14 @@ class GroupOut(GroupBase):
     expenses: list[ExpenseOut] = []
     model_config = {"from_attributes": True}
 
+class GroupUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    emoji: Optional[str] = None
+    is_historical: Optional[bool] = None
+    members_add: list[str] = []
+    members_remove: list[int] = []
+
 class GroupSummary(BaseModel):
     id: int
     name: str
