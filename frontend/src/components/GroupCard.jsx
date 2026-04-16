@@ -10,22 +10,22 @@ export default function GroupCard({ group }) {
       className="card flex items-center gap-4 cursor-pointer active:scale-[0.98] transition-transform"
       onClick={() => nav(`/groups/${group.id}`)}
     >
-      <div className="w-14 h-14 rounded-2xl bg-brand-50 flex items-center justify-center text-2xl flex-shrink-0">
+      <div className="w-14 h-14 rounded-2xl bg-brand-400/10 flex items-center justify-center text-2xl flex-shrink-0 border border-brand-400/20">
         {group.emoji}
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2">
-          <p className="font-semibold text-gray-900 truncate">{group.name}</p>
-          <span className="font-bold text-brand-600 whitespace-nowrap text-sm">{INR(group.total_amount)}</span>
+          <p className="font-bold text-gray-900 truncate">{group.name}</p>
+          <span className="font-black text-brand-600 whitespace-nowrap text-sm">{INR(group.total_amount)}</span>
         </div>
         <div className="flex items-center gap-2 mt-0.5">
           <span className="text-xs text-gray-400">{group.member_count} people</span>
-          <span className="text-gray-200">·</span>
+          <span className="text-amber-200">·</span>
           <span className="text-xs text-gray-400">{group.expense_count} expenses</span>
           {group.is_historical && (
             <>
-              <span className="text-gray-200">·</span>
-              <span className="badge bg-amber-50 text-amber-600">Historical</span>
+              <span className="text-amber-200">·</span>
+              <span className="badge bg-amber-100 text-amber-700">Historical</span>
             </>
           )}
         </div>

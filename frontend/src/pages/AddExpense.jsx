@@ -13,11 +13,16 @@ export default function AddExpense() {
   const [params] = useSearchParams()
   const defaultGroup = params.get('group') || ''
 
-  const [groups, setGroups]         = useState([])
-  const [loading, setLoading]       = useState(true)
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError]           = useState('')
-  const [members, setMembers]       = useState([])
+  const [groups, setGroups]               = useState([])
+  const [loading, setLoading]             = useState(true)
+  const [submitting, setSubmitting]       = useState(false)
+  const [error, setError]                 = useState('')
+  const [members, setMembers]             = useState([])
+
+  // Split mode state
+  const [splitMode, setSplitMode]               = useState('equal')
+  const [gentlemanFlipped, setGentlemanFlipped] = useState(false)
+  const [customPcts, setCustomPcts]             = useState({})
 
   const [form, setForm] = useState({
     group_id: defaultGroup,
@@ -41,14 +46,44 @@ export default function AddExpense() {
     if (!form.group_id) { setMembers([]); return }
     import('../api').then(({ getGroup }) =>
       getGroup(form.group_id).then((r) => {
-        setMembers(r.data.members || [])
-        const n = r.data.members?.length || 2
-        setForm((f) => ({ ...f, divider: String(n) }))
+        const ms = r.data.members || []
+        setMembers(ms)
+        setForm((f) => ({ ...f, divider: String(ms.length || 2) }))
+        // Reset split mode when group changes
+        setSplitMode('equal')
+        setGentlemanFlipped(false)
+        setCustomPcts(Object.fromEntries(ms.map((m) => [m.name, ''])))
       })
     )
   }, [form.group_id, groups])
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
+
+  // Compute split_json for non-equal modes
+  const buildSplitJson = () => {
+    const amt = parseFloat(form.amount)
+    if (!amt) return null
+
+    if (splitMode === 'gentleman' && members.length === 2) {
+      const [pct0, pct1] = gentlemanFlipped ? [35, 65] : [65, 35]
+      return JSON.stringify({
+        [members[0].name]: Math.round(amt * pct0) / 100,
+        [members[1].name]: Math.round(amt * pct1) / 100,
+      })
+    }
+
+    if (splitMode === 'custom') {
+      const obj = {}
+      members.forEach((m) => {
+        obj[m.name] = Math.round(amt * Number(customPcts[m.name] || 0)) / 100
+      })
+      return JSON.stringify(obj)
+    }
+
+    return null
+  }
+
+  const customTotal = members.reduce((s, m) => s + Number(customPcts[m.name] || 0), 0)
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -56,18 +91,21 @@ export default function AddExpense() {
     if (!form.group_id) return setError('Please select a group')
     if (!form.amount || isNaN(form.amount)) return setError('Enter a valid amount')
     if (!form.paid_by) return setError('Select who paid')
+    if (splitMode === 'custom' && Math.abs(customTotal - 100) > 0.1)
+      return setError('Custom percentages must add up to 100%')
 
     setSubmitting(true)
     try {
       await createExpense({
-        group_id: Number(form.group_id),
-        date: form.date || null,
-        category: form.category || null,
-        title: form.title || null,
-        amount: parseFloat(form.amount),
-        paid_by: form.paid_by,
-        divider: Number(form.divider) || members.length || 2,
-        notes: form.notes || null,
+        group_id:   Number(form.group_id),
+        date:       form.date || null,
+        category:   form.category || null,
+        title:      form.title || null,
+        amount:     parseFloat(form.amount),
+        paid_by:    form.paid_by,
+        divider:    splitMode === 'equal' ? (Number(form.divider) || members.length || 2) : members.length,
+        notes:      form.notes || null,
+        split_json: buildSplitJson(),
       })
       nav(`/groups/${form.group_id}`)
     } catch (err) {
@@ -82,7 +120,7 @@ export default function AddExpense() {
   return (
     <div className="pb-28 md:pb-10">
       {/* Header */}
-      <div className="px-5 pt-10 md:pt-6 pb-4 bg-white border-b border-gray-100 sticky top-0 z-10">
+      <div className="px-5 pt-10 md:pt-6 pb-4 bg-cream border-b border-amber-100/60 sticky top-0 z-10">
         <div className="flex items-center gap-3">
           <button onClick={() => nav(-1)} className="btn-ghost">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
@@ -130,7 +168,9 @@ export default function AddExpense() {
                   key={m.id}
                   onClick={() => setForm((f) => ({ ...f, paid_by: m.name }))}
                   className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
-                    form.paid_by === m.name ? 'bg-brand-600 text-white' : 'bg-gray-100 text-gray-700'
+                    form.paid_by === m.name
+                      ? 'bg-brand-400 text-gray-900'
+                      : 'bg-amber-50 text-gray-700 border border-amber-200'
                   }`}
                 >
                   {m.name}
@@ -142,37 +182,144 @@ export default function AddExpense() {
           )}
         </div>
 
-        {/* Split between */}
+        {/* Split section */}
         <div>
-          <label className="label">Split between (# people)</label>
-          <div className="flex gap-2 flex-wrap">
-            {[2,3,4,5].map((n) => (
+          <label className="label">Split</label>
+
+          {/* Mode selector — only when members are known */}
+          {members.length > 0 && (
+            <div className="flex gap-2 flex-wrap mb-3">
               <button
                 type="button"
-                key={n}
-                onClick={() => setForm((f) => ({ ...f, divider: String(n) }))}
-                className={`w-12 h-12 rounded-xl text-sm font-bold transition-colors ${
-                  String(form.divider) === String(n) ? 'bg-brand-600 text-white' : 'bg-gray-100 text-gray-700'
+                onClick={() => setSplitMode('equal')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                  splitMode === 'equal'
+                    ? 'bg-brand-400 text-gray-900'
+                    : 'bg-amber-50 text-gray-600 border border-amber-200'
                 }`}
               >
-                {n}
+                Equal
               </button>
-            ))}
-            <input
-              className="input w-20"
-              type="number"
-              min="1"
-              placeholder="Other"
-              value={[2,3,4,5].includes(Number(form.divider)) ? '' : form.divider}
-              onChange={set('divider')}
-            />
-          </div>
-          {form.amount && form.divider && (
-            <p className="text-xs text-gray-400 mt-1">
-              Each person pays: <span className="font-semibold text-brand-600">
-                ₹{(parseFloat(form.amount) / parseInt(form.divider)).toFixed(2)}
-              </span>
-            </p>
+              {members.length === 2 && (
+                <button
+                  type="button"
+                  onClick={() => setSplitMode('gentleman')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                    splitMode === 'gentleman'
+                      ? 'bg-amber-400 text-white'
+                      : 'bg-amber-50 text-gray-600 border border-amber-200'
+                  }`}
+                >
+                  🤝 Gentleman's (65/35)
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setSplitMode('custom')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                  splitMode === 'custom'
+                    ? 'bg-purple-500 text-white'
+                    : 'bg-amber-50 text-gray-600 border border-amber-200'
+                }`}
+              >
+                Custom %
+              </button>
+            </div>
+          )}
+
+          {/* Equal mode */}
+          {splitMode === 'equal' && (
+            <>
+              <div className="flex gap-2 flex-wrap">
+                {[2,3,4,5].map((n) => (
+                  <button
+                    type="button"
+                    key={n}
+                    onClick={() => setForm((f) => ({ ...f, divider: String(n) }))}
+                    className={`w-12 h-12 rounded-xl text-sm font-bold transition-colors ${
+                      String(form.divider) === String(n)
+                        ? 'bg-brand-400 text-gray-900'
+                        : 'bg-amber-50 text-gray-700 border border-amber-200'
+                    }`}
+                  >
+                    {n}
+                  </button>
+                ))}
+                <input
+                  className="input w-20"
+                  type="number"
+                  min="1"
+                  placeholder="Other"
+                  value={[2,3,4,5].includes(Number(form.divider)) ? '' : form.divider}
+                  onChange={set('divider')}
+                />
+              </div>
+              {form.amount && form.divider && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Each person pays:{' '}
+                  <span className="font-bold text-brand-600">
+                    ₹{(parseFloat(form.amount) / parseInt(form.divider)).toFixed(2)}
+                  </span>
+                </p>
+              )}
+            </>
+          )}
+
+          {/* Gentleman's mode */}
+          {splitMode === 'gentleman' && members.length === 2 && (
+            <div className="space-y-2">
+              {members.map((m, i) => {
+                const pct = gentlemanFlipped ? (i === 0 ? 35 : 65) : (i === 0 ? 65 : 35)
+                const amt = form.amount ? (Math.round(parseFloat(form.amount) * pct) / 100).toFixed(2) : null
+                return (
+                  <div key={m.id} className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+                    <span className="text-sm font-semibold text-gray-800 flex-1">{m.name}</span>
+                    <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">{pct}%</span>
+                    {amt && <span className="text-sm font-bold text-gray-900">₹{amt}</span>}
+                  </div>
+                )
+              })}
+              <button
+                type="button"
+                onClick={() => setGentlemanFlipped((f) => !f)}
+                className="text-xs text-amber-600 font-semibold flex items-center gap-1 mt-1 hover:text-amber-700"
+              >
+                ⇄ Swap ratios
+              </button>
+            </div>
+          )}
+
+          {/* Custom % mode */}
+          {splitMode === 'custom' && (
+            <div className="space-y-2">
+              {members.map((m) => {
+                const pct = customPcts[m.name] ?? ''
+                const amt = form.amount && pct ? (Math.round(parseFloat(form.amount) * Number(pct)) / 100).toFixed(2) : null
+                return (
+                  <div key={m.id} className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-gray-700 w-24 truncate">{m.name}</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.1"
+                      className="input w-20 text-center"
+                      placeholder="0"
+                      value={pct}
+                      onChange={(e) =>
+                        setCustomPcts((p) => ({ ...p, [m.name]: e.target.value }))
+                      }
+                    />
+                    <span className="text-xs text-gray-400 font-medium">%</span>
+                    {amt && <span className="text-xs text-gray-600 font-semibold">₹{amt}</span>}
+                  </div>
+                )
+              })}
+              <p className={`text-xs font-bold mt-1 ${Math.abs(customTotal - 100) < 0.1 ? 'text-brand-600' : 'text-red-500'}`}>
+                Total: {customTotal.toFixed(1)}%{' '}
+                {Math.abs(customTotal - 100) < 0.1 ? '✓' : '— must equal 100%'}
+              </p>
+            </div>
           )}
         </div>
 
@@ -185,8 +332,10 @@ export default function AddExpense() {
                 type="button"
                 key={c}
                 onClick={() => setForm((f) => ({ ...f, category: f.category === c ? '' : c }))}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                  form.category === c ? 'bg-brand-600 text-white' : 'bg-gray-100 text-gray-600'
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
+                  form.category === c
+                    ? 'bg-brand-400 text-gray-900'
+                    : 'bg-amber-50 text-gray-600 border border-amber-200'
                 }`}
               >
                 {c}
@@ -213,7 +362,7 @@ export default function AddExpense() {
           <textarea className="input resize-none" rows={2} placeholder="Any extra notes…" value={form.notes} onChange={set('notes')} />
         </div>
 
-        {error && <p className="text-sm text-red-500 bg-red-50 rounded-xl px-4 py-3">{error}</p>}
+        {error && <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">{error}</p>}
 
         <button type="submit" className="btn-primary" disabled={submitting}>
           {submitting ? 'Saving…' : 'Add Expense'}

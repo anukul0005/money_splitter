@@ -14,14 +14,14 @@ const items = [
 
 export default function Sidebar() {
   return (
-    <aside className="hidden md:flex flex-col fixed left-0 top-0 h-screen w-56 bg-white border-r border-gray-100 z-40">
+    <aside className="hidden md:flex flex-col fixed left-0 top-0 h-screen w-56 bg-field-950 border-r border-field-800 z-40">
       {/* Logo */}
-      <div className="px-5 py-6 border-b border-gray-50">
-        <div className="flex items-center gap-2">
+      <div className="px-5 py-6 border-b border-field-800">
+        <div className="flex items-center gap-2.5">
           <span className="text-2xl">💰</span>
           <div>
-            <p className="text-base font-bold text-gray-900 leading-tight">Splitter</p>
-            <p className="text-xs text-gray-400">Group expenses</p>
+            <p className="text-base font-black text-white leading-tight tracking-tight">SPLITTER</p>
+            <p className="text-xs text-brand-400/70">Group expenses</p>
           </div>
         </div>
       </div>
@@ -34,12 +34,12 @@ export default function Sidebar() {
             to={to}
             end={exact}
             className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+              `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${
                 highlight
-                  ? 'bg-brand-600 text-white shadow-sm hover:bg-brand-700'
+                  ? 'bg-brand-400 text-gray-900 shadow-md shadow-brand-400/30'
                   : isActive
-                  ? 'bg-brand-50 text-brand-700'
-                  : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+                  ? 'bg-field-800 text-brand-400'
+                  : 'text-green-200/60 hover:bg-field-800 hover:text-white'
               }`
             }
           >
@@ -50,8 +50,8 @@ export default function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="px-5 py-4 border-t border-gray-50">
-        <p className="text-xs text-gray-300">Money Splitter v1.0</p>
+      <div className="px-5 py-4 border-t border-field-800">
+        <p className="text-xs text-green-200/20 font-medium tracking-wide">MONEY SPLITTER v1.0</p>
       </div>
     </aside>
   )

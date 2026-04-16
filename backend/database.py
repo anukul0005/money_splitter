@@ -49,4 +49,11 @@ def get_db() -> Session:
 
 
 def create_tables():
+    from sqlalchemy import text
     Base.metadata.create_all(bind=get_engine())
+    # Safe migration: add split_json column if it doesn't exist yet
+    with get_engine().connect() as conn:
+        conn.execute(text(
+            "ALTER TABLE expenses ADD COLUMN IF NOT EXISTS split_json TEXT"
+        ))
+        conn.commit()

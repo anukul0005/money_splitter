@@ -85,7 +85,7 @@ export default function GroupDetail() {
   return (
     <div className="pb-24 md:pb-8">
       {/* Header */}
-      <div className="bg-white border-b border-gray-100 px-5 pt-10 md:pt-6 pb-3 sticky top-0 z-10">
+      <div className="bg-cream border-b border-amber-100/60 px-5 pt-10 md:pt-6 pb-3 sticky top-0 z-10">
         <div className="flex items-center gap-3">
           <button onClick={() => nav(-1)} className="btn-ghost">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
@@ -98,7 +98,7 @@ export default function GroupDetail() {
             <p className="text-xs text-gray-400">{group.members.map((m) => m.name).join(' · ')}</p>
           </div>
           <button
-            className="bg-brand-50 text-brand-700 text-xs font-semibold px-3 py-1.5 rounded-lg"
+            className="bg-brand-400 text-gray-900 text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm"
             onClick={() => nav(`/add?group=${id}`)}
           >
             + Add
@@ -112,7 +112,7 @@ export default function GroupDetail() {
               key={v}
               onClick={() => setTab(v)}
               className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-colors ${
-                tab === v ? 'bg-brand-600 text-white' : 'text-gray-500 hover:bg-gray-100'
+                tab === v ? 'bg-brand-400 text-gray-900 font-bold' : 'text-gray-500 hover:bg-amber-50'
               }`}
             >
               {label}
@@ -148,18 +148,28 @@ export default function GroupDetail() {
           )}
           {[...group.expenses].reverse().map((e) => (
             <div key={e.id} className="card flex items-start gap-3">
-              <div className="w-9 h-9 rounded-xl bg-gray-50 flex items-center justify-center text-lg flex-shrink-0">
+              <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center text-lg flex-shrink-0">
                 {categoryEmoji(e.category)}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-gray-900 truncate">{e.title || e.category || 'Expense'}</p>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  {e.paid_by} paid · {e.divider} people · {e.date || '—'}
+                  {e.paid_by} paid ·{' '}
+                  {e.split_json ? (
+                    <span className="text-purple-500 font-medium">custom split</span>
+                  ) : (
+                    `${e.divider} people`
+                  )}{' '}
+                  · {e.date || '—'}
                 </p>
               </div>
               <div className="text-right flex-shrink-0">
                 <p className="text-sm font-bold text-gray-900">{INR(e.amount)}</p>
-                <p className="text-xs text-brand-600">{INR(e.individual_amount)}/ea</p>
+                {e.split_json ? (
+                  <p className="text-xs text-purple-500">split</p>
+                ) : (
+                  <p className="text-xs text-brand-600">{INR(e.individual_amount)}/ea</p>
+                )}
               </div>
               {!group.is_historical && (
                 <button
@@ -185,7 +195,7 @@ export default function GroupDetail() {
                 key={v}
                 onClick={() => setChartView(v)}
                 className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                  chartView === v ? 'bg-brand-600 text-white' : 'bg-gray-100 text-gray-500'
+                  chartView === v ? 'bg-brand-400 text-gray-900 font-bold' : 'bg-amber-50 border border-amber-200 text-gray-500'
                 }`}
               >
                 {label}

@@ -28,6 +28,7 @@ class ExpenseBase(BaseModel):
     participants: Optional[str] = None   # comma-separated; null = all members
     divider: int = 2
     individual_amount: Optional[float] = None
+    split_json: Optional[str] = None   # JSON: {memberName: amount} for custom/gentleman splits
     notes: Optional[str] = None
 
     @field_validator("amount")

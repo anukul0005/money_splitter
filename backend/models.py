@@ -42,6 +42,7 @@ class Expense(Base):
     participants = Column(Text, nullable=True)
     divider = Column(Integer, nullable=False, default=2)
     individual_amount = Column(Float, nullable=True)
+    split_json = Column(Text, nullable=True)   # JSON: {memberName: amount} for custom splits
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

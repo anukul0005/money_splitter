@@ -22,10 +22,10 @@ export default function Groups() {
 
   return (
     <div className="pb-24 md:pb-8">
-      <div className="px-5 pt-10 md:pt-6 pb-4 bg-white sticky top-0 z-10 border-b border-gray-100">
+      <div className="px-5 pt-10 md:pt-6 pb-4 bg-cream sticky top-0 z-10 border-b border-amber-100/60">
         <div className="flex items-center justify-between">
-          <h1 className="text-xl font-bold">Groups</h1>
-          <button className="text-brand-600 text-sm font-semibold" onClick={() => nav('/groups/new')}>
+          <h1 className="text-xl font-black tracking-tight">Groups</h1>
+          <button className="bg-brand-400 text-gray-900 text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm" onClick={() => nav('/groups/new')}>
             + New
           </button>
         </div>
@@ -34,8 +34,8 @@ export default function Groups() {
             <button
               key={f}
               onClick={() => setFilter(f)}
-              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors capitalize ${
-                filter === f ? 'bg-brand-600 text-white' : 'bg-gray-100 text-gray-500'
+              className={`px-3 py-1 rounded-full text-xs font-bold transition-colors capitalize ${
+                filter === f ? 'bg-brand-400 text-gray-900' : 'bg-amber-50 border border-amber-200 text-gray-500'
               }`}
             >
               {f}

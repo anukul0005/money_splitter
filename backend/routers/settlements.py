@@ -1,3 +1,4 @@
+import json
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db
@@ -29,9 +30,16 @@ def _calculate(group: Group) -> SettlementOut:
         if payer in paid:
             paid[payer] += amount
 
-        for p in participants:
-            if p in share:
-                share[p] += individual
+        if exp.split_json:
+            # Custom/Gentleman split: use per-member amounts directly
+            split_amounts = json.loads(exp.split_json)
+            for p, amt in split_amounts.items():
+                if p in share:
+                    share[p] += float(amt)
+        else:
+            for p in participants:
+                if p in share:
+                    share[p] += individual
 
     balances: list[BalanceEntry] = []
     net_map: dict[str, float] = {}

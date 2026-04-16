@@ -40,7 +40,7 @@ export default function NewGroup() {
 
   return (
     <div className="pb-28 md:pb-10">
-      <div className="px-5 pt-10 md:pt-6 pb-4 bg-white border-b border-gray-100 sticky top-0 z-10">
+      <div className="px-5 pt-10 md:pt-6 pb-4 bg-cream border-b border-amber-100/60 sticky top-0 z-10">
         <div className="flex items-center gap-3">
           <button onClick={() => nav(-1)} className="btn-ghost">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
@@ -62,7 +62,7 @@ export default function NewGroup() {
                 key={e}
                 onClick={() => setForm((f) => ({ ...f, emoji: e }))}
                 className={`w-11 h-11 rounded-xl text-xl transition-colors ${
-                  form.emoji === e ? 'bg-brand-100 ring-2 ring-brand-500' : 'bg-gray-100'
+                  form.emoji === e ? 'bg-brand-400/20 ring-2 ring-brand-400' : 'bg-amber-50 border border-amber-200'
                 }`}
               >
                 {e}
@@ -107,7 +107,7 @@ export default function NewGroup() {
             <button
               type="button"
               onClick={addMember}
-              className="bg-brand-600 text-white px-4 rounded-xl font-semibold text-sm"
+              className="bg-brand-400 text-gray-900 px-4 rounded-xl font-bold text-sm shadow-sm"
             >
               Add
             </button>
@@ -118,7 +118,7 @@ export default function NewGroup() {
               {members.map((m) => (
                 <span
                   key={m}
-                  className="flex items-center gap-1.5 bg-brand-50 text-brand-700 px-3 py-1.5 rounded-full text-sm font-medium"
+                  className="flex items-center gap-1.5 bg-brand-400/15 text-brand-700 border border-brand-400/30 px-3 py-1.5 rounded-full text-sm font-semibold"
                 >
                   {m}
                   <button type="button" onClick={() => removeMember(m)} className="text-brand-400 hover:text-brand-700">

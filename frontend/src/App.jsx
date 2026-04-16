@@ -11,7 +11,7 @@ import History     from './pages/History'
 export default function App() {
   return (
     <BrowserRouter>
-      <div className="flex min-h-screen bg-gray-50">
+      <div className="flex min-h-screen bg-field-900">
         {/* Desktop sidebar */}
         <Sidebar />
 

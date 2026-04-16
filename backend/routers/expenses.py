@@ -32,6 +32,7 @@ def create_expense(payload: ExpenseCreate, db: Session = Depends(get_db)):
         participants=payload.participants,
         divider=payload.divider,
         individual_amount=individual,
+        split_json=payload.split_json,
         notes=payload.notes,
     )
     db.add(expense)
@@ -55,6 +56,7 @@ def update_expense(expense_id: int, payload: ExpenseCreate, db: Session = Depend
     expense.participants = payload.participants
     expense.divider = payload.divider
     expense.individual_amount = individual
+    expense.split_json = payload.split_json
     expense.notes = payload.notes
 
     db.commit()

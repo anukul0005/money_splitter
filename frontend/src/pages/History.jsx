@@ -65,7 +65,7 @@ export default function History() {
     <div className="flex flex-col items-center justify-center min-h-[60vh] px-5 text-center">
       <p className="text-4xl mb-3">😴</p>
       <p className="text-sm text-gray-600 mb-4">{error}</p>
-      <button onClick={load} className="bg-brand-600 text-white px-5 py-2 rounded-xl text-sm font-semibold">
+      <button onClick={load} className="bg-brand-400 text-gray-900 px-5 py-2 rounded-xl text-sm font-bold shadow-md">
         Retry
       </button>
     </div>
@@ -73,9 +73,9 @@ export default function History() {
 
   return (
     <div className="pb-24 md:pb-8">
-      <div className="px-5 pt-10 md:pt-6 pb-4 bg-white border-b border-gray-100 sticky top-0 z-10">
-        <h1 className="text-xl font-bold">History & Stats</h1>
-        <p className="text-xs text-gray-400 mt-0.5">Tap a bar to drill into that group</p>
+      <div className="px-5 pt-10 md:pt-6 pb-4 bg-cream border-b border-amber-100/60 sticky top-0 z-10">
+        <h1 className="text-xl font-black tracking-tight">History & Stats</h1>
+        <p className="text-xs text-gray-400 mt-0.5 font-medium">Tap a bar to drill into that group</p>
       </div>
 
       <div className="px-5 mt-4 md:grid md:grid-cols-2 md:gap-6 md:items-start">
