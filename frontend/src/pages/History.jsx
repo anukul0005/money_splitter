@@ -17,12 +17,18 @@ export default function History() {
   const [groups, setGroups]     = useState([])
   const [overview, setOverview] = useState([])
   const [loading, setLoading]   = useState(true)
+  const [error, setError]       = useState('')
 
-  useEffect(() => {
+  const load = () => {
+    setLoading(true)
+    setError('')
     Promise.all([getGroups(), getOverview()])
       .then(([g, o]) => { setGroups(g.data); setOverview(o.data) })
+      .catch(() => setError('Could not reach server. The API may be waking up — please try again in 30 seconds.'))
       .finally(() => setLoading(false))
-  }, [])
+  }
+
+  useEffect(() => { load() }, [])
 
   const historical = groups.filter((g) => g.is_historical)
 
@@ -54,6 +60,16 @@ export default function History() {
   }
 
   if (loading) return <LoadingSpinner />
+
+  if (error) return (
+    <div className="flex flex-col items-center justify-center min-h-[60vh] px-5 text-center">
+      <p className="text-4xl mb-3">😴</p>
+      <p className="text-sm text-gray-600 mb-4">{error}</p>
+      <button onClick={load} className="bg-brand-600 text-white px-5 py-2 rounded-xl text-sm font-semibold">
+        Retry
+      </button>
+    </div>
+  )
 
   return (
     <div className="pb-24 md:pb-8">
