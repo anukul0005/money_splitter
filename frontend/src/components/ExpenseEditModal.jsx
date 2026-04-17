@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { updateExpense } from '../api'
 
-const INR  = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
-const r2   = (n) => Math.round(n * 100) / 100
+const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+const r2  = (n) => Math.round(n * 100) / 100
 
 const PAYMENT_MODES = [
   { value: 'cash',        label: 'Cash' },
@@ -13,85 +13,67 @@ const PAYMENT_MODES = [
 
 /**
  * Modal for editing an existing expense.
- *
- * Props:
- *   expense  – full ExpenseOut object
- *   group    – full GroupOut object (has .members[].name and .id)
- *   onSave   – called after successful save (triggers parent reload)
- *   onClose  – called to dismiss without saving
+ * Amount is locked. Custom split uses % inputs; amounts are derived.
  */
 export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
   const members = group.members.map((m) => m.name)
+  const amt = expense.amount   // locked — never editable
 
-  /* ── Initialise state from existing expense ── */
+  // Parse existing split_json to derive initial percentages
   const parsedSplit = (() => {
     try { return expense.split_json ? JSON.parse(expense.split_json) : null }
     catch { return null }
   })()
 
-  const initCustom = () => {
-    if (parsedSplit) {
-      // Fill in any missing members with 0
-      const base = Object.fromEntries(members.map((m) => [m, 0]))
-      return { ...base, ...parsedSplit }
+  const initPcts = () => {
+    if (parsedSplit && amt > 0) {
+      const base = Object.fromEntries(members.map((m) => [m, '0']))
+      Object.entries(parsedSplit).forEach(([k, v]) => {
+        if (Object.prototype.hasOwnProperty.call(base, k)) {
+          base[k] = String(r2((parseFloat(v) / amt) * 100))
+        }
+      })
+      return base
     }
-    const ea = r2(expense.amount / members.length)
-    return Object.fromEntries(members.map((m) => [m, ea]))
+    // Default: equal percentages
+    const ea = r2(100 / members.length)
+    return Object.fromEntries(members.map((m) => [m, String(ea)]))
   }
 
   const [title,       setTitle]       = useState(expense.title || '')
-  const [amount,      setAmount]      = useState(expense.amount.toString())
   const [paidBy,      setPaidBy]      = useState(expense.paid_by)
   const [paymentMode, setPaymentMode] = useState(expense.payment_mode || 'cash')
   const [splitMode,   setSplitMode]   = useState(parsedSplit ? 'custom' : 'equal')
-  const [customAmts,  setCustomAmts]  = useState(initCustom)
+  const [customPcts,  setCustomPcts]  = useState(initPcts)
   const [saving,      setSaving]      = useState(false)
   const [error,       setError]       = useState('')
 
-  const amt          = parseFloat(amount) || 0
-  const customTotal  = r2(Object.values(customAmts).reduce((s, v) => s + (parseFloat(v) || 0), 0))
-  const remaining    = r2(amt - customTotal)
+  const pctTotal    = members.reduce((s, m) => s + parseFloat(customPcts[m] || 0), 0)
+  const pctBalanced = Math.abs(pctTotal - 100) <= 0.5
 
-  /* ── Amount change – scale custom amounts proportionally ── */
-  const handleAmountChange = (val) => {
-    setAmount(val)
-    if (splitMode !== 'custom') return
-    const newAmt = parseFloat(val) || 0
-    if (amt > 0 && newAmt > 0) {
-      const scale = newAmt / amt
-      setCustomAmts((prev) =>
-        Object.fromEntries(Object.entries(prev).map(([k, v]) => [k, r2((parseFloat(v) || 0) * scale)]))
-      )
-    }
-  }
-
-  /* ── Split mode switch ── */
-  const handleSplitModeChange = (mode) => {
-    setSplitMode(mode)
-    if (mode === 'custom') {
-      const ea = r2((parseFloat(amount) || 0) / members.length)
-      setCustomAmts(Object.fromEntries(members.map((m) => [m, ea])))
-    }
-  }
-
-  /* ── Split label shown in card (same logic as GroupDetail) ── */
   const getSplitLabel = () => {
     if (splitMode === 'equal') return `Equal · ${INR(r2(amt / members.length))} each`
-    const vals = members.map((m) => parseFloat(customAmts[m]) || 0)
-    if (members.length === 2 && amt > 0) {
-      const r0 = Math.round((vals[0] / amt) * 100)
-      const r1 = Math.round((vals[1] / amt) * 100)
-      const lo = Math.min(r0, r1), hi = Math.max(r0, r1)
+    if (members.length === 2) {
+      const p0 = parseFloat(customPcts[members[0]] || 0)
+      const p1 = parseFloat(customPcts[members[1]] || 0)
+      const lo = Math.min(Math.round(p0), Math.round(p1))
+      const hi = Math.max(Math.round(p0), Math.round(p1))
       if (lo === 35 && hi === 65) return "Gentleman's 65/35"
-      return `Custom ${r0}/${r1}`
+      return `Custom ${Math.round(p0)}/${Math.round(p1)}`
     }
     return 'Custom split'
   }
 
-  /* ── Save ── */
+  const handleSplitModeChange = (mode) => {
+    setSplitMode(mode)
+    if (mode === 'custom') {
+      const ea = r2(100 / members.length)
+      setCustomPcts(Object.fromEntries(members.map((m) => [m, String(ea)])))
+    }
+  }
+
   const handleSave = async () => {
     setError('')
-    if (amt <= 0) { setError('Enter a valid amount'); return }
 
     let payload
     if (splitMode === 'equal') {
@@ -110,8 +92,8 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
         notes:             expense.notes,
       }
     } else {
-      if (Math.abs(remaining) > 0.02) {
-        setError(`Amounts must add up to ${INR(amt)}. Difference: ${remaining >= 0 ? '+' : ''}${INR(remaining)}`)
+      if (!pctBalanced) {
+        setError(`Percentages must add up to 100%. Current total: ${pctTotal.toFixed(2)}%`)
         return
       }
       payload = {
@@ -125,7 +107,9 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
         divider:           members.length,
         individual_amount: null,
         split_json:        JSON.stringify(
-          Object.fromEntries(members.map((m) => [m, r2(parseFloat(customAmts[m]) || 0)]))
+          Object.fromEntries(
+            members.map((m) => [m, r2(amt * parseFloat(customPcts[m] || 0) / 100)])
+          )
         ),
         participants:      expense.participants,
         notes:             expense.notes,
@@ -149,7 +133,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
     >
       <div className="bg-cream w-full md:max-w-lg max-h-[92vh] flex flex-col border-t border-x border-amber-100/60 md:border shadow-2xl">
 
-        {/* ── Header ── */}
+        {/* Header */}
         <div className="px-5 py-4 border-b border-amber-100/60 flex items-center justify-between flex-shrink-0 bg-cream">
           <h2 className="font-black text-sm tracking-widest">Edit Expense</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-700 p-1">
@@ -159,8 +143,14 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
           </button>
         </div>
 
-        {/* ── Body (scrollable) ── */}
+        {/* Body */}
         <div className="overflow-y-auto flex-1 px-5 py-4 space-y-4">
+
+          {/* Amount — locked, display only */}
+          <div className="bg-amber-50 border border-amber-200 px-4 py-3 flex items-center justify-between">
+            <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">Total Amount</span>
+            <span className="text-xl font-black text-gray-900">{INR(amt)}</span>
+          </div>
 
           {/* Title */}
           <div>
@@ -173,31 +163,11 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
             />
           </div>
 
-          {/* Amount */}
-          <div>
-            <label className="label">Total Amount (₹)</label>
-            <input
-              className="input"
-              type="number"
-              inputMode="decimal"
-              value={amount}
-              onChange={(e) => handleAmountChange(e.target.value)}
-              min="0"
-              step="0.01"
-            />
-          </div>
-
           {/* Paid by */}
           <div>
             <label className="label">Paid By</label>
-            <select
-              className="input"
-              value={paidBy}
-              onChange={(e) => setPaidBy(e.target.value)}
-            >
-              {members.map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
+            <select className="input" value={paidBy} onChange={(e) => setPaidBy(e.target.value)}>
+              {members.map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
           </div>
 
@@ -236,14 +206,14 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
                       : 'bg-cream text-gray-400 hover:text-gray-700'
                   }`}
                 >
-                  {mode === 'equal' ? 'Equal' : 'Custom'}
+                  {mode === 'equal' ? 'Equal' : 'Custom %'}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* ── Equal split preview ── */}
-          {splitMode === 'equal' && amt > 0 && (
+          {/* Equal split preview */}
+          {splitMode === 'equal' && (
             <div className="border border-amber-200 bg-amber-50/50 px-3 py-2.5 space-y-1.5">
               <p className="text-[10px] font-black text-amber-700 tracking-widest mb-1">Equal split</p>
               {members.map((m) => (
@@ -255,43 +225,46 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
             </div>
           )}
 
-          {/* ── Custom split inputs ── */}
+          {/* Custom % split */}
           {splitMode === 'custom' && (
             <div className="border border-amber-200 bg-amber-50/50 px-3 py-3 space-y-2">
               <p className="text-[10px] font-black text-amber-700 tracking-widest mb-1">
                 {getSplitLabel()}
               </p>
-              {members.map((m) => (
-                <div key={m} className="flex items-center gap-3">
-                  <span className="text-xs font-bold text-gray-700 flex-1">{m}</span>
-                  <span className="text-xs text-gray-400">
-                    {amt > 0 ? Math.round(((parseFloat(customAmts[m]) || 0) / amt) * 100) : 0}%
-                  </span>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    className="input w-28 text-right py-1.5"
-                    value={customAmts[m] ?? ''}
-                    onChange={(e) =>
-                      setCustomAmts((prev) => ({ ...prev, [m]: e.target.value }))
-                    }
-                    min="0"
-                    step="0.01"
-                  />
-                </div>
-              ))}
-              {/* Running total / remaining */}
+              {members.map((m) => {
+                const pct     = customPcts[m] ?? ''
+                const calcAmt = pct !== '' ? r2(amt * parseFloat(pct) / 100) : null
+                return (
+                  <div key={m} className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-gray-700 flex-1">{m}</span>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      className="input w-24 text-right py-1.5"
+                      placeholder="0"
+                      min="0"
+                      max="100"
+                      step="any"
+                      value={pct}
+                      onChange={(e) =>
+                        setCustomPcts((prev) => ({ ...prev, [m]: e.target.value }))
+                      }
+                    />
+                    <span className="text-xs text-gray-400 font-bold">%</span>
+                    {calcAmt !== null && (
+                      <span className="text-xs font-black text-gray-900 w-16 text-right">{INR(calcAmt)}</span>
+                    )}
+                  </div>
+                )
+              })}
+              {/* Running total */}
               <div
                 className={`flex items-center justify-between pt-2 border-t border-amber-200 text-xs font-black ${
-                  Math.abs(remaining) <= 0.02 ? 'text-green-600' : 'text-red-500'
+                  pctBalanced ? 'text-green-600' : 'text-red-500'
                 }`}
               >
-                <span>{Math.abs(remaining) <= 0.02 ? 'Balanced' : 'Remaining'}</span>
-                <span>
-                  {Math.abs(remaining) <= 0.02
-                    ? '✓'
-                    : `${remaining >= 0 ? '' : '-'}${INR(Math.abs(remaining))}`}
-                </span>
+                <span>{pctBalanced ? 'Balanced' : 'Total'}</span>
+                <span>{pctBalanced ? '✓ 100%' : `${pctTotal.toFixed(2)}%`}</span>
               </div>
             </div>
           )}
@@ -301,7 +274,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
           )}
         </div>
 
-        {/* ── Footer ── */}
+        {/* Footer */}
         <div className="px-5 pt-3 pb-6 flex gap-3 border-t border-amber-100/60 flex-shrink-0 bg-cream">
           <button
             className="flex-1 py-3 text-xs font-bold text-gray-500 border border-amber-200 hover:bg-amber-50 active:scale-95 transition-all"
