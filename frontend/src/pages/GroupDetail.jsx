@@ -30,18 +30,21 @@ export default function GroupDetail() {
   const [chartView, setChartView]       = useState('member')
   const [editingExpense, setEditingExp] = useState(null)   // expense being edited
 
-  const reload = () => {
-    setLoading(true)
+  const fetchData = () =>
     Promise.all([getGroup(id), getSettlement(id), getGroupStats(id)])
       .then(([g, s, st]) => {
         setGroup(g.data)
         setSettlement(s.data)
         setStats(st.data)
       })
-      .finally(() => setLoading(false))
-  }
 
-  useEffect(() => { reload() }, [id])
+  // Silent refresh — no spinner, preserves scroll position
+  const reload = () => fetchData()
+
+  useEffect(() => {
+    setLoading(true)
+    fetchData().finally(() => setLoading(false))
+  }, [id])
 
   const handleDeleteExpense = async (expId) => {
     if (!confirm('Delete this expense?')) return
