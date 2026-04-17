@@ -382,6 +382,18 @@ export default function AddExpense() {
                       placeholder="0"
                       value={pct}
                       onChange={(e) => setCustomPcts((p) => ({ ...p, [m.name]: e.target.value }))}
+                      onBlur={(e) => {
+                        const val = parseFloat(e.target.value)
+                        if (!isNaN(val) && val === 0) {
+                          const others = members.filter((x) => x.id !== m.id)
+                          const equalPct = String(Math.round((100 / others.length) * 100) / 100)
+                          setCustomPcts((p) => {
+                            const updated = { ...p, [m.name]: '0' }
+                            others.forEach((x) => { updated[x.name] = equalPct })
+                            return updated
+                          })
+                        }
+                      }}
                     />
                     <span className="text-xs text-gray-400 font-bold">%</span>
                     {amt && <span className="text-xs text-gray-600 font-black">₹{amt}</span>}

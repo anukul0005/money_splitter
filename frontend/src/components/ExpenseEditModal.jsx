@@ -266,6 +266,19 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
                       onChange={(e) =>
                         setCustomPcts((prev) => ({ ...prev, [m]: e.target.value }))
                       }
+                      onBlur={(e) => {
+                        const val = parseFloat(e.target.value)
+                        if (!isNaN(val) && val === 0) {
+                          // Redistribute 100% equally among the other members
+                          const others = members.filter((x) => x !== m)
+                          const equalPct = String(r2(100 / others.length))
+                          setCustomPcts((prev) => {
+                            const updated = { ...prev, [m]: '0' }
+                            others.forEach((x) => { updated[x] = equalPct })
+                            return updated
+                          })
+                        }
+                      }}
                     />
                     <span className="text-xs text-gray-400 font-bold">%</span>
                     {calcAmt !== null && (
