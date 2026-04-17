@@ -66,10 +66,8 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
 
   const handleSplitModeChange = (mode) => {
     setSplitMode(mode)
-    if (mode === 'custom') {
-      const ea = r2(100 / members.length)
-      setCustomPcts(Object.fromEntries(members.map((m) => [m, String(ea)])))
-    }
+    // customPcts are already initialised correctly from the expense's split_json
+    // (or as equal % if no custom split existed). Don't reset them here.
   }
 
   const handleSave = async () => {
@@ -131,7 +129,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
       className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div className="bg-cream w-full md:max-w-lg max-h-[92vh] flex flex-col border-t border-x border-amber-100/60 md:border shadow-2xl">
+      <div className="bg-cream w-full md:max-w-lg max-h-[92vh] overflow-hidden flex flex-col border-t border-x border-amber-100/60 md:border shadow-2xl">
 
         {/* Header */}
         <div className="px-5 py-4 border-b border-amber-100/60 flex items-center justify-between flex-shrink-0 bg-cream">
