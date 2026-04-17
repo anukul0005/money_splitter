@@ -129,7 +129,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
       className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div className="bg-cream w-full md:max-w-lg max-h-[92vh] overflow-hidden flex flex-col border-t border-x border-amber-100/60 md:border shadow-2xl">
+      <div className="bg-cream w-full md:max-w-lg max-h-[92vh] flex flex-col border-t border-x border-amber-100/60 md:border shadow-2xl">
 
         {/* Header */}
         <div className="px-5 py-4 border-b border-amber-100/60 flex items-center justify-between flex-shrink-0 bg-cream">
@@ -141,8 +141,9 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
           </button>
         </div>
 
-        {/* Body */}
-        <div className="overflow-y-auto flex-1 px-5 py-4 space-y-4">
+        {/* Body — min-h-0 overrides flex's implicit min-height:auto so the
+             body can actually shrink and scroll, keeping the footer on-screen */}
+        <div className="overflow-y-auto flex-1 min-h-0 px-5 py-4 space-y-4">
 
           {/* Amount — locked, display only */}
           <div className="bg-amber-50 border border-amber-200 px-4 py-3 flex items-center justify-between">
