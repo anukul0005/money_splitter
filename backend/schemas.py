@@ -45,8 +45,14 @@ class ExpenseCreate(ExpenseBase):
 class ExpenseOut(ExpenseBase):
     id: int
     group_id: int
+    settled_by: Optional[str] = None   # JSON array of names who settled
     created_at: Optional[datetime] = None
     model_config = {"from_attributes": True}
+
+
+class SettleRequest(BaseModel):
+    member: str
+    settled: bool
 
 
 # ─── Group ───────────────────────────────────────────────────────────────────

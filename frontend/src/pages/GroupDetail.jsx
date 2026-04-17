@@ -5,9 +5,10 @@ import {
   ArcElement, DoughnutController, BarController,
 } from 'chart.js'
 import { Bar, Doughnut } from 'react-chartjs-2'
-import { getGroup, getSettlement, getGroupStats, deleteExpense, deleteGroup } from '../api'
+import { getGroup, getSettlement, getGroupStats, deleteExpense, deleteGroup, settleExpense } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ExpenseEditModal from '../components/ExpenseEditModal'
+import { useUser } from '../UserContext'
 
 Chart.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend, ArcElement, DoughnutController, BarController)
 Chart.defaults.font.family = "'Barlow Condensed', sans-serif"
@@ -18,6 +19,8 @@ const PALETTE = ['#ef4444','#f97316','#eab308','#22c55e','#06b6d4','#3b82f6','#8
 export default function GroupDetail() {
   const { id } = useParams()
   const nav = useNavigate()
+
+  const currentUser = useUser()
 
   const [group, setGroup]               = useState(null)
   const [settlement, setSettlement]     = useState(null)
@@ -43,6 +46,11 @@ export default function GroupDetail() {
   const handleDeleteExpense = async (expId) => {
     if (!confirm('Delete this expense?')) return
     await deleteExpense(expId)
+    reload()
+  }
+
+  const handleSettle = async (expenseId, member, settled) => {
+    await settleExpense(expenseId, { member, settled })
     reload()
   }
 
@@ -207,82 +215,137 @@ export default function GroupDetail() {
               } catch { /* ignore */ }
             }
 
-            return (
-              <div key={e.id} className="card flex items-start gap-3">
-                <div className="w-8 h-8 bg-amber-50 border border-amber-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <svg className="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" />
-                  </svg>
-                </div>
+            // Settlement helpers
+            const actualParticipants = e.participants
+              ? e.participants.split(',').map((s) => s.trim()).filter(Boolean)
+              : group.members.map((m) => m.name)
+            const debtors = actualParticipants.filter(
+              (n) => n.toLowerCase() !== e.paid_by?.toLowerCase()
+            )
+            const settledList = (() => {
+              try { return e.settled_by ? JSON.parse(e.settled_by) : [] }
+              catch { return [] }
+            })()
+            const isSettled = (n) => settledList.some((s) => s.toLowerCase() === n.toLowerCase())
+            const isPayer = currentUser?.name?.toLowerCase() === e.paid_by?.toLowerCase()
+            const getOwed = (name) => {
+              if (e.split_json) {
+                try { const obj = JSON.parse(e.split_json); return obj[name] ?? 0 }
+                catch { return 0 }
+              }
+              return e.individual_amount || (e.amount / (e.divider || 1))
+            }
 
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-gray-900 leading-tight" style={{ wordBreak: 'break-word' }}>
-                    {e.title || e.category || 'Expense'}
-                  </p>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    {e.paid_by} · {e.date || '—'}
-                    {e.payment_mode && (
-                      <span className="ml-1.5 inline-block bg-amber-50 border border-amber-200 px-1.5 py-px text-[10px] font-bold text-amber-700 tracking-wide">
-                        {e.payment_mode.replace('_', ' ').toUpperCase()}
+            return (
+              <div key={e.id} className="card">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 bg-amber-50 border border-amber-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <svg className="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" />
+                    </svg>
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-gray-900 leading-tight" style={{ wordBreak: 'break-word' }}>
+                      {e.title || e.category || 'Expense'}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {e.paid_by} · {e.date || '—'}
+                      {e.payment_mode && (
+                        <span className="ml-1.5 inline-block bg-amber-50 border border-amber-200 px-1.5 py-px text-[10px] font-bold text-amber-700 tracking-wide">
+                          {e.payment_mode.replace('_', ' ').toUpperCase()}
+                        </span>
+                      )}
+                    </p>
+
+                    {/* Custom / gentleman's split — per-member breakdown */}
+                    {splitEntries && (
+                      <div className="mt-1.5 border border-amber-300 bg-amber-50/60 px-2 py-1.5 space-y-1">
+                        <p className="text-[10px] font-black text-amber-700 tracking-widest mb-0.5">
+                          {splitLabel}
+                        </p>
+                        {splitEntries.map(([name, amt]) => {
+                          const pct = Math.round((amt / e.amount) * 100)
+                          return (
+                            <div key={name} className="flex items-center justify-between gap-2">
+                              <span className="text-xs font-bold text-gray-700">{name}</span>
+                              <span className="text-xs text-gray-400">{pct}%</span>
+                              <span className="text-xs font-black text-gray-900">{INR(amt)}</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+
+                    {/* Partial equal split badge */}
+                    {isPartialSplit && (
+                      <span className="inline-block mt-1 text-[10px] font-bold text-orange-600 bg-orange-50 border border-orange-200 px-1.5 py-0.5 tracking-wide">
+                        {e.divider}/{memberCount} split
                       </span>
                     )}
-                  </p>
+                  </div>
 
-                  {/* Custom / gentleman's split — per-member breakdown */}
-                  {splitEntries && (
-                    <div className="mt-1.5 border border-amber-300 bg-amber-50/60 px-2 py-1.5 space-y-1">
-                      <p className="text-[10px] font-black text-amber-700 tracking-widest mb-0.5">
-                        {splitLabel}
-                      </p>
-                      {splitEntries.map(([name, amt]) => {
-                        const pct = Math.round((amt / e.amount) * 100)
-                        return (
-                          <div key={name} className="flex items-center justify-between gap-2">
-                            <span className="text-xs font-bold text-gray-700">{name}</span>
-                            <span className="text-xs text-gray-400">{pct}%</span>
-                            <span className="text-xs font-black text-gray-900">{INR(amt)}</span>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
+                  <div className="text-right flex-shrink-0">
+                    <p className="text-sm font-black text-gray-900">{INR(e.amount)}</p>
+                    {!e.split_json && (
+                      <p className="text-xs text-brand-600">{INR(e.individual_amount)}/ea</p>
+                    )}
+                  </div>
 
-                  {/* Partial equal split badge */}
-                  {isPartialSplit && (
-                    <span className="inline-block mt-1 text-[10px] font-bold text-orange-600 bg-orange-50 border border-orange-200 px-1.5 py-0.5 tracking-wide">
-                      {e.divider}/{memberCount} split
-                    </span>
-                  )}
+                  {/* Action buttons — edit + delete always visible */}
+                  <div className="flex flex-col gap-1 ml-1 mt-0.5 flex-shrink-0">
+                    <button
+                      onClick={() => setEditingExp(e)}
+                      className="text-gray-300 hover:text-brand-500 transition-colors"
+                      title="Edit expense"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={() => handleDeleteExpense(e.id)}
+                      className="text-gray-300 hover:text-red-400 transition-colors"
+                      title="Delete expense"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
 
-                <div className="text-right flex-shrink-0">
-                  <p className="text-sm font-black text-gray-900">{INR(e.amount)}</p>
-                  {!e.split_json && (
-                    <p className="text-xs text-brand-600">{INR(e.individual_amount)}/ea</p>
-                  )}
-                </div>
-
-                {/* Action buttons — edit + delete always visible */}
-                <div className="flex flex-col gap-1 ml-1 mt-0.5 flex-shrink-0">
-                  <button
-                    onClick={() => setEditingExp(e)}
-                    className="text-gray-300 hover:text-brand-500 transition-colors"
-                    title="Edit expense"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                    </svg>
-                  </button>
-                  <button
-                    onClick={() => handleDeleteExpense(e.id)}
-                    className="text-gray-300 hover:text-red-400 transition-colors"
-                    title="Delete expense"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
+                {/* Settlement status — shown when there are debtors */}
+                {debtors.length > 0 && (
+                  <div className="mt-2.5 border-t border-amber-100 pt-2.5 space-y-1.5">
+                    {debtors.map((name) => {
+                      const settled = isSettled(name)
+                      const owed    = getOwed(name)
+                      return (
+                        <div key={name} className="flex items-center gap-2">
+                          <span className="text-xs font-semibold text-gray-600 flex-1 min-w-0 truncate">{name}</span>
+                          {settled ? (
+                            <span className="text-[10px] font-bold text-green-700 bg-green-50 border border-green-200 px-1.5 py-0.5 flex-shrink-0">✓ Settled</span>
+                          ) : (
+                            <span className="text-[10px] font-bold text-red-600 bg-red-50 border border-red-100 px-1.5 py-0.5 flex-shrink-0">owes {INR(owed)}</span>
+                          )}
+                          {isPayer && (
+                            <button
+                              onClick={() => handleSettle(e.id, name, !settled)}
+                              className={`text-[10px] font-bold px-1.5 py-0.5 border transition-colors flex-shrink-0 ${
+                                settled
+                                  ? 'text-gray-400 border-gray-200 hover:text-red-500 hover:border-red-200'
+                                  : 'text-brand-600 border-brand-400/40 hover:bg-brand-400/10'
+                              }`}
+                            >
+                              {settled ? 'Undo' : 'Mark settled'}
+                            </button>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
             )
           })}

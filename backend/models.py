@@ -46,6 +46,7 @@ class Expense(Base):
     split_json = Column(Text, nullable=True)   # JSON: {memberName: amount} for custom splits
     payment_mode = Column(String(50), nullable=True)  # cash / upi / credit_card / debit_card
     notes = Column(Text, nullable=True)
+    settled_by = Column(Text, nullable=True)   # JSON array of member names who settled their share
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     group = relationship("Group", back_populates="expenses")

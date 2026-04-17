@@ -16,6 +16,7 @@ export const getExpenses   = (groupId)   => api.get(`/expenses/group/${groupId}`
 export const createExpense = (data)      => api.post('/expenses/', data)
 export const updateExpense = (id, data)  => api.put(`/expenses/${id}`, data)
 export const deleteExpense = (id)        => api.delete(`/expenses/${id}`)
+export const settleExpense = (id, data)  => api.patch(`/expenses/${id}/settle`, data)
 
 // ── Settlements ───────────────────────────────────────────────────────────────
 export const getSettlement = (groupId)   => api.get(`/settlements/${groupId}`)
