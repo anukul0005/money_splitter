@@ -13,11 +13,10 @@ const PAYMENT_MODES = [
 
 /**
  * Modal for editing an existing expense.
- * Amount is locked. Custom split uses % inputs; amounts are derived.
+ * Amount is editable. Custom split uses % inputs; amounts are derived.
  */
 export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
   const members = group.members.map((m) => m.name)
-  const amt = expense.amount   // locked — never editable
 
   // Parse existing split_json to derive initial percentages
   const parsedSplit = (() => {
@@ -26,11 +25,12 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
   })()
 
   const initPcts = () => {
-    if (parsedSplit && amt > 0) {
+    const baseAmt = expense.amount
+    if (parsedSplit && baseAmt > 0) {
       const base = Object.fromEntries(members.map((m) => [m, '0']))
       Object.entries(parsedSplit).forEach(([k, v]) => {
         if (Object.prototype.hasOwnProperty.call(base, k)) {
-          base[k] = String(r2((parseFloat(v) / amt) * 100))
+          base[k] = String(r2((parseFloat(v) / baseAmt) * 100))
         }
       })
       return base
@@ -40,6 +40,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
     return Object.fromEntries(members.map((m) => [m, String(ea)]))
   }
 
+  const [amount,      setAmount]      = useState(String(expense.amount))
   const [title,       setTitle]       = useState(expense.title || '')
   const [paidBy,      setPaidBy]      = useState(expense.paid_by)
   const [paymentMode, setPaymentMode] = useState(expense.payment_mode || 'cash')
@@ -48,11 +49,12 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
   const [saving,      setSaving]      = useState(false)
   const [error,       setError]       = useState('')
 
+  const amtNum      = parseFloat(amount) || 0
   const pctTotal    = members.reduce((s, m) => s + parseFloat(customPcts[m] || 0), 0)
   const pctBalanced = Math.abs(pctTotal - 100) <= 0.5
 
   const getSplitLabel = () => {
-    if (splitMode === 'equal') return `Equal · ${INR(r2(amt / members.length))} each`
+    if (splitMode === 'equal') return `Equal · ${INR(r2(amtNum / members.length))} each`
     if (members.length === 2) {
       const p0 = parseFloat(customPcts[members[0]] || 0)
       const p1 = parseFloat(customPcts[members[1]] || 0)
@@ -73,6 +75,11 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
   const handleSave = async () => {
     setError('')
 
+    if (!amtNum || amtNum <= 0) {
+      setError('Amount must be a positive number.')
+      return
+    }
+
     let payload
     if (splitMode === 'equal') {
       payload = {
@@ -80,11 +87,11 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
         date:              expense.date,
         category:          expense.category,
         title:             title.trim() || null,
-        amount:            amt,
+        amount:            r2(amtNum),
         paid_by:           paidBy,
         payment_mode:      paymentMode || null,
         divider:           members.length,
-        individual_amount: r2(amt / members.length),
+        individual_amount: r2(amtNum / members.length),
         split_json:        null,
         participants:      expense.participants,
         notes:             expense.notes,
@@ -99,14 +106,14 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
         date:              expense.date,
         category:          expense.category,
         title:             title.trim() || null,
-        amount:            amt,
+        amount:            r2(amtNum),
         paid_by:           paidBy,
         payment_mode:      paymentMode || null,
         divider:           members.length,
         individual_amount: null,
         split_json:        JSON.stringify(
           Object.fromEntries(
-            members.map((m) => [m, r2(amt * parseFloat(customPcts[m] || 0) / 100)])
+            members.map((m) => [m, r2(amtNum * parseFloat(customPcts[m] || 0) / 100)])
           )
         ),
         participants:      expense.participants,
@@ -129,7 +136,8 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
       className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div className="bg-cream w-full md:max-w-lg h-[90vh] md:h-auto md:max-h-[92vh] overflow-hidden flex flex-col border-t border-x border-amber-100/60 md:border shadow-2xl">
+      {/* relative so the absolutely-positioned footer anchors to this card */}
+      <div className="bg-cream w-full md:max-w-lg h-[90vh] md:h-auto md:max-h-[92vh] overflow-hidden flex flex-col relative border-t border-x border-amber-100/60 md:border shadow-2xl">
 
         {/* Header */}
         <div className="px-5 py-4 border-b border-amber-100/60 flex items-center justify-between flex-shrink-0 bg-cream">
@@ -141,14 +149,25 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
           </button>
         </div>
 
-        {/* Body — min-h-0 overrides flex's implicit min-height:auto so the
-             body can actually shrink and scroll, keeping the footer on-screen */}
-        <div className="overflow-y-auto flex-1 min-h-0 px-5 py-4 space-y-4">
+        {/* Body — pb-20 reserves space so content isn't hidden behind the absolute footer */}
+        <div className="overflow-y-auto flex-1 min-h-0 px-5 py-4 pb-20 space-y-4">
 
-          {/* Amount — locked, display only */}
-          <div className="bg-amber-50 border border-amber-200 px-4 py-3 flex items-center justify-between">
-            <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">Total Amount</span>
-            <span className="text-xl font-black text-gray-900">{INR(amt)}</span>
+          {/* Amount — editable */}
+          <div>
+            <label className="label">Total Amount</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold text-gray-500">₹</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                className="input pl-7"
+                value={amount}
+                min="0.01"
+                step="any"
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="0"
+              />
+            </div>
           </div>
 
           {/* Title */}
@@ -218,7 +237,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
               {members.map((m) => (
                 <div key={m} className="flex items-center justify-between">
                   <span className="text-xs font-bold text-gray-700">{m}</span>
-                  <span className="text-xs font-black text-gray-900">{INR(r2(amt / members.length))}</span>
+                  <span className="text-xs font-black text-gray-900">{INR(r2(amtNum / members.length))}</span>
                 </div>
               ))}
             </div>
@@ -232,7 +251,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
               </p>
               {members.map((m) => {
                 const pct     = customPcts[m] ?? ''
-                const calcAmt = pct !== '' ? r2(amt * parseFloat(pct) / 100) : null
+                const calcAmt = pct !== '' ? r2(amtNum * parseFloat(pct) / 100) : null
                 return (
                   <div key={m} className="flex items-center gap-2">
                     <span className="text-xs font-bold text-gray-700 flex-1">{m}</span>
@@ -273,8 +292,8 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
           )}
         </div>
 
-        {/* Footer */}
-        <div className="px-5 pt-3 pb-6 flex gap-3 border-t border-amber-100/60 flex-shrink-0 bg-cream">
+        {/* Footer — absolute so it's always visible regardless of flex/scroll behaviour */}
+        <div className="absolute bottom-0 left-0 right-0 px-5 pt-3 pb-6 flex gap-3 border-t border-amber-100/60 bg-cream z-10">
           <button
             className="flex-1 py-3 text-xs font-bold text-gray-500 border border-amber-200 hover:bg-amber-50 active:scale-95 transition-all"
             onClick={onClose}
