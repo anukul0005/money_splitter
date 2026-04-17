@@ -1,7 +1,18 @@
 import { useState } from 'react'
+import { ADMIN_NAMES } from '../UserContext'
 
-const USERS_KEY   = 'splitter_users'
+// v2 key → automatically purges all old test accounts saved under 'splitter_users'
+const USERS_KEY   = 'splitter_users_v2'
 const SESSION_KEY = 'splitter_session'
+
+/**
+ * Hardcoded admin credentials.
+ * Admins always work regardless of localStorage; they see all groups.
+ */
+const ADMIN_USERS = [
+  { name: 'Anukul',  key: 'anuk25', isAdmin: true },
+  { name: 'Anubhav', key: 'anub10', isAdmin: true },
+]
 
 /** Key = first-4-chars-of-name (lowercase) + total-char-length, spaces stripped */
 function deriveKey(name) {
@@ -11,17 +22,28 @@ function deriveKey(name) {
 }
 
 export default function Login({ onLogin }) {
-  const [mode, setMode]             = useState('login') // 'login' | 'create'
-  const [keyInput, setKeyInput]     = useState('')
-  const [nameInput, setNameInput]   = useState('')
-  const [generatedKey, setGenKey]   = useState('')
-  const [error, setError]           = useState('')
+  const [mode, setMode]           = useState('login') // 'login' | 'create'
+  const [keyInput, setKeyInput]   = useState('')
+  const [nameInput, setNameInput] = useState('')
+  const [generatedKey, setGenKey] = useState('')
+  const [error, setError]         = useState('')
 
   /* ── Login ── */
   const handleLogin = () => {
     setError('')
+    const k = keyInput.trim().toLowerCase()
+
+    // 1. Check hardcoded admins first
+    const admin = ADMIN_USERS.find((u) => u.key === k)
+    if (admin) {
+      localStorage.setItem(SESSION_KEY, JSON.stringify(admin))
+      onLogin(admin)
+      return
+    }
+
+    // 2. Regular users stored in localStorage
     const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]')
-    const user  = users.find((u) => u.key === keyInput.trim().toLowerCase())
+    const user  = users.find((u) => u.key === k)
     if (!user) {
       setError('Invalid key. Check your key or create a new user.')
       return
@@ -33,16 +55,21 @@ export default function Login({ onLogin }) {
   /* ── Create: step 1 – generate key ── */
   const handleGenerate = () => {
     setError('')
-    const key = deriveKey(nameInput)
-    if (!key) { setError('Enter a name first'); return }
-    setGenKey(key)
+    const name = nameInput.trim()
+    if (!name) { setError('Enter a name first'); return }
+    // Block creating an account with an admin name
+    if (ADMIN_NAMES.includes(name.toLowerCase())) {
+      setError('That name is reserved. Use the Enter Key tab to log in.')
+      return
+    }
+    setGenKey(deriveKey(name))
   }
 
   /* ── Create: step 2 – save & enter ── */
   const handleSaveAndEnter = () => {
     const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]')
     const name  = nameInput.trim()
-    const user  = { name, key: generatedKey }
+    const user  = { name, key: generatedKey, isAdmin: false }
     if (!users.find((u) => u.key === generatedKey)) {
       localStorage.setItem(USERS_KEY, JSON.stringify([...users, user]))
     }
@@ -51,11 +78,7 @@ export default function Login({ onLogin }) {
   }
 
   const switchMode = (m) => {
-    setMode(m)
-    setError('')
-    setKeyInput('')
-    setNameInput('')
-    setGenKey('')
+    setMode(m); setError(''); setKeyInput(''); setNameInput(''); setGenKey('')
   }
 
   return (
@@ -115,7 +138,7 @@ export default function Login({ onLogin }) {
               <label className="label">Your name</label>
               <input
                 className="input"
-                placeholder="e.g. Anukul"
+                placeholder="e.g. Priya"
                 value={nameInput}
                 onChange={(e) => { setNameInput(e.target.value); setGenKey('') }}
                 onKeyDown={(e) => e.key === 'Enter' && !generatedKey && handleGenerate()}
@@ -145,7 +168,7 @@ export default function Login({ onLogin }) {
 
             <p className="text-center text-xs text-gray-400 leading-relaxed">
               Key formula: first 4 letters of name + name length<br />
-              <span className="text-brand-600 font-semibold">Anukul → anuk6 &nbsp;·&nbsp; Anubhav → anub7</span>
+              <span className="text-brand-600 font-semibold">Priya → priy5 &nbsp;·&nbsp; Rohan → roha5</span>
             </p>
           </div>
         )}

@@ -21,6 +21,7 @@ def list_groups(db: Session = Depends(get_db)):
             member_count=len(g.members),
             expense_count=len(g.expenses),
             total_amount=round(total, 2),
+            member_names=[m.name for m in g.members],
             created_at=g.created_at,
         ))
     return summaries

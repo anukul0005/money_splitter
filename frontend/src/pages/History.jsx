@@ -6,6 +6,7 @@ import {
 import { Bar } from 'react-chartjs-2'
 import { getGroups, getOverview } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
+import { useUser, isAdmin } from '../UserContext'
 
 Chart.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend, BarController)
 Chart.defaults.font.family = "'Barlow Condensed', sans-serif"
@@ -15,6 +16,9 @@ const PALETTE = ['#ef4444','#f97316','#eab308','#22c55e','#06b6d4','#3b82f6','#8
 
 export default function History() {
   const nav = useNavigate()
+  const user = useUser()
+  const admin = isAdmin(user)
+
   const [groups, setGroups]     = useState([])
   const [overview, setOverview] = useState([])
   const [loading, setLoading]   = useState(true)
@@ -31,7 +35,19 @@ export default function History() {
 
   useEffect(() => { load() }, [])
 
-  const historical = groups.filter((g) => g.is_historical)
+  // Non-admins only see groups they are a member of
+  const filterForUser = (list) => {
+    if (admin) return list
+    return list.filter((g) =>
+      (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase())
+    )
+  }
+
+  const historical = filterForUser(groups).filter((g) => g.is_historical)
+
+  // For the overview bar chart, filter IDs that match visible historical groups
+  const visibleIds = new Set(filterForUser(groups).map((g) => g.id))
+  const visibleOverview = overview.filter((g) => visibleIds.has(g.id))
 
   // Wrap long group names into 2-word lines so nothing is truncated
   const wrapLabel = (name) => {
@@ -42,12 +58,12 @@ export default function History() {
   }
 
   const barData = {
-    labels: overview.map((g) => wrapLabel(g.name.toUpperCase())),
+    labels: visibleOverview.map((g) => wrapLabel(g.name.toUpperCase())),
     datasets: [{
       label: 'Total Spent',
-      data: overview.map((g) => g.total),
+      data: visibleOverview.map((g) => g.total),
       backgroundColor: PALETTE,
-      borderRadius: 0,        // strictly rectangular
+      borderRadius: 0,
       borderSkipped: false,
     }],
   }
@@ -62,8 +78,8 @@ export default function History() {
       x: {
         ticks: {
           font: { size: 9, family: "'Barlow Condensed', sans-serif" },
-          maxRotation: 0,   // no rotation — let wrapping handle readability
-          autoSkip: false,  // never hide a label
+          maxRotation: 0,
+          autoSkip: false,
         },
         grid: { display: false },
       },
@@ -76,7 +92,7 @@ export default function History() {
       },
     },
     onClick: (_, elements) => {
-      if (elements.length > 0) nav(`/groups/${overview[elements[0].index]?.id}`)
+      if (elements.length > 0) nav(`/groups/${visibleOverview[elements[0].index]?.id}`)
     },
   }
 
@@ -101,7 +117,7 @@ export default function History() {
 
       <div className="px-5 mt-4 md:grid md:grid-cols-2 md:gap-6 md:items-start">
         {/* Overall bar chart */}
-        {overview.length > 0 && (
+        {visibleOverview.length > 0 && (
           <div className="card mb-4 md:mb-0">
             <h2 className="text-sm font-semibold text-gray-600 mb-3">Spending across all groups</h2>
             <Bar data={barData} options={barOptions} />
@@ -115,15 +131,12 @@ export default function History() {
             {historical.map((g) => (
               <div
                 key={g.id}
-                className="card flex items-center gap-4 cursor-pointer active:scale-[0.98] transition-transform"
+                className="card flex items-center gap-3 cursor-pointer active:scale-[0.98] transition-transform"
                 onClick={() => nav(`/groups/${g.id}`)}
               >
-                <div className="w-12 h-12 bg-brand-400/10 flex items-center justify-center font-black text-brand-600 text-lg border border-brand-400/20">
-                  {g.name[0]?.toUpperCase() || 'G'}
-                </div>
                 <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-sm truncate">{g.name}</p>
-                  <p className="text-xs text-gray-400">{g.expense_count} expenses · {g.member_count} people</p>
+                  <p className="font-semibold text-sm leading-snug">{g.name}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">{g.expense_count} expenses · {g.member_count} people</p>
                 </div>
                 <span className="font-bold text-gray-900 text-sm whitespace-nowrap">{INR(g.total_amount)}</span>
               </div>

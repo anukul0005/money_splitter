@@ -7,6 +7,7 @@ import {
 import { Bar, Doughnut } from 'react-chartjs-2'
 import { getGroup, getSettlement, getGroupStats, deleteExpense, deleteGroup } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
+import ExpenseEditModal from '../components/ExpenseEditModal'
 
 Chart.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend, ArcElement, DoughnutController, BarController)
 Chart.defaults.font.family = "'Barlow Condensed', sans-serif"
@@ -18,12 +19,13 @@ export default function GroupDetail() {
   const { id } = useParams()
   const nav = useNavigate()
 
-  const [group, setGroup]           = useState(null)
-  const [settlement, setSettlement] = useState(null)
-  const [stats, setStats]           = useState(null)
-  const [loading, setLoading]       = useState(true)
-  const [tab, setTab]               = useState('expenses')
-  const [chartView, setChartView]   = useState('member')
+  const [group, setGroup]               = useState(null)
+  const [settlement, setSettlement]     = useState(null)
+  const [stats, setStats]               = useState(null)
+  const [loading, setLoading]           = useState(true)
+  const [tab, setTab]                   = useState('expenses')
+  const [chartView, setChartView]       = useState('member')
+  const [editingExpense, setEditingExp] = useState(null)   // expense being edited
 
   const reload = () => {
     setLoading(true)
@@ -53,7 +55,7 @@ export default function GroupDetail() {
   if (loading) return <LoadingSpinner />
   if (!group)  return <p className="p-5 text-gray-500">Group not found.</p>
 
-  // Horizontal bar chart (member names on y-axis — no label suppression)
+  // Horizontal bar chart (member names on y-axis)
   const memberChartData = {
     labels: stats?.by_member.map((x) => x.member.toUpperCase()) || [],
     datasets: [{
@@ -104,9 +106,6 @@ export default function GroupDetail() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
           </button>
-          <div className="w-9 h-9 bg-brand-400/15 flex items-center justify-center font-black text-brand-600 text-base flex-shrink-0 border border-brand-400/20 mt-0.5">
-            {group.name[0]?.toUpperCase() || 'G'}
-          </div>
           <div className="flex-1 min-w-0">
             <h1 className="text-lg font-bold leading-tight">{group.name}</h1>
             <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">{group.members.map((m) => m.name).join(' · ')}</p>
@@ -185,30 +184,27 @@ export default function GroupDetail() {
             </div>
           )}
           {[...group.expenses].reverse().map((e) => {
-            const memberCount = group.members.length
+            const memberCount   = group.members.length
             const isPartialSplit = !e.split_json && e.divider < memberCount && e.divider > 0
 
-            // Parse split_json and detect if it's a gentleman's (65/35) or fully custom split
+            // Parse split_json
             let splitEntries = null
             let splitLabel   = null
             if (e.split_json) {
               try {
                 const obj = JSON.parse(e.split_json)
-                splitEntries = Object.entries(obj)   // [[name, amount], ...]
-                // Detect gentleman's: check if ratios are close to 65/35
+                splitEntries = Object.entries(obj)
                 if (splitEntries.length === 2) {
                   const [, a0] = splitEntries[0]
                   const [, a1] = splitEntries[1]
                   const r0 = Math.round((a0 / e.amount) * 100)
                   const r1 = Math.round((a1 / e.amount) * 100)
                   const lo = Math.min(r0, r1), hi = Math.max(r0, r1)
-                  splitLabel = (lo === 35 && hi === 65)
-                    ? "Gentleman's 65/35"
-                    : `Custom ${r0}/${r1}`
+                  splitLabel = (lo === 35 && hi === 65) ? "Gentleman's 65/35" : `Custom ${r0}/${r1}`
                 } else {
                   splitLabel = 'Custom split'
                 }
-              } catch { /* ignore parse error */ }
+              } catch { /* ignore */ }
             }
 
             return (
@@ -220,14 +216,14 @@ export default function GroupDetail() {
                 </div>
 
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-gray-900 leading-tight" style={{wordBreak:'break-word'}}>
+                  <p className="text-sm font-bold text-gray-900 leading-tight" style={{ wordBreak: 'break-word' }}>
                     {e.title || e.category || 'Expense'}
                   </p>
                   <p className="text-xs text-gray-400 mt-0.5">
                     {e.paid_by} · {e.date || '—'}
                   </p>
 
-                  {/* Custom / gentleman's split — show per-member amounts */}
+                  {/* Custom / gentleman's split — per-member breakdown */}
                   {splitEntries && (
                     <div className="mt-1.5 border border-amber-300 bg-amber-50/60 px-2 py-1.5 space-y-1">
                       <p className="text-[10px] font-black text-amber-700 tracking-widest mb-0.5">
@@ -261,16 +257,29 @@ export default function GroupDetail() {
                   )}
                 </div>
 
-                {!group.is_historical && (
+                {/* Action buttons — edit always visible; delete only for non-historical */}
+                <div className="flex flex-col gap-1 ml-1 mt-0.5 flex-shrink-0">
                   <button
-                    onClick={() => handleDeleteExpense(e.id)}
-                    className="text-gray-300 hover:text-red-400 transition-colors ml-1 mt-0.5"
+                    onClick={() => setEditingExp(e)}
+                    className="text-gray-300 hover:text-brand-500 transition-colors"
+                    title="Edit expense"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                     </svg>
                   </button>
-                )}
+                  {!group.is_historical && (
+                    <button
+                      onClick={() => handleDeleteExpense(e.id)}
+                      className="text-gray-300 hover:text-red-400 transition-colors"
+                      title="Delete expense"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
               </div>
             )
           })}
@@ -370,6 +379,16 @@ export default function GroupDetail() {
             )}
           </div>
         </div>
+      )}
+
+      {/* Expense Edit Modal */}
+      {editingExpense && (
+        <ExpenseEditModal
+          expense={editingExpense}
+          group={group}
+          onSave={() => { setEditingExp(null); reload() }}
+          onClose={() => setEditingExp(null)}
+        />
       )}
     </div>
   )

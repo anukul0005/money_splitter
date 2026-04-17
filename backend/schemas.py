@@ -82,6 +82,7 @@ class GroupSummary(BaseModel):
     member_count: int
     expense_count: int
     total_amount: float
+    member_names: list[str] = []
     created_at: Optional[datetime] = None
     model_config = {"from_attributes": True}
 

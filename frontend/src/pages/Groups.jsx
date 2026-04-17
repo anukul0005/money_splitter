@@ -3,9 +3,13 @@ import { useNavigate } from 'react-router-dom'
 import { getGroups } from '../api'
 import GroupCard from '../components/GroupCard'
 import LoadingSpinner from '../components/LoadingSpinner'
+import { useUser, isAdmin } from '../UserContext'
 
 export default function Groups() {
   const nav = useNavigate()
+  const user = useUser()
+  const admin = isAdmin(user)
+
   const [groups, setGroups] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
@@ -14,7 +18,14 @@ export default function Groups() {
     getGroups().then((r) => setGroups(r.data)).finally(() => setLoading(false))
   }, [])
 
-  const filtered = groups.filter((g) =>
+  // Non-admins only see groups they belong to
+  const visibleGroups = admin
+    ? groups
+    : groups.filter((g) =>
+        (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase())
+      )
+
+  const filtered = visibleGroups.filter((g) =>
     filter === 'all' ? true : filter === 'historical' ? g.is_historical : !g.is_historical
   )
 
@@ -25,9 +36,11 @@ export default function Groups() {
       <div className="px-5 pt-10 md:pt-6 pb-4 bg-cream sticky top-0 z-10 border-b border-amber-100/60">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-black tracking-tight">Groups</h1>
-          <button className="bg-brand-400 text-gray-900 text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm" onClick={() => nav('/groups/new')}>
-            + New
-          </button>
+          {admin && (
+            <button className="bg-brand-400 text-gray-900 text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm" onClick={() => nav('/groups/new')}>
+              + New
+            </button>
+          )}
         </div>
         <div className="flex gap-2 mt-3">
           {['all','active','historical'].map((f) => (

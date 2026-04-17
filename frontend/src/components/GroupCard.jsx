@@ -7,18 +7,15 @@ export default function GroupCard({ group }) {
 
   return (
     <div
-      className="card flex items-center gap-4 cursor-pointer active:scale-[0.98] transition-transform"
+      className="card flex items-center gap-3 cursor-pointer active:scale-[0.98] transition-transform"
       onClick={() => nav(`/groups/${group.id}`)}
     >
-      <div className="w-12 h-12 bg-brand-400/10 flex items-center justify-center font-black text-brand-600 text-lg flex-shrink-0 border border-brand-400/20">
-        {group.name[0]?.toUpperCase() || 'G'}
-      </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2">
-          <p className="font-bold text-gray-900 truncate min-w-0 flex-1">{group.name}</p>
+          <p className="font-bold text-gray-900 min-w-0 flex-1 leading-snug">{group.name}</p>
           <span className="font-black text-brand-600 whitespace-nowrap text-sm flex-shrink-0">{INR(group.total_amount)}</span>
         </div>
-        <div className="flex items-center gap-2 mt-0.5">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
           <span className="text-xs text-gray-400">{group.member_count} people</span>
           <span className="text-amber-200">·</span>
           <span className="text-xs text-gray-400">{group.expense_count} expenses</span>
