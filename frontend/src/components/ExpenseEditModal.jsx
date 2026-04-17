@@ -133,7 +133,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50"
+      className="fixed inset-0 z-[200] flex items-end md:items-center justify-center bg-black/50"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
       <div className="bg-cream w-full md:max-w-lg h-[90vh] md:h-auto md:max-h-[92vh] overflow-hidden flex flex-col border-t border-x border-amber-100/60 md:border shadow-2xl">
