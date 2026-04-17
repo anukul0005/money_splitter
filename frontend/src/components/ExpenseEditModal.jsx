@@ -269,12 +269,18 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
                       onBlur={(e) => {
                         const val = parseFloat(e.target.value)
                         if (!isNaN(val) && val === 0) {
-                          // Redistribute 100% equally among the other members
-                          const others = members.filter((x) => x !== m)
-                          const equalPct = String(r2(100 / others.length))
                           setCustomPcts((prev) => {
                             const updated = { ...prev, [m]: '0' }
-                            others.forEach((x) => { updated[x] = equalPct })
+                            // Only distribute to members not already explicitly set to 0
+                            const recipients = members.filter((x) => {
+                              if (x === m) return false
+                              const n = parseFloat(prev[x])
+                              return isNaN(n) || n !== 0   // empty or non-zero = eligible
+                            })
+                            if (recipients.length > 0) {
+                              const equalPct = String(r2(100 / recipients.length))
+                              recipients.forEach((x) => { updated[x] = equalPct })
+                            }
                             return updated
                           })
                         }

@@ -385,11 +385,18 @@ export default function AddExpense() {
                       onBlur={(e) => {
                         const val = parseFloat(e.target.value)
                         if (!isNaN(val) && val === 0) {
-                          const others = members.filter((x) => x.id !== m.id)
-                          const equalPct = String(Math.round((100 / others.length) * 100) / 100)
                           setCustomPcts((p) => {
                             const updated = { ...p, [m.name]: '0' }
-                            others.forEach((x) => { updated[x.name] = equalPct })
+                            // Only distribute to members not already explicitly set to 0
+                            const recipients = members.filter((x) => {
+                              if (x.id === m.id) return false
+                              const n = parseFloat(p[x.name])
+                              return isNaN(n) || n !== 0   // empty or non-zero = eligible
+                            })
+                            if (recipients.length > 0) {
+                              const equalPct = String(Math.round((100 / recipients.length) * 100) / 100)
+                              recipients.forEach((x) => { updated[x.name] = equalPct })
+                            }
                             return updated
                           })
                         }
