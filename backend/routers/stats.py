@@ -67,12 +67,16 @@ def get_group_stats(group_id: int, db: Session = Depends(get_db)):
     total = round(sum(e.amount for e in expenses), 2)
 
     by_cat: dict[str, float] = defaultdict(float)
+    by_cat_display: dict[str, str] = {}
     by_member: dict[str, float] = defaultdict(float)
     by_date: dict[str, float] = defaultdict(float)
 
     for e in expenses:
-        cat = e.category or "Other"
-        by_cat[cat] += e.amount
+        raw = (e.category or "Other").strip()
+        key = raw.lower()
+        if key not in by_cat_display:
+            by_cat_display[key] = raw
+        by_cat[key] += e.amount
         by_member[e.paid_by] += e.amount
         if e.date:
             # Normalise to YYYY-MM for timeline grouping
@@ -83,7 +87,7 @@ def get_group_stats(group_id: int, db: Session = Depends(get_db)):
     return GroupStats(
         group_id=group_id,
         total=total,
-        by_category=[CategoryStat(category=k, total=round(v, 2)) for k, v in sorted(by_cat.items(), key=lambda x: -x[1])],
+        by_category=[CategoryStat(category=by_cat_display[k], total=round(v, 2)) for k, v in sorted(by_cat.items(), key=lambda x: -x[1])],
         by_member=[MemberStat(member=k, total_paid=round(v, 2)) for k, v in sorted(by_member.items(), key=lambda x: -x[1])],
         by_date=[TimelineStat(date=k, total=round(v, 2)) for k, v in sorted(by_date.items())],
     )

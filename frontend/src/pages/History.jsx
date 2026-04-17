@@ -162,6 +162,26 @@ export default function History() {
     ? totalSpend / monthlyTotals.length
     : 0
 
+  const histDistStats = useMemo(() => {
+    const vals = monthlyTotals.map(([, v]) => v).sort((a, b) => a - b)
+    const n = vals.length
+    if (n < 2) return null
+    const mean = vals.reduce((s, v) => s + v, 0) / n
+    const median = n % 2 === 0
+      ? (vals[n / 2 - 1] + vals[n / 2]) / 2
+      : vals[Math.floor(n / 2)]
+    const freq = {}
+    vals.forEach((v) => { freq[v] = (freq[v] || 0) + 1 })
+    let mode = vals[0], maxF = 0
+    Object.entries(freq).forEach(([v, f]) => { if (f > maxF) { maxF = f; mode = parseFloat(v) } })
+    const pct = (p) => {
+      const idx = (p / 100) * (n - 1)
+      const lo = Math.floor(idx), hi = Math.ceil(idx)
+      return lo === hi ? vals[lo] : vals[lo] + (vals[hi] - vals[lo]) * (idx - lo)
+    }
+    return { mean, median, mode, p10: pct(10), p25: pct(25), p75: pct(75), p90: pct(90), min: vals[0], max: vals[n - 1] }
+  }, [monthlyTotals])
+
   // ── Chart configs ─────────────────────────────────────────────────────────────
 
   const lineData = {
@@ -174,7 +194,7 @@ export default function History() {
       borderWidth: 2,
       pointRadius: 4,
       pointBackgroundColor: '#22c55e',
-      tension: 0.35,
+      tension: 0,
       fill: true,
     }],
   }
@@ -240,7 +260,7 @@ export default function History() {
       backgroundColor: CAT_COLORS[cat] + '33',
       borderWidth: 2,
       pointRadius: 3,
-      tension: 0.35,
+      tension: 0,
       fill: true,
     })),
   }
@@ -367,46 +387,33 @@ export default function History() {
           </div>
         )}
 
-        {/* ── 4. All Groups Table ── */}
-        <div>
-          <h2 className="text-xs font-black text-gray-500 uppercase tracking-widest mb-3">All Groups</h2>
-          <div className="space-y-2">
-            {[...visibleGroups]
-              .sort((a, b) => b.total_amount - a.total_amount)
-              .map((g) => (
-                <div
-                  key={g.id}
-                  className="card flex items-center gap-3 cursor-pointer active:scale-[0.98] transition-transform"
-                  onClick={() => nav(`/groups/${g.id}`)}
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <p className="font-bold text-sm leading-snug">{g.name}</p>
-                      {g.category && (
-                        <span className="text-[10px] font-bold px-1.5 py-0.5 bg-brand-400/15 text-brand-700 capitalize">
-                          {g.category}
-                        </span>
-                      )}
-                      {g.is_historical && (
-                        <span className="text-[10px] font-bold px-1.5 py-0.5 bg-amber-100 text-amber-700">
-                          Historical
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      {g.expense_count} expenses · {g.member_count} people
-                    </p>
-                  </div>
-                  <span className="font-black text-brand-600 text-sm whitespace-nowrap">{INR(g.total_amount)}</span>
-                </div>
-              ))}
-            {visibleGroups.length === 0 && (
-              <div className="text-center py-8 text-gray-400">
-                <p className="text-sm">No groups yet</p>
-              </div>
-            )}
+        {/* ── 4. Monthly Spend Distribution ── */}
+        {histDistStats && (
+          <div className="card">
+            <h2 className="text-xs font-black text-gray-500 uppercase tracking-widest mb-3">
+              Monthly Spend Distribution ({monthlyTotals.length} months)
+            </h2>
+            <table className="w-full">
+              <tbody className="divide-y divide-amber-100">
+                {[
+                  ['Mean',                 INR(Math.round(histDistStats.mean))],
+                  ['Median',               INR(Math.round(histDistStats.median))],
+                  ['Mode',                 INR(Math.round(histDistStats.mode))],
+                  ['Top 10% (P90–max)',    `${INR(Math.round(histDistStats.p90))} – ${INR(Math.round(histDistStats.max))}`],
+                  ['P75 – P90',            `${INR(Math.round(histDistStats.p75))} – ${INR(Math.round(histDistStats.p90))}`],
+                  ['P25 – P75 (IQR)',      `${INR(Math.round(histDistStats.p25))} – ${INR(Math.round(histDistStats.p75))}`],
+                  ['P10 – P25',            `${INR(Math.round(histDistStats.p10))} – ${INR(Math.round(histDistStats.p25))}`],
+                  ['Bottom 10% (min–P10)', `${INR(Math.round(histDistStats.min))} – ${INR(Math.round(histDistStats.p10))}`],
+                ].map(([label, value]) => (
+                  <tr key={label}>
+                    <td className="py-2 text-xs text-gray-500 font-semibold pr-3">{label}</td>
+                    <td className="py-2 text-xs font-black text-gray-900 text-right">{value}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        </div>
+        )}
 
       </div>
     </div>

@@ -11,6 +11,11 @@ const PAYMENT_MODES = [
   { value: 'debit_card',  label: 'Debit Card' },
 ]
 
+const CATEGORIES = [
+  'Food','Drinks','Snacks','Travel - Cab','Travel - Train',
+  'Hotel','Movie','Shopping','Groceries','Other',
+]
+
 /**
  * Modal for editing an existing expense.
  * Amount is editable. Custom split uses % inputs; amounts are derived.
@@ -42,6 +47,8 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
 
   const [amount,      setAmount]      = useState(String(expense.amount))
   const [title,       setTitle]       = useState(expense.title || '')
+  const [date,        setDate]        = useState(expense.date || '')
+  const [category,    setCategory]    = useState(expense.category || '')
   const [paidBy,      setPaidBy]      = useState(expense.paid_by)
   const [paymentMode, setPaymentMode] = useState(expense.payment_mode || 'cash')
   const [splitMode,   setSplitMode]   = useState(parsedSplit ? 'custom' : 'equal')
@@ -84,8 +91,8 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
     if (splitMode === 'equal') {
       payload = {
         group_id:          group.id,
-        date:              expense.date,
-        category:          expense.category,
+        date:              date || null,
+        category:          category || null,
         title:             title.trim() || null,
         amount:            r2(amtNum),
         paid_by:           paidBy,
@@ -103,8 +110,8 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
       }
       payload = {
         group_id:          group.id,
-        date:              expense.date,
-        category:          expense.category,
+        date:              date || null,
+        category:          category || null,
         title:             title.trim() || null,
         amount:            r2(amtNum),
         paid_by:           paidBy,
@@ -178,6 +185,38 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
               onChange={(e) => setTitle(e.target.value)}
               placeholder="e.g. Dinner, Taxi"
             />
+          </div>
+
+          {/* Date */}
+          <div>
+            <label className="label">Date</label>
+            <input
+              className="input"
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
+          </div>
+
+          {/* Category */}
+          <div>
+            <label className="label">Category</label>
+            <div className="flex flex-wrap gap-2">
+              {CATEGORIES.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setCategory((prev) => prev === c ? '' : c)}
+                  className={`px-3 py-1.5 text-xs font-bold transition-colors border ${
+                    category === c
+                      ? 'bg-brand-400 text-gray-900 border-brand-400'
+                      : 'bg-cream text-gray-400 border-amber-200 hover:text-gray-700'
+                  }`}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Paid by */}

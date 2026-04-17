@@ -269,7 +269,8 @@ export default function AddExpense() {
           </div>
         </div>
 
-        {/* Split section */}
+        {/* Split section — hidden for single-member groups */}
+        {members.length !== 1 && (
         <div>
           <label className="label">Split</label>
 
@@ -414,6 +415,7 @@ export default function AddExpense() {
             </div>
           )}
         </div>
+        )}
 
         {/* Category */}
         <div>

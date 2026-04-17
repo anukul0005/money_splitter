@@ -78,7 +78,14 @@ export default function GroupDetail() {
     }],
   }
 
-  const catData = stats?.by_category.slice(0, 8) || []
+  const rawCats = stats?.by_category || []
+  const catMerge = {}
+  rawCats.forEach((c) => {
+    const key = c.category.trim().toLowerCase()
+    if (!catMerge[key]) catMerge[key] = { category: c.category, total: 0 }
+    catMerge[key].total += c.total
+  })
+  const catData = Object.values(catMerge).sort((a, b) => b.total - a.total).slice(0, 8)
   const catChartData = {
     labels: catData.map((c) => c.category.toUpperCase()),
     datasets: [{
@@ -106,6 +113,27 @@ export default function GroupDetail() {
     cutout: '60%',
     plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ` ${INR(c.parsed)}` } } },
   }
+
+  // Distribution stats for Charts tab
+  const expAmounts = [...group.expenses].map((e) => e.amount).sort((a, b) => a - b)
+  const distStats = (() => {
+    const n = expAmounts.length
+    if (n < 2) return null
+    const mean = expAmounts.reduce((s, v) => s + v, 0) / n
+    const median = n % 2 === 0
+      ? (expAmounts[n / 2 - 1] + expAmounts[n / 2]) / 2
+      : expAmounts[Math.floor(n / 2)]
+    const freq = {}
+    expAmounts.forEach((v) => { freq[v] = (freq[v] || 0) + 1 })
+    let mode = expAmounts[0], maxF = 0
+    Object.entries(freq).forEach(([v, f]) => { if (f > maxF) { maxF = f; mode = parseFloat(v) } })
+    const pct = (p) => {
+      const idx = (p / 100) * (n - 1)
+      const lo = Math.floor(idx), hi = Math.ceil(idx)
+      return lo === hi ? expAmounts[lo] : expAmounts[lo] + (expAmounts[hi] - expAmounts[lo]) * (idx - lo)
+    }
+    return { mean, median, mode, p10: pct(10), p25: pct(25), p75: pct(75), p90: pct(90), min: expAmounts[0], max: expAmounts[n - 1] }
+  })()
 
   return (
     <div className="pb-24 md:pb-8">
@@ -295,11 +323,11 @@ export default function GroupDetail() {
                     )}
                   </div>
 
-                  {/* Action buttons — edit + delete always visible */}
-                  <div className="flex flex-col gap-1 ml-1 mt-0.5 flex-shrink-0">
+                  {/* Action buttons — row layout with generous tap targets for mobile */}
+                  <div className="flex items-center ml-1 flex-shrink-0">
                     <button
                       onClick={() => setEditingExp(e)}
-                      className="text-gray-300 hover:text-brand-500 transition-colors"
+                      className="p-2 text-gray-300 hover:text-brand-500 transition-colors"
                       title="Edit expense"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -308,7 +336,7 @@ export default function GroupDetail() {
                     </button>
                     <button
                       onClick={() => handleDeleteExpense(e.id)}
-                      className="text-gray-300 hover:text-red-400 transition-colors"
+                      className="p-2 text-gray-300 hover:text-red-400 transition-colors"
                       title="Delete expense"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -398,6 +426,31 @@ export default function GroupDetail() {
                   ))}
                 </ul>
               </div>
+            </div>
+          )}
+
+          {distStats && (
+            <div className="card">
+              <h3 className="text-xs font-bold text-gray-500 mb-3">Expense Distribution ({expAmounts.length} expenses)</h3>
+              <table className="w-full">
+                <tbody className="divide-y divide-amber-100">
+                  {[
+                    ['Mean',                 INR(Math.round(distStats.mean))],
+                    ['Median',               INR(Math.round(distStats.median))],
+                    ['Mode',                 INR(Math.round(distStats.mode))],
+                    ['Top 10% (P90–max)',    `${INR(Math.round(distStats.p90))} – ${INR(Math.round(distStats.max))}`],
+                    ['P75 – P90',            `${INR(Math.round(distStats.p75))} – ${INR(Math.round(distStats.p90))}`],
+                    ['P25 – P75 (IQR)',      `${INR(Math.round(distStats.p25))} – ${INR(Math.round(distStats.p75))}`],
+                    ['P10 – P25',            `${INR(Math.round(distStats.p10))} – ${INR(Math.round(distStats.p25))}`],
+                    ['Bottom 10% (min–P10)', `${INR(Math.round(distStats.min))} – ${INR(Math.round(distStats.p10))}`],
+                  ].map(([label, value]) => (
+                    <tr key={label}>
+                      <td className="py-2 text-xs text-gray-500 font-semibold pr-3">{label}</td>
+                      <td className="py-2 text-xs font-black text-gray-900 text-right">{value}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
