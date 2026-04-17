@@ -1,11 +1,60 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from collections import defaultdict
+import json as _json
 from database import get_db
 from models import Group
 from schemas import GroupStats, CategoryStat, MemberStat, TimelineStat
 
 router = APIRouter(prefix="/stats", tags=["stats"])
+
+
+@router.get("/user-summary", response_model=dict)
+def get_user_summary(name: str, db: Session = Depends(get_db)):
+    """Cross-group personal stats for a named member."""
+    groups = db.query(Group).all()
+    total_paid  = 0.0
+    total_share = 0.0
+    groups_count = 0
+
+    for g in groups:
+        member_names_lower = [m.name.lower() for m in g.members]
+        if name.lower() not in member_names_lower:
+            continue
+        groups_count += 1
+
+        for e in g.expenses:
+            # What this person paid
+            if e.paid_by.lower() == name.lower():
+                total_paid += e.amount
+
+            # What this person's share is
+            if e.split_json:
+                try:
+                    splits = _json.loads(e.split_json)
+                    for k, v in splits.items():
+                        if k.lower() == name.lower():
+                            total_share += float(v)
+                            break
+                except Exception:
+                    pass
+            else:
+                # Equal split — check participation
+                participates = True
+                if e.participants:
+                    parts = [p.strip().lower() for p in e.participants.split(',')]
+                    participates = name.lower() in parts
+                if participates:
+                    share = e.individual_amount if e.individual_amount else (e.amount / max(e.divider, 1))
+                    total_share += share
+
+    return {
+        "name": name,
+        "total_paid":  round(total_paid,  2),
+        "total_share": round(total_share, 2),
+        "net":         round(total_paid - total_share, 2),
+        "groups_count": groups_count,
+    }
 
 
 @router.get("/{group_id}", response_model=GroupStats)

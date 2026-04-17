@@ -43,6 +43,7 @@ class Expense(Base):
     divider = Column(Integer, nullable=False, default=2)
     individual_amount = Column(Float, nullable=True)
     split_json = Column(Text, nullable=True)   # JSON: {memberName: amount} for custom splits
+    payment_mode = Column(String(50), nullable=True)  # cash / upi / credit_card / debit_card
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

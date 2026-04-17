@@ -2,17 +2,18 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Chart, BarElement, CategoryScale, LinearScale, Tooltip, Legend, BarController,
+  ArcElement, DoughnutController,
 } from 'chart.js'
-import { Bar } from 'react-chartjs-2'
+import { Bar, Doughnut } from 'react-chartjs-2'
 import { getGroups, getOverview } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser, isAdmin } from '../UserContext'
 
-Chart.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend, BarController)
+Chart.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend, BarController, ArcElement, DoughnutController)
 Chart.defaults.font.family = "'Barlow Condensed', sans-serif"
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
-const PALETTE = ['#ef4444','#f97316','#eab308','#22c55e','#06b6d4','#3b82f6','#8b5cf6','#ec4899']
+const PALETTE = ['#ef4444','#f97316','#eab308','#22c55e','#06b6d4','#3b82f6','#8b5cf6','#ec4899','#14b8a6','#f59e0b','#84cc16','#6366f1']
 
 export default function History() {
   const nav = useNavigate()
@@ -45,11 +46,10 @@ export default function History() {
 
   const historical = filterForUser(groups).filter((g) => g.is_historical)
 
-  // For the overview bar chart, filter IDs that match visible historical groups
   const visibleIds = new Set(filterForUser(groups).map((g) => g.id))
   const visibleOverview = overview.filter((g) => visibleIds.has(g.id))
 
-  // Wrap long group names into 2-word lines so nothing is truncated
+  // Wrap long group names into 2-word lines for bar chart
   const wrapLabel = (name) => {
     const words = name.split(' ')
     const lines = []
@@ -96,6 +96,27 @@ export default function History() {
     },
   }
 
+  const doughnutData = {
+    labels: visibleOverview.map((g) => g.name),
+    datasets: [{
+      data: visibleOverview.map((g) => g.total),
+      backgroundColor: PALETTE,
+      borderWidth: 0,
+      hoverOffset: 8,
+    }],
+  }
+
+  const doughnutOptions = {
+    cutout: '68%',
+    plugins: {
+      legend: { display: false },
+      tooltip: { callbacks: { label: (ctx) => ` ${INR(ctx.parsed)}` } },
+    },
+    onClick: (_, elements) => {
+      if (elements.length > 0) nav(`/groups/${visibleOverview[elements[0].index]?.id}`)
+    },
+  }
+
   if (loading) return <LoadingSpinner />
 
   if (error) return (
@@ -112,15 +133,41 @@ export default function History() {
     <div className="pb-24 md:pb-8">
       <div className="px-5 pt-10 md:pt-6 pb-4 bg-cream border-b border-amber-100/60 sticky top-0 z-10">
         <h1 className="text-xl font-black tracking-tight">History & Stats</h1>
-        <p className="text-xs text-gray-400 mt-0.5 font-medium">Tap a bar to drill into that group</p>
+        <p className="text-xs text-gray-400 mt-0.5 font-medium">Tap a bar or slice to drill into that group</p>
       </div>
 
-      <div className="px-5 mt-4 md:grid md:grid-cols-2 md:gap-6 md:items-start">
-        {/* Overall bar chart */}
+      <div className="px-5 mt-4 space-y-4">
+
         {visibleOverview.length > 0 && (
-          <div className="card mb-4 md:mb-0">
-            <h2 className="text-sm font-semibold text-gray-600 mb-3">Spending across all groups</h2>
-            <Bar data={barData} options={barOptions} />
+          <div className="md:grid md:grid-cols-2 md:gap-4">
+            {/* Bar chart */}
+            <div className="card mb-4 md:mb-0">
+              <h2 className="text-sm font-semibold text-gray-600 mb-3">Spending across all groups</h2>
+              <Bar data={barData} options={barOptions} />
+            </div>
+
+            {/* Doughnut / pie chart */}
+            <div className="card">
+              <h2 className="text-sm font-semibold text-gray-600 mb-3">Share by group</h2>
+              <div className="flex items-center gap-4">
+                <div className="w-36 h-36 flex-shrink-0">
+                  <Doughnut data={doughnutData} options={doughnutOptions} />
+                </div>
+                <ul className="flex-1 space-y-2">
+                  {visibleOverview.map((g, i) => (
+                    <li
+                      key={g.id}
+                      className="flex items-start gap-2 cursor-pointer"
+                      onClick={() => nav(`/groups/${g.id}`)}
+                    >
+                      <span className="w-2 h-2 flex-shrink-0 mt-1.5" style={{ background: PALETTE[i % PALETTE.length] }} />
+                      <span className="text-xs text-gray-600 flex-1 leading-tight">{g.name}</span>
+                      <span className="text-xs font-black text-gray-800 whitespace-nowrap">{INR(g.total)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
           </div>
         )}
 

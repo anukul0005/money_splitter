@@ -1,40 +1,33 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Chart, ArcElement, Tooltip, Legend, DoughnutController } from 'chart.js'
-import { Doughnut } from 'react-chartjs-2'
-import { getGroups, getOverview } from '../api'
+import { getGroups, getOverview, getUserSummary } from '../api'
 import GroupCard from '../components/GroupCard'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser, isAdmin } from '../UserContext'
 
-Chart.register(ArcElement, Tooltip, Legend, DoughnutController)
-Chart.defaults.font.family = "'Barlow Condensed', sans-serif"
-
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
-
-const PALETTE = [
-  '#ef4444','#f97316','#eab308','#22c55e',
-  '#06b6d4','#3b82f6','#8b5cf6','#ec4899',
-  '#14b8a6','#f59e0b','#84cc16','#6366f1',
-]
 
 export default function Home() {
   const nav = useNavigate()
   const user = useUser()
   const admin = isAdmin(user)
 
-  const [groups, setGroups]     = useState([])
-  const [overview, setOverview] = useState([])
-  const [loading, setLoading]   = useState(true)
-  const [error, setError]       = useState('')
+  const [groups, setGroups]       = useState([])
+  const [overview, setOverview]   = useState([])
+  const [userStats, setUserStats] = useState(null)
+  const [loading, setLoading]     = useState(true)
+  const [error, setError]         = useState('')
 
   const load = () => {
     setLoading(true)
     setError('')
-    Promise.all([getGroups(), getOverview()])
-      .then(([g, o]) => {
+    const calls = [getGroups(), getOverview()]
+    if (user?.name) calls.push(getUserSummary(user.name))
+    Promise.all(calls)
+      .then(([g, o, u]) => {
         setGroups(g.data)
         setOverview(o.data)
+        if (u) setUserStats(u.data)
       })
       .catch(() => setError('Could not reach server. The API may be waking up — please try again in 30 seconds.'))
       .finally(() => setLoading(false))
@@ -42,7 +35,6 @@ export default function Home() {
 
   useEffect(() => { load() }, [])
 
-  // Non-admins only see groups they belong to
   const filterForUser = (list) => {
     if (admin) return list
     return list.filter((g) =>
@@ -50,36 +42,10 @@ export default function Home() {
     )
   }
 
-  const visibleGroups = filterForUser(groups)
-  const visibleIds    = new Set(visibleGroups.map((g) => g.id))
+  const visibleGroups   = filterForUser(groups)
+  const visibleIds      = new Set(visibleGroups.map((g) => g.id))
   const visibleOverview = overview.filter((g) => visibleIds.has(g.id))
-
-  const totalSpend = visibleOverview.reduce((s, g) => s + g.total, 0)
-
-  const chartData = {
-    labels: visibleOverview.map((g) => g.name),
-    datasets: [{
-      data: visibleOverview.map((g) => g.total),
-      backgroundColor: PALETTE,
-      borderWidth: 0,
-      hoverOffset: 8,
-    }],
-  }
-
-  const chartOptions = {
-    cutout: '68%',
-    plugins: {
-      legend: { display: false },
-      tooltip: { callbacks: { label: (ctx) => ` ${INR(ctx.parsed)}` } },
-    },
-    onClick: (_, elements) => {
-      if (elements.length > 0) {
-        const idx = elements[0].index
-        const gId = visibleOverview[idx]?.id
-        if (gId) nav(`/groups/${gId}`)
-      }
-    },
-  }
+  const totalSpend      = visibleOverview.reduce((s, g) => s + g.total, 0)
 
   if (loading) return <LoadingSpinner />
 
@@ -93,91 +59,64 @@ export default function Home() {
     </div>
   )
 
+  const net = userStats?.net ?? 0
+  const netPositive = net >= 0
+
   return (
     <div className="pb-24 md:pb-8">
       {/* Header */}
       <div className="bg-gradient-to-br from-field-800 to-field-950 text-white px-5 pt-10 md:pt-8 pb-6 md:rounded-b-3xl border-b border-field-700">
         <p className="text-brand-400/70 text-xs font-bold uppercase tracking-widest">Total spent across all groups</p>
         <h1 className="text-4xl font-black mt-1 tracking-tight">{INR(totalSpend)}</h1>
-        <p className="text-green-200/40 text-xs mt-1 font-medium">{visibleGroups.length} groups · tap a slice to explore</p>
+        <p className="text-green-200/40 text-xs mt-1 font-medium">{visibleGroups.length} groups</p>
       </div>
 
-      <div className="px-5 mt-4 md:mt-6">
-        {/* Chart + groups grid on desktop */}
-        <div className="md:grid md:grid-cols-2 md:gap-6">
+      <div className="px-5 mt-5">
 
-          {/* Doughnut chart */}
-          {visibleOverview.length > 0 && (
-            <div className="card mb-4 md:mb-0">
-              <h2 className="text-sm font-semibold text-gray-500 mb-3">Spending by group</h2>
-              <div className="flex items-center gap-4">
-                <div className="w-36 h-36 flex-shrink-0">
-                  <Doughnut data={chartData} options={chartOptions} />
-                </div>
-                <ul className="flex-1 space-y-2">
-                  {visibleOverview.map((g, i) => (
-                    <li
-                      key={g.id}
-                      className="flex items-start gap-2 cursor-pointer"
-                      onClick={() => nav(`/groups/${g.id}`)}
-                    >
-                      <span className="w-2 h-2 flex-shrink-0 mt-1.5" style={{ background: PALETTE[i % PALETTE.length] }} />
-                      <span className="text-xs text-gray-600 flex-1 leading-tight">{g.name}</span>
-                      <span className="text-xs font-black text-gray-800 whitespace-nowrap">{INR(g.total)}</span>
-                    </li>
-                  ))}
-                </ul>
+        {/* Personal KPI cards */}
+        {userStats && userStats.groups_count > 0 && (
+          <div className="mb-5">
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">
+              {user?.name}'s Overview
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="card text-center py-3">
+                <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide leading-tight">Total Paid</p>
+                <p className="text-sm font-black text-gray-900 mt-1">{INR(userStats.total_paid)}</p>
               </div>
-            </div>
-          )}
-
-          {/* Quick actions */}
-          <div className="space-y-3">
-            {admin && (
-              <div className="grid grid-cols-2 gap-3">
-                <button className="btn-primary py-3 text-sm" onClick={() => nav('/groups/new')}>
-                  + New Group
-                </button>
-                <button
-                  className="bg-cream border border-amber-200 hover:bg-cream-200 active:scale-95 text-gray-800 font-bold px-4 py-3 transition-all duration-150 w-full text-center text-sm"
-                  onClick={() => nav('/add')}
-                >
-                  + Add Expense
-                </button>
+              <div className="card text-center py-3">
+                <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide leading-tight">My Share</p>
+                <p className="text-sm font-black text-gray-900 mt-1">{INR(userStats.total_share)}</p>
               </div>
-            )}
-
-            {/* Recent groups on desktop (shown next to chart) */}
-            <div className="hidden md:block card">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Recent groups</p>
-              <div className="space-y-2">
-                {visibleGroups.slice(0, 3).map((g) => (
-                  <div
-                    key={g.id}
-                    className="flex items-center gap-2 cursor-pointer hover:bg-amber-50 rounded-lg px-1 py-1 transition-colors"
-                    onClick={() => nav(`/groups/${g.id}`)}
-                  >
-                    <span className="text-sm font-medium text-gray-700 flex-1 leading-tight">{g.name}</span>
-                    <span className="text-sm font-bold text-brand-600 whitespace-nowrap">
-                      {INR(g.total_amount)}
-                    </span>
-                  </div>
-                ))}
-                {visibleGroups.length > 3 && (
-                  <button
-                    className="text-xs text-brand-600 font-medium pt-1"
-                    onClick={() => nav('/groups')}
-                  >
-                    View all {visibleGroups.length} groups →
-                  </button>
-                )}
+              <div className="card text-center py-3">
+                <p className={`text-[10px] font-semibold uppercase tracking-wide leading-tight ${netPositive ? 'text-brand-600' : 'text-red-500'}`}>
+                  {netPositive ? 'Owed to me' : 'I owe'}
+                </p>
+                <p className={`text-sm font-black mt-1 ${netPositive ? 'text-brand-600' : 'text-red-500'}`}>
+                  {INR(Math.abs(net))}
+                </p>
               </div>
             </div>
           </div>
-        </div>
+        )}
+
+        {/* Admin quick actions */}
+        {admin && (
+          <div className="grid grid-cols-2 gap-3 mb-5">
+            <button className="btn-primary py-3 text-sm" onClick={() => nav('/groups/new')}>
+              + New Group
+            </button>
+            <button
+              className="bg-cream border border-amber-200 hover:bg-cream-200 active:scale-95 text-gray-800 font-bold px-4 py-3 transition-all duration-150 w-full text-center text-sm"
+              onClick={() => nav('/add')}
+            >
+              + Add Expense
+            </button>
+          </div>
+        )}
 
         {/* All groups list */}
-        <div className="mt-5">
+        <div>
           <h2 className="text-sm font-semibold text-gray-500 mb-3 uppercase tracking-wide">All Groups</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {visibleGroups.map((g) => (

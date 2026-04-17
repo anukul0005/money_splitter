@@ -8,13 +8,22 @@ const CATEGORIES = [
   'Hotel','Movie','Shopping','Groceries','Other',
 ]
 
-const STORED_GROUP_KEY = 'splitter_last_group'
+const PAYMENT_MODES = [
+  { value: 'cash',        label: 'Cash' },
+  { value: 'upi',         label: 'UPI' },
+  { value: 'credit_card', label: 'Credit Card' },
+  { value: 'debit_card',  label: 'Debit Card' },
+]
+
+const STORED_GROUP_KEY   = 'splitter_last_group'
+const STORED_PAYMENT_KEY = 'splitter_last_payment_mode'
 
 export default function AddExpense() {
   const nav = useNavigate()
   const [params] = useSearchParams()
-  const urlGroup   = params.get('group') || ''
+  const urlGroup     = params.get('group') || ''
   const defaultGroup = urlGroup || localStorage.getItem(STORED_GROUP_KEY) || ''
+  const defaultPayment = localStorage.getItem(STORED_PAYMENT_KEY) || 'cash'
 
   const [groups, setGroups]               = useState([])
   const [loading, setLoading]             = useState(true)
@@ -29,14 +38,15 @@ export default function AddExpense() {
   const [customPcts, setCustomPcts]             = useState({})
 
   const [form, setForm] = useState({
-    group_id: defaultGroup,
-    date: new Date().toISOString().split('T')[0],
-    category: '',
-    title: '',
-    amount: '',
-    paid_by: '',
-    divider: '',
-    notes: '',
+    group_id:     defaultGroup,
+    date:         new Date().toISOString().split('T')[0],
+    category:     '',
+    title:        '',
+    amount:       '',
+    paid_by:      '',
+    divider:      '',
+    notes:        '',
+    payment_mode: defaultPayment,
   })
 
   const amountRef = useRef(null)
@@ -64,6 +74,11 @@ export default function AddExpense() {
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
 
+  const setPaymentMode = (val) => {
+    setForm((f) => ({ ...f, payment_mode: val }))
+    localStorage.setItem(STORED_PAYMENT_KEY, val)
+  }
+
   const buildSplitJson = () => {
     const amt = parseFloat(form.amount)
     if (!amt) return null
@@ -71,15 +86,15 @@ export default function AddExpense() {
     if (splitMode === 'gentleman' && members.length === 2) {
       const [pct0, pct1] = gentlemanFlipped ? [35, 65] : [65, 35]
       return JSON.stringify({
-        [members[0].name]: Math.round(amt * pct0) / 100,
-        [members[1].name]: Math.round(amt * pct1) / 100,
+        [members[0].name]: Math.round(amt * pct0 * 100) / 10000,
+        [members[1].name]: Math.round(amt * pct1 * 100) / 10000,
       })
     }
 
     if (splitMode === 'custom') {
       const obj = {}
       members.forEach((m) => {
-        obj[m.name] = Math.round(amt * Number(customPcts[m.name] || 0)) / 100
+        obj[m.name] = Math.round(amt * parseFloat(customPcts[m.name] || 0) * 100) / 10000
       })
       return JSON.stringify(obj)
     }
@@ -87,19 +102,20 @@ export default function AddExpense() {
     return null
   }
 
-  const customTotal = members.reduce((s, m) => s + Number(customPcts[m.name] || 0), 0)
+  const customTotal = members.reduce((s, m) => s + parseFloat(customPcts[m.name] || 0), 0)
 
   const resetExpenseFields = (gid) => {
-    setForm({
-      group_id: gid,
-      date: new Date().toISOString().split('T')[0],
-      category: '',
-      title: '',
-      amount: '',
-      paid_by: '',
-      divider: String(members.length || 2),
-      notes: '',
-    })
+    setForm((prev) => ({
+      group_id:     gid,
+      date:         prev.date,          // persist the selected date
+      category:     '',
+      title:        '',
+      amount:       '',
+      paid_by:      '',
+      divider:      String(members.length || 2),
+      notes:        '',
+      payment_mode: prev.payment_mode,  // persist the payment mode
+    }))
     setSplitMode('equal')
     setGentlemanFlipped(false)
     setCustomPcts(Object.fromEntries(members.map((m) => [m.name, ''])))
@@ -112,21 +128,22 @@ export default function AddExpense() {
     if (!form.group_id) return setError('Please select a group')
     if (!form.amount || isNaN(form.amount)) return setError('Enter a valid amount')
     if (!form.paid_by) return setError('Select who paid')
-    if (splitMode === 'custom' && Math.abs(customTotal - 100) > 0.1)
+    if (splitMode === 'custom' && Math.abs(customTotal - 100) > 0.5)
       return setError('Custom percentages must add up to 100%')
 
     setSubmitting(true)
     try {
       await createExpense({
-        group_id:   Number(form.group_id),
-        date:       form.date || null,
-        category:   form.category || null,
-        title:      form.title || null,
-        amount:     parseFloat(form.amount),
-        paid_by:    form.paid_by,
-        divider:    splitMode === 'equal' ? (Number(form.divider) || members.length || 2) : members.length,
-        notes:      form.notes || null,
-        split_json: buildSplitJson(),
+        group_id:     Number(form.group_id),
+        date:         form.date || null,
+        category:     form.category || null,
+        title:        form.title || null,
+        amount:       parseFloat(form.amount),
+        paid_by:      form.paid_by,
+        divider:      splitMode === 'equal' ? (Number(form.divider) || members.length || 2) : members.length,
+        notes:        form.notes || null,
+        split_json:   buildSplitJson(),
+        payment_mode: form.payment_mode || null,
       })
       localStorage.setItem(STORED_GROUP_KEY, form.group_id)
       setSuccessCount((n) => n + 1)
@@ -231,6 +248,27 @@ export default function AddExpense() {
           )}
         </div>
 
+        {/* Payment mode */}
+        <div>
+          <label className="label">Payment Mode</label>
+          <div className="flex gap-2 flex-wrap">
+            {PAYMENT_MODES.map((pm) => (
+              <button
+                type="button"
+                key={pm.value}
+                onClick={() => setPaymentMode(pm.value)}
+                className={`px-3 py-1.5 text-xs font-bold transition-colors border ${
+                  form.payment_mode === pm.value
+                    ? 'bg-brand-400 text-gray-900 border-brand-400'
+                    : 'bg-amber-50 text-gray-600 border-amber-200'
+                }`}
+              >
+                {pm.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Split section */}
         <div>
           <label className="label">Split</label>
@@ -309,7 +347,7 @@ export default function AddExpense() {
             <div className="space-y-2">
               {members.map((m, i) => {
                 const pct = gentlemanFlipped ? (i === 0 ? 35 : 65) : (i === 0 ? 65 : 35)
-                const amt = form.amount ? (Math.round(parseFloat(form.amount) * pct) / 100).toFixed(2) : null
+                const amt = form.amount ? (parseFloat(form.amount) * pct / 100).toFixed(2) : null
                 return (
                   <div key={m.id} className="flex items-center gap-3 bg-amber-50 border border-amber-200 px-3 py-2.5">
                     <span className="text-sm font-bold text-gray-800 flex-1">{m.name}</span>
@@ -334,13 +372,13 @@ export default function AddExpense() {
             <div className="space-y-2">
               {members.map((m) => {
                 const pct = customPcts[m.name] ?? ''
-                const amt = form.amount && pct ? (Math.round(parseFloat(form.amount) * Number(pct)) / 100).toFixed(2) : null
+                const amt = form.amount && pct ? (parseFloat(form.amount) * parseFloat(pct) / 100).toFixed(2) : null
                 return (
                   <div key={m.id} className="flex items-center gap-2">
                     <span className="text-sm font-bold text-gray-700 w-24 truncate">{m.name}</span>
                     <input
-                      type="number" min="0" max="100" step="0.1"
-                      className="input w-20 text-center"
+                      type="number" min="0" max="100" step="any"
+                      className="input w-24 text-center"
                       placeholder="0"
                       value={pct}
                       onChange={(e) => setCustomPcts((p) => ({ ...p, [m.name]: e.target.value }))}
@@ -350,9 +388,9 @@ export default function AddExpense() {
                   </div>
                 )
               })}
-              <p className={`text-xs font-black mt-1 ${Math.abs(customTotal - 100) < 0.1 ? 'text-brand-600' : 'text-red-500'}`}>
-                Total: {customTotal.toFixed(1)}%{' '}
-                {Math.abs(customTotal - 100) < 0.1 ? 'OK' : '— must equal 100%'}
+              <p className={`text-xs font-black mt-1 ${Math.abs(customTotal - 100) <= 0.5 ? 'text-brand-600' : 'text-red-500'}`}>
+                Total: {customTotal.toFixed(2)}%{' '}
+                {Math.abs(customTotal - 100) <= 0.5 ? '✓ OK' : '— must equal 100%'}
               </p>
             </div>
           )}

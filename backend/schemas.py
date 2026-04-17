@@ -29,6 +29,7 @@ class ExpenseBase(BaseModel):
     divider: int = 2
     individual_amount: Optional[float] = None
     split_json: Optional[str] = None   # JSON: {memberName: amount} for custom/gentleman splits
+    payment_mode: Optional[str] = None  # cash / upi / credit_card / debit_card
     notes: Optional[str] = None
 
     @field_validator("amount")

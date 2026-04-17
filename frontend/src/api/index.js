@@ -21,5 +21,6 @@ export const deleteExpense = (id)        => api.delete(`/expenses/${id}`)
 export const getSettlement = (groupId)   => api.get(`/settlements/${groupId}`)
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
-export const getGroupStats = (groupId)   => api.get(`/stats/${groupId}`)
-export const getOverview   = ()          => api.get('/stats/overview/all')
+export const getGroupStats   = (groupId) => api.get(`/stats/${groupId}`)
+export const getOverview     = ()        => api.get('/stats/overview/all')
+export const getUserSummary  = (name)    => api.get('/stats/user-summary', { params: { name } })

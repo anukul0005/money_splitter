@@ -221,6 +221,11 @@ export default function GroupDetail() {
                   </p>
                   <p className="text-xs text-gray-400 mt-0.5">
                     {e.paid_by} · {e.date || '—'}
+                    {e.payment_mode && (
+                      <span className="ml-1.5 inline-block bg-amber-50 border border-amber-200 px-1.5 py-px text-[10px] font-bold text-amber-700 tracking-wide">
+                        {e.payment_mode.replace('_', ' ').toUpperCase()}
+                      </span>
+                    )}
                   </p>
 
                   {/* Custom / gentleman's split — per-member breakdown */}

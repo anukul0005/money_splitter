@@ -4,6 +4,13 @@ import { updateExpense } from '../api'
 const INR  = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 const r2   = (n) => Math.round(n * 100) / 100
 
+const PAYMENT_MODES = [
+  { value: 'cash',        label: 'Cash' },
+  { value: 'upi',         label: 'UPI' },
+  { value: 'credit_card', label: 'Credit Card' },
+  { value: 'debit_card',  label: 'Debit Card' },
+]
+
 /**
  * Modal for editing an existing expense.
  *
@@ -32,13 +39,14 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
     return Object.fromEntries(members.map((m) => [m, ea]))
   }
 
-  const [title,      setTitle]      = useState(expense.title || '')
-  const [amount,     setAmount]     = useState(expense.amount.toString())
-  const [paidBy,     setPaidBy]     = useState(expense.paid_by)
-  const [splitMode,  setSplitMode]  = useState(parsedSplit ? 'custom' : 'equal')
-  const [customAmts, setCustomAmts] = useState(initCustom)
-  const [saving,     setSaving]     = useState(false)
-  const [error,      setError]      = useState('')
+  const [title,       setTitle]       = useState(expense.title || '')
+  const [amount,      setAmount]      = useState(expense.amount.toString())
+  const [paidBy,      setPaidBy]      = useState(expense.paid_by)
+  const [paymentMode, setPaymentMode] = useState(expense.payment_mode || 'cash')
+  const [splitMode,   setSplitMode]   = useState(parsedSplit ? 'custom' : 'equal')
+  const [customAmts,  setCustomAmts]  = useState(initCustom)
+  const [saving,      setSaving]      = useState(false)
+  const [error,       setError]       = useState('')
 
   const amt          = parseFloat(amount) || 0
   const customTotal  = r2(Object.values(customAmts).reduce((s, v) => s + (parseFloat(v) || 0), 0))
@@ -94,6 +102,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
         title:             title.trim() || null,
         amount:            amt,
         paid_by:           paidBy,
+        payment_mode:      paymentMode || null,
         divider:           members.length,
         individual_amount: r2(amt / members.length),
         split_json:        null,
@@ -112,6 +121,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
         title:             title.trim() || null,
         amount:            amt,
         paid_by:           paidBy,
+        payment_mode:      paymentMode || null,
         divider:           members.length,
         individual_amount: null,
         split_json:        JSON.stringify(
@@ -189,6 +199,27 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
                 <option key={m} value={m}>{m}</option>
               ))}
             </select>
+          </div>
+
+          {/* Payment mode */}
+          <div>
+            <label className="label">Payment Mode</label>
+            <div className="flex gap-2 flex-wrap">
+              {PAYMENT_MODES.map((pm) => (
+                <button
+                  key={pm.value}
+                  type="button"
+                  onClick={() => setPaymentMode(pm.value)}
+                  className={`px-3 py-1.5 text-xs font-bold transition-colors border ${
+                    paymentMode === pm.value
+                      ? 'bg-brand-400 text-gray-900 border-brand-400'
+                      : 'bg-cream text-gray-400 border-amber-200 hover:text-gray-700'
+                  }`}
+                >
+                  {pm.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Split type toggle */}
