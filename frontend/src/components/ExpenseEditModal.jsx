@@ -45,11 +45,18 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
     return Object.fromEntries(members.map((m) => [m, String(ea)]))
   }
 
-  // Lock body scroll while modal is open
+  // Lock body scroll — position:fixed is the only reliable iOS Safari fix
   useEffect(() => {
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = prev }
+    const scrollY = window.scrollY
+    document.body.style.position = 'fixed'
+    document.body.style.top = `-${scrollY}px`
+    document.body.style.width = '100%'
+    return () => {
+      document.body.style.position = ''
+      document.body.style.top = ''
+      document.body.style.width = ''
+      window.scrollTo(0, scrollY)
+    }
   }, [])
 
   const [amount,      setAmount]      = useState(String(expense.amount))

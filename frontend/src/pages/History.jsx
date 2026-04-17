@@ -20,40 +20,43 @@ Chart.register(
 )
 Chart.defaults.font.family = "'Barlow Condensed', sans-serif"
 
-const INR  = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+const INR      = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 const fmtMonth = (yyyymm) => {
   const [y, m] = yyyymm.split('-')
   const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m, 10) - 1]
   return `${mon} '${y.slice(2)}`
 }
+const advanceMonth = (yyyymm, n) => {
+  const [y, m] = yyyymm.split('-').map(Number)
+  const d = new Date(y, m - 1 + n, 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
 
 const CAT_OPTIONS = ['trip','outing','festival','personal','other']
 const CAT_COLORS  = {
-  trip:      '#3b82f6',
-  outing:    '#22c55e',
-  festival:  '#f97316',
-  personal:  '#8b5cf6',
-  other:     '#94a3b8',
+  trip:     '#3b82f6',
+  outing:   '#22c55e',
+  festival: '#f97316',
+  personal: '#8b5cf6',
+  other:    '#94a3b8',
 }
-const PALETTE = ['#ef4444','#f97316','#eab308','#22c55e','#06b6d4','#3b82f6','#8b5cf6','#ec4899','#14b8a6','#f59e0b']
-
+const PALETTE    = ['#ef4444','#f97316','#eab308','#22c55e','#06b6d4','#3b82f6','#8b5cf6','#ec4899','#14b8a6','#f59e0b']
 const CHART_FONT = { size: 11, family: "'Barlow Condensed', sans-serif" }
 
 export default function History() {
   const nav  = useNavigate()
   const user = useUser()
 
-  const [groups,      setGroups]      = useState([])
-  const [overview,    setOverview]    = useState([])
-  const [groupStats,  setGroupStats]  = useState([])   // [{group_id, total, by_date, by_category, by_member}]
-  const [loading,     setLoading]     = useState(true)
-  const [error,       setError]       = useState('')
+  const [groups,     setGroups]     = useState([])
+  const [overview,   setOverview]   = useState([])
+  const [groupStats, setGroupStats] = useState([])
+  const [loading,    setLoading]    = useState(true)
+  const [error,      setError]      = useState('')
 
-  // Bar-chart controls
   const [selectedYear, setSelectedYear] = useState('')
   const [topN,         setTopN]         = useState(10)
+  const [timeFilter,   setTimeFilter]   = useState('all')  // '3' | '6' | '12' | 'all'
 
-  // All users only see groups they are a member of (case-insensitive)
   const filterForUser = (list) =>
     list.filter((g) =>
       (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase())
@@ -64,8 +67,8 @@ export default function History() {
     setError('')
     try {
       const [gRes, oRes] = await Promise.all([getGroups(), getOverview()])
-      const allGroups    = gRes.data
-      const allOverview  = oRes.data
+      const allGroups   = gRes.data
+      const allOverview = oRes.data
       setGroups(allGroups)
       setOverview(allOverview)
 
@@ -83,13 +86,12 @@ export default function History() {
 
   useEffect(() => { load() }, [])
 
-  // ── Derived data ─────────────────────────────────────────────────────────────
+  // ── Derived data ──────────────────────────────────────────────────────────────
 
   const visibleGroups = filterForUser(groups)
   const visibleIds    = new Set(visibleGroups.map((g) => g.id))
   const visibleOv     = overview.filter((g) => visibleIds.has(g.id))
 
-  // Monthly aggregated totals across all visible groups
   const monthlyTotals = useMemo(() => {
     const map = {}
     groupStats.forEach((gs) => {
@@ -101,18 +103,20 @@ export default function History() {
     return Object.entries(map).sort(([a], [b]) => a.localeCompare(b))
   }, [groupStats, visibleIds])
 
-  // Available years for the bar-chart year filter
+  const filteredMonthly = useMemo(() => {
+    if (timeFilter === 'all') return monthlyTotals
+    return monthlyTotals.slice(-parseInt(timeFilter))
+  }, [monthlyTotals, timeFilter])
+
   const availableYears = useMemo(() => {
     const yrs = new Set(monthlyTotals.map(([d]) => d.slice(0, 4)))
     return [...yrs].sort((a, b) => b - a)
   }, [monthlyTotals])
 
-  // Default to most recent year once data loads
   useEffect(() => {
     if (availableYears.length > 0 && !selectedYear) setSelectedYear(availableYears[0])
   }, [availableYears])
 
-  // Per-group totals for the selected year (top-N bar chart)
   const topGroups = useMemo(() => {
     if (!selectedYear) return []
     return groupStats
@@ -129,15 +133,13 @@ export default function History() {
       .slice(0, topN)
   }, [groupStats, visibleGroups, visibleIds, selectedYear, topN])
 
-  // Monthly-by-category (stacked area)
   const categoryMonthly = useMemo(() => {
-    const map = {}   // category → { month → total }
+    const map = {}
     CAT_OPTIONS.forEach((c) => { map[c] = {} })
-
     groupStats.forEach((gs) => {
       if (!visibleIds.has(gs.group_id)) return
-      const grp = visibleGroups.find((g) => g.id === gs.group_id)
-      const cat = (grp?.category || 'other').toLowerCase()
+      const grp   = visibleGroups.find((g) => g.id === gs.group_id)
+      const cat   = (grp?.category || 'other').toLowerCase()
       const bucket = CAT_OPTIONS.includes(cat) ? cat : 'other'
       gs.by_date.forEach(({ date, total }) => {
         map[bucket][date] = (map[bucket][date] || 0) + total
@@ -146,27 +148,61 @@ export default function History() {
     return map
   }, [groupStats, visibleGroups, visibleIds])
 
-  const allMonths = useMemo(
-    () => monthlyTotals.map(([d]) => d),
-    [monthlyTotals],
-  )
-
+  const allMonths  = useMemo(() => monthlyTotals.map(([d]) => d), [monthlyTotals])
   const activeCats = useMemo(
     () => CAT_OPTIONS.filter((c) => Object.keys(categoryMonthly[c] || {}).length > 0),
     [categoryMonthly],
   )
 
-  // ── Overall KPIs ─────────────────────────────────────────────────────────────
+  // ── Analytics ─────────────────────────────────────────────────────────────────
+
   const totalSpend  = visibleOv.reduce((s, g) => s + g.total, 0)
-  const avgMonthly  = monthlyTotals.length > 0
-    ? totalSpend / monthlyTotals.length
-    : 0
+  const avgMonthly  = monthlyTotals.length > 0 ? totalSpend / monthlyTotals.length : 0
+
+  const monthlyValues = filteredMonthly.map(([, v]) => v)
+  const N             = filteredMonthly.length
+  const monthlyMax    = N > 0 ? Math.max(...monthlyValues) : 0
+  const monthlyMin    = N > 0 ? Math.min(...monthlyValues) : 0
+  const maxMonthIdx   = monthlyValues.indexOf(monthlyMax)
+  const minMonthIdx   = monthlyValues.indexOf(monthlyMin)
+  const maxMonthLbl   = filteredMonthly[maxMonthIdx] ? fmtMonth(filteredMonthly[maxMonthIdx][0]) : ''
+  const minMonthLbl   = filteredMonthly[minMonthIdx] ? fmtMonth(filteredMonthly[minMonthIdx][0]) : ''
+
+  const movingAvg = useMemo(() =>
+    filteredMonthly.map((_, i) => {
+      const w = filteredMonthly.slice(Math.max(0, i - 2), i + 1)
+      return w.reduce((s, [, x]) => s + x, 0) / w.length
+    }),
+    [filteredMonthly],
+  )
+
+  const { anomalyMonths, anomalySpike } = useMemo(() => {
+    if (N < 3) return { anomalyMonths: [], anomalySpike: null }
+    const mean    = monthlyValues.reduce((s, v) => s + v, 0) / N
+    const stddev  = Math.sqrt(monthlyValues.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / N)
+    const threshold = mean + 1.5 * stddev
+    const flagged = filteredMonthly.filter(([, v]) => v > threshold)
+    if (flagged.length === 0) return { anomalyMonths: [], anomalySpike: null }
+    const spike   = flagged.reduce((a, b) => a[1] > b[1] ? a : b)
+    return {
+      anomalyMonths: flagged.map(([d]) => d),
+      anomalySpike: { label: fmtMonth(spike[0]), pct: Math.round(((spike[1] - mean) / mean) * 100) },
+    }
+  }, [filteredMonthly])
+
+  const forecastData = useMemo(() => {
+    if (N < 2) return []
+    const lastN = filteredMonthly.slice(-Math.min(3, N)).map(([, v]) => v)
+    const avg   = lastN.reduce((s, v) => s + v, 0) / lastN.length
+    const lastMonth = filteredMonthly[N - 1][0]
+    return Array.from({ length: 3 }, (_, i) => [advanceMonth(lastMonth, i + 1), avg])
+  }, [filteredMonthly])
 
   const histDistStats = useMemo(() => {
     const vals = monthlyTotals.map(([, v]) => v).sort((a, b) => a - b)
-    const n = vals.length
+    const n    = vals.length
     if (n < 2) return null
-    const mean = vals.reduce((s, v) => s + v, 0) / n
+    const mean   = vals.reduce((s, v) => s + v, 0) / n
     const median = n % 2 === 0
       ? (vals[n / 2 - 1] + vals[n / 2]) / 2
       : vals[Math.floor(n / 2)]
@@ -182,28 +218,96 @@ export default function History() {
     return { mean, median, mode, p10: pct(10), p25: pct(25), p75: pct(75), p90: pct(90), min: vals[0], max: vals[n - 1] }
   }, [monthlyTotals])
 
-  // ── Chart configs ─────────────────────────────────────────────────────────────
+  const topCategory = useMemo(() => {
+    const catTotals = {}
+    groupStats.forEach((gs) => {
+      if (!visibleIds.has(gs.group_id)) return
+      gs.by_category?.forEach(({ category, total }) => {
+        const k = (category || 'Other').trim()
+        catTotals[k] = (catTotals[k] || 0) + total
+      })
+    })
+    const entries = Object.entries(catTotals)
+    if (entries.length === 0) return null
+    return entries.sort((a, b) => b[1] - a[1])[0][0]
+  }, [groupStats, visibleIds])
+
+  // ── Chart configs ──────────────────────────────────────────────────────────────
+
+  const combinedLabels   = [...filteredMonthly.map(([d]) => fmtMonth(d)), ...forecastData.map(([d]) => fmtMonth(d))]
+  const actualPadded     = [...monthlyValues, ...forecastData.map(() => null)]
+  const movingAvgPadded  = [...movingAvg,     ...forecastData.map(() => null)]
+  const forecastPadded   = [
+    ...filteredMonthly.map((_, i) => (i === N - 1 ? monthlyValues[i] : null)),
+    ...forecastData.map(([, v]) => v),
+  ]
+
+  const pointColors = combinedLabels.map((_, i) => {
+    if (i >= N) return '#22c55e'
+    if (i === maxMonthIdx) return '#22c55e'
+    if (i === minMonthIdx) return '#ef4444'
+    if (anomalyMonths.includes(filteredMonthly[i]?.[0])) return '#f97316'
+    return '#22c55e'
+  })
+  const pointRadii = combinedLabels.map((_, i) => {
+    if (i >= N) return 0
+    if (i === maxMonthIdx) return 7
+    if (i === minMonthIdx) return 5
+    if (anomalyMonths.includes(filteredMonthly[i]?.[0])) return 6
+    return 3
+  })
 
   const lineData = {
-    labels: monthlyTotals.map(([d]) => fmtMonth(d)),
-    datasets: [{
-      label: 'Total Spend',
-      data: monthlyTotals.map(([, v]) => v),
-      borderColor: '#22c55e',
-      backgroundColor: 'rgba(34,197,94,0.08)',
-      borderWidth: 2,
-      pointRadius: 4,
-      pointBackgroundColor: '#22c55e',
-      tension: 0,
-      fill: true,
-    }],
+    labels: combinedLabels,
+    datasets: [
+      {
+        label: 'Actual',
+        data: actualPadded,
+        borderColor: '#22c55e',
+        backgroundColor: 'rgba(34,197,94,0.08)',
+        borderWidth: 2,
+        pointRadius: pointRadii,
+        pointBackgroundColor: pointColors,
+        tension: 0,
+        fill: true,
+        spanGaps: false,
+      },
+      {
+        label: '3M Avg',
+        data: movingAvgPadded,
+        borderColor: '#94a3b8',
+        borderWidth: 1.5,
+        borderDash: [4, 4],
+        pointRadius: 0,
+        tension: 0,
+        fill: false,
+        spanGaps: false,
+      },
+      ...(forecastData.length > 0 ? [{
+        label: 'Forecast',
+        data: forecastPadded,
+        borderColor: '#3b82f6',
+        borderWidth: 2,
+        borderDash: [6, 4],
+        pointRadius: forecastPadded.map((v) => v !== null ? 4 : 0),
+        pointBackgroundColor: '#3b82f6',
+        tension: 0,
+        fill: false,
+        spanGaps: false,
+      }] : []),
+    ],
   }
 
   const lineOptions = {
     responsive: true,
+    interaction: { mode: 'index', intersect: false },
     plugins: {
-      legend: { display: false },
-      tooltip: { callbacks: { label: (c) => ` ${INR(c.parsed.y)}` } },
+      legend: {
+        display: true,
+        position: 'bottom',
+        labels: { font: CHART_FONT, boxWidth: 10, padding: 10 },
+      },
+      tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${INR(c.parsed.y)}` } },
     },
     scales: {
       x: { ticks: { font: CHART_FONT }, grid: { display: false } },
@@ -213,6 +317,8 @@ export default function History() {
       },
     },
   }
+
+  const yearTotal = topGroups.reduce((s, g) => s + g.yearTotal, 0)
 
   const barData = {
     labels: topGroups.map((g) => {
@@ -231,19 +337,27 @@ export default function History() {
   }
 
   const barOptions = {
+    indexAxis: 'y',
     responsive: true,
     plugins: {
       legend: { display: false },
-      tooltip: { callbacks: { label: (c) => ` ${INR(c.parsed.y)}` } },
+      tooltip: {
+        callbacks: {
+          label: (c) => {
+            const pct = yearTotal > 0 ? ` (${Math.round((c.parsed.x / yearTotal) * 100)}%)` : ''
+            return ` ${INR(c.parsed.x)}${pct}`
+          },
+        },
+      },
     },
     scales: {
       x: {
-        ticks: { font: { size: 9, family: "'Barlow Condensed', sans-serif" }, maxRotation: 0, autoSkip: false },
-        grid: { display: false },
-      },
-      y: {
         ticks: { callback: (v) => `₹${(v / 1000).toFixed(0)}k`, font: CHART_FONT },
         grid: { color: '#f1f5f9' },
+      },
+      y: {
+        ticks: { font: { size: 9, family: "'Barlow Condensed', sans-serif" }, autoSkip: false },
+        grid: { display: false },
       },
     },
     onClick: (_, elements) => {
@@ -285,7 +399,7 @@ export default function History() {
     },
   }
 
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ──────────────────────────────────────────────────────────────────────────────
 
   if (loading) return <LoadingSpinner />
 
@@ -293,9 +407,7 @@ export default function History() {
     <div className="flex flex-col items-center justify-center min-h-[60vh] px-5 text-center">
       <p className="text-4xl mb-3">😴</p>
       <p className="text-sm text-gray-600 mb-4">{error}</p>
-      <button onClick={load} className="bg-brand-400 text-gray-900 px-5 py-2 text-sm font-bold shadow-md">
-        Retry
-      </button>
+      <button onClick={load} className="bg-brand-400 text-gray-900 px-5 py-2 text-sm font-bold shadow-md">Retry</button>
     </div>
   )
 
@@ -306,7 +418,7 @@ export default function History() {
       <div className="bg-gradient-to-br from-field-800 to-field-950 text-white px-5 pt-10 md:pt-8 pb-6 border-b border-field-700">
         <p className="text-brand-400/70 text-xs font-bold uppercase tracking-widest">History & Stats</p>
         <h1 className="text-3xl font-black mt-1 tracking-tight">{INR(totalSpend)}</h1>
-        <div className="flex gap-4 mt-2">
+        <div className="flex gap-4 mt-2 flex-wrap">
           <div>
             <p className="text-green-200/40 text-[10px] font-bold uppercase tracking-widest">Groups</p>
             <p className="text-white font-black text-sm">{visibleGroups.length}</p>
@@ -316,29 +428,82 @@ export default function History() {
             <p className="text-white font-black text-sm">{INR(Math.round(avgMonthly))}</p>
           </div>
           <div>
-            <p className="text-green-200/40 text-[10px] font-bold uppercase tracking-widest">Months Active</p>
-            <p className="text-white font-black text-sm">{monthlyTotals.length}</p>
+            <p className="text-green-200/40 text-[10px] font-bold uppercase tracking-widest">Peak Month</p>
+            <p className="text-white font-black text-sm">{maxMonthLbl || '—'}</p>
           </div>
+          {topCategory && (
+            <div>
+              <p className="text-green-200/40 text-[10px] font-bold uppercase tracking-widest">Top Category</p>
+              <p className="text-white font-black text-sm">{topCategory}</p>
+            </div>
+          )}
         </div>
       </div>
 
       <div className="px-5 mt-5 space-y-5">
 
-        {/* ── 1. Monthly Trend (Line Chart) ── */}
-        {monthlyTotals.length > 0 && (
+        {/* ── 1. Monthly Trend ── */}
+        {filteredMonthly.length > 0 && (
           <div className="card">
-            <h2 className="text-xs font-black text-gray-500 uppercase tracking-widest mb-3">Monthly Spend</h2>
+            <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
+              <div>
+                <h2 className="text-xs font-black text-gray-500 uppercase tracking-widest">Monthly Spend</h2>
+                <div className="mt-1 space-y-0.5">
+                  <p className="text-[11px] text-gray-500">
+                    <span className="text-green-600 font-bold">Highest</span>{' '}
+                    {INR(monthlyMax)} in {maxMonthLbl}
+                    {' · '}
+                    <span className="text-red-500 font-bold">Lowest</span>{' '}
+                    {INR(monthlyMin)} in {minMonthLbl}
+                  </p>
+                  <p className="text-[11px] text-gray-500">
+                    Avg {INR(Math.round(monthlyValues.reduce((s, v) => s + v, 0) / (monthlyValues.length || 1)))} /month
+                    {forecastData.length > 0 && (
+                      <> · <span className="text-blue-500 font-bold">Forecast</span>{' '}
+                      ~{INR(Math.round(forecastData[0][1]))} next 3M</>
+                    )}
+                  </p>
+                  {anomalySpike && (
+                    <p className="text-[11px] text-orange-500 font-bold">
+                      ⚠️ Unusual spike in {anomalySpike.label} (+{anomalySpike.pct}% above avg)
+                    </p>
+                  )}
+                </div>
+              </div>
+              {/* Time filter */}
+              <div className="flex gap-1 flex-wrap">
+                {[['3', '3M'], ['6', '6M'], ['12', '1Y'], ['all', 'All']].map(([v, lbl]) => (
+                  <button
+                    key={v}
+                    onClick={() => setTimeFilter(v)}
+                    className={`px-2 py-1 text-[10px] font-bold border transition-colors ${
+                      timeFilter === v
+                        ? 'bg-brand-400 text-gray-900 border-brand-400'
+                        : 'bg-cream text-gray-400 border-amber-200 hover:text-gray-700'
+                    }`}
+                  >
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+            </div>
             <Line data={lineData} options={lineOptions} />
           </div>
         )}
 
-        {/* ── 2. Top Trips (Bar Chart + Year Filter) ── */}
+        {/* ── 2. Top Groups (Horizontal Bar) ── */}
         {groupStats.length > 0 && (
           <div className="card">
-            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <h2 className="text-xs font-black text-gray-500 uppercase tracking-widest">Top Groups</h2>
+            <div className="flex items-start justify-between mb-3 flex-wrap gap-2">
+              <div>
+                <h2 className="text-xs font-black text-gray-500 uppercase tracking-widest">Top Groups</h2>
+                {topGroups.length > 0 && yearTotal > 0 && (
+                  <p className="text-[11px] text-gray-500 mt-0.5">
+                    {topGroups[0].name} = {Math.round((topGroups[0].yearTotal / yearTotal) * 100)}% of {selectedYear} spend
+                  </p>
+                )}
+              </div>
               <div className="flex items-center gap-2 flex-wrap">
-                {/* Year filter */}
                 <div className="flex gap-1">
                   {availableYears.map((y) => (
                     <button
@@ -354,7 +519,6 @@ export default function History() {
                     </button>
                   ))}
                 </div>
-                {/* Top-N toggle */}
                 <div className="flex gap-1">
                   {[5, 10].map((n) => (
                     <button
