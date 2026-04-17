@@ -18,12 +18,10 @@ export default function Groups() {
     getGroups().then((r) => setGroups(r.data)).finally(() => setLoading(false))
   }, [])
 
-  // Non-admins only see groups they belong to
-  const visibleGroups = admin
-    ? groups
-    : groups.filter((g) =>
-        (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase())
-      )
+  // All users only see groups they belong to (case-insensitive)
+  const visibleGroups = groups.filter((g) =>
+    (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase())
+  )
 
   const filtered = visibleGroups.filter((g) =>
     filter === 'all' ? true : filter === 'historical' ? g.is_historical : !g.is_historical

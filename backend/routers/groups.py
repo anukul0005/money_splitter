@@ -18,6 +18,7 @@ def list_groups(db: Session = Depends(get_db)):
             name=g.name,
             emoji=g.emoji,
             is_historical=g.is_historical,
+            category=g.category,
             member_count=len(g.members),
             expense_count=len(g.expenses),
             total_amount=round(total, 2),
@@ -34,6 +35,7 @@ def create_group(payload: GroupCreate, db: Session = Depends(get_db)):
         description=payload.description,
         emoji=payload.emoji,
         is_historical=payload.is_historical,
+        category=payload.category,
     )
     db.add(group)
     db.flush()
@@ -68,6 +70,8 @@ def update_group(group_id: int, payload: GroupUpdate, db: Session = Depends(get_
         group.emoji = payload.emoji
     if payload.is_historical is not None:
         group.is_historical = payload.is_historical
+    if payload.category is not None:
+        group.category = payload.category
 
     # Remove members by ID
     for mid in payload.members_remove:

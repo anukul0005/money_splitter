@@ -56,6 +56,7 @@ class GroupBase(BaseModel):
     description: Optional[str] = None
     emoji: str = "💰"
     is_historical: bool = False
+    category: Optional[str] = None   # trip / outing / festival / personal / other
 
 class GroupCreate(GroupBase):
     members: list[str]           # just names at creation time
@@ -72,6 +73,7 @@ class GroupUpdate(BaseModel):
     description: Optional[str] = None
     emoji: Optional[str] = None
     is_historical: Optional[bool] = None
+    category: Optional[str] = None
     members_add: list[str] = []
     members_remove: list[int] = []
 
@@ -80,6 +82,7 @@ class GroupSummary(BaseModel):
     name: str
     emoji: str
     is_historical: bool
+    category: Optional[str] = None
     member_count: int
     expense_count: int
     total_amount: float

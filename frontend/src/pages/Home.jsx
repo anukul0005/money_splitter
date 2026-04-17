@@ -35,12 +35,10 @@ export default function Home() {
 
   useEffect(() => { load() }, [])
 
-  const filterForUser = (list) => {
-    if (admin) return list
-    return list.filter((g) =>
+  const filterForUser = (list) =>
+    list.filter((g) =>
       (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase())
     )
-  }
 
   const visibleGroups   = filterForUser(groups)
   const visibleIds      = new Set(visibleGroups.map((g) => g.id))

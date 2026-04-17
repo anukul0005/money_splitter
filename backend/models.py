@@ -12,6 +12,7 @@ class Group(Base):
     description = Column(Text, nullable=True)
     emoji = Column(String(10), default="💰")
     is_historical = Column(Boolean, default=False)
+    category = Column(String(50), nullable=True)   # trip / outing / festival / personal / other
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     members = relationship("Member", back_populates="group", cascade="all, delete-orphan", lazy="selectin")

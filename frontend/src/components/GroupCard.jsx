@@ -19,6 +19,12 @@ export default function GroupCard({ group }) {
           <span className="text-xs text-gray-400">{group.member_count} people</span>
           <span className="text-amber-200">·</span>
           <span className="text-xs text-gray-400">{group.expense_count} expenses</span>
+          {group.category && (
+            <>
+              <span className="text-amber-200">·</span>
+              <span className="badge bg-brand-400/15 text-brand-700 capitalize">{group.category}</span>
+            </>
+          )}
           {group.is_historical && (
             <>
               <span className="text-amber-200">·</span>

@@ -59,4 +59,7 @@ def create_tables():
         conn.execute(text(
             "ALTER TABLE expenses ADD COLUMN IF NOT EXISTS payment_mode VARCHAR(50)"
         ))
+        conn.execute(text(
+            "ALTER TABLE groups ADD COLUMN IF NOT EXISTS category VARCHAR(50)"
+        ))
         conn.commit()

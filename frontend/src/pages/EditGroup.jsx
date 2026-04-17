@@ -12,6 +12,7 @@ export default function EditGroup() {
   const [error, setError]           = useState('')
   const [name, setName]             = useState('')
   const [description, setDescription] = useState('')
+  const [category, setCategory]     = useState('')
   const [members, setMembers]       = useState([])   // existing { id, name }
   const [newInput, setNewInput]     = useState('')
   const [toRemove, setToRemove]     = useState([])   // ids to remove
@@ -21,6 +22,7 @@ export default function EditGroup() {
       .then((r) => {
         setName(r.data.name)
         setDescription(r.data.description || '')
+        setCategory(r.data.category || '')
         setMembers(r.data.members)
       })
       .catch(() => setError('Could not load group'))
@@ -65,6 +67,7 @@ export default function EditGroup() {
       await updateGroup(id, {
         name: name.trim(),
         description: description.trim() || null,
+        category: category || null,
         members_add: membersAdd,
         members_remove: toRemove,
       })
@@ -112,6 +115,27 @@ export default function EditGroup() {
             value={description}
             onChange={(e) => setDescription(e.target.value)}
           />
+        </div>
+
+        {/* Category */}
+        <div>
+          <label className="label">Category</label>
+          <div className="flex gap-2 flex-wrap">
+            {['trip', 'outing', 'festival', 'personal', 'other'].map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => setCategory((prev) => prev === c ? '' : c)}
+                className={`px-3 py-1.5 text-xs font-bold border transition-colors capitalize ${
+                  category === c
+                    ? 'bg-brand-400 text-gray-900 border-brand-400'
+                    : 'bg-cream text-gray-400 border-amber-200 hover:text-gray-700'
+                }`}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Members */}

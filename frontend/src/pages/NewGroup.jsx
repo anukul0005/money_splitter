@@ -4,7 +4,7 @@ import { createGroup } from '../api'
 
 export default function NewGroup() {
   const nav = useNavigate()
-  const [form, setForm]             = useState({ name: '', description: '' })
+  const [form, setForm]             = useState({ name: '', description: '', category: '' })
   const [memberInput, setMInput]    = useState('')
   const [members, setMembers]       = useState([])
   const [submitting, setSubmitting] = useState(false)
@@ -70,6 +70,27 @@ export default function NewGroup() {
             value={form.description}
             onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
           />
+        </div>
+
+        {/* Category */}
+        <div>
+          <label className="label">Category</label>
+          <div className="flex gap-2 flex-wrap">
+            {['trip', 'outing', 'festival', 'personal', 'other'].map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, category: f.category === c ? '' : c }))}
+                className={`px-3 py-1.5 text-xs font-bold border transition-colors capitalize ${
+                  form.category === c
+                    ? 'bg-brand-400 text-gray-900 border-brand-400'
+                    : 'bg-cream text-gray-400 border-amber-200 hover:text-gray-700'
+                }`}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Members */}
