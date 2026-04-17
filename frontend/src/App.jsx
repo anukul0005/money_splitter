@@ -13,18 +13,28 @@ import Login       from './pages/Login'
 import { UserContext } from './UserContext'
 
 const SESSION_KEY = 'splitter_session'
-const ADMIN_KEYS  = ['anuk25', 'anub10']
+const ADMIN_NAMES = ['anukul', 'anubhav']
+
+// One-time migration: wipe all non-admin user accounts (groups/expenses untouched)
+if (!localStorage.getItem('splitter_migration_clear_users_v1')) {
+  localStorage.removeItem('splitter_users_v2')
+  localStorage.removeItem('splitter_users_v3')
+  // Clear session only if it belongs to a non-admin
+  try {
+    const s = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null')
+    if (s && !ADMIN_NAMES.includes(s.name?.toLowerCase())) {
+      localStorage.removeItem(SESSION_KEY)
+    }
+  } catch { localStorage.removeItem(SESSION_KEY) }
+  localStorage.setItem('splitter_migration_clear_users_v1', '1')
+}
 
 function getStoredUser() {
   try {
     const s = localStorage.getItem(SESSION_KEY)
     if (!s) return null
     const u = JSON.parse(s)
-    // Backfill isAdmin for any sessions saved before this field was added
-    if (u.isAdmin === undefined) {
-      return { ...u, isAdmin: ADMIN_KEYS.includes(u.key) }
-    }
-    return u
+    return u?.name ? u : null
   } catch { return null }
 }
 
