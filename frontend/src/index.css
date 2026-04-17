@@ -21,8 +21,10 @@
     text-transform: none;
     letter-spacing: normal;
     font-family: inherit;
-    /* 16px prevents iOS Safari from zooming in when an input is focused */
-    font-size: 16px;
+    /* 16px !important prevents iOS Safari from zooming in when an input is focused.
+       The !important overrides Tailwind's text-sm (14px) which would otherwise
+       trigger auto-zoom on every focus tap. */
+    font-size: 16px !important;
     /* Disable double-tap zoom on interactive elements */
     touch-action: manipulation;
   }
@@ -41,8 +43,9 @@
     @apply text-gray-500 hover:text-gray-800 active:scale-95 transition-all duration-150;
   }
   .input {
-    @apply w-full border border-amber-200 px-4 py-3 text-sm
+    @apply w-full border border-amber-200 px-4 py-3
            focus:outline-none focus:ring-2 focus:ring-brand-400 bg-cream-50;
+    /* No text-sm here — font-size is locked to 16px globally to prevent iOS zoom */
   }
   .label {
     @apply block text-xs font-bold text-gray-500 mb-1.5 uppercase tracking-widest;
