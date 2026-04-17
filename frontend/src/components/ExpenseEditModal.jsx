@@ -136,8 +136,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
       className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
-      {/* relative so the absolutely-positioned footer anchors to this card */}
-      <div className="bg-cream w-full md:max-w-lg h-[90vh] md:h-auto md:max-h-[92vh] overflow-hidden flex flex-col relative border-t border-x border-amber-100/60 md:border shadow-2xl">
+      <div className="bg-cream w-full md:max-w-lg h-[90vh] md:h-auto md:max-h-[92vh] overflow-hidden flex flex-col border-t border-x border-amber-100/60 md:border shadow-2xl">
 
         {/* Header */}
         <div className="px-5 py-4 border-b border-amber-100/60 flex items-center justify-between flex-shrink-0 bg-cream">
@@ -149,8 +148,8 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
           </button>
         </div>
 
-        {/* Body — pb-20 reserves space so content isn't hidden behind the absolute footer */}
-        <div className="overflow-y-auto flex-1 min-h-0 px-5 py-4 pb-20 space-y-4">
+        {/* Body */}
+        <div className="overflow-y-auto flex-1 min-h-0 px-5 py-4 space-y-4">
 
           {/* Amount — editable */}
           <div>
@@ -292,8 +291,11 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
           )}
         </div>
 
-        {/* Footer — absolute so it's always visible regardless of flex/scroll behaviour */}
-        <div className="absolute bottom-0 left-0 right-0 px-5 pt-3 pb-6 flex gap-3 border-t border-amber-100/60 bg-cream z-10">
+        {/* Footer */}
+        <div
+          className="flex-shrink-0 px-5 pt-3 flex gap-3 border-t border-amber-100/60 bg-cream"
+          style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 1.25rem)' }}
+        >
           <button
             className="flex-1 py-3 text-xs font-bold text-gray-500 border border-amber-200 hover:bg-amber-50 active:scale-95 transition-all"
             onClick={onClose}
