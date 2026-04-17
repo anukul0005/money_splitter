@@ -3,14 +3,15 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   Chart, BarElement, CategoryScale, LinearScale, Tooltip, Legend,
   ArcElement, DoughnutController, BarController,
+  LineElement, PointElement, LineController,
 } from 'chart.js'
-import { Bar, Doughnut } from 'react-chartjs-2'
+import { Bar, Doughnut, Line } from 'react-chartjs-2'
 import { getGroup, getSettlement, getGroupStats, deleteExpense, deleteGroup, settleExpense } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ExpenseEditModal from '../components/ExpenseEditModal'
 import { useUser } from '../UserContext'
 
-Chart.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend, ArcElement, DoughnutController, BarController)
+Chart.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend, ArcElement, DoughnutController, BarController, LineElement, PointElement, LineController)
 Chart.defaults.font.family = "'Barlow Condensed', sans-serif"
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
@@ -134,6 +135,59 @@ export default function GroupDetail() {
     }
     return { mean, median, mode, p10: pct(10), p25: pct(25), p75: pct(75), p90: pct(90), min: expAmounts[0], max: expAmounts[n - 1] }
   })()
+
+  // Daily spend line chart (for single-member groups)
+  const isSolo = group.members.length === 1
+  const dailyMap = {}
+  group.expenses.forEach((e) => {
+    if (e.date) dailyMap[e.date] = (dailyMap[e.date] || 0) + e.amount
+  })
+  const dailyEntries = Object.entries(dailyMap).sort(([a], [b]) => a.localeCompare(b))
+  const dailyLabels  = dailyEntries.map(([d]) => d)
+  const dailyValues  = dailyEntries.map(([, v]) => v)
+
+  const dailyLineData = {
+    labels: dailyLabels,
+    datasets: [{
+      label: 'Daily Spend',
+      data: dailyValues,
+      borderColor: '#22c55e',
+      backgroundColor: 'rgba(34,197,94,0.08)',
+      borderWidth: 2,
+      pointRadius: 5,
+      pointHoverRadius: 7,
+      pointBackgroundColor: '#22c55e',
+      tension: 0,
+      fill: true,
+    }],
+  }
+
+  const dailyLineOptions = {
+    responsive: true,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { display: false },
+      tooltip: { callbacks: { label: (c) => ` ${INR(c.parsed.y)}` } },
+    },
+    scales: {
+      x: {
+        ticks: {
+          font: { size: 11, family: "'Barlow Condensed'" },
+          maxTicksLimit: 3,
+          maxRotation: 0,
+        },
+        grid: { display: false },
+      },
+      y: {
+        ticks: {
+          callback: (v) => `₹${(v / 1000).toFixed(0)}k`,
+          font: { size: 11, family: "'Barlow Condensed'" },
+          maxTicksLimit: 4,
+        },
+        grid: { color: '#f1f5f9' },
+      },
+    },
+  }
 
   return (
     <div className="pb-24 md:pb-8">
@@ -386,47 +440,84 @@ export default function GroupDetail() {
       {/* Charts tab */}
       {tab === 'chart' && stats && (
         <div className="px-5 space-y-4 mt-2">
-          <div className="flex gap-2">
-            {[['member','By Person'],['category','By Category']].map(([v, label]) => (
-              <button
-                key={v}
-                onClick={() => setChartView(v)}
-                className={`px-3 py-1.5 text-xs font-bold transition-colors border ${
-                  chartView === v
-                    ? 'bg-brand-400 text-gray-900 border-brand-400'
-                    : 'bg-amber-50 border-amber-200 text-gray-500'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
 
-          {chartView === 'member' && (
-            <div className="card">
-              <h3 className="text-xs font-bold text-gray-500 mb-3">Who paid how much?</h3>
-              <Bar data={memberChartData} options={hBarOptions} />
-            </div>
-          )}
-
-          {chartView === 'category' && catData.length > 0 && (
-            <div className="card">
-              <h3 className="text-xs font-bold text-gray-500 mb-3">Spending by category</h3>
-              <div className="flex items-start gap-4">
-                <div className="w-36 h-36 flex-shrink-0">
-                  <Doughnut data={catChartData} options={donutOptions} />
+          {/* Solo group: daily spend line + category donut */}
+          {isSolo ? (
+            <>
+              {dailyEntries.length > 0 ? (
+                <div className="card">
+                  <h3 className="text-xs font-bold text-gray-500 mb-3">Daily Spend</h3>
+                  <Line data={dailyLineData} options={dailyLineOptions} />
                 </div>
-                <ul className="flex-1 space-y-2">
-                  {catData.map((c, i) => (
-                    <li key={c.category} className="flex items-start gap-2">
-                      <span className="w-2 h-2 flex-shrink-0 mt-1.5" style={{ background: PALETTE[i % PALETTE.length] }} />
-                      <span className="text-xs text-gray-600 flex-1 leading-tight">{c.category}</span>
-                      <span className="text-xs font-black flex-shrink-0">{INR(c.total)}</span>
-                    </li>
-                  ))}
-                </ul>
+              ) : (
+                <p className="text-xs text-gray-400 text-center py-6">No dated expenses yet</p>
+              )}
+
+              {catData.length > 0 && (
+                <div className="card">
+                  <h3 className="text-xs font-bold text-gray-500 mb-3">Spending by category</h3>
+                  <div className="flex items-start gap-4">
+                    <div className="w-36 h-36 flex-shrink-0">
+                      <Doughnut data={catChartData} options={donutOptions} />
+                    </div>
+                    <ul className="flex-1 space-y-2">
+                      {catData.map((c, i) => (
+                        <li key={c.category} className="flex items-start gap-2">
+                          <span className="w-2 h-2 flex-shrink-0 mt-1.5" style={{ background: PALETTE[i % PALETTE.length] }} />
+                          <span className="text-xs text-gray-600 flex-1 leading-tight">{c.category}</span>
+                          <span className="text-xs font-black flex-shrink-0">{INR(c.total)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="flex gap-2">
+                {[['member','By Person'],['category','By Category']].map(([v, label]) => (
+                  <button
+                    key={v}
+                    onClick={() => setChartView(v)}
+                    className={`px-3 py-1.5 text-xs font-bold transition-colors border ${
+                      chartView === v
+                        ? 'bg-brand-400 text-gray-900 border-brand-400'
+                        : 'bg-amber-50 border-amber-200 text-gray-500'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
-            </div>
+
+              {chartView === 'member' && (
+                <div className="card">
+                  <h3 className="text-xs font-bold text-gray-500 mb-3">Who paid how much?</h3>
+                  <Bar data={memberChartData} options={hBarOptions} />
+                </div>
+              )}
+
+              {chartView === 'category' && catData.length > 0 && (
+                <div className="card">
+                  <h3 className="text-xs font-bold text-gray-500 mb-3">Spending by category</h3>
+                  <div className="flex items-start gap-4">
+                    <div className="w-36 h-36 flex-shrink-0">
+                      <Doughnut data={catChartData} options={donutOptions} />
+                    </div>
+                    <ul className="flex-1 space-y-2">
+                      {catData.map((c, i) => (
+                        <li key={c.category} className="flex items-start gap-2">
+                          <span className="w-2 h-2 flex-shrink-0 mt-1.5" style={{ background: PALETTE[i % PALETTE.length] }} />
+                          <span className="text-xs text-gray-600 flex-1 leading-tight">{c.category}</span>
+                          <span className="text-xs font-black flex-shrink-0">{INR(c.total)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
           {distStats && (

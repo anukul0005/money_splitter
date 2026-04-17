@@ -31,6 +31,7 @@ export default function AddExpense() {
   const [error, setError]                 = useState('')
   const [successCount, setSuccessCount]   = useState(0)
   const [members, setMembers]             = useState([])
+  const [existingTitles, setExistingTitles] = useState([])
 
   // Split mode state
   const [splitMode, setSplitMode]               = useState('equal')
@@ -59,15 +60,18 @@ export default function AddExpense() {
   }, [])
 
   useEffect(() => {
-    if (!form.group_id) { setMembers([]); return }
+    if (!form.group_id) { setMembers([]); setExistingTitles([]); return }
     import('../api').then(({ getGroup }) =>
       getGroup(form.group_id).then((r) => {
         const ms = r.data.members || []
         setMembers(ms)
-        setForm((f) => ({ ...f, divider: String(ms.length || 2) }))
+        const autoPaidBy = ms.length === 1 ? ms[0].name : ''
+        setForm((f) => ({ ...f, divider: String(ms.length || 2), paid_by: autoPaidBy }))
         setSplitMode('equal')
         setGentlemanFlipped(false)
         setCustomPcts(Object.fromEntries(ms.map((m) => [m.name, ''])))
+        const titles = [...new Set((r.data.expenses || []).map((e) => e.title).filter(Boolean))]
+        setExistingTitles(titles)
       })
     )
   }, [form.group_id, groups])
@@ -223,30 +227,32 @@ export default function AddExpense() {
           />
         </div>
 
-        {/* Paid by */}
-        <div>
-          <label className="label">Paid by *</label>
-          {members.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
-              {members.map((m) => (
-                <button
-                  type="button"
-                  key={m.id}
-                  onClick={() => setForm((f) => ({ ...f, paid_by: m.name }))}
-                  className={`px-4 py-2 text-sm font-bold transition-colors border ${
-                    form.paid_by === m.name
-                      ? 'bg-brand-400 text-gray-900 border-brand-400'
-                      : 'bg-amber-50 text-gray-700 border-amber-200'
-                  }`}
-                >
-                  {m.name}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <input className="input" placeholder="Name of person who paid" value={form.paid_by} onChange={set('paid_by')} />
-          )}
-        </div>
+        {/* Paid by — hidden for single-member groups (auto-filled) */}
+        {members.length !== 1 && (
+          <div>
+            <label className="label">Paid by *</label>
+            {members.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {members.map((m) => (
+                  <button
+                    type="button"
+                    key={m.id}
+                    onClick={() => setForm((f) => ({ ...f, paid_by: m.name }))}
+                    className={`px-4 py-2 text-sm font-bold transition-colors border ${
+                      form.paid_by === m.name
+                        ? 'bg-brand-400 text-gray-900 border-brand-400'
+                        : 'bg-amber-50 text-gray-700 border-amber-200'
+                    }`}
+                  >
+                    {m.name}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <input className="input" placeholder="Name of person who paid" value={form.paid_by} onChange={set('paid_by')} />
+            )}
+          </div>
+        )}
 
         {/* Payment mode */}
         <div>
@@ -438,10 +444,22 @@ export default function AddExpense() {
           </div>
         </div>
 
-        {/* Title */}
+        {/* Title with autocomplete from existing group expenses */}
         <div>
           <label className="label">Description (optional)</label>
-          <input className="input" placeholder="e.g. dinner at Punjab Grill" value={form.title} onChange={set('title')} />
+          <input
+            className="input"
+            placeholder="e.g. dinner at Punjab Grill"
+            value={form.title}
+            onChange={set('title')}
+            list="expense-title-suggestions"
+            autoComplete="off"
+          />
+          {existingTitles.length > 0 && (
+            <datalist id="expense-title-suggestions">
+              {existingTitles.map((t) => <option key={t} value={t} />)}
+            </datalist>
+          )}
         </div>
 
         {/* Date */}

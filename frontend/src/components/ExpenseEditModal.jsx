@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { updateExpense } from '../api'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
@@ -44,6 +44,13 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
     const ea = r2(100 / members.length)
     return Object.fromEntries(members.map((m) => [m, String(ea)]))
   }
+
+  // Lock body scroll while modal is open
+  useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [])
 
   const [amount,      setAmount]      = useState(String(expense.amount))
   const [title,       setTitle]       = useState(expense.title || '')
