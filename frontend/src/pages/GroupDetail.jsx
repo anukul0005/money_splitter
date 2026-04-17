@@ -262,7 +262,7 @@ export default function GroupDetail() {
                   )}
                 </div>
 
-                {/* Action buttons — edit always visible; delete only for non-historical */}
+                {/* Action buttons — edit + delete always visible */}
                 <div className="flex flex-col gap-1 ml-1 mt-0.5 flex-shrink-0">
                   <button
                     onClick={() => setEditingExp(e)}
@@ -273,17 +273,15 @@ export default function GroupDetail() {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                     </svg>
                   </button>
-                  {!group.is_historical && (
-                    <button
-                      onClick={() => handleDeleteExpense(e.id)}
-                      className="text-gray-300 hover:text-red-400 transition-colors"
-                      title="Delete expense"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  )}
+                  <button
+                    onClick={() => handleDeleteExpense(e.id)}
+                    className="text-gray-300 hover:text-red-400 transition-colors"
+                    title="Delete expense"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
                 </div>
               </div>
             )
