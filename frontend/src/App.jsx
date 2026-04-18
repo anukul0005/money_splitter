@@ -7,6 +7,7 @@ import Groups      from './pages/Groups'
 import GroupDetail from './pages/GroupDetail'
 import AddExpense  from './pages/AddExpense'
 import NewGroup    from './pages/NewGroup'
+import MonthlyGroup from './pages/MonthlyGroup'
 import EditGroup   from './pages/EditGroup'
 import History     from './pages/History'
 import Login       from './pages/Login'
@@ -61,7 +62,8 @@ export default function App() {
               <Routes>
                 <Route path="/"           element={<Home />} />
                 <Route path="/groups"     element={<Groups />} />
-                <Route path="/groups/new" element={<NewGroup />} />
+                <Route path="/groups/new"     element={<NewGroup />} />
+                <Route path="/groups/monthly" element={<MonthlyGroup />} />
                 <Route path="/groups/:id" element={<GroupDetail />} />
                 <Route path="/groups/:id/edit" element={<EditGroup />} />
                 <Route path="/add"        element={<AddExpense />} />
