@@ -273,7 +273,13 @@ export default function GroupDetail() {
               <svg className="w-10 h-10 mx-auto mb-2 text-gray-300" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" />
               </svg>
-              <p className="text-sm">No expenses yet</p>
+              <p className="text-sm mb-4">No expenses yet</p>
+              <button
+                onClick={() => nav(`/add?group=${id}`)}
+                className="btn-primary px-6 py-3 text-sm"
+              >
+                + Add First Expense
+              </button>
             </div>
           )}
           {[...group.expenses]

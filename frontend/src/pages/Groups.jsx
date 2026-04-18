@@ -1,11 +1,17 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getGroups, createGroup } from '../api'
+import { getGroups, createGroup, updateGroup } from '../api'
 import GroupCard from '../components/GroupCard'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser, isAdmin } from '../UserContext'
 
 const MONTH_NAMES = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
+
+const getTargetName = (my) => {
+  if (!my) return ''
+  const [y, m] = my.split('-')
+  return `MONTHLY EXPENSES ${MONTH_NAMES[parseInt(m) - 1]} ${y}`
+}
 
 export default function Groups() {
   const nav = useNavigate()
@@ -23,25 +29,48 @@ export default function Groups() {
     getGroups().then((r) => setGroups(r.data)).finally(() => setLoading(false))
   }, [])
 
+  // All users only see groups they belong to (case-insensitive)
+  const visibleGroups = groups.filter((g) =>
+    (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase())
+  )
+
+  // Derived from current monthYear selection
+  const targetName  = getTargetName(monthYear)
+  const exactMatch  = visibleGroups.find((g) => g.name === targetName)
+  const fuzzyMatch  = !exactMatch && monthYear ? (() => {
+    const [y, m] = monthYear.split('-')
+    const mon = MONTH_NAMES[parseInt(m) - 1].toLowerCase()
+    return visibleGroups.find((g) => {
+      const lower = g.name.toLowerCase()
+      return (lower.includes(mon) || lower.includes(y)) &&
+             (g.member_names ?? []).length === 1
+    })
+  })() : null
+
   const handleCreateMonthly = async () => {
     if (!monthYear || !user?.name) return
-    const [y, m] = monthYear.split('-')
-    const name = `MONTHLY EXPENSES ${MONTH_NAMES[parseInt(m) - 1]} ${y}`
+    if (exactMatch) { setShowMonthlyModal(false); nav(`/groups/${exactMatch.id}`); return }
     setMonthlyCreating(true)
     try {
-      const r = await createGroup({ name, description: '', category: 'personal', emoji: '', members: [user.name] })
+      const r = await createGroup({ name: targetName, description: '', category: 'personal', emoji: '', members: [user.name] })
       setShowMonthlyModal(false)
-      getGroups().then((res) => setGroups(res.data))
       nav(`/groups/${r.data.id}`)
     } finally {
       setMonthlyCreating(false)
     }
   }
 
-  // All users only see groups they belong to (case-insensitive)
-  const visibleGroups = groups.filter((g) =>
-    (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase())
-  )
+  const handleRenameAndUse = async () => {
+    if (!fuzzyMatch || !targetName) return
+    setMonthlyCreating(true)
+    try {
+      await updateGroup(fuzzyMatch.id, { name: targetName, description: null, category: 'personal', members_add: [], members_remove: [] })
+      setShowMonthlyModal(false)
+      nav(`/groups/${fuzzyMatch.id}`)
+    } finally {
+      setMonthlyCreating(false)
+    }
+  }
 
   const filtered = visibleGroups.filter((g) =>
     filter === 'all' ? true : filter === 'historical' ? g.is_historical : !g.is_historical
@@ -99,10 +128,13 @@ export default function Groups() {
       {showMonthlyModal && (
         <div
           className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50"
+          style={{ touchAction: 'none' }}
           onClick={(e) => { if (e.target === e.currentTarget) setShowMonthlyModal(false) }}
         >
-          <div className="bg-cream w-full md:max-w-sm border-t border-x border-amber-100/60 md:border shadow-2xl p-5 space-y-4">
-            <div className="flex items-center justify-between">
+          <div className="bg-cream w-full md:max-w-sm border-t border-x border-amber-100/60 md:border shadow-2xl flex flex-col">
+
+            {/* Header */}
+            <div className="px-5 pt-5 pb-4 flex items-center justify-between border-b border-amber-100/60 flex-shrink-0">
               <h2 className="font-black text-sm tracking-widest">Track Monthly Expenses</h2>
               <button onClick={() => setShowMonthlyModal(false)} className="text-gray-400 hover:text-gray-700 p-1">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -110,36 +142,68 @@ export default function Groups() {
                 </svg>
               </button>
             </div>
-            <div>
-              <label className="label">Month &amp; Year</label>
-              <input
-                type="month"
-                className="input"
-                value={monthYear}
-                onChange={(e) => setMonthYear(e.target.value)}
-              />
+
+            {/* Body */}
+            <div className="px-5 py-4 space-y-4 flex-1">
+              <div>
+                <label className="label">Month &amp; Year</label>
+                <input
+                  type="month"
+                  className="input"
+                  value={monthYear}
+                  onChange={(e) => setMonthYear(e.target.value)}
+                />
+              </div>
+
+              {/* Status feedback */}
+              {exactMatch && (
+                <div className="bg-brand-400/10 border border-brand-400/30 px-3 py-2.5">
+                  <p className="text-xs font-bold text-brand-700">Group already exists — will open it.</p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">{exactMatch.name}</p>
+                </div>
+              )}
+              {fuzzyMatch && (
+                <div className="bg-amber-50 border border-amber-300 px-3 py-2.5 space-y-1.5">
+                  <p className="text-xs font-bold text-amber-800">Found a similar group:</p>
+                  <p className="text-[10px] text-gray-600 font-semibold">"{fuzzyMatch.name}"</p>
+                  <p className="text-[10px] text-gray-500">Rename it to <span className="font-bold text-gray-700">{targetName}</span> and open?</p>
+                </div>
+              )}
+              {!exactMatch && !fuzzyMatch && targetName && (
+                <p className="text-xs text-gray-400">
+                  Will create: <span className="font-bold text-gray-700">{targetName}</span>
+                </p>
+              )}
             </div>
-            {monthYear && (
-              <p className="text-xs text-gray-400">
-                Creates: <span className="font-bold text-gray-700">
-                  MONTHLY EXPENSES {MONTH_NAMES[parseInt(monthYear.split('-')[1]) - 1]} {monthYear.split('-')[0]}
-                </span>
-              </p>
-            )}
-            <div className="flex gap-3 pt-1">
+
+            {/* Footer — always visible, safe-area aware */}
+            <div
+              className="px-5 pt-3 flex gap-3 border-t border-amber-100/60 bg-cream flex-shrink-0"
+              style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 1.25rem)' }}
+            >
               <button
-                className="flex-1 py-3 text-xs font-bold text-gray-500 border border-amber-200 hover:bg-amber-50"
+                className="flex-1 py-3 text-xs font-bold text-gray-500 border border-amber-200 hover:bg-amber-50 active:scale-95 transition-all"
                 onClick={() => setShowMonthlyModal(false)}
               >
                 Cancel
               </button>
-              <button
-                className="flex-1 btn-primary py-3 text-xs"
-                onClick={handleCreateMonthly}
-                disabled={monthlyCreating || !monthYear}
-              >
-                {monthlyCreating ? 'Creating…' : 'Create'}
-              </button>
+              {fuzzyMatch ? (
+                <button
+                  className="flex-1 btn-primary py-3 text-xs"
+                  onClick={handleRenameAndUse}
+                  disabled={monthlyCreating}
+                >
+                  {monthlyCreating ? 'Renaming…' : 'Rename & Open'}
+                </button>
+              ) : (
+                <button
+                  className="flex-1 btn-primary py-3 text-xs"
+                  onClick={handleCreateMonthly}
+                  disabled={monthlyCreating || !monthYear}
+                >
+                  {monthlyCreating ? (exactMatch ? 'Opening…' : 'Creating…') : (exactMatch ? 'Open' : 'Create')}
+                </button>
+              )}
             </div>
           </div>
         </div>
