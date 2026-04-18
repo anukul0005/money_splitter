@@ -140,10 +140,10 @@ export default function Groups() {
       {showMonthlyModal && (
         <div
           className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50"
-          style={{ touchAction: 'none' }}
+          style={{ touchAction: 'none', paddingBottom: 'env(safe-area-inset-bottom, 16px)' }}
           onClick={(e) => { if (e.target === e.currentTarget) { setShowMonthlyModal(false); setMonthlyError('') } }}
         >
-          <div className="bg-cream w-full md:max-w-sm border-t border-x border-amber-100/60 md:border shadow-2xl flex flex-col">
+          <div className="bg-cream w-full md:max-w-sm border-t border-x border-amber-100/60 md:border shadow-2xl flex flex-col max-h-[85dvh]">
 
             {/* Header */}
             <div className="px-5 pt-5 pb-4 flex items-center justify-between border-b border-amber-100/60 flex-shrink-0">
@@ -156,7 +156,7 @@ export default function Groups() {
             </div>
 
             {/* Body */}
-            <div className="px-5 py-4 space-y-4 flex-1">
+            <div className="px-5 py-4 space-y-4 flex-1 overflow-y-auto">
               <div>
                 <label className="label">Month &amp; Year</label>
                 <div className="flex gap-2">

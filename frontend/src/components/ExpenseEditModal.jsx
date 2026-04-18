@@ -271,7 +271,8 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
             </div>
           </div>
 
-          {/* Split type toggle */}
+          {/* Split type toggle — hidden for solo groups */}
+          {members.length > 1 && (
           <div>
             <label className="label">Split</label>
             <div className="flex border border-amber-200">
@@ -290,9 +291,10 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
               ))}
             </div>
           </div>
+          )}
 
           {/* Equal split preview */}
-          {splitMode === 'equal' && (
+          {members.length > 1 && splitMode === 'equal' && (
             <div className="border border-amber-200 bg-amber-50/50 px-3 py-2.5 space-y-1.5">
               <p className="text-[10px] font-black text-amber-700 tracking-widest mb-1">Equal split</p>
               {members.map((m) => (
@@ -305,7 +307,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
           )}
 
           {/* Custom % split */}
-          {splitMode === 'custom' && (
+          {members.length > 1 && splitMode === 'custom' && (
             <div className="border border-amber-200 bg-amber-50/50 px-3 py-3 space-y-2">
               <p className="text-[10px] font-black text-amber-700 tracking-widest mb-1">
                 {getSplitLabel()}
