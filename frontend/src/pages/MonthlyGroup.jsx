@@ -6,6 +6,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 
 const MONTH_NAMES = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
 const MONTH_FULL  = ['January','February','March','April','May','June','July','August','September','October','November','December']
+const START_YEAR  = 2020
 
 const getTargetName = (my) => {
   if (!my) return ''
@@ -25,7 +26,7 @@ export default function MonthlyGroup() {
   const [submitting,   setSubmitting]   = useState(false)
   const [error,        setError]        = useState('')
 
-  const yearOptions = [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1]
+  const yearOptions = Array.from({ length: now.getFullYear() + 1 - START_YEAR + 1 }, (_, i) => START_YEAR + i)
   const monthYear   = `${monthYearNum}-${String(monthMonth).padStart(2, '0')}`
   const targetName  = getTargetName(monthYear)
 
@@ -91,45 +92,31 @@ export default function MonthlyGroup() {
       {/* Body */}
       <div className="px-5 mt-6 space-y-6 max-w-lg">
 
-        {/* Month picker */}
-        <div>
-          <label className="label">Select Month</label>
-          <div className="grid grid-cols-3 gap-2 mt-2">
-            {MONTH_FULL.map((name, i) => (
-              <button
-                key={i}
-                type="button"
-                onClick={() => setMonthMonth(i + 1)}
-                className={`py-3 text-xs font-bold border transition-colors ${
-                  monthMonth === i + 1
-                    ? 'bg-brand-400 text-gray-900 border-brand-400'
-                    : 'bg-cream text-gray-500 border-amber-200 hover:text-gray-700 hover:border-amber-300'
-                }`}
-              >
-                {MONTH_NAMES[i]}
-              </button>
-            ))}
+        {/* Month + Year pickers */}
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <label className="label">Month</label>
+            <select
+              value={monthMonth}
+              onChange={(e) => setMonthMonth(Number(e.target.value))}
+              className="mt-2 w-full border border-amber-200 bg-cream text-gray-800 font-bold text-sm px-3 py-3 appearance-none focus:outline-none focus:border-brand-400"
+            >
+              {MONTH_FULL.map((name, i) => (
+                <option key={i} value={i + 1}>{name}</option>
+              ))}
+            </select>
           </div>
-        </div>
-
-        {/* Year picker */}
-        <div>
-          <label className="label">Select Year</label>
-          <div className="flex gap-2 mt-2">
-            {yearOptions.map((y) => (
-              <button
-                key={y}
-                type="button"
-                onClick={() => setMonthYearNum(y)}
-                className={`flex-1 py-3 text-sm font-bold border transition-colors ${
-                  monthYearNum === y
-                    ? 'bg-brand-400 text-gray-900 border-brand-400'
-                    : 'bg-cream text-gray-500 border-amber-200 hover:text-gray-700'
-                }`}
-              >
-                {y}
-              </button>
-            ))}
+          <div className="flex-1">
+            <label className="label">Year</label>
+            <select
+              value={monthYearNum}
+              onChange={(e) => setMonthYearNum(Number(e.target.value))}
+              className="mt-2 w-full border border-amber-200 bg-cream text-gray-800 font-bold text-sm px-3 py-3 appearance-none focus:outline-none focus:border-brand-400"
+            >
+              {yearOptions.map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
           </div>
         </div>
 
@@ -150,8 +137,7 @@ export default function MonthlyGroup() {
 
       {/* Sticky footer — fixed on mobile, inline on desktop */}
       <div
-        className="fixed bottom-0 left-0 right-0 md:static md:mt-6 md:px-5 md:max-w-lg px-5 pt-3 bg-cream border-t border-amber-100/60 md:border-0 md:bg-transparent z-20"
-        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 1.25rem)' }}
+        className="fixed bottom-16 left-0 right-0 md:static md:bottom-auto md:mt-6 md:px-5 md:max-w-lg px-5 pt-3 pb-5 bg-cream border-t border-amber-100/60 md:border-0 md:bg-transparent z-20"
       >
         <button
           type="button"
