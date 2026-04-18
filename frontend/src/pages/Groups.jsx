@@ -22,8 +22,14 @@ export default function Groups() {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
   const [showMonthlyModal, setShowMonthlyModal] = useState(false)
-  const [monthYear, setMonthYear] = useState(() => new Date().toISOString().slice(0, 7))
+  const [monthMonth, setMonthMonth] = useState(() => new Date().getMonth() + 1)
+  const [monthYearNum, setMonthYearNum] = useState(() => new Date().getFullYear())
   const [monthlyCreating, setMonthlyCreating] = useState(false)
+  const [monthlyError, setMonthlyError] = useState('')
+
+  const monthYear = `${monthYearNum}-${String(monthMonth).padStart(2, '0')}`
+  const now = new Date()
+  const yearOptions = [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1]
 
   useEffect(() => {
     getGroups().then((r) => setGroups(r.data)).finally(() => setLoading(false))
@@ -51,10 +57,13 @@ export default function Groups() {
     if (!monthYear || !user?.name) return
     if (exactMatch) { setShowMonthlyModal(false); nav(`/groups/${exactMatch.id}`); return }
     setMonthlyCreating(true)
+    setMonthlyError('')
     try {
-      const r = await createGroup({ name: targetName, description: '', category: 'personal', emoji: '', members: [user.name] })
+      const r = await createGroup({ name: targetName, description: '', category: 'personal', emoji: '💰', members: [user.name] })
       setShowMonthlyModal(false)
       nav(`/groups/${r.data.id}`)
+    } catch (err) {
+      setMonthlyError(err?.response?.data?.detail || 'Failed to create group. Please try again.')
     } finally {
       setMonthlyCreating(false)
     }
@@ -63,10 +72,13 @@ export default function Groups() {
   const handleRenameAndUse = async () => {
     if (!fuzzyMatch || !targetName) return
     setMonthlyCreating(true)
+    setMonthlyError('')
     try {
       await updateGroup(fuzzyMatch.id, { name: targetName, description: null, category: 'personal', members_add: [], members_remove: [] })
       setShowMonthlyModal(false)
       nav(`/groups/${fuzzyMatch.id}`)
+    } catch (err) {
+      setMonthlyError(err?.response?.data?.detail || 'Failed to rename group. Please try again.')
     } finally {
       setMonthlyCreating(false)
     }
@@ -129,14 +141,14 @@ export default function Groups() {
         <div
           className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50"
           style={{ touchAction: 'none' }}
-          onClick={(e) => { if (e.target === e.currentTarget) setShowMonthlyModal(false) }}
+          onClick={(e) => { if (e.target === e.currentTarget) { setShowMonthlyModal(false); setMonthlyError('') } }}
         >
           <div className="bg-cream w-full md:max-w-sm border-t border-x border-amber-100/60 md:border shadow-2xl flex flex-col">
 
             {/* Header */}
             <div className="px-5 pt-5 pb-4 flex items-center justify-between border-b border-amber-100/60 flex-shrink-0">
               <h2 className="font-black text-sm tracking-widest">Track Monthly Expenses</h2>
-              <button onClick={() => setShowMonthlyModal(false)} className="text-gray-400 hover:text-gray-700 p-1">
+              <button onClick={() => { setShowMonthlyModal(false); setMonthlyError('') }} className="text-gray-400 hover:text-gray-700 p-1">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -147,12 +159,24 @@ export default function Groups() {
             <div className="px-5 py-4 space-y-4 flex-1">
               <div>
                 <label className="label">Month &amp; Year</label>
-                <input
-                  type="month"
-                  className="input"
-                  value={monthYear}
-                  onChange={(e) => setMonthYear(e.target.value)}
-                />
+                <div className="flex gap-2">
+                  <select
+                    className="input flex-1"
+                    value={monthMonth}
+                    onChange={(e) => setMonthMonth(Number(e.target.value))}
+                  >
+                    {MONTH_NAMES.map((name, i) => (
+                      <option key={i} value={i + 1}>{name}</option>
+                    ))}
+                  </select>
+                  <select
+                    className="input w-28"
+                    value={monthYearNum}
+                    onChange={(e) => setMonthYearNum(Number(e.target.value))}
+                  >
+                    {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+                  </select>
+                </div>
               </div>
 
               {/* Status feedback */}
@@ -174,6 +198,9 @@ export default function Groups() {
                   Will create: <span className="font-bold text-gray-700">{targetName}</span>
                 </p>
               )}
+              {monthlyError && (
+                <p className="text-xs text-red-500 bg-red-50 border border-red-100 px-3 py-2">{monthlyError}</p>
+              )}
             </div>
 
             {/* Footer — always visible, safe-area aware */}
@@ -183,7 +210,7 @@ export default function Groups() {
             >
               <button
                 className="flex-1 py-3 text-xs font-bold text-gray-500 border border-amber-200 hover:bg-amber-50 active:scale-95 transition-all"
-                onClick={() => setShowMonthlyModal(false)}
+                onClick={() => { setShowMonthlyModal(false); setMonthlyError('') }}
               >
                 Cancel
               </button>

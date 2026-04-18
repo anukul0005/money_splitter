@@ -385,7 +385,7 @@ export default function GroupDetail() {
 
                   <div className="text-right flex-shrink-0">
                     <p className="text-sm font-black text-gray-900">{INR(e.amount)}</p>
-                    {!e.split_json && (
+                    {!e.split_json && !isSolo && (
                       <p className="text-xs text-brand-600">{INR(e.individual_amount)}/ea</p>
                     )}
                   </div>

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { getGroups, createExpense } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
+import { useUser } from '../UserContext'
 
 const CATEGORIES = [
   'Food','Drinks','Snacks','Travel - Cab','Travel - Train',
@@ -20,6 +21,7 @@ const STORED_PAYMENT_KEY = 'splitter_last_payment_mode'
 
 export default function AddExpense() {
   const nav = useNavigate()
+  const user = useUser()
   const [params] = useSearchParams()
   const urlGroup     = params.get('group') || ''
   const defaultGroup = urlGroup || localStorage.getItem(STORED_GROUP_KEY) || ''
@@ -161,6 +163,9 @@ export default function AddExpense() {
 
   if (loading) return <LoadingSpinner text="Loading groups…" />
 
+  const userGroups = groups.filter((g) =>
+    (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase())
+  )
   const selectedGroup = groups.find((g) => String(g.id) === String(form.group_id))
 
   return (
@@ -206,7 +211,7 @@ export default function AddExpense() {
           <label className="label">Group *</label>
           <select className="input" value={form.group_id} onChange={set('group_id')}>
             <option value="">Select a group…</option>
-            {groups.map((g) => (
+            {userGroups.map((g) => (
               <option key={g.id} value={g.id}>{g.name}</option>
             ))}
           </select>

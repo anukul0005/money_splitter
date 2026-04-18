@@ -164,7 +164,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
       style={{ touchAction: 'none' }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div className="bg-cream w-full md:max-w-lg h-[90vh] md:h-auto md:max-h-[92vh] overflow-hidden flex flex-col border-t border-x border-amber-100/60 md:border shadow-2xl">
+      <div className="bg-cream w-full md:max-w-lg h-[90dvh] md:h-auto md:max-h-[92vh] overflow-hidden flex flex-col border-t border-x border-amber-100/60 md:border shadow-2xl">
 
         {/* Header */}
         <div className="px-5 py-4 border-b border-amber-100/60 flex items-center justify-between flex-shrink-0 bg-cream">
@@ -240,13 +240,15 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
             </div>
           </div>
 
-          {/* Paid by */}
-          <div>
-            <label className="label">Paid By</label>
-            <select className="input" value={paidBy} onChange={(e) => setPaidBy(e.target.value)}>
-              {members.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </div>
+          {/* Paid by — hidden for solo groups (only one possible payer) */}
+          {members.length > 1 && (
+            <div>
+              <label className="label">Paid By</label>
+              <select className="input" value={paidBy} onChange={(e) => setPaidBy(e.target.value)}>
+                {members.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+          )}
 
           {/* Payment mode */}
           <div>
