@@ -233,7 +233,7 @@ export default function GroupDetail() {
 
         {/* Tabs */}
         <div className="flex gap-1 mt-3">
-          {[['expenses','Expenses'],['chart','Charts'],['settle','Settle Up']].map(([v, label]) => (
+          {([['expenses','Expenses'],['chart','Charts'],...(isSolo ? [] : [['settle','Settle Up']])]).map(([v, label]) => (
             <button
               key={v}
               onClick={() => setTab(v)}
@@ -276,7 +276,14 @@ export default function GroupDetail() {
               <p className="text-sm">No expenses yet</p>
             </div>
           )}
-          {[...group.expenses].reverse().map((e) => {
+          {[...group.expenses]
+            .sort((a, b) => {
+              if (!a.date && !b.date) return 0
+              if (!a.date) return 1
+              if (!b.date) return -1
+              return b.date.localeCompare(a.date)
+            })
+            .map((e) => {
             const memberCount   = group.members.length
             const isPartialSplit = !e.split_json && e.divider < memberCount && e.divider > 0
 

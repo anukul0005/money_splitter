@@ -45,16 +45,22 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
     return Object.fromEntries(members.map((m) => [m, String(ea)]))
   }
 
-  // Lock body scroll — position:fixed is the only reliable iOS Safari fix
+  // Lock body scroll — position:fixed + html overflow:hidden is the most robust iOS Safari fix
   useEffect(() => {
     const scrollY = window.scrollY
-    document.body.style.position = 'fixed'
-    document.body.style.top = `-${scrollY}px`
-    document.body.style.width = '100%'
+    const body = document.body
+    const html = document.documentElement
+    body.style.position = 'fixed'
+    body.style.top = `-${scrollY}px`
+    body.style.width = '100%'
+    body.style.overflow = 'hidden'
+    html.style.overflow = 'hidden'
     return () => {
-      document.body.style.position = ''
-      document.body.style.top = ''
-      document.body.style.width = ''
+      body.style.position = ''
+      body.style.top = ''
+      body.style.width = ''
+      body.style.overflow = ''
+      html.style.overflow = ''
       window.scrollTo(0, scrollY)
     }
   }, [])
@@ -155,6 +161,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
   return (
     <div
       className="fixed inset-0 z-[200] flex items-end md:items-center justify-center bg-black/50 overflow-hidden"
+      style={{ touchAction: 'none' }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
       <div className="bg-cream w-full md:max-w-lg h-[90vh] md:h-auto md:max-h-[92vh] overflow-hidden flex flex-col border-t border-x border-amber-100/60 md:border shadow-2xl">
@@ -170,7 +177,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
         </div>
 
         {/* Body */}
-        <div className="overflow-y-auto overscroll-y-contain flex-1 min-h-0 px-5 py-4 space-y-4">
+        <div className="overflow-y-auto overscroll-y-contain flex-1 min-h-0 px-5 py-4 space-y-4" style={{ touchAction: 'pan-y' }}>
 
           {/* Amount — editable */}
           <div>

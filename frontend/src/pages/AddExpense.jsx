@@ -115,7 +115,7 @@ export default function AddExpense() {
       category:     '',
       title:        '',
       amount:       '',
-      paid_by:      '',
+      paid_by:      members.length === 1 ? members[0].name : '',
       divider:      String(members.length || 2),
       notes:        '',
       payment_mode: prev.payment_mode,  // persist the payment mode
