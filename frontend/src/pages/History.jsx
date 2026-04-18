@@ -53,9 +53,10 @@ export default function History() {
   const [loading,    setLoading]    = useState(true)
   const [error,      setError]      = useState('')
 
-  const [selectedYear, setSelectedYear] = useState('')
-  const [topN,         setTopN]         = useState(10)
-  const [timeFilter,   setTimeFilter]   = useState('all')  // '3' | '6' | '12' | 'all'
+  const [selectedYear,      setSelectedYear]      = useState('')
+  const [topN,              setTopN]              = useState(10)
+  const [timeFilter,        setTimeFilter]        = useState('all')
+  const [selectedDrillMonth, setSelectedDrillMonth] = useState(null)
 
   const filterForUser = (list) =>
     list.filter((g) =>
@@ -117,6 +118,9 @@ export default function History() {
     if (availableYears.length > 0 && !selectedYear) setSelectedYear(availableYears[0])
   }, [availableYears])
 
+  // Clear drill selection when filter changes
+  useEffect(() => { setSelectedDrillMonth(null) }, [timeFilter])
+
   const topGroups = useMemo(() => {
     if (!selectedYear) return []
     return groupStats
@@ -138,8 +142,8 @@ export default function History() {
     CAT_OPTIONS.forEach((c) => { map[c] = {} })
     groupStats.forEach((gs) => {
       if (!visibleIds.has(gs.group_id)) return
-      const grp   = visibleGroups.find((g) => g.id === gs.group_id)
-      const cat   = (grp?.category || 'other').toLowerCase()
+      const grp    = visibleGroups.find((g) => g.id === gs.group_id)
+      const cat    = (grp?.category || 'other').toLowerCase()
       const bucket = CAT_OPTIONS.includes(cat) ? cat : 'other'
       gs.by_date.forEach(({ date, total }) => {
         map[bucket][date] = (map[bucket][date] || 0) + total
@@ -153,6 +157,21 @@ export default function History() {
     () => CAT_OPTIONS.filter((c) => Object.keys(categoryMonthly[c] || {}).length > 0),
     [categoryMonthly],
   )
+
+  // Groups that contributed to each month (for drill-down)
+  const monthlyByGroup = useMemo(() => {
+    const map = {}
+    groupStats.forEach((gs) => {
+      if (!visibleIds.has(gs.group_id)) return
+      const grp = visibleGroups.find((g) => g.id === gs.group_id)
+      gs.by_date.forEach(({ date, total }) => {
+        if (!map[date]) map[date] = []
+        map[date].push({ id: gs.group_id, name: grp?.name || '', total })
+      })
+    })
+    Object.values(map).forEach((arr) => arr.sort((a, b) => b.total - a.total))
+    return map
+  }, [groupStats, visibleGroups, visibleIds])
 
   // ── Analytics ─────────────────────────────────────────────────────────────────
 
@@ -178,12 +197,12 @@ export default function History() {
 
   const { anomalyMonths, anomalySpike } = useMemo(() => {
     if (N < 3) return { anomalyMonths: [], anomalySpike: null }
-    const mean    = monthlyValues.reduce((s, v) => s + v, 0) / N
-    const stddev  = Math.sqrt(monthlyValues.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / N)
+    const mean      = monthlyValues.reduce((s, v) => s + v, 0) / N
+    const stddev    = Math.sqrt(monthlyValues.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / N)
     const threshold = mean + 1.5 * stddev
-    const flagged = filteredMonthly.filter(([, v]) => v > threshold)
+    const flagged   = filteredMonthly.filter(([, v]) => v > threshold)
     if (flagged.length === 0) return { anomalyMonths: [], anomalySpike: null }
-    const spike   = flagged.reduce((a, b) => a[1] > b[1] ? a : b)
+    const spike = flagged.reduce((a, b) => a[1] > b[1] ? a : b)
     return {
       anomalyMonths: flagged.map(([d]) => d),
       anomalySpike: { label: fmtMonth(spike[0]), pct: Math.round(((spike[1] - mean) / mean) * 100) },
@@ -192,8 +211,8 @@ export default function History() {
 
   const forecastData = useMemo(() => {
     if (N < 2) return []
-    const lastN = filteredMonthly.slice(-Math.min(3, N)).map(([, v]) => v)
-    const avg   = lastN.reduce((s, v) => s + v, 0) / lastN.length
+    const lastN     = filteredMonthly.slice(-Math.min(3, N)).map(([, v]) => v)
+    const avg       = lastN.reduce((s, v) => s + v, 0) / lastN.length
     const lastMonth = filteredMonthly[N - 1][0]
     return Array.from({ length: 3 }, (_, i) => [advanceMonth(lastMonth, i + 1), avg])
   }, [filteredMonthly])
@@ -234,10 +253,10 @@ export default function History() {
 
   // ── Chart configs ──────────────────────────────────────────────────────────────
 
-  const combinedLabels   = [...filteredMonthly.map(([d]) => fmtMonth(d)), ...forecastData.map(([d]) => fmtMonth(d))]
-  const actualPadded     = [...monthlyValues, ...forecastData.map(() => null)]
-  const movingAvgPadded  = [...movingAvg,     ...forecastData.map(() => null)]
-  const forecastPadded   = [
+  const combinedLabels  = [...filteredMonthly.map(([d]) => fmtMonth(d)), ...forecastData.map(([d]) => fmtMonth(d))]
+  const actualPadded    = [...monthlyValues, ...forecastData.map(() => null)]
+  const movingAvgPadded = [...movingAvg,     ...forecastData.map(() => null)]
+  const forecastPadded  = [
     ...filteredMonthly.map((_, i) => (i === N - 1 ? monthlyValues[i] : null)),
     ...forecastData.map(([, v]) => v),
   ]
@@ -254,7 +273,7 @@ export default function History() {
     if (i === maxMonthIdx) return 7
     if (i === minMonthIdx) return 5
     if (anomalyMonths.includes(filteredMonthly[i]?.[0])) return 6
-    return 3
+    return 4
   })
 
   const lineData = {
@@ -264,9 +283,10 @@ export default function History() {
         label: 'Actual',
         data: actualPadded,
         borderColor: '#22c55e',
-        backgroundColor: 'rgba(34,197,94,0.08)',
-        borderWidth: 2,
+        backgroundColor: 'rgba(34,197,94,0.10)',
+        borderWidth: 2.5,
         pointRadius: pointRadii,
+        pointHoverRadius: pointRadii.map((r) => r + 3),
         pointBackgroundColor: pointColors,
         tension: 0,
         fill: true,
@@ -300,38 +320,50 @@ export default function History() {
 
   const lineOptions = {
     responsive: true,
+    maintainAspectRatio: false,
     interaction: { mode: 'index', intersect: false },
     plugins: {
       legend: {
         display: true,
         position: 'bottom',
-        labels: { font: CHART_FONT, boxWidth: 10, padding: 10 },
+        labels: { font: CHART_FONT, boxWidth: 8, padding: 12 },
       },
       tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${INR(c.parsed.y)}` } },
     },
     scales: {
-      x: { ticks: { font: CHART_FONT }, grid: { display: false } },
+      x: {
+        ticks: { font: CHART_FONT, maxTicksLimit: 6, maxRotation: 0 },
+        grid: { display: false },
+      },
       y: {
-        ticks: { callback: (v) => `₹${(v / 1000).toFixed(0)}k`, font: CHART_FONT },
+        ticks: { callback: (v) => `₹${(v / 1000).toFixed(0)}k`, font: CHART_FONT, maxTicksLimit: 4 },
         grid: { color: '#f1f5f9' },
       },
+    },
+    onClick: (_, elements) => {
+      if (elements.length > 0) {
+        const idx = elements[0].index
+        if (idx < N) {
+          const month = filteredMonthly[idx][0]
+          setSelectedDrillMonth((prev) => prev === month ? null : month)
+        }
+      }
+    },
+    onHover: (evt, chartElement) => {
+      if (evt.native) evt.native.target.style.cursor = chartElement[0] ? 'pointer' : 'default'
     },
   }
 
   const yearTotal = topGroups.reduce((s, g) => s + g.yearTotal, 0)
+  const barHeight = Math.max(200, topGroups.length * 44)
 
   const barData = {
-    labels: topGroups.map((g) => {
-      const words = g.name.split(' ')
-      const lines = []
-      for (let i = 0; i < words.length; i += 2) lines.push(words.slice(i, i + 2).join(' '))
-      return lines
-    }),
+    labels: topGroups.map((g) => g.name),
     datasets: [{
       label: 'Total Spent',
       data: topGroups.map((g) => g.yearTotal),
       backgroundColor: PALETTE,
-      borderRadius: 0,
+      borderRadius: 2,
       borderSkipped: false,
     }],
   }
@@ -339,6 +371,7 @@ export default function History() {
   const barOptions = {
     indexAxis: 'y',
     responsive: true,
+    maintainAspectRatio: false,
     plugins: {
       legend: { display: false },
       tooltip: {
@@ -352,16 +385,19 @@ export default function History() {
     },
     scales: {
       x: {
-        ticks: { callback: (v) => `₹${(v / 1000).toFixed(0)}k`, font: CHART_FONT },
+        ticks: { callback: (v) => `₹${(v / 1000).toFixed(0)}k`, font: CHART_FONT, maxTicksLimit: 4 },
         grid: { color: '#f1f5f9' },
       },
       y: {
-        ticks: { font: { size: 9, family: "'Barlow Condensed', sans-serif" }, autoSkip: false },
+        ticks: { font: { size: 10, family: "'Barlow Condensed', sans-serif" }, autoSkip: false },
         grid: { display: false },
       },
     },
     onClick: (_, elements) => {
       if (elements.length > 0) nav(`/groups/${topGroups[elements[0].index]?.id}`)
+    },
+    onHover: (evt, chartElement) => {
+      if (evt.native) evt.native.target.style.cursor = chartElement[0] ? 'pointer' : 'default'
     },
   }
 
@@ -372,8 +408,9 @@ export default function History() {
       data: allMonths.map((m) => categoryMonthly[cat][m] || 0),
       borderColor: CAT_COLORS[cat],
       backgroundColor: CAT_COLORS[cat] + '33',
-      borderWidth: 2,
-      pointRadius: 3,
+      borderWidth: 1.5,
+      pointRadius: 0,
+      pointHoverRadius: 4,
       tension: 0,
       fill: true,
     })),
@@ -381,19 +418,25 @@ export default function History() {
 
   const areaOptions = {
     responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
     plugins: {
       legend: {
         display: true,
         position: 'bottom',
-        labels: { font: CHART_FONT, boxWidth: 10, padding: 12 },
+        labels: { font: { size: 10, family: "'Barlow Condensed', sans-serif" }, boxWidth: 8, padding: 10 },
       },
       tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${INR(c.parsed.y)}` } },
     },
     scales: {
-      x: { stacked: true, ticks: { font: CHART_FONT }, grid: { display: false } },
+      x: {
+        stacked: true,
+        ticks: { font: CHART_FONT, maxTicksLimit: 5, maxRotation: 0 },
+        grid: { display: false },
+      },
       y: {
         stacked: true,
-        ticks: { callback: (v) => `₹${(v / 1000).toFixed(0)}k`, font: CHART_FONT },
+        ticks: { callback: (v) => `₹${(v / 1000).toFixed(0)}k`, font: CHART_FONT, maxTicksLimit: 4 },
         grid: { color: '#f1f5f9' },
       },
     },
@@ -465,7 +508,7 @@ export default function History() {
                   </p>
                   {anomalySpike && (
                     <p className="text-[11px] text-orange-500 font-bold">
-                      ⚠️ Unusual spike in {anomalySpike.label} (+{anomalySpike.pct}% above avg)
+                      ⚠️ Spike in {anomalySpike.label} (+{anomalySpike.pct}% above avg)
                     </p>
                   )}
                 </div>
@@ -487,7 +530,44 @@ export default function History() {
                 ))}
               </div>
             </div>
-            <Line data={lineData} options={lineOptions} />
+
+            {/* Chart — fixed height so it fills properly */}
+            <div className="relative h-72">
+              <Line data={lineData} options={lineOptions} />
+            </div>
+
+            {/* Drill-down panel — tap a month to expand */}
+            {selectedDrillMonth && monthlyByGroup[selectedDrillMonth] && (
+              <div className="mt-4 pt-3 border-t border-amber-100">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
+                    {fmtMonth(selectedDrillMonth)} — breakdown
+                  </p>
+                  <button
+                    onClick={() => setSelectedDrillMonth(null)}
+                    className="text-gray-300 hover:text-gray-500 text-sm leading-none"
+                  >
+                    ✕
+                  </button>
+                </div>
+                {monthlyByGroup[selectedDrillMonth].map(({ id, name, total }) => (
+                  <div
+                    key={id}
+                    className="flex items-center justify-between py-2 cursor-pointer hover:bg-amber-50 -mx-2 px-2 transition-colors"
+                    onClick={() => nav(`/groups/${id}`)}
+                  >
+                    <span className="text-xs font-bold text-gray-700">{name}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-black text-gray-900">{INR(total)}</span>
+                      <span className="text-gray-300 text-xs">›</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {!selectedDrillMonth && filteredMonthly.length > 0 && (
+              <p className="text-[10px] text-gray-300 mt-2 text-center">tap a month to see breakdown</p>
+            )}
           </div>
         )}
 
@@ -536,10 +616,13 @@ export default function History() {
                 </div>
               </div>
             </div>
-            {topGroups.length > 0
-              ? <Bar data={barData} options={barOptions} />
-              : <p className="text-xs text-gray-400 text-center py-4">No expenses in {selectedYear}</p>
-            }
+            {topGroups.length > 0 ? (
+              <div className="relative" style={{ height: `${barHeight}px` }}>
+                <Bar data={barData} options={barOptions} />
+              </div>
+            ) : (
+              <p className="text-xs text-gray-400 text-center py-4">No expenses in {selectedYear}</p>
+            )}
           </div>
         )}
 
@@ -547,7 +630,9 @@ export default function History() {
         {activeCats.length > 1 && (
           <div className="card">
             <h2 className="text-xs font-black text-gray-500 uppercase tracking-widest mb-3">Spend by Category</h2>
-            <Line data={areaData} options={areaOptions} />
+            <div className="relative h-64">
+              <Line data={areaData} options={areaOptions} />
+            </div>
           </div>
         )}
 
