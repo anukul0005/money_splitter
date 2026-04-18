@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getGroups, createGroup, updateGroup } from '../api'
+import { getGroups, createGroup } from '../api'
 import { useUser } from '../UserContext'
 import LoadingSpinner from '../components/LoadingSpinner'
 
@@ -39,16 +39,8 @@ export default function MonthlyGroup() {
     (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase())
   )
 
+  // Only exact name match — no fuzzy rename logic that caused wrong groups to be renamed
   const exactMatch = visibleGroups.find((g) => g.name === targetName)
-  const fuzzyMatch = !exactMatch && monthYear ? (() => {
-    const [y, m] = monthYear.split('-')
-    const mon = MONTH_NAMES[parseInt(m) - 1].toLowerCase()
-    return visibleGroups.find((g) => {
-      const lower = g.name.toLowerCase()
-      return (lower.includes(mon) || lower.includes(y)) &&
-             (g.member_names ?? []).length === 1
-    })
-  })() : null
 
   const handleSubmit = async () => {
     if (!monthYear || !user?.name) return
@@ -59,12 +51,13 @@ export default function MonthlyGroup() {
         nav(`/groups/${exactMatch.id}`)
         return
       }
-      if (fuzzyMatch) {
-        await updateGroup(fuzzyMatch.id, { name: targetName, description: null, category: 'personal', members_add: [], members_remove: [] })
-        nav(`/groups/${fuzzyMatch.id}`)
-        return
-      }
-      const r = await createGroup({ name: targetName, description: '', category: 'personal', emoji: '💰', members: [user.name] })
+      const r = await createGroup({
+        name:        targetName,
+        description: '',
+        category:    'personal',
+        emoji:       '💰',
+        members:     [user.name],
+      })
       nav(`/groups/${r.data.id}`)
     } catch (err) {
       setError(err?.response?.data?.detail || 'Something went wrong. Please try again.')
@@ -75,8 +68,8 @@ export default function MonthlyGroup() {
   if (loading) return <LoadingSpinner />
 
   const btnLabel = submitting
-    ? (exactMatch ? 'Opening…' : fuzzyMatch ? 'Renaming…' : 'Creating…')
-    : (exactMatch ? 'Open Group' : fuzzyMatch ? 'Rename & Open' : 'Create Group')
+    ? (exactMatch ? 'Opening…' : 'Creating…')
+    : (exactMatch ? 'Open Group' : 'Create Group')
 
   return (
     <div className="pb-32 md:pb-10">
@@ -144,15 +137,10 @@ export default function MonthlyGroup() {
         <div className="border border-amber-200 bg-amber-50/60 px-4 py-3 space-y-1">
           <p className="text-[10px] font-black text-amber-700 tracking-widest">GROUP NAME</p>
           <p className="text-sm font-bold text-gray-800">{targetName}</p>
-          {exactMatch && (
-            <p className="text-xs text-brand-700 font-semibold mt-1">✓ Group already exists — will open it</p>
-          )}
-          {fuzzyMatch && !exactMatch && (
-            <p className="text-xs text-amber-700 font-semibold mt-1">Similar group found — will rename "{fuzzyMatch.name}"</p>
-          )}
-          {!exactMatch && !fuzzyMatch && (
-            <p className="text-xs text-gray-400 mt-1">A new group will be created for you</p>
-          )}
+          {exactMatch
+            ? <p className="text-xs text-brand-700 font-semibold mt-1">✓ Already exists — will open it</p>
+            : <p className="text-xs text-gray-400 mt-1">A new group will be created for you</p>
+          }
         </div>
 
         {error && (
@@ -160,7 +148,7 @@ export default function MonthlyGroup() {
         )}
       </div>
 
-      {/* Sticky footer button — always visible, safe-area aware */}
+      {/* Sticky footer — fixed on mobile, inline on desktop */}
       <div
         className="fixed bottom-0 left-0 right-0 md:static md:mt-6 md:px-5 md:max-w-lg px-5 pt-3 bg-cream border-t border-amber-100/60 md:border-0 md:bg-transparent z-20"
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 1.25rem)' }}
