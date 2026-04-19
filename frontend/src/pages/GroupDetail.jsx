@@ -30,6 +30,7 @@ export default function GroupDetail() {
   const [tab, setTab]                   = useState('expenses')
   const [chartView, setChartView]       = useState('member')
   const [editingExpense, setEditingExp] = useState(null)   // expense being edited
+  const [hoveredDayIdx, setHoveredDayIdx] = useState(null)
 
   const fetchData = () =>
     Promise.all([getGroup(id), getSettlement(id), getGroupStats(id)])
@@ -191,15 +192,11 @@ export default function GroupDetail() {
     interaction: { mode: 'index', intersect: false },
     plugins: {
       legend: { display: false },
-      tooltip: {
-        callbacks: {
-          title: (items) => {
-            const i = items[0].dataIndex
-            return fmtDayLabel(dailyLabels[i]) + (isWeekend(dailyLabels[i]) ? ' · Weekend' : '')
-          },
-          label: (c) => ` ${INR(c.parsed.y)}`,
-        },
-      },
+      tooltip: { enabled: false },
+    },
+    onHover: (evt, elements) => {
+      if (evt.native) evt.native.target.style.cursor = elements.length ? 'crosshair' : 'default'
+      setHoveredDayIdx(elements.length > 0 ? elements[0].index : null)
     },
     scales: {
       x: {
@@ -489,37 +486,38 @@ export default function GroupDetail() {
             <>
               {dailyEntries.length > 0 ? (
                 <div className="card">
-                  {/* Fixed two-stat header — like reference image */}
-                  <div className="flex items-start gap-4 mb-4 pb-4 border-b border-amber-100">
-                    <div className="flex-1">
-                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
-                        Latest
-                      </p>
-                      <p className="text-2xl font-black text-gray-900 mt-1 tracking-tight">
-                        {INR(dailyValues[dailyValues.length - 1] ?? 0)}
-                      </p>
-                      <p className="text-[11px] text-gray-400 mt-0.5">
-                        {dailyLabels.length > 0 ? fmtDayLabel(dailyLabels[dailyLabels.length - 1]) : '—'}
-                        {dailyLabels.length > 0 && isWeekend(dailyLabels[dailyLabels.length - 1]) && (
-                          <span className="ml-1 text-orange-400 font-semibold">· Weekend</span>
-                        )}
-                      </p>
-                    </div>
+                  {/* Dynamic two-card header — updates on hover/touch */}
+                  {(() => {
+                    const ai  = hoveredDayIdx !== null ? hoveredDayIdx : dailyLabels.length - 1
+                    const ad  = dailyLabels[ai]
+                    const av  = dailyValues[ai]
+                    const wkd = isWeekend(ad)
+                    return (
+                      <div className="flex items-stretch gap-0 mb-4 pb-4 border-b border-amber-100">
+                        <div className="flex-1 pr-4">
+                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Date</p>
+                          <p className="text-xl font-black text-gray-900 mt-1 tracking-tight leading-tight">
+                            {ad ? fmtDayLabel(ad) : '—'}
+                          </p>
+                          <p className={`text-[11px] font-semibold mt-0.5 ${wkd ? 'text-orange-400' : 'text-gray-300'}`}>
+                            {wkd ? 'Weekend' : 'Weekday'}
+                          </p>
+                        </div>
 
-                    <div className="w-px self-stretch bg-amber-100" />
+                        <div className="w-px bg-amber-100" />
 
-                    <div className="flex-1">
-                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-brand-500 inline-block" />
-                        Month Total
-                      </p>
-                      <p className="text-2xl font-black text-brand-600 mt-1 tracking-tight">
-                        {INR(stats?.total ?? 0)}
-                      </p>
-                      <p className="text-[11px] text-gray-400 mt-0.5">{dailyEntries.length} days with spend</p>
-                    </div>
-                  </div>
+                        <div className="flex-1 pl-4">
+                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Spent</p>
+                          <p className="text-xl font-black text-gray-900 mt-1 tracking-tight leading-tight">
+                            {INR(av ?? 0)}
+                          </p>
+                          <p className="text-[11px] text-gray-300 mt-0.5">
+                            {hoveredDayIdx === null ? 'latest · slide to explore' : 'this day'}
+                          </p>
+                        </div>
+                      </div>
+                    )
+                  })()}
 
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-xs font-bold text-gray-500">Daily Spend</h3>
