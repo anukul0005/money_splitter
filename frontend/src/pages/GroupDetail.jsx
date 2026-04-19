@@ -30,7 +30,6 @@ export default function GroupDetail() {
   const [tab, setTab]                   = useState('expenses')
   const [chartView, setChartView]       = useState('member')
   const [editingExpense, setEditingExp] = useState(null)   // expense being edited
-  const [hoveredDayIdx, setHoveredDayIdx] = useState(null)
 
   const fetchData = () =>
     Promise.all([getGroup(id), getSettlement(id), getGroupStats(id)])
@@ -192,11 +191,15 @@ export default function GroupDetail() {
     interaction: { mode: 'index', intersect: false },
     plugins: {
       legend: { display: false },
-      tooltip: { enabled: false },
-    },
-    onHover: (evt, elements) => {
-      if (evt.native) evt.native.target.style.cursor = elements.length ? 'crosshair' : 'default'
-      setHoveredDayIdx(elements.length > 0 ? elements[0].index : null)
+      tooltip: {
+        callbacks: {
+          title: (items) => {
+            const i = items[0].dataIndex
+            return fmtDayLabel(dailyLabels[i]) + (isWeekend(dailyLabels[i]) ? ' · Weekend' : '')
+          },
+          label: (c) => ` ${INR(c.parsed.y)}`,
+        },
+      },
     },
     scales: {
       x: {
@@ -484,21 +487,38 @@ export default function GroupDetail() {
           {/* Solo group: daily spend line + category donut */}
           {isSolo ? (
             <>
-              {dailyEntries.length > 0 ? (() => {
-                const activeIdx    = hoveredDayIdx !== null ? hoveredDayIdx : dailyLabels.length - 1
-                const activeDate   = dailyLabels[activeIdx]
-                const activeAmount = dailyValues[activeIdx]
-                const activeWknd   = isWeekend(activeDate)
-                return (
+              {dailyEntries.length > 0 ? (
                 <div className="card">
-                  {/* Dynamic value card */}
-                  <div className="mb-4 pb-3 border-b border-amber-100">
-                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
-                      {activeDate ? fmtDayLabel(activeDate) : '—'}
-                      {activeWknd && <span className="text-orange-400">· Weekend</span>}
-                      {hoveredDayIdx === null && <span className="text-gray-300 font-normal normal-case tracking-normal">touch graph to explore</span>}
-                    </p>
-                    <p className="text-3xl font-black text-gray-900 mt-1 tracking-tight">{INR(activeAmount ?? 0)}</p>
+                  {/* Fixed two-stat header — like reference image */}
+                  <div className="flex items-start gap-4 mb-4 pb-4 border-b border-amber-100">
+                    <div className="flex-1">
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
+                        Latest
+                      </p>
+                      <p className="text-2xl font-black text-gray-900 mt-1 tracking-tight">
+                        {INR(dailyValues[dailyValues.length - 1] ?? 0)}
+                      </p>
+                      <p className="text-[11px] text-gray-400 mt-0.5">
+                        {dailyLabels.length > 0 ? fmtDayLabel(dailyLabels[dailyLabels.length - 1]) : '—'}
+                        {dailyLabels.length > 0 && isWeekend(dailyLabels[dailyLabels.length - 1]) && (
+                          <span className="ml-1 text-orange-400 font-semibold">· Weekend</span>
+                        )}
+                      </p>
+                    </div>
+
+                    <div className="w-px self-stretch bg-amber-100" />
+
+                    <div className="flex-1">
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-brand-500 inline-block" />
+                        Month Total
+                      </p>
+                      <p className="text-2xl font-black text-brand-600 mt-1 tracking-tight">
+                        {INR(stats?.total ?? 0)}
+                      </p>
+                      <p className="text-[11px] text-gray-400 mt-0.5">{dailyEntries.length} days with spend</p>
+                    </div>
                   </div>
 
                   <div className="flex items-center justify-between mb-3">
@@ -516,8 +536,7 @@ export default function GroupDetail() {
                     <Line data={dailyLineData} options={dailyLineOptions} />
                   </div>
                 </div>
-                )
-              })()}
+              )
               ) : (
                 <p className="text-xs text-gray-400 text-center py-6">No dated expenses yet</p>
               )}
