@@ -536,7 +536,6 @@ export default function GroupDetail() {
                     <Line data={dailyLineData} options={dailyLineOptions} />
                   </div>
                 </div>
-              )
               ) : (
                 <p className="text-xs text-gray-400 text-center py-6">No dated expenses yet</p>
               )}
