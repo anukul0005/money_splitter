@@ -17,6 +17,33 @@ Chart.defaults.font.family = "'Barlow Condensed', sans-serif"
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 const PALETTE = ['#ef4444','#f97316','#eab308','#22c55e','#06b6d4','#3b82f6','#8b5cf6','#ec4899']
 
+// Inline plugin: draws % labels on doughnut slices (registered after definition)
+const donutPctPlugin = {
+  id: 'donutPct',
+  afterDatasetsDraw(chart) {
+    const { ctx } = chart
+    chart.data.datasets.forEach((dataset, di) => {
+      const meta = chart.getDatasetMeta(di)
+      if (meta.hidden) return
+      const total = dataset.data.reduce((s, v) => s + v, 0)
+      if (total === 0) return
+      meta.data.forEach((el, idx) => {
+        const pct = Math.round((dataset.data[idx] / total) * 100)
+        if (pct < 5) return
+        const pos = el.tooltipPosition()
+        ctx.save()
+        ctx.fillStyle = '#fff'
+        ctx.font = "bold 11px 'Barlow Condensed', sans-serif"
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(`${pct}%`, pos.x, pos.y)
+        ctx.restore()
+      })
+    })
+  },
+}
+Chart.register(donutPctPlugin)
+
 export default function GroupDetail() {
   const { id } = useParams()
   const nav = useNavigate()
@@ -113,7 +140,11 @@ export default function GroupDetail() {
 
   const donutOptions = {
     cutout: '60%',
-    plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ` ${INR(c.parsed)}` } } },
+    plugins: {
+      legend: { display: false },
+      tooltip: { callbacks: { label: (c) => ` ${INR(c.parsed)}` } },
+      donutPct: {},
+    },
   }
 
   // Distribution stats for Charts tab
@@ -543,7 +574,7 @@ export default function GroupDetail() {
                       </span>
                     </div>
                   </div>
-                  <div className="relative h-72">
+                  <div className="relative h-56 md:h-72">
                     <Line data={dailyLineData} options={dailyLineOptions} />
                   </div>
                 </div>
@@ -574,7 +605,7 @@ export default function GroupDetail() {
           ) : (
             <>
               <div className="flex gap-2">
-                {[['member','By Person'],['category','By Category']].map(([v, label]) => (
+                {[['member','By Person'],['category','By Category'],['daily','Daily']].map(([v, label]) => (
                   <button
                     key={v}
                     onClick={() => setChartView(v)}
@@ -614,6 +645,51 @@ export default function GroupDetail() {
                     </ul>
                   </div>
                 </div>
+              )}
+
+              {chartView === 'daily' && (
+                dailyEntries.length > 0 ? (
+                  <div className="card">
+                    {/* Dynamic two-card header */}
+                    {(() => {
+                      const ai = hoveredDayIdx !== null ? hoveredDayIdx : dailyLabels.length - 1
+                      const av = dailyValues[ai] ?? 0
+                      return (
+                        <div className="flex items-stretch mb-4 pb-4 border-b border-amber-100">
+                          <div className="flex-1 pr-4">
+                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Daily Spend</p>
+                            <p className="text-2xl font-black text-gray-900 mt-1 tracking-tight">{INR(av)}</p>
+                            <p className="text-[11px] text-gray-300 mt-0.5">
+                              {hoveredDayIdx === null ? 'slide chart to explore' : fmtDayLabel(dailyLabels[ai])}
+                            </p>
+                          </div>
+                          <div className="w-px bg-amber-100" />
+                          <div className="flex-1 pl-4">
+                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Mean (WO)</p>
+                            <p className="text-2xl font-black text-brand-600 mt-1 tracking-tight">{INR(Math.round(dailyMeanWO))}</p>
+                            <p className="text-[11px] text-gray-300 mt-0.5">avg excl. outliers</p>
+                          </div>
+                        </div>
+                      )
+                    })()}
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-xs font-bold text-gray-500">Daily Spend</h3>
+                      <div className="flex items-center gap-3">
+                        <span className="flex items-center gap-1.5 text-[10px] text-gray-400">
+                          <span className="w-2 h-2 rounded-full bg-green-500 inline-block" /> Weekday
+                        </span>
+                        <span className="flex items-center gap-1.5 text-[10px] text-gray-400">
+                          <span className="w-2 h-2 rounded-full bg-orange-500 inline-block" /> Weekend
+                        </span>
+                      </div>
+                    </div>
+                    <div className="relative h-56 md:h-72">
+                      <Line data={dailyLineData} options={dailyLineOptions} />
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-400 text-center py-6">No dated expenses yet</p>
+                )
               )}
             </>
           )}
