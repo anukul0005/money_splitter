@@ -30,6 +30,7 @@ export default function GroupDetail() {
   const [tab, setTab]                   = useState('expenses')
   const [chartView, setChartView]       = useState('member')
   const [editingExpense, setEditingExp] = useState(null)   // expense being edited
+  const [hoveredDayIdx, setHoveredDayIdx] = useState(null)
 
   const fetchData = () =>
     Promise.all([getGroup(id), getSettlement(id), getGroupStats(id)])
@@ -191,15 +192,11 @@ export default function GroupDetail() {
     interaction: { mode: 'index', intersect: false },
     plugins: {
       legend: { display: false },
-      tooltip: {
-        callbacks: {
-          title: (items) => {
-            const i = items[0].dataIndex
-            return fmtDayLabel(dailyLabels[i]) + (isWeekend(dailyLabels[i]) ? ' · Weekend' : '')
-          },
-          label: (c) => ` ${INR(c.parsed.y)}`,
-        },
-      },
+      tooltip: { enabled: false },
+    },
+    onHover: (evt, elements) => {
+      if (evt.native) evt.native.target.style.cursor = elements.length ? 'crosshair' : 'default'
+      setHoveredDayIdx(elements.length > 0 ? elements[0].index : null)
     },
     scales: {
       x: {
@@ -487,8 +484,23 @@ export default function GroupDetail() {
           {/* Solo group: daily spend line + category donut */}
           {isSolo ? (
             <>
-              {dailyEntries.length > 0 ? (
+              {dailyEntries.length > 0 ? (() => {
+                const activeIdx    = hoveredDayIdx !== null ? hoveredDayIdx : dailyLabels.length - 1
+                const activeDate   = dailyLabels[activeIdx]
+                const activeAmount = dailyValues[activeIdx]
+                const activeWknd   = isWeekend(activeDate)
+                return (
                 <div className="card">
+                  {/* Dynamic value card */}
+                  <div className="mb-4 pb-3 border-b border-amber-100">
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
+                      {activeDate ? fmtDayLabel(activeDate) : '—'}
+                      {activeWknd && <span className="text-orange-400">· Weekend</span>}
+                      {hoveredDayIdx === null && <span className="text-gray-300 font-normal normal-case tracking-normal">touch graph to explore</span>}
+                    </p>
+                    <p className="text-3xl font-black text-gray-900 mt-1 tracking-tight">{INR(activeAmount ?? 0)}</p>
+                  </div>
+
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-xs font-bold text-gray-500">Daily Spend</h3>
                     <div className="flex items-center gap-3">
@@ -504,6 +516,8 @@ export default function GroupDetail() {
                     <Line data={dailyLineData} options={dailyLineOptions} />
                   </div>
                 </div>
+                )
+              })()}
               ) : (
                 <p className="text-xs text-gray-400 text-center py-6">No dated expenses yet</p>
               )}
