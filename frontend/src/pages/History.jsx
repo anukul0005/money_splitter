@@ -283,12 +283,20 @@ export default function History() {
         label: 'Actual',
         data: actualPadded,
         borderColor: '#22c55e',
-        backgroundColor: 'rgba(34,197,94,0.10)',
+        backgroundColor: (context) => {
+          const chart = context.chart
+          const { ctx, chartArea } = chart
+          if (!chartArea) return 'rgba(34,197,94,0.15)'
+          const gradient = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom)
+          gradient.addColorStop(0, 'rgba(34,197,94,0.28)')
+          gradient.addColorStop(1, 'rgba(34,197,94,0.00)')
+          return gradient
+        },
         borderWidth: 2.5,
         pointRadius: pointRadii,
         pointHoverRadius: pointRadii.map((r) => r + 3),
         pointBackgroundColor: pointColors,
-        tension: 0,
+        tension: 0.3,
         fill: true,
         spanGaps: false,
       },
@@ -335,10 +343,7 @@ export default function History() {
         ticks: { font: CHART_FONT, maxTicksLimit: 6, maxRotation: 0 },
         grid: { display: false },
       },
-      y: {
-        ticks: { callback: (v) => `₹${(v / 1000).toFixed(0)}k`, font: CHART_FONT, maxTicksLimit: 4 },
-        grid: { color: '#f1f5f9' },
-      },
+      y: { display: false },
     },
     onClick: (_, elements) => {
       if (elements.length > 0) {
@@ -434,11 +439,7 @@ export default function History() {
         ticks: { font: CHART_FONT, maxTicksLimit: 5, maxRotation: 0 },
         grid: { display: false },
       },
-      y: {
-        stacked: true,
-        ticks: { callback: (v) => `₹${(v / 1000).toFixed(0)}k`, font: CHART_FONT, maxTicksLimit: 4 },
-        grid: { color: '#f1f5f9' },
-      },
+      y: { display: false, stacked: true },
     },
   }
 
@@ -532,7 +533,7 @@ export default function History() {
             </div>
 
             {/* Chart — fixed height so it fills properly */}
-            <div className="relative h-72">
+            <div className="relative h-80">
               <Line data={lineData} options={lineOptions} />
             </div>
 
@@ -630,7 +631,7 @@ export default function History() {
         {activeCats.length > 1 && (
           <div className="card">
             <h2 className="text-xs font-black text-gray-500 uppercase tracking-widest mb-3">Spend by Category</h2>
-            <div className="relative h-64">
+            <div className="relative h-72">
               <Line data={areaData} options={areaOptions} />
             </div>
           </div>

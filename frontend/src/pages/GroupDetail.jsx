@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   Chart, BarElement, CategoryScale, LinearScale, Tooltip, Legend,
   ArcElement, DoughnutController, BarController,
-  LineElement, PointElement, LineController,
+  LineElement, PointElement, LineController, Filler,
 } from 'chart.js'
 import { Bar, Doughnut, Line } from 'react-chartjs-2'
 import { getGroup, getSettlement, getGroupStats, deleteExpense, deleteGroup, settleExpense } from '../api'
@@ -11,7 +11,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import ExpenseEditModal from '../components/ExpenseEditModal'
 import { useUser } from '../UserContext'
 
-Chart.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend, ArcElement, DoughnutController, BarController, LineElement, PointElement, LineController)
+Chart.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend, ArcElement, DoughnutController, BarController, LineElement, PointElement, LineController, Filler)
 Chart.defaults.font.family = "'Barlow Condensed', sans-serif"
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
@@ -146,46 +146,76 @@ export default function GroupDetail() {
   const dailyLabels  = dailyEntries.map(([d]) => d)
   const dailyValues  = dailyEntries.map(([, v]) => v)
 
+  const isWeekend = (dateStr) => {
+    if (!dateStr) return false
+    const d = new Date(dateStr + 'T00:00:00')
+    return d.getDay() === 0 || d.getDay() === 6
+  }
+  const fmtDayLabel = (dateStr) => {
+    const [, m, d] = dateStr.split('-')
+    const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m) - 1]
+    return `${mon} ${parseInt(d)}`
+  }
+
+  const dailyPointColors = dailyLabels.map((d) => isWeekend(d) ? '#f97316' : '#22c55e')
+  const dailyPointSizes  = dailyLabels.map((d) => isWeekend(d) ? 7 : 5)
+
   const dailyLineData = {
-    labels: dailyLabels,
+    labels: dailyLabels.map(fmtDayLabel),
     datasets: [{
       label: 'Daily Spend',
       data: dailyValues,
       borderColor: '#22c55e',
-      backgroundColor: 'rgba(34,197,94,0.08)',
-      borderWidth: 2,
-      pointRadius: 5,
-      pointHoverRadius: 7,
-      pointBackgroundColor: '#22c55e',
-      tension: 0,
+      backgroundColor: (context) => {
+        const chart = context.chart
+        const { ctx, chartArea } = chart
+        if (!chartArea) return 'rgba(34,197,94,0.15)'
+        const gradient = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom)
+        gradient.addColorStop(0, 'rgba(34,197,94,0.30)')
+        gradient.addColorStop(1, 'rgba(34,197,94,0.00)')
+        return gradient
+      },
+      borderWidth: 2.5,
+      pointRadius: dailyPointSizes,
+      pointHoverRadius: dailyPointSizes.map((r) => r + 3),
+      pointBackgroundColor: dailyPointColors,
+      pointBorderColor: dailyPointColors,
+      tension: 0.3,
       fill: true,
     }],
   }
 
   const dailyLineOptions = {
     responsive: true,
+    maintainAspectRatio: false,
     interaction: { mode: 'index', intersect: false },
     plugins: {
       legend: { display: false },
-      tooltip: { callbacks: { label: (c) => ` ${INR(c.parsed.y)}` } },
+      tooltip: {
+        callbacks: {
+          title: (items) => {
+            const i = items[0].dataIndex
+            return fmtDayLabel(dailyLabels[i]) + (isWeekend(dailyLabels[i]) ? ' · Weekend' : '')
+          },
+          label: (c) => ` ${INR(c.parsed.y)}`,
+        },
+      },
     },
     scales: {
       x: {
         ticks: {
           font: { size: 11, family: "'Barlow Condensed'" },
-          maxTicksLimit: 3,
           maxRotation: 0,
+          callback: (val, i) => {
+            const raw = dailyLabels[i]
+            if (!raw) return null
+            const day = parseInt(raw.split('-')[2])
+            return (day === 1 || (day - 1) % 5 === 0) ? fmtDayLabel(raw) : null
+          },
         },
         grid: { display: false },
       },
-      y: {
-        ticks: {
-          callback: (v) => `₹${(v / 1000).toFixed(0)}k`,
-          font: { size: 11, family: "'Barlow Condensed'" },
-          maxTicksLimit: 4,
-        },
-        grid: { color: '#f1f5f9' },
-      },
+      y: { display: false },
     },
   }
 
@@ -459,8 +489,20 @@ export default function GroupDetail() {
             <>
               {dailyEntries.length > 0 ? (
                 <div className="card">
-                  <h3 className="text-xs font-bold text-gray-500 mb-3">Daily Spend</h3>
-                  <Line data={dailyLineData} options={dailyLineOptions} />
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-xs font-bold text-gray-500">Daily Spend</h3>
+                    <div className="flex items-center gap-3">
+                      <span className="flex items-center gap-1.5 text-[10px] text-gray-400">
+                        <span className="w-2 h-2 rounded-full bg-green-500 inline-block" /> Weekday
+                      </span>
+                      <span className="flex items-center gap-1.5 text-[10px] text-gray-400">
+                        <span className="w-2 h-2 rounded-full bg-orange-500 inline-block" /> Weekend
+                      </span>
+                    </div>
+                  </div>
+                  <div className="relative h-72">
+                    <Line data={dailyLineData} options={dailyLineOptions} />
+                  </div>
                 </div>
               ) : (
                 <p className="text-xs text-gray-400 text-center py-6">No dated expenses yet</p>
