@@ -39,6 +39,7 @@ export default function AddExpense() {
   const [splitMode, setSplitMode]               = useState('equal')
   const [gentlemanFlipped, setGentlemanFlipped] = useState(false)
   const [customPcts, setCustomPcts]             = useState({})
+  const [customAmts, setCustomAmts]             = useState({})
 
   const [form, setForm] = useState({
     group_id:     defaultGroup,
@@ -72,6 +73,7 @@ export default function AddExpense() {
         setSplitMode('equal')
         setGentlemanFlipped(false)
         setCustomPcts(Object.fromEntries(ms.map((m) => [m.name, ''])))
+        setCustomAmts(Object.fromEntries(ms.map((m) => [m.name, ''])))
         const titles = [...new Set((r.data.expenses || []).map((e) => e.title).filter(Boolean))]
         setExistingTitles(titles)
       })
@@ -110,6 +112,24 @@ export default function AddExpense() {
 
   const customTotal = members.reduce((s, m) => s + parseFloat(customPcts[m.name] || 0), 0)
 
+  const onPctChange = (name, pctStr) => {
+    setCustomPcts((p) => ({ ...p, [name]: pctStr }))
+    const total = parseFloat(form.amount)
+    const pctNum = parseFloat(pctStr)
+    if (!isNaN(pctNum) && !isNaN(total) && total > 0) {
+      setCustomAmts((a) => ({ ...a, [name]: String(Math.round(total * pctNum / 100 * 100) / 100) }))
+    }
+  }
+
+  const onAmtChange = (name, amtStr) => {
+    setCustomAmts((a) => ({ ...a, [name]: amtStr }))
+    const total = parseFloat(form.amount)
+    const amtNum = parseFloat(amtStr)
+    if (!isNaN(amtNum) && !isNaN(total) && total > 0) {
+      setCustomPcts((p) => ({ ...p, [name]: String(Math.round(amtNum / total * 10000) / 100) }))
+    }
+  }
+
   const resetExpenseFields = (gid) => {
     setForm((prev) => ({
       group_id:     gid,
@@ -125,6 +145,7 @@ export default function AddExpense() {
     setSplitMode('equal')
     setGentlemanFlipped(false)
     setCustomPcts(Object.fromEntries(members.map((m) => [m.name, ''])))
+    setCustomAmts(Object.fromEntries(members.map((m) => [m.name, ''])))
     setTimeout(() => amountRef.current?.focus(), 50)
   }
 
@@ -379,50 +400,41 @@ export default function AddExpense() {
             </div>
           )}
 
-          {/* Custom % mode */}
+          {/* Custom split — % and ₹ linked bidirectionally */}
           {splitMode === 'custom' && (
             <div className="space-y-2">
               {members.map((m) => {
                 const pct = customPcts[m.name] ?? ''
-                const amt = form.amount && pct ? (parseFloat(form.amount) * parseFloat(pct) / 100).toFixed(2) : null
+                const amt = customAmts[m.name] ?? ''
                 return (
                   <div key={m.id} className="flex items-center gap-2">
-                    <span className="text-sm font-bold text-gray-700 w-24 truncate">{m.name}</span>
-                    <input
-                      type="number" min="0" max="100" step="any"
-                      className="input w-24 text-center"
-                      placeholder="0"
-                      value={pct}
-                      onChange={(e) => setCustomPcts((p) => ({ ...p, [m.name]: e.target.value }))}
-                      onBlur={(e) => {
-                        const val = parseFloat(e.target.value)
-                        if (!isNaN(val) && val === 0) {
-                          setCustomPcts((p) => {
-                            const updated = { ...p, [m.name]: '0' }
-                            // Only distribute to members not already explicitly set to 0
-                            const recipients = members.filter((x) => {
-                              if (x.id === m.id) return false
-                              const n = parseFloat(p[x.name])
-                              return isNaN(n) || n !== 0   // empty or non-zero = eligible
-                            })
-                            if (recipients.length > 0) {
-                              const equalPct = String(Math.round((100 / recipients.length) * 100) / 100)
-                              recipients.forEach((x) => { updated[x.name] = equalPct })
-                            }
-                            return updated
-                          })
-                        }
-                      }}
-                    />
-                    <span className="text-xs text-gray-400 font-bold">%</span>
-                    {amt && <span className="text-xs text-gray-600 font-black">₹{amt}</span>}
+                    <span className="text-sm font-bold text-gray-700 w-20 truncate">{m.name}</span>
+                    <div className="relative flex-1">
+                      <input
+                        type="number" min="0" max="100" step="any"
+                        className="input w-full text-right pr-6"
+                        placeholder="0"
+                        value={pct}
+                        onChange={(e) => onPctChange(m.name, e.target.value)}
+                      />
+                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 font-bold pointer-events-none">%</span>
+                    </div>
+                    <div className="relative flex-1">
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 font-bold pointer-events-none">₹</span>
+                      <input
+                        type="number" min="0" step="any"
+                        className="input w-full text-right pl-6"
+                        placeholder="0"
+                        value={amt}
+                        onChange={(e) => onAmtChange(m.name, e.target.value)}
+                      />
+                    </div>
                   </div>
                 )
               })}
-              <p className={`text-xs font-black mt-1 ${Math.abs(customTotal - 100) <= 0.5 ? 'text-brand-600' : 'text-red-500'}`}>
-                Total: {customTotal.toFixed(2)}%{' '}
-                {Math.abs(customTotal - 100) <= 0.5 ? '✓ OK' : '— must equal 100%'}
-              </p>
+              <div className={`flex items-center justify-between text-xs font-black pt-1 ${Math.abs(customTotal - 100) <= 0.5 ? 'text-brand-600' : 'text-red-500'}`}>
+                <span>{Math.abs(customTotal - 100) <= 0.5 ? '✓ Balanced' : `Total: ${customTotal.toFixed(1)}% — must equal 100%`}</span>
+              </div>
             </div>
           )}
         </div>

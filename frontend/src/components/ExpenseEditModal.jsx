@@ -73,6 +73,13 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
   const [paymentMode, setPaymentMode] = useState(expense.payment_mode || 'cash')
   const [splitMode,   setSplitMode]   = useState(parsedSplit ? 'custom' : 'equal')
   const [customPcts,  setCustomPcts]  = useState(initPcts)
+  const [customAmts,  setCustomAmts]  = useState(() => {
+    const base = expense.amount
+    if (parsedSplit && base > 0) {
+      return Object.fromEntries(members.map((m) => [m, String(r2(parsedSplit[m] ?? 0))]))
+    }
+    return Object.fromEntries(members.map((m) => [m, String(r2(base / members.length))]))
+  })
   const [saving,      setSaving]      = useState(false)
   const [error,       setError]       = useState('')
 
@@ -97,6 +104,22 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
     setSplitMode(mode)
     // customPcts are already initialised correctly from the expense's split_json
     // (or as equal % if no custom split existed). Don't reset them here.
+  }
+
+  const onPctChange = (name, pctStr) => {
+    setCustomPcts((p) => ({ ...p, [name]: pctStr }))
+    const total = amtNum
+    const pctNum = parseFloat(pctStr)
+    if (!isNaN(pctNum) && total > 0)
+      setCustomAmts((a) => ({ ...a, [name]: String(r2(total * pctNum / 100)) }))
+  }
+
+  const onAmtChange = (name, amtStr) => {
+    setCustomAmts((a) => ({ ...a, [name]: amtStr }))
+    const total = amtNum
+    const av = parseFloat(amtStr)
+    if (!isNaN(av) && total > 0)
+      setCustomPcts((p) => ({ ...p, [name]: String(r2(av / total * 100)) }))
   }
 
   const handleSave = async () => {
@@ -306,63 +329,40 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
             </div>
           )}
 
-          {/* Custom % split */}
+          {/* Custom split — % and ₹ linked bidirectionally */}
           {members.length > 1 && splitMode === 'custom' && (
             <div className="border border-amber-200 bg-amber-50/50 px-3 py-3 space-y-2">
-              <p className="text-[10px] font-black text-amber-700 tracking-widest mb-1">
-                {getSplitLabel()}
-              </p>
+              <p className="text-[10px] font-black text-amber-700 tracking-widest mb-1">{getSplitLabel()}</p>
               {members.map((m) => {
-                const pct     = customPcts[m] ?? ''
-                const calcAmt = pct !== '' ? r2(amtNum * parseFloat(pct) / 100) : null
+                const pct = customPcts[m] ?? ''
+                const amt = customAmts[m] ?? ''
                 return (
                   <div key={m} className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-gray-700 flex-1">{m}</span>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      className="input w-24 text-right py-1.5"
-                      placeholder="0"
-                      min="0"
-                      max="100"
-                      step="any"
-                      value={pct}
-                      onChange={(e) =>
-                        setCustomPcts((prev) => ({ ...prev, [m]: e.target.value }))
-                      }
-                      onBlur={(e) => {
-                        const val = parseFloat(e.target.value)
-                        if (!isNaN(val) && val === 0) {
-                          setCustomPcts((prev) => {
-                            const updated = { ...prev, [m]: '0' }
-                            // Only distribute to members not already explicitly set to 0
-                            const recipients = members.filter((x) => {
-                              if (x === m) return false
-                              const n = parseFloat(prev[x])
-                              return isNaN(n) || n !== 0   // empty or non-zero = eligible
-                            })
-                            if (recipients.length > 0) {
-                              const equalPct = String(r2(100 / recipients.length))
-                              recipients.forEach((x) => { updated[x] = equalPct })
-                            }
-                            return updated
-                          })
-                        }
-                      }}
-                    />
-                    <span className="text-xs text-gray-400 font-bold">%</span>
-                    {calcAmt !== null && (
-                      <span className="text-xs font-black text-gray-900 w-16 text-right">{INR(calcAmt)}</span>
-                    )}
+                    <span className="text-xs font-bold text-gray-700 w-20 truncate">{m}</span>
+                    <div className="relative flex-1">
+                      <input
+                        type="number" inputMode="decimal" min="0" max="100" step="any"
+                        className="input w-full text-right pr-6 py-1.5"
+                        placeholder="0"
+                        value={pct}
+                        onChange={(e) => onPctChange(m, e.target.value)}
+                      />
+                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 font-bold pointer-events-none">%</span>
+                    </div>
+                    <div className="relative flex-1">
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 font-bold pointer-events-none">₹</span>
+                      <input
+                        type="number" inputMode="decimal" min="0" step="any"
+                        className="input w-full text-right pl-6 py-1.5"
+                        placeholder="0"
+                        value={amt}
+                        onChange={(e) => onAmtChange(m, e.target.value)}
+                      />
+                    </div>
                   </div>
                 )
               })}
-              {/* Running total */}
-              <div
-                className={`flex items-center justify-between pt-2 border-t border-amber-200 text-xs font-black ${
-                  pctBalanced ? 'text-green-600' : 'text-red-500'
-                }`}
-              >
+              <div className={`flex items-center justify-between pt-2 border-t border-amber-200 text-xs font-black ${pctBalanced ? 'text-green-600' : 'text-red-500'}`}>
                 <span>{pctBalanced ? 'Balanced' : 'Total'}</span>
                 <span>{pctBalanced ? '✓ 100%' : `${pctTotal.toFixed(2)}%`}</span>
               </div>

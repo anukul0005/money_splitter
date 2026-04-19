@@ -158,6 +158,18 @@ export default function GroupDetail() {
     return `${mon} ${parseInt(d)}`
   }
 
+  const calcMeanWO = (values) => {
+    if (values.length < 3) return values.reduce((s, v) => s + v, 0) / Math.max(values.length, 1)
+    const sorted = [...values].sort((a, b) => a - b)
+    const n  = sorted.length
+    const q1 = sorted[Math.floor(n * 0.25)]
+    const q3 = sorted[Math.floor(n * 0.75)]
+    const iqr = q3 - q1
+    const filtered = sorted.filter((v) => v >= q1 - 1.5 * iqr && v <= q3 + 1.5 * iqr)
+    return filtered.length > 0 ? filtered.reduce((s, v) => s + v, 0) / filtered.length : 0
+  }
+  const dailyMeanWO = calcMeanWO(dailyValues)
+
   const dailyPointColors = dailyLabels.map((d) => isWeekend(d) ? '#f97316' : '#22c55e')
   const dailyPointSizes  = dailyLabels.map((d) => isWeekend(d) ? 7 : 5)
 
@@ -192,7 +204,16 @@ export default function GroupDetail() {
     interaction: { mode: 'index', intersect: false },
     plugins: {
       legend: { display: false },
-      tooltip: { enabled: false },
+      tooltip: {
+        displayColors: false,
+        callbacks: {
+          title: (items) => {
+            const i = items[0].dataIndex
+            return fmtDayLabel(dailyLabels[i]) + (isWeekend(dailyLabels[i]) ? ' · Weekend' : '')
+          },
+          label: () => '',
+        },
+      },
     },
     onHover: (evt, elements) => {
       if (evt.native) evt.native.target.style.cursor = elements.length ? 'crosshair' : 'default'
@@ -486,34 +507,26 @@ export default function GroupDetail() {
             <>
               {dailyEntries.length > 0 ? (
                 <div className="card">
-                  {/* Dynamic two-card header — updates on hover/touch */}
+                  {/* Dynamic two-card header */}
                   {(() => {
-                    const ai  = hoveredDayIdx !== null ? hoveredDayIdx : dailyLabels.length - 1
-                    const ad  = dailyLabels[ai]
-                    const av  = dailyValues[ai]
-                    const wkd = isWeekend(ad)
+                    const ai = hoveredDayIdx !== null ? hoveredDayIdx : dailyLabels.length - 1
+                    const av = dailyValues[ai] ?? 0
                     return (
-                      <div className="flex items-stretch gap-0 mb-4 pb-4 border-b border-amber-100">
+                      <div className="flex items-stretch mb-4 pb-4 border-b border-amber-100">
                         <div className="flex-1 pr-4">
-                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Date</p>
-                          <p className="text-xl font-black text-gray-900 mt-1 tracking-tight leading-tight">
-                            {ad ? fmtDayLabel(ad) : '—'}
-                          </p>
-                          <p className={`text-[11px] font-semibold mt-0.5 ${wkd ? 'text-orange-400' : 'text-gray-300'}`}>
-                            {wkd ? 'Weekend' : 'Weekday'}
+                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Daily Spend</p>
+                          <p className="text-2xl font-black text-gray-900 mt-1 tracking-tight">{INR(av)}</p>
+                          <p className="text-[11px] text-gray-300 mt-0.5">
+                            {hoveredDayIdx === null ? 'slide chart to explore' : fmtDayLabel(dailyLabels[ai])}
                           </p>
                         </div>
 
                         <div className="w-px bg-amber-100" />
 
                         <div className="flex-1 pl-4">
-                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Spent</p>
-                          <p className="text-xl font-black text-gray-900 mt-1 tracking-tight leading-tight">
-                            {INR(av ?? 0)}
-                          </p>
-                          <p className="text-[11px] text-gray-300 mt-0.5">
-                            {hoveredDayIdx === null ? 'latest · slide to explore' : 'this day'}
-                          </p>
+                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Mean (WO)</p>
+                          <p className="text-2xl font-black text-brand-600 mt-1 tracking-tight">{INR(Math.round(dailyMeanWO))}</p>
+                          <p className="text-[11px] text-gray-300 mt-0.5">avg excl. outliers</p>
                         </div>
                       </div>
                     )
