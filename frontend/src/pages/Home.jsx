@@ -42,7 +42,7 @@ export default function Home() {
 
   const visibleGroups   = filterForUser(groups)
   const visibleIds      = new Set(visibleGroups.map((g) => g.id))
-  const visibleOverview = overview.filter((g) => visibleIds.has(g.id))
+  const visibleOverview = overview.filter((g) => visibleIds.has(g.id) && !g.is_historical)
   const totalSpend      = visibleOverview.reduce((s, g) => s + g.total, 0)
 
   if (loading) return <LoadingSpinner />

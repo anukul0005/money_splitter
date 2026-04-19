@@ -77,4 +77,8 @@ def get_settlement(group_id: int, db: Session = Depends(get_db)):
     group = db.query(Group).filter(Group.id == group_id).first()
     if not group:
         raise HTTPException(404, "Group not found")
+    if group.is_historical:
+        member_names = [m.name for m in group.members]
+        balances = [BalanceEntry(member=m, paid=0.0, share=0.0, net=0.0) for m in member_names]
+        return SettlementOut(group_id=group_id, balances=balances, transactions=[])
     return _calculate(group)

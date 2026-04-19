@@ -18,6 +18,8 @@ def get_user_summary(name: str, db: Session = Depends(get_db)):
     groups_count = 0
 
     for g in groups:
+        if g.is_historical:
+            continue
         member_names_lower = [m.name.lower() for m in g.members]
         if name.lower() not in member_names_lower:
             continue

@@ -9,11 +9,14 @@ router = APIRouter(prefix="/groups", tags=["groups"])
 
 @router.get("/", response_model=list[GroupSummary])
 def list_groups(db: Session = Depends(get_db)):
-    groups = db.query(Group).order_by(Group.created_at.desc()).all()
-    summaries = []
+    groups = db.query(Group).all()
+    rows = []
     for g in groups:
         total = sum(e.amount for e in g.expenses)
-        summaries.append(GroupSummary(
+        dates = [e.date for e in g.expenses if e.date]
+        # Sort key: latest expense date if available, else group creation date
+        sort_key = max(dates) if dates else (g.created_at.date().isoformat() if g.created_at else "1970-01-01")
+        rows.append((sort_key, GroupSummary(
             id=g.id,
             name=g.name,
             emoji=g.emoji,
@@ -24,8 +27,9 @@ def list_groups(db: Session = Depends(get_db)):
             total_amount=round(total, 2),
             member_names=[m.name for m in g.members],
             created_at=g.created_at,
-        ))
-    return summaries
+        )))
+    rows.sort(key=lambda x: x[0], reverse=True)
+    return [s for _, s in rows]
 
 
 @router.post("/", response_model=GroupOut, status_code=201)
