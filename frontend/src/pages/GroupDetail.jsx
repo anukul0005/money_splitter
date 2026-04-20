@@ -656,7 +656,7 @@ export default function GroupDetail() {
                     return (
                       <div className="flex items-stretch mb-4 pb-4 border-b border-amber-100">
                         <div className="flex-1 pr-4">
-                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Daily Spend</p>
+                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Spend</p>
                           <p className="text-2xl font-black text-gray-900 mt-1 tracking-tight">{INR(av)}</p>
                           <p className="text-[11px] text-gray-300 mt-0.5">
                             {hoveredDayIdx === null ? 'slide chart to explore' : fmtDayLabel(dailyLabels[ai])}
@@ -672,7 +672,7 @@ export default function GroupDetail() {
                     )
                   })()}
                   <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-xs font-bold text-gray-500">Daily Spend</h3>
+                    <h3 className="text-xs font-bold text-gray-500">Spend by Day</h3>
                     <div className="flex items-center gap-3">
                       <span className="flex items-center gap-1.5 text-[10px] text-gray-400">
                         <span className="w-2 h-2 rounded-full bg-green-500 inline-block" /> Weekday

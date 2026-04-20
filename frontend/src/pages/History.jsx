@@ -57,6 +57,7 @@ export default function History() {
   const [topN,              setTopN]              = useState(10)
   const [timeFilter,        setTimeFilter]        = useState('all')
   const [selectedDrillMonth, setSelectedDrillMonth] = useState(null)
+  const [hoveredLineIdx,    setHoveredLineIdx]    = useState(null)
 
   const filterForUser = (list) =>
     list.filter((g) =>
@@ -354,8 +355,9 @@ export default function History() {
         }
       }
     },
-    onHover: (evt, chartElement) => {
-      if (evt.native) evt.native.target.style.cursor = chartElement[0] ? 'pointer' : 'default'
+    onHover: (evt, elements) => {
+      if (evt.native) evt.native.target.style.cursor = elements[0] ? 'pointer' : 'default'
+      setHoveredLineIdx(elements.length > 0 ? elements[0].index : null)
     },
   }
 
@@ -489,32 +491,8 @@ export default function History() {
         {/* ── 1. Monthly Trend ── */}
         {filteredMonthly.length > 0 && (
           <div className="card">
-            <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
-              <div>
-                <h2 className="text-xs font-black text-gray-500 uppercase tracking-widest">Monthly Spend</h2>
-                <div className="mt-1 space-y-0.5">
-                  <p className="text-[11px] text-gray-500">
-                    <span className="text-green-600 font-bold">Highest</span>{' '}
-                    {INR(monthlyMax)} in {maxMonthLbl}
-                    {' · '}
-                    <span className="text-red-500 font-bold">Lowest</span>{' '}
-                    {INR(monthlyMin)} in {minMonthLbl}
-                  </p>
-                  <p className="text-[11px] text-gray-500">
-                    Avg {INR(Math.round(monthlyValues.reduce((s, v) => s + v, 0) / (monthlyValues.length || 1)))} /month
-                    {forecastData.length > 0 && (
-                      <> · <span className="text-blue-500 font-bold">Forecast</span>{' '}
-                      ~{INR(Math.round(forecastData[0][1]))} next 3M</>
-                    )}
-                  </p>
-                  {anomalySpike && (
-                    <p className="text-[11px] text-orange-500 font-bold">
-                      ⚠️ Spike in {anomalySpike.label} (+{anomalySpike.pct}% above avg)
-                    </p>
-                  )}
-                </div>
-              </div>
-              {/* Time filter */}
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xs font-black text-gray-500 uppercase tracking-widest">Monthly Spend</h2>
               <div className="flex gap-1 flex-wrap">
                 {[['3', '3M'], ['6', '6M'], ['12', '1Y'], ['all', 'All']].map(([v, lbl]) => (
                   <button
@@ -531,6 +509,46 @@ export default function History() {
                 ))}
               </div>
             </div>
+
+            {/* Dynamic 3 cards */}
+            {(() => {
+              const ai       = hoveredLineIdx !== null ? hoveredLineIdx : N - 1
+              const actVal   = actualPadded[ai] ?? null
+              const avgVal   = movingAvgPadded[ai] ?? null
+              const fcstVal  = forecastData.length > 0 ? forecastData[0][1] : null
+              const monthLbl = combinedLabels[ai] || ''
+              return (
+                <div className="flex items-stretch mb-4 pb-4 border-b border-amber-100">
+                  <div className="flex-1 text-center px-2">
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Actual</p>
+                    <p className="text-xl font-black text-gray-900 mt-1 tracking-tight">
+                      {actVal !== null ? INR(Math.round(actVal)) : '—'}
+                    </p>
+                    <p className="text-[10px] text-gray-300 mt-0.5">
+                      {hoveredLineIdx === null ? 'latest' : monthLbl}
+                    </p>
+                  </div>
+                  <div className="w-px bg-amber-100" />
+                  <div className="flex-1 text-center px-2">
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">3M Avg</p>
+                    <p className="text-xl font-black text-brand-600 mt-1 tracking-tight">
+                      {avgVal !== null ? INR(Math.round(avgVal)) : '—'}
+                    </p>
+                    <p className="text-[10px] text-gray-300 mt-0.5">
+                      {hoveredLineIdx === null ? 'current' : monthLbl}
+                    </p>
+                  </div>
+                  <div className="w-px bg-amber-100" />
+                  <div className="flex-1 text-center px-2">
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Forecast</p>
+                    <p className="text-xl font-black text-blue-500 mt-1 tracking-tight">
+                      {fcstVal !== null ? INR(Math.round(fcstVal)) : '—'}
+                    </p>
+                    <p className="text-[10px] text-gray-300 mt-0.5">next month</p>
+                  </div>
+                </div>
+              )
+            })()}
 
             {/* Chart — fixed height so it fills properly */}
             <div className="relative h-80">
