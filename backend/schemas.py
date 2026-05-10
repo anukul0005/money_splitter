@@ -110,10 +110,17 @@ class Transaction(BaseModel):
     to_member: str
     amount: float
 
+class PastPayment(BaseModel):
+    from_member: str
+    to_member: str
+    settled_amount: float   # already paid
+    total_owed: float       # original debt before any settling
+
 class SettlementOut(BaseModel):
     group_id: int
     balances: list[BalanceEntry]
     transactions: list[Transaction]
+    past_payments: list[PastPayment] = []
 
 
 # ─── Stats ───────────────────────────────────────────────────────────────────

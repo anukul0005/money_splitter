@@ -40,6 +40,7 @@ export default function AddExpense() {
   const [gentlemanFlipped, setGentlemanFlipped] = useState(false)
   const [customPcts, setCustomPcts]             = useState({})
   const [customAmts, setCustomAmts]             = useState({})
+  const [touchedPcts, setTouchedPcts]           = useState({})
 
   const [form, setForm] = useState({
     group_id:     defaultGroup,
@@ -74,6 +75,7 @@ export default function AddExpense() {
         setGentlemanFlipped(false)
         setCustomPcts(Object.fromEntries(ms.map((m) => [m.name, ''])))
         setCustomAmts(Object.fromEntries(ms.map((m) => [m.name, ''])))
+        setTouchedPcts({})
         const titles = [...new Set((r.data.expenses || []).map((e) => e.title).filter(Boolean))]
         setExistingTitles(titles)
       })
@@ -112,22 +114,72 @@ export default function AddExpense() {
 
   const customTotal = members.reduce((s, m) => s + parseFloat(customPcts[m.name] || 0), 0)
 
+  const r2 = (n) => Math.round(n * 100) / 100
+
   const onPctChange = (name, pctStr) => {
-    setCustomPcts((p) => ({ ...p, [name]: pctStr }))
-    const total = parseFloat(form.amount)
     const pctNum = parseFloat(pctStr)
-    if (!isNaN(pctNum) && !isNaN(total) && total > 0) {
-      setCustomAmts((a) => ({ ...a, [name]: String(Math.round(total * pctNum / 100 * 100) / 100) }))
+    const isEmpty = pctStr === ''
+    const newTouched = { ...touchedPcts, [name]: !isEmpty }
+    setTouchedPcts(newTouched)
+
+    const memberNames = members.map((m) => m.name)
+    const newPcts = { ...customPcts, [name]: pctStr }
+
+    if (!isEmpty && !isNaN(pctNum)) {
+      const unlockedNames = memberNames.filter((n) => n !== name && !newTouched[n])
+      if (unlockedNames.length > 0) {
+        const lockedSum = memberNames
+          .filter((n) => n === name || newTouched[n])
+          .reduce((s, n) => s + parseFloat(n === name ? pctStr : (customPcts[n] || 0)), 0)
+        const share = r2(Math.max(0, (100 - lockedSum) / unlockedNames.length))
+        unlockedNames.forEach((n) => { newPcts[n] = String(share) })
+      }
+    }
+
+    setCustomPcts(newPcts)
+    const total = parseFloat(form.amount)
+    if (!isNaN(total) && total > 0) {
+      const newAmts = { ...customAmts }
+      memberNames.forEach((n) => {
+        const p = parseFloat(newPcts[n])
+        if (!isNaN(p)) newAmts[n] = String(r2(total * p / 100))
+      })
+      setCustomAmts(newAmts)
     }
   }
 
   const onAmtChange = (name, amtStr) => {
-    setCustomAmts((a) => ({ ...a, [name]: amtStr }))
     const total = parseFloat(form.amount)
     const amtNum = parseFloat(amtStr)
-    if (!isNaN(amtNum) && !isNaN(total) && total > 0) {
-      setCustomPcts((p) => ({ ...p, [name]: String(Math.round(amtNum / total * 10000) / 100) }))
+    const isEmpty = amtStr === ''
+    const pctNum = (!isEmpty && !isNaN(amtNum) && !isNaN(total) && total > 0)
+      ? r2(amtNum / total * 100)
+      : NaN
+    const pctStr = isNaN(pctNum) ? '' : String(pctNum)
+
+    const newTouched = { ...touchedPcts, [name]: !isEmpty }
+    setTouchedPcts(newTouched)
+
+    const memberNames = members.map((m) => m.name)
+    const newPcts = { ...customPcts, [name]: pctStr }
+    const newAmts = { ...customAmts, [name]: amtStr }
+
+    if (!isEmpty && !isNaN(pctNum) && !isNaN(total) && total > 0) {
+      const unlockedNames = memberNames.filter((n) => n !== name && !newTouched[n])
+      if (unlockedNames.length > 0) {
+        const lockedSum = memberNames
+          .filter((n) => n === name || newTouched[n])
+          .reduce((s, n) => s + parseFloat(n === name ? pctStr : (customPcts[n] || 0)), 0)
+        const share = r2(Math.max(0, (100 - lockedSum) / unlockedNames.length))
+        unlockedNames.forEach((n) => {
+          newPcts[n] = String(share)
+          newAmts[n] = String(r2(total * share / 100))
+        })
+      }
     }
+
+    setCustomPcts(newPcts)
+    setCustomAmts(newAmts)
   }
 
   const resetExpenseFields = (gid) => {
@@ -146,6 +198,7 @@ export default function AddExpense() {
     setGentlemanFlipped(false)
     setCustomPcts(Object.fromEntries(members.map((m) => [m.name, ''])))
     setCustomAmts(Object.fromEntries(members.map((m) => [m.name, ''])))
+    setTouchedPcts({})
     setTimeout(() => amountRef.current?.focus(), 50)
   }
 

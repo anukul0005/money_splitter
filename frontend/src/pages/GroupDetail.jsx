@@ -744,12 +744,30 @@ export default function GroupDetail() {
           {/* Transactions */}
           <div className="card">
             <h3 className="text-xs font-bold text-gray-500 mb-3">Who pays whom?</h3>
-            {settlement.transactions.length === 0 ? (
+            {settlement.transactions.length === 0 && (!settlement.past_payments || settlement.past_payments.length === 0) ? (
               <p className="text-sm text-brand-600 font-black text-center py-4">All settled</p>
             ) : (
               <div className="space-y-2">
+                {/* Past (settled) payments */}
+                {settlement.past_payments && settlement.past_payments.map((p, i) => (
+                  <div key={`past-${i}`} className="flex items-center gap-2 bg-green-50 border border-green-200 px-3 py-2.5">
+                    <svg className="w-4 h-4 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span className="font-bold text-sm text-green-700 flex-shrink-0">{p.from_member}</span>
+                    <span className="text-xs text-green-600 flex-shrink-0">paid</span>
+                    <span className="font-bold text-sm text-green-700 flex-1 min-w-0 truncate">{p.to_member}</span>
+                    <div className="text-right flex-shrink-0">
+                      <span className="font-black text-green-700 text-sm">{INR(p.settled_amount)}</span>
+                      {p.total_owed > p.settled_amount + 0.5 && (
+                        <p className="text-xs text-gray-400">of {INR(p.total_owed)}</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {/* Pending payments */}
                 {settlement.transactions.map((t, i) => (
-                  <div key={i} className="flex items-center gap-2 bg-red-50 border border-red-100 px-3 py-2.5">
+                  <div key={`pending-${i}`} className="flex items-center gap-2 bg-red-50 border border-red-100 px-3 py-2.5">
                     <span className="font-bold text-sm text-red-700 flex-shrink-0">{t.from_member}</span>
                     <svg className="w-4 h-4 text-red-400 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />

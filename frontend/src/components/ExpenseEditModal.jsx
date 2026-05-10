@@ -55,12 +55,20 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
     body.style.width = '100%'
     body.style.overflow = 'hidden'
     html.style.overflow = 'hidden'
+
+    // Prevent elastic-scroll / bounce from moving the modal on iOS
+    const preventBounce = (e) => {
+      if (!e.target.closest('[data-modal-scroll]')) e.preventDefault()
+    }
+    document.addEventListener('touchmove', preventBounce, { passive: false })
+
     return () => {
       body.style.position = ''
       body.style.top = ''
       body.style.width = ''
       body.style.overflow = ''
       html.style.overflow = ''
+      document.removeEventListener('touchmove', preventBounce)
       window.scrollTo(0, scrollY)
     }
   }, [])
@@ -82,6 +90,10 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
   })
   const [saving,      setSaving]      = useState(false)
   const [error,       setError]       = useState('')
+  // Track which pct fields the user has explicitly typed (vs auto-filled)
+  const [touchedPcts, setTouchedPcts] = useState(() =>
+    parsedSplit ? Object.fromEntries(members.map((m) => [m, true])) : {}
+  )
 
   const amtNum      = parseFloat(amount) || 0
   const pctTotal    = members.reduce((s, m) => s + parseFloat(customPcts[m] || 0), 0)
@@ -107,19 +119,63 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
   }
 
   const onPctChange = (name, pctStr) => {
-    setCustomPcts((p) => ({ ...p, [name]: pctStr }))
-    const total = amtNum
     const pctNum = parseFloat(pctStr)
-    if (!isNaN(pctNum) && total > 0)
-      setCustomAmts((a) => ({ ...a, [name]: String(r2(total * pctNum / 100)) }))
+    const isEmpty = pctStr === ''
+    const newTouched = { ...touchedPcts, [name]: !isEmpty }
+    setTouchedPcts(newTouched)
+
+    const newPcts = { ...customPcts, [name]: pctStr }
+
+    if (!isEmpty && !isNaN(pctNum)) {
+      const unlockedNames = members.filter((n) => n !== name && !newTouched[n])
+      if (unlockedNames.length > 0) {
+        const lockedSum = members
+          .filter((n) => n === name || newTouched[n])
+          .reduce((s, n) => s + parseFloat(n === name ? pctStr : (customPcts[n] || 0)), 0)
+        const share = r2(Math.max(0, (100 - lockedSum) / unlockedNames.length))
+        unlockedNames.forEach((n) => { newPcts[n] = String(share) })
+      }
+    }
+
+    setCustomPcts(newPcts)
+    if (!isNaN(amtNum) && amtNum > 0) {
+      const newAmts = { ...customAmts }
+      members.forEach((n) => {
+        const p = parseFloat(newPcts[n])
+        if (!isNaN(p)) newAmts[n] = String(r2(amtNum * p / 100))
+      })
+      setCustomAmts(newAmts)
+    }
   }
 
   const onAmtChange = (name, amtStr) => {
-    setCustomAmts((a) => ({ ...a, [name]: amtStr }))
-    const total = amtNum
     const av = parseFloat(amtStr)
-    if (!isNaN(av) && total > 0)
-      setCustomPcts((p) => ({ ...p, [name]: String(r2(av / total * 100)) }))
+    const isEmpty = amtStr === ''
+    const pctNum = (!isEmpty && !isNaN(av) && amtNum > 0) ? r2(av / amtNum * 100) : NaN
+    const pctStr = isNaN(pctNum) ? '' : String(pctNum)
+
+    const newTouched = { ...touchedPcts, [name]: !isEmpty }
+    setTouchedPcts(newTouched)
+
+    const newPcts = { ...customPcts, [name]: pctStr }
+    const newAmts = { ...customAmts, [name]: amtStr }
+
+    if (!isEmpty && !isNaN(pctNum) && amtNum > 0) {
+      const unlockedNames = members.filter((n) => n !== name && !newTouched[n])
+      if (unlockedNames.length > 0) {
+        const lockedSum = members
+          .filter((n) => n === name || newTouched[n])
+          .reduce((s, n) => s + parseFloat(n === name ? pctStr : (customPcts[n] || 0)), 0)
+        const share = r2(Math.max(0, (100 - lockedSum) / unlockedNames.length))
+        unlockedNames.forEach((n) => {
+          newPcts[n] = String(share)
+          newAmts[n] = String(r2(amtNum * share / 100))
+        })
+      }
+    }
+
+    setCustomPcts(newPcts)
+    setCustomAmts(newAmts)
   }
 
   const handleSave = async () => {
@@ -187,7 +243,8 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
       style={{ touchAction: 'none' }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div className="bg-cream w-full md:max-w-lg h-[90dvh] md:h-auto md:max-h-[92vh] overflow-hidden flex flex-col border-t border-x border-amber-100/60 md:border shadow-2xl">
+      <div className="bg-cream w-full md:max-w-lg h-[90svh] md:h-auto md:max-h-[92vh] overflow-hidden flex flex-col border-t border-x border-amber-100/60 md:border shadow-2xl"
+           style={{ willChange: 'transform' }}>
 
         {/* Header */}
         <div className="px-5 py-4 border-b border-amber-100/60 flex items-center justify-between flex-shrink-0 bg-cream">
@@ -200,7 +257,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
         </div>
 
         {/* Body */}
-        <div className="overflow-y-auto overscroll-y-contain flex-1 min-h-0 px-5 py-4 space-y-4" style={{ touchAction: 'pan-y' }}>
+        <div data-modal-scroll className="overflow-y-auto overscroll-y-contain flex-1 min-h-0 px-5 py-4 space-y-4" style={{ touchAction: 'pan-y' }}>
 
           {/* Amount — editable */}
           <div>

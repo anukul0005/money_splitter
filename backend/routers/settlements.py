@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db
 from models import Group
-from schemas import SettlementOut, BalanceEntry, Transaction
+from schemas import SettlementOut, BalanceEntry, Transaction, PastPayment
 
 router = APIRouter(prefix="/settlements", tags=["settlements"])
 
@@ -11,10 +11,12 @@ router = APIRouter(prefix="/settlements", tags=["settlements"])
 def _calculate(group: Group) -> SettlementOut:
     member_names = [m.name for m in group.members]
     if not member_names:
-        return SettlementOut(group_id=group.id, balances=[], transactions=[])
+        return SettlementOut(group_id=group.id, balances=[], transactions=[], past_payments=[])
 
     paid: dict[str, float] = {m: 0.0 for m in member_names}
     share: dict[str, float] = {m: 0.0 for m in member_names}
+    # settled_map[debtor][payer] = total settled so far
+    settled_map: dict[str, dict[str, float]] = {m: {} for m in member_names}
 
     for exp in group.expenses:
         payer = exp.paid_by
@@ -30,16 +32,26 @@ def _calculate(group: Group) -> SettlementOut:
         if payer in paid:
             paid[payer] += amount
 
+        settled_members: list[str] = json.loads(exp.settled_by) if exp.settled_by else []
+
         if exp.split_json:
-            # Custom/Gentleman split: use per-member amounts directly
             split_amounts = json.loads(exp.split_json)
             for p, amt in split_amounts.items():
+                member_share = float(amt)
                 if p in share:
-                    share[p] += float(amt)
+                    share[p] += member_share
+                if p in settled_members and p != payer and p in settled_map:
+                    settled_map[p].setdefault(payer, 0.0)
+                    settled_map[p][payer] += member_share
+                    paid[p] += member_share  # treat as if debtor repaid their share
         else:
             for p in participants:
                 if p in share:
                     share[p] += individual
+                if p in settled_members and p != payer and p in settled_map:
+                    settled_map[p].setdefault(payer, 0.0)
+                    settled_map[p][payer] += individual
+                    paid[p] += individual  # treat as if debtor repaid their share
 
     balances: list[BalanceEntry] = []
     net_map: dict[str, float] = {}
@@ -48,6 +60,23 @@ def _calculate(group: Group) -> SettlementOut:
         net = round(paid[m] - share[m], 2)
         net_map[m] = net
         balances.append(BalanceEntry(member=m, paid=round(paid[m], 2), share=round(share[m], 2), net=net))
+
+    # Build past payments: pairs where debtor has already settled some amount to payer
+    # Also track the original (pre-settle) debt to show total_owed
+    past_payments: list[PastPayment] = []
+    for debtor, payer_map in settled_map.items():
+        for payer_name, settled_amt in payer_map.items():
+            if settled_amt > 0.01:
+                # original debt = current net (already adjusted) + settled_amt
+                # net_map[debtor] = paid - share; since we added settled_amt to paid,
+                # original_net = net_map[debtor] - settled_amt
+                total_owed = round(settled_amt + max(0.0, -net_map[debtor]), 2)
+                past_payments.append(PastPayment(
+                    from_member=debtor,
+                    to_member=payer_name,
+                    settled_amount=round(settled_amt, 2),
+                    total_owed=total_owed,
+                ))
 
     creditors = sorted([(n, v) for n, v in net_map.items() if v > 0.01], key=lambda x: -x[1])
     debtors   = sorted([(n, -v) for n, v in net_map.items() if v < -0.01], key=lambda x: -x[1])
@@ -69,7 +98,7 @@ def _calculate(group: Group) -> SettlementOut:
         if debt[j][1] < 0.01:
             j += 1
 
-    return SettlementOut(group_id=group.id, balances=balances, transactions=transactions)
+    return SettlementOut(group_id=group.id, balances=balances, transactions=transactions, past_payments=past_payments)
 
 
 @router.get("/{group_id}", response_model=SettlementOut)
