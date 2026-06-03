@@ -18,9 +18,11 @@ export default function Groups() {
     getGroups().then((r) => setGroups(r.data)).finally(() => setLoading(false))
   }, [])
 
-  const visibleGroups = groups.filter((g) =>
-    (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase())
-  )
+  const visibleGroups = admin
+    ? groups
+    : groups.filter((g) =>
+        (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase())
+      )
 
   const filtered = visibleGroups.filter((g) =>
     filter === 'all' ? true : filter === 'historical' ? g.is_historical : !g.is_historical

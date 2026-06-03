@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from database import create_tables, get_settings
-from routers import groups, expenses, settlements, stats
+from routers import groups, expenses, settlements, stats, users
 
 
 @asynccontextmanager
@@ -24,6 +24,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(users.router)
 app.include_router(groups.router)
 app.include_router(expenses.router)
 app.include_router(settlements.router)

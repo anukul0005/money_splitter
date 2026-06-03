@@ -1,15 +1,7 @@
 import { useState } from 'react'
+import { loginUser, signupUser } from '../api'
 
-const ADMIN_USERS = [
-  { name: 'Anukul',  password: 'anuk25', isAdmin: true },
-  { name: 'Anubhav', password: 'anub10', isAdmin: true },
-]
-const USERS_KEY   = 'splitter_users_v3'
 const SESSION_KEY = 'splitter_session'
-
-function getUsers() {
-  try { return JSON.parse(localStorage.getItem(USERS_KEY) || '[]') } catch { return [] }
-}
 
 const FEATURES = [
   { icon: '💸', text: 'Track who paid what in groups' },
@@ -25,58 +17,50 @@ export default function Login({ onLogin }) {
   const [confirmPw, setConfirmPw] = useState('')
   const [showPw, setShowPw]     = useState(false)
   const [error, setError]       = useState('')
+  const [loading, setLoading]   = useState(false)
   const [forgotOpen, setForgotOpen] = useState(false)
 
   const switchMode = (m) => {
     setMode(m); setError(''); setUsername(''); setPassword(''); setConfirmPw('')
   }
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault()
     setError('')
     if (!username.trim() || !password) { setError('Enter username and password.'); return }
-
-    const admin = ADMIN_USERS.find(
-      u => u.name.toLowerCase() === username.trim().toLowerCase() && u.password === password
-    )
-    if (admin) {
-      const s = { name: admin.name, isAdmin: true }
+    setLoading(true)
+    try {
+      const res = await loginUser({ name: username.trim(), password })
+      const u = res.data
+      const s = { name: u.name, isAdmin: u.is_admin, id: u.id }
       localStorage.setItem(SESSION_KEY, JSON.stringify(s))
       onLogin(s)
-      return
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Incorrect username or password.')
+    } finally {
+      setLoading(false)
     }
-
-    const user = getUsers().find(
-      u => u.name.toLowerCase() === username.trim().toLowerCase() && u.password === password
-    )
-    if (user) {
-      const s = { name: user.name, isAdmin: false }
-      localStorage.setItem(SESSION_KEY, JSON.stringify(s))
-      onLogin(s)
-      return
-    }
-
-    setError('Incorrect username or password.')
   }
 
-  const handleSignup = (e) => {
+  const handleSignup = async (e) => {
     e.preventDefault()
     setError('')
     const name = username.trim()
     if (!name || !password) { setError('Please fill in all fields.'); return }
-    if (password.length > 6) { setError('Password must be 6 characters or less.'); return }
     if (password !== confirmPw) { setError('Passwords do not match.'); return }
-
-    const taken =
-      ADMIN_USERS.some(u => u.name.toLowerCase() === name.toLowerCase()) ||
-      getUsers().some(u => u.name.toLowerCase() === name.toLowerCase())
-    if (taken) { setError('Username already taken. Please choose a different one.'); return }
-
-    const users = getUsers()
-    localStorage.setItem(USERS_KEY, JSON.stringify([...users, { name, password, isAdmin: false }]))
-    const s = { name, isAdmin: false }
-    localStorage.setItem(SESSION_KEY, JSON.stringify(s))
-    onLogin(s)
+    setLoading(true)
+    try {
+      const res = await signupUser({ name, password })
+      const u = res.data
+      const s = { name: u.name, isAdmin: u.is_admin, id: u.id }
+      localStorage.setItem(SESSION_KEY, JSON.stringify(s))
+      onLogin(s)
+    } catch (err) {
+      const detail = err.response?.data?.detail || 'Signup failed.'
+      setError(detail === 'Username already taken' ? 'Username already taken. Please choose a different one.' : detail)
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -88,7 +72,6 @@ export default function Login({ onLogin }) {
         <div className="absolute -bottom-20 -right-20 w-64 h-64 rounded-full bg-brand-600/10 pointer-events-none" />
 
         <div className="relative z-10">
-          {/* Logo */}
           <div className="flex items-center gap-3 mb-10">
             <div className="w-11 h-11 bg-brand-400 flex items-center justify-center shadow-lg shadow-brand-400/30">
               <span className="text-field-950 font-black text-xl">S</span>
@@ -203,8 +186,8 @@ export default function Login({ onLogin }) {
                   </p>
                 )}
 
-                <button type="submit" className="btn-primary">
-                  LOG IN →
+                <button type="submit" className="btn-primary" disabled={loading}>
+                  {loading ? 'LOGGING IN...' : 'LOG IN →'}
                 </button>
 
                 <div className="text-center pt-1">
@@ -285,8 +268,8 @@ export default function Login({ onLogin }) {
                   </p>
                 )}
 
-                <button type="submit" className="btn-primary">
-                  CREATE ACCOUNT →
+                <button type="submit" className="btn-primary" disabled={loading}>
+                  {loading ? 'CREATING...' : 'CREATE ACCOUNT →'}
                 </button>
               </form>
             )}

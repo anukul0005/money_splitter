@@ -10,7 +10,7 @@ import {
 import { Line, Bar } from 'react-chartjs-2'
 import { getGroups, getOverview, getGroupStats } from '../api/index.js'
 import LoadingSpinner from '../components/LoadingSpinner'
-import { useUser } from '../UserContext'
+import { useUser, isAdmin } from '../UserContext'
 
 Chart.register(
   LineElement, PointElement, LineController, Filler,
@@ -44,8 +44,9 @@ const PALETTE    = ['#ef4444','#f97316','#eab308','#22c55e','#06b6d4','#3b82f6',
 const CHART_FONT = { size: 11, family: "'Barlow Condensed', sans-serif" }
 
 export default function History() {
-  const nav  = useNavigate()
-  const user = useUser()
+  const nav   = useNavigate()
+  const user  = useUser()
+  const admin = isAdmin(user)
 
   const [groups,     setGroups]     = useState([])
   const [overview,   setOverview]   = useState([])
@@ -60,9 +61,11 @@ export default function History() {
   const [hoveredLineIdx,    setHoveredLineIdx]    = useState(null)
 
   const filterForUser = (list) =>
-    list.filter((g) =>
-      (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase())
-    )
+    admin
+      ? list
+      : list.filter((g) =>
+          (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase())
+        )
 
   const load = async () => {
     setLoading(true)

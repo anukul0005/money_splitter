@@ -3,6 +3,24 @@ from typing import Optional
 from datetime import datetime
 
 
+# ─── User ────────────────────────────────────────────────────────────────────
+
+class UserSignup(BaseModel):
+    name: str
+    password: str
+
+class UserLogin(BaseModel):
+    name: str
+    password: str
+
+class UserOut(BaseModel):
+    id: int
+    name: str
+    is_admin: bool
+    created_at: Optional[datetime] = None
+    model_config = {"from_attributes": True}
+
+
 # ─── Member ──────────────────────────────────────────────────────────────────
 
 class MemberBase(BaseModel):

@@ -4,6 +4,11 @@ const BASE = import.meta.env.VITE_API_URL || '/api'
 
 const api = axios.create({ baseURL: BASE })
 
+// ── Auth ──────────────────────────────────────────────────────────────────────
+export const loginUser  = (data) => api.post('/users/login', data)
+export const signupUser = (data) => api.post('/users/signup', data)
+export const listUsers  = ()     => api.get('/users/')
+
 // ── Groups ────────────────────────────────────────────────────────────────────
 export const getGroups   = ()            => api.get('/groups/')
 export const getGroup    = (id)          => api.get(`/groups/${id}`)
