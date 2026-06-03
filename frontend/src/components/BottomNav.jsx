@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
+import ChangePasswordModal from './ChangePasswordModal'
 
 const items = [
   { to: '/',        label: 'Home',    icon: HomeIcon },
@@ -13,7 +15,11 @@ function AddIcon()     { return <svg className="w-6 h-6" fill="none" stroke="cur
 function HistoryIcon() { return <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> }
 
 export default function BottomNav({ user, onLogout }) {
+  const [menuOpen, setMenuOpen]     = useState(false)
+  const [showChangePw, setShowChangePw] = useState(false)
+
   const handleLogout = () => {
+    setMenuOpen(false)
     if (window.confirm('Sign out?')) onLogout()
   }
 
@@ -48,17 +54,40 @@ export default function BottomNav({ user, onLogout }) {
           </NavLink>
         ))}
 
-        {/* User / logout */}
-        <button
-          onClick={handleLogout}
-          className="flex flex-col items-center gap-0.5 flex-1 py-2 text-green-200/40 active:scale-95 transition-transform"
-        >
-          <span className="w-6 h-6 bg-brand-400/15 border border-brand-400/30 flex items-center justify-center font-black text-brand-400 text-xs">
-            {user?.name?.[0]?.toUpperCase() || '?'}
-          </span>
-          <span className="text-[10px] font-semibold text-green-200/40">Sign out</span>
-        </button>
+        {/* User menu */}
+        <div className="relative flex-1">
+          <button
+            onClick={() => setMenuOpen(v => !v)}
+            className="flex flex-col items-center gap-0.5 w-full py-2 text-green-200/40 active:scale-95 transition-transform"
+          >
+            <span className="w-6 h-6 bg-brand-400/15 border border-brand-400/30 flex items-center justify-center font-black text-brand-400 text-xs">
+              {user?.name?.[0]?.toUpperCase() || '?'}
+            </span>
+            <span className="text-[10px] font-semibold text-green-200/40">Account</span>
+          </button>
+
+          {menuOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+              <div className="absolute bottom-14 right-0 bg-field-900 border border-field-700 shadow-xl z-50 w-44 py-1">
+                <button
+                  onClick={() => { setMenuOpen(false); setShowChangePw(true) }}
+                  className="w-full text-left px-4 py-2.5 text-xs font-semibold text-green-200/60 hover:text-brand-400 hover:bg-field-800 transition-colors"
+                >
+                  Change password
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="w-full text-left px-4 py-2.5 text-xs font-semibold text-green-200/60 hover:text-red-400 hover:bg-field-800 transition-colors"
+                >
+                  Sign out
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
+      {showChangePw && <ChangePasswordModal user={user} onClose={() => setShowChangePw(false)} />}
     </nav>
   )
 }

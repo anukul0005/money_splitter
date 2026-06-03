@@ -51,6 +51,25 @@ def list_users(db: Session = Depends(get_db)):
     return db.query(User).order_by(User.created_at).all()
 
 
+@router.patch("/{user_id}/password", response_model=UserOut)
+def change_password(user_id: int, payload: dict, db: Session = Depends(get_db)):
+    from pydantic import BaseModel
+    current = payload.get("current_password", "")
+    new = payload.get("new_password", "")
+    if not current or not new:
+        raise HTTPException(400, "Both current and new password are required")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "User not found")
+    if user.password_hash != _hash(current, user.salt):
+        raise HTTPException(401, "Current password is incorrect")
+    user.salt = secrets.token_hex(16)
+    user.password_hash = _hash(new, user.salt)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 @router.delete("/{user_id}", status_code=204)
 def delete_user(user_id: int, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
