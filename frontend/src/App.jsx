@@ -13,7 +13,7 @@ import History     from './pages/History'
 import Login       from './pages/Login'
 import { UserContext } from './UserContext'
 
-const SESSION_KEY = 'splitter_session'
+const SESSION_KEY = 'splitter_session_v2'
 
 function getStoredUser() {
   try {
@@ -28,8 +28,8 @@ export default function App() {
   const [user, setUser] = useState(getStoredUser)
 
   const handleLogout = () => {
-    localStorage.removeItem(SESSION_KEY)
-    setUser(null)
+    localStorage.clear()
+    window.location.reload()
   }
 
   if (!user) return <Login onLogin={setUser} />

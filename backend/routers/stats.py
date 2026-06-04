@@ -26,8 +26,12 @@ def get_user_summary(name: str, db: Session = Depends(get_db)):
         groups_count += 1
 
         for e in g.expenses:
+            payer = e.paid_by.lower()
+            settled_members = [s.lower() for s in (_json.loads(e.settled_by) if e.settled_by else [])]
+            user_settled = name.lower() in settled_members and payer != name.lower()
+
             # What this person paid
-            if e.paid_by.lower() == name.lower():
+            if payer == name.lower():
                 total_paid += e.amount
 
             # What this person's share is
@@ -36,7 +40,10 @@ def get_user_summary(name: str, db: Session = Depends(get_db)):
                     splits = _json.loads(e.split_json)
                     for k, v in splits.items():
                         if k.lower() == name.lower():
-                            total_share += float(v)
+                            member_share = float(v)
+                            total_share += member_share
+                            if user_settled:
+                                total_paid += member_share
                             break
                 except Exception:
                     pass
@@ -47,8 +54,10 @@ def get_user_summary(name: str, db: Session = Depends(get_db)):
                     parts = [p.strip().lower() for p in e.participants.split(',')]
                     participates = name.lower() in parts
                 if participates:
-                    share = e.individual_amount if e.individual_amount else (e.amount / max(e.divider, 1))
-                    total_share += share
+                    member_share = e.individual_amount if e.individual_amount else (e.amount / max(e.divider, 1))
+                    total_share += member_share
+                    if user_settled:
+                        total_paid += member_share
 
     return {
         "name": name,

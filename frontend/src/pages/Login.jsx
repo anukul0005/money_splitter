@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { loginUser, signupUser } from '../api'
 
-const SESSION_KEY = 'splitter_session'
+const SESSION_KEY = 'splitter_session_v2'
 
 const FEATURES = [
   { icon: '💸', text: 'Track who paid what in groups' },
@@ -35,6 +35,7 @@ export default function Login({ onLogin }) {
       const s = { name: u.name, isAdmin: u.is_admin, id: u.id }
       localStorage.setItem(SESSION_KEY, JSON.stringify(s))
       onLogin(s)
+      window.location.reload()
     } catch (err) {
       setError(err.response?.data?.detail || 'Incorrect username or password.')
     } finally {
