@@ -120,6 +120,40 @@ def get_overview(db: Session = Depends(get_db)):
     ]
 
 
+@router.get("/user-group-balances", response_model=list[dict])
+def get_user_group_balances(name: str, db: Session = Depends(get_db)):
+    """Per-group net balance for a named user (non-historical, non-zero balance only)."""
+    from routers.settlements import _calculate
+
+    groups = db.query(Group).all()
+    result = []
+
+    for g in groups:
+        if g.is_historical:
+            continue
+        member_names_lower = [m.name.lower() for m in g.members]
+        if name.lower() not in member_names_lower:
+            continue
+
+        settlement = _calculate(g)
+        user_balance = next(
+            (b for b in settlement.balances if b.member.lower() == name.lower()),
+            None,
+        )
+        if user_balance and abs(user_balance.net) > 0.01:
+            result.append({
+                "group_id": g.id,
+                "name": g.name,
+                "emoji": g.emoji or "💰",
+                "net": round(user_balance.net, 2),
+                "category": g.category or "",
+            })
+
+    # owe first (negative net), then owed (positive net), each sorted by abs amount desc
+    result.sort(key=lambda x: (x["net"] >= 0, -abs(x["net"])))
+    return result
+
+
 @router.get("/global-analytics", response_model=dict)
 def get_global_analytics(name: str = "", db: Session = Depends(get_db)):
     """Cross-group analytics: overall by expense category + per-person category breakdown."""

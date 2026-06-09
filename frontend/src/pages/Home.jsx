@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getOverview, getUserSummary, getGlobalAnalytics } from '../api'
+import { getOverview, getUserSummary, getGlobalAnalytics, getUserGroupBalances } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser, isAdmin } from '../UserContext'
 
@@ -10,6 +10,33 @@ const PALETTE = [
   '#f97316','#eab308','#22c55e','#06b6d4','#3b82f6',
   '#8b5cf6','#ec4899','#ef4444','#14b8a6','#f59e0b',
 ]
+
+function BalanceGroupCard({ group, nav }) {
+  const owes = group.net < 0
+  return (
+    <button
+      onClick={() => nav(`/groups/${group.group_id}`)}
+      className={`w-full text-left rounded-2xl border px-4 py-3 flex items-center gap-3 active:scale-95 transition-all duration-150 ${
+        owes
+          ? 'bg-red-50 border-red-200 hover:bg-red-100'
+          : 'bg-green-50 border-green-200 hover:bg-green-100'
+      }`}
+    >
+      <span className="text-2xl shrink-0">{group.emoji}</span>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-bold text-gray-900 truncate">{group.name}</p>
+        <p className={`text-xs font-semibold mt-0.5 ${owes ? 'text-red-600' : 'text-green-600'}`}>
+          {owes ? `You owe ${INR(Math.abs(group.net))}` : `You're owed ${INR(group.net)}`}
+        </p>
+      </div>
+      <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-black ${
+        owes ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'
+      }`}>
+        {owes ? '↑' : '↓'}
+      </div>
+    </button>
+  )
+}
 
 function CategoryBar({ category, total, maxTotal, color, count }) {
   const pct = maxTotal > 0 ? Math.max(4, (total / maxTotal) * 100) : 4
@@ -35,7 +62,6 @@ function CategoryBar({ category, total, maxTotal, color, count }) {
 function PersonCategoryCard({ person, cats }) {
   const top = cats[0]
   const maxAmt = cats[0]?.total ?? 1
-  const colors = PALETTE
 
   return (
     <div className="card p-3">
@@ -45,23 +71,16 @@ function PersonCategoryCard({ person, cats }) {
         </div>
         <div className="min-w-0">
           <p className="text-xs font-bold text-gray-900 truncate capitalize">{person}</p>
-          {top && (
-            <p className="text-[10px] text-gray-400 truncate">Top: {top.category}</p>
-          )}
+          {top && <p className="text-[10px] text-gray-400 truncate">Top: {top.category}</p>}
         </div>
-        {top && (
-          <span className="ml-auto text-xs font-black text-gray-800 shrink-0">{INR(top.total)}</span>
-        )}
+        {top && <span className="ml-auto text-xs font-black text-gray-800 shrink-0">{INR(top.total)}</span>}
       </div>
       <div className="space-y-1">
         {cats.slice(0, 4).map((c, i) => (
           <div key={c.category} className="flex items-center gap-2">
             <div
               className="h-1.5 rounded-full shrink-0"
-              style={{
-                width: `${Math.max(6, (c.total / maxAmt) * 80)}%`,
-                backgroundColor: colors[i % colors.length],
-              }}
+              style={{ width: `${Math.max(6, (c.total / maxAmt) * 80)}%`, backgroundColor: PALETTE[i % PALETTE.length] }}
             />
             <span className="text-[10px] text-gray-500 truncate flex-1">{c.category}</span>
             <span className="text-[10px] font-semibold text-gray-700 shrink-0">{INR(c.total)}</span>
@@ -73,15 +92,16 @@ function PersonCategoryCard({ person, cats }) {
 }
 
 export default function Home() {
-  const nav = useNavigate()
+  const nav  = useNavigate()
   const user = useUser()
   const admin = isAdmin(user)
 
-  const [overview,   setOverview]   = useState([])
-  const [userStats,  setUserStats]  = useState(null)
-  const [analytics,  setAnalytics]  = useState(null)
-  const [loading,    setLoading]    = useState(true)
-  const [error,      setError]      = useState('')
+  const [overview,    setOverview]    = useState([])
+  const [userStats,   setUserStats]   = useState(null)
+  const [analytics,   setAnalytics]   = useState(null)
+  const [balances,    setBalances]    = useState([])
+  const [loading,     setLoading]     = useState(true)
+  const [error,       setError]       = useState('')
 
   const load = async () => {
     setLoading(true)
@@ -93,7 +113,12 @@ export default function Home() {
       setOverview(o.data)
       if (u) setUserStats(u.data)
 
-      // Analytics load independently — failure here doesn't break the page
+      // These load independently — failures don't break the page
+      if (user?.name) {
+        getUserGroupBalances(user.name)
+          .then((r) => setBalances(r.data))
+          .catch(() => {})
+      }
       getGlobalAnalytics(admin ? '' : user?.name ?? '')
         .then((a) => setAnalytics(a.data))
         .catch(() => {})
@@ -123,6 +148,9 @@ export default function Home() {
 
   const net         = userStats?.net ?? 0
   const netPositive = net >= 0
+
+  const oweGroups  = balances.filter((g) => g.net < 0)
+  const owedGroups = balances.filter((g) => g.net > 0)
 
   const byCategory    = analytics?.by_category ?? []
   const byPersonCat   = analytics?.by_person_category ?? {}
@@ -186,6 +214,34 @@ export default function Home() {
           </div>
         )}
 
+        {/* You Owe */}
+        {oweGroups.length > 0 && (
+          <div>
+            <p className="text-xs font-bold text-red-400 uppercase tracking-widest mb-2">You Owe</p>
+            <div className="space-y-2">
+              {oweGroups.map((g) => <BalanceGroupCard key={g.group_id} group={g} nav={nav} />)}
+            </div>
+          </div>
+        )}
+
+        {/* Owed to You */}
+        {owedGroups.length > 0 && (
+          <div>
+            <p className="text-xs font-bold text-green-500 uppercase tracking-widest mb-2">Owed to You</p>
+            <div className="space-y-2">
+              {owedGroups.map((g) => <BalanceGroupCard key={g.group_id} group={g} nav={nav} />)}
+            </div>
+          </div>
+        )}
+
+        {/* All settled */}
+        {balances.length === 0 && userStats && userStats.groups_count > 0 && (
+          <div className="text-center py-6">
+            <p className="text-2xl mb-1">✅</p>
+            <p className="text-sm font-semibold text-gray-500">All settled up!</p>
+          </div>
+        )}
+
         {/* Spend by Category */}
         {byCategory.length > 0 && (
           <div>
@@ -217,11 +273,6 @@ export default function Home() {
           </div>
         )}
 
-        {byCategory.length === 0 && (
-          <div className="text-center py-12 text-gray-400">
-            <p className="text-sm">No expense data yet.</p>
-          </div>
-        )}
       </div>
     </div>
   )
