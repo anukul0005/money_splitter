@@ -7,15 +7,16 @@ export default function EditGroup() {
   const { id } = useParams()
   const nav = useNavigate()
 
-  const [loading, setLoading]       = useState(true)
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError]           = useState('')
-  const [name, setName]             = useState('')
-  const [description, setDescription] = useState('')
-  const [category, setCategory]     = useState('')
-  const [members, setMembers]       = useState([])   // existing { id, name }
-  const [newInput, setNewInput]     = useState('')
-  const [toRemove, setToRemove]     = useState([])   // ids to remove
+  const [loading, setLoading]           = useState(true)
+  const [submitting, setSubmitting]     = useState(false)
+  const [error, setError]               = useState('')
+  const [name, setName]                 = useState('')
+  const [description, setDescription]   = useState('')
+  const [category, setCategory]         = useState('')
+  const [isHistorical, setIsHistorical] = useState(false)
+  const [members, setMembers]           = useState([])   // existing { id, name }
+  const [newInput, setNewInput]         = useState('')
+  const [toRemove, setToRemove]         = useState([])   // ids to remove
 
   useEffect(() => {
     getGroup(id)
@@ -23,6 +24,7 @@ export default function EditGroup() {
         setName(r.data.name)
         setDescription(r.data.description || '')
         setCategory(r.data.category || '')
+        setIsHistorical(r.data.is_historical || false)
         setMembers(r.data.members)
       })
       .catch(() => setError('Could not load group'))
@@ -68,6 +70,7 @@ export default function EditGroup() {
         name: name.trim(),
         description: description.trim() || null,
         category: category || null,
+        is_historical: isHistorical,
         members_add: membersAdd,
         members_remove: toRemove,
       })
@@ -136,6 +139,30 @@ export default function EditGroup() {
               </button>
             ))}
           </div>
+        </div>
+
+        {/* Historical toggle */}
+        <div>
+          <label className="label">Status</label>
+          <button
+            type="button"
+            onClick={() => setIsHistorical((v) => !v)}
+            className={`w-full flex items-center justify-between px-4 py-3 border font-semibold text-sm transition-colors ${
+              isHistorical
+                ? 'bg-amber-50 border-amber-300 text-amber-800'
+                : 'bg-cream border-amber-200 text-gray-500'
+            }`}
+          >
+            <span>{isHistorical ? 'Historical (archived)' : 'Active group'}</span>
+            <span className={`w-10 h-5 flex items-center rounded-full transition-colors ${isHistorical ? 'bg-amber-400' : 'bg-gray-200'}`}>
+              <span className={`w-4 h-4 bg-white rounded-full shadow transition-transform mx-0.5 ${isHistorical ? 'translate-x-5' : 'translate-x-0'}`} />
+            </span>
+          </button>
+          {isHistorical && (
+            <p className="text-[11px] text-amber-700 mt-1.5 px-1">
+              Marking as historical will settle all expenses and hide this group from the dashboard.
+            </p>
+          )}
         </div>
 
         {/* Members */}
