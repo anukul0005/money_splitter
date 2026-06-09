@@ -1,3 +1,4 @@
+import json
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db
@@ -5,6 +6,41 @@ from models import Group, Member, Expense
 from schemas import GroupCreate, GroupOut, GroupSummary, GroupUpdate
 
 router = APIRouter(prefix="/groups", tags=["groups"])
+
+
+def _settle_all_expenses(group: Group, db: Session):
+    """Mark every expense in a group as fully settled by all non-payer participants."""
+    member_names = [m.name for m in group.members]
+    for expense in group.expenses:
+        payer = (expense.paid_by or "").lower()
+
+        # Determine non-payer participants
+        if expense.split_json:
+            try:
+                splits = json.loads(expense.split_json)
+                participants = [k for k in splits.keys() if k.lower() != payer]
+            except Exception:
+                participants = [m for m in member_names if m.lower() != payer]
+        elif expense.participants:
+            parts = [p.strip() for p in expense.participants.split(",")]
+            participants = [p for p in parts if p.lower() != payer]
+        else:
+            participants = [m for m in member_names if m.lower() != payer]
+
+        settled: list[str] = []
+        if expense.settled_by:
+            try:
+                settled = json.loads(expense.settled_by)
+            except Exception:
+                settled = []
+
+        settled_lower = {s.lower() for s in settled}
+        for p in participants:
+            if p.lower() not in settled_lower:
+                settled.append(p)
+                settled_lower.add(p.lower())
+
+        expense.settled_by = json.dumps(settled)
 
 
 @router.get("/", response_model=list[GroupSummary])
@@ -73,7 +109,10 @@ def update_group(group_id: int, payload: GroupUpdate, db: Session = Depends(get_
     if payload.emoji is not None:
         group.emoji = payload.emoji
     if payload.is_historical is not None:
+        becoming_historical = payload.is_historical and not group.is_historical
         group.is_historical = payload.is_historical
+        if becoming_historical:
+            _settle_all_expenses(group, db)
     if payload.category is not None:
         group.category = payload.category
 

@@ -5,9 +5,24 @@ from database import create_tables, get_settings
 from routers import groups, expenses, settlements, stats, users
 
 
+def _settle_existing_historical():
+    """One-time migration: settle all expenses in already-historical groups."""
+    from database import get_session_factory
+    from models import Group
+    from routers.groups import _settle_all_expenses
+    db = get_session_factory()()
+    try:
+        for group in db.query(Group).filter(Group.is_historical == True).all():
+            _settle_all_expenses(group, db)
+        db.commit()
+    finally:
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_tables()
+    _settle_existing_historical()
     yield
 
 

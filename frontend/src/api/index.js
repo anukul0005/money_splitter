@@ -28,6 +28,7 @@ export const settleExpense = (id, data)  => api.patch(`/expenses/${id}/settle`, 
 export const getSettlement = (groupId)   => api.get(`/settlements/${groupId}`)
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
-export const getGroupStats   = (groupId) => api.get(`/stats/${groupId}`)
-export const getOverview     = ()        => api.get('/stats/overview/all')
-export const getUserSummary  = (name)    => api.get('/stats/user-summary', { params: { name } })
+export const getGroupStats      = (groupId) => api.get(`/stats/${groupId}`)
+export const getOverview        = ()        => api.get('/stats/overview/all')
+export const getUserSummary     = (name)    => api.get('/stats/user-summary', { params: { name } })
+export const getGlobalAnalytics = (name)    => api.get('/stats/global-analytics', { params: name ? { name } : {} })

@@ -1,32 +1,100 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getGroups, getOverview, getUserSummary } from '../api'
-import GroupCard from '../components/GroupCard'
+import { getOverview, getUserSummary, getGlobalAnalytics } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser, isAdmin } from '../UserContext'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+
+const PALETTE = [
+  '#f97316','#eab308','#22c55e','#06b6d4','#3b82f6',
+  '#8b5cf6','#ec4899','#ef4444','#14b8a6','#f59e0b',
+]
+
+function CategoryBar({ category, total, maxTotal, color, count }) {
+  const pct = maxTotal > 0 ? Math.max(4, (total / maxTotal) * 100) : 4
+  return (
+    <div className="mb-2">
+      <div className="flex justify-between items-center mb-0.5">
+        <span className="text-xs font-semibold text-gray-700 truncate max-w-[55%]">{category}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-gray-400">{count} exp</span>
+          <span className="text-xs font-bold text-gray-900">{INR(total)}</span>
+        </div>
+      </div>
+      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+        <div
+          className="h-2 rounded-full transition-all duration-500"
+          style={{ width: `${pct}%`, backgroundColor: color }}
+        />
+      </div>
+    </div>
+  )
+}
+
+function PersonCategoryCard({ person, cats }) {
+  const top = cats[0]
+  const maxAmt = cats[0]?.total ?? 1
+  const colors = PALETTE
+
+  return (
+    <div className="card p-3">
+      <div className="flex items-center gap-2 mb-2">
+        <div className="w-7 h-7 rounded-full bg-amber-100 border border-amber-300 flex items-center justify-center text-xs font-black text-amber-700 uppercase shrink-0">
+          {person[0]}
+        </div>
+        <div className="min-w-0">
+          <p className="text-xs font-bold text-gray-900 truncate capitalize">{person}</p>
+          {top && (
+            <p className="text-[10px] text-gray-400 truncate">Top: {top.category}</p>
+          )}
+        </div>
+        {top && (
+          <span className="ml-auto text-xs font-black text-gray-800 shrink-0">{INR(top.total)}</span>
+        )}
+      </div>
+      <div className="space-y-1">
+        {cats.slice(0, 4).map((c, i) => (
+          <div key={c.category} className="flex items-center gap-2">
+            <div
+              className="h-1.5 rounded-full shrink-0"
+              style={{
+                width: `${Math.max(6, (c.total / maxAmt) * 80)}%`,
+                backgroundColor: colors[i % colors.length],
+              }}
+            />
+            <span className="text-[10px] text-gray-500 truncate flex-1">{c.category}</span>
+            <span className="text-[10px] font-semibold text-gray-700 shrink-0">{INR(c.total)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 export default function Home() {
   const nav = useNavigate()
   const user = useUser()
   const admin = isAdmin(user)
 
-  const [groups, setGroups]       = useState([])
-  const [overview, setOverview]   = useState([])
-  const [userStats, setUserStats] = useState(null)
-  const [loading, setLoading]     = useState(true)
-  const [error, setError]         = useState('')
+  const [overview,   setOverview]   = useState([])
+  const [userStats,  setUserStats]  = useState(null)
+  const [analytics,  setAnalytics]  = useState(null)
+  const [loading,    setLoading]    = useState(true)
+  const [error,      setError]      = useState('')
 
   const load = () => {
     setLoading(true)
     setError('')
-    const calls = [getGroups(), getOverview()]
+    const calls = [
+      getOverview(),
+      getGlobalAnalytics(admin ? '' : user?.name ?? ''),
+    ]
     if (user?.name) calls.push(getUserSummary(user.name))
     Promise.all(calls)
-      .then(([g, o, u]) => {
-        setGroups(g.data)
+      .then(([o, a, u]) => {
         setOverview(o.data)
+        setAnalytics(a.data)
         if (u) setUserStats(u.data)
       })
       .catch(() => setError('Could not reach server. The API may be waking up — please try again in 30 seconds.'))
@@ -35,17 +103,8 @@ export default function Home() {
 
   useEffect(() => { load() }, [])
 
-  const filterForUser = (list) =>
-    admin
-      ? list
-      : list.filter((g) =>
-          (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase())
-        )
-
-  const visibleGroups   = filterForUser(groups)
-  const visibleIds      = new Set(visibleGroups.map((g) => g.id))
-  const visibleOverview = overview.filter((g) => visibleIds.has(g.id) && !g.is_historical)
-  const totalSpend      = visibleOverview.reduce((s, g) => s + g.total, 0)
+  const activeOverview = overview.filter((g) => !g.is_historical)
+  const totalSpend     = activeOverview.reduce((s, g) => s + g.total, 0)
 
   if (loading) return <LoadingSpinner />
 
@@ -59,23 +118,32 @@ export default function Home() {
     </div>
   )
 
-  const net = userStats?.net ?? 0
+  const net         = userStats?.net ?? 0
   const netPositive = net >= 0
+
+  const byCategory    = analytics?.by_category ?? []
+  const byPersonCat   = analytics?.by_person_category ?? {}
+  const maxCatTotal   = byCategory[0]?.total ?? 1
+  const personEntries = Object.entries(byPersonCat).sort((a, b) => {
+    const aTotal = a[1].reduce((s, c) => s + c.total, 0)
+    const bTotal = b[1].reduce((s, c) => s + c.total, 0)
+    return bTotal - aTotal
+  })
 
   return (
     <div className="pb-24 md:pb-8">
       {/* Header */}
       <div className="bg-gradient-to-br from-field-800 to-field-950 text-white px-5 pt-10 md:pt-8 pb-6 md:rounded-b-3xl border-b border-field-700">
-        <p className="text-brand-400/70 text-xs font-bold uppercase tracking-widest">Total spent across all groups</p>
+        <p className="text-brand-400/70 text-xs font-bold uppercase tracking-widest">Total spent (active groups)</p>
         <h1 className="text-4xl font-black mt-1 tracking-tight">{INR(totalSpend)}</h1>
-        <p className="text-green-200/40 text-xs mt-1 font-medium">{visibleGroups.length} groups</p>
+        <p className="text-green-200/40 text-xs mt-1 font-medium">{activeOverview.length} active groups</p>
       </div>
 
-      <div className="px-5 mt-5">
+      <div className="px-5 mt-5 space-y-5">
 
         {/* Personal KPI cards */}
         {userStats && userStats.groups_count > 0 && (
-          <div className="mb-5">
+          <div>
             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">
               {user?.name}'s Overview
             </p>
@@ -102,7 +170,7 @@ export default function Home() {
 
         {/* Admin quick actions */}
         {admin && (
-          <div className="grid grid-cols-2 gap-3 mb-5">
+          <div className="grid grid-cols-2 gap-3">
             <button className="btn-primary py-3 text-sm" onClick={() => nav('/groups/new')}>
               + New Group
             </button>
@@ -115,23 +183,42 @@ export default function Home() {
           </div>
         )}
 
-        {/* All groups list */}
-        <div>
-          <h2 className="text-sm font-semibold text-gray-500 mb-3 uppercase tracking-wide">All Groups</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {visibleGroups.map((g) => (
-              <GroupCard key={g.id} group={g} />
-            ))}
-          </div>
-          {visibleGroups.length === 0 && (
-            <div className="text-center py-12 text-gray-400">
-              <svg className="w-10 h-10 mx-auto mb-2 text-gray-300" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m9-4.13a4 4 0 11-8 0 4 4 0 018 0zm6 0a4 4 0 11-8 0 4 4 0 018 0z" />
-              </svg>
-              <p className="text-sm">No groups yet.</p>
+        {/* Spend by Category */}
+        {byCategory.length > 0 && (
+          <div>
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Spend by Category</p>
+            <div className="card p-4">
+              {byCategory.slice(0, 10).map((c, i) => (
+                <CategoryBar
+                  key={c.category}
+                  category={c.category}
+                  total={c.total}
+                  count={c.count}
+                  maxTotal={maxCatTotal}
+                  color={PALETTE[i % PALETTE.length]}
+                />
+              ))}
             </div>
-          )}
-        </div>
+          </div>
+        )}
+
+        {/* By Person */}
+        {personEntries.length > 0 && (
+          <div>
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Category by Person</p>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {personEntries.map(([person, cats]) => (
+                <PersonCategoryCard key={person} person={person} cats={cats} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {byCategory.length === 0 && (
+          <div className="text-center py-12 text-gray-400">
+            <p className="text-sm">No expense data yet.</p>
+          </div>
+        )}
       </div>
     </div>
   )

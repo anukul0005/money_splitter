@@ -118,3 +118,58 @@ def get_overview(db: Session = Depends(get_db)):
         }
         for g in groups
     ]
+
+
+@router.get("/global-analytics", response_model=dict)
+def get_global_analytics(name: str = "", db: Session = Depends(get_db)):
+    """Cross-group analytics: overall by expense category + per-person category breakdown."""
+    groups = db.query(Group).all()
+
+    by_category: dict[str, float] = defaultdict(float)
+    by_category_count: dict[str, int] = defaultdict(int)
+    by_category_display: dict[str, str] = {}
+    by_person_category: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+
+    for g in groups:
+        if g.is_historical:
+            continue
+        # Filter to groups containing the named member (if name provided)
+        if name:
+            member_names_lower = [m.name.lower() for m in g.members]
+            if name.lower() not in member_names_lower:
+                continue
+
+        for e in g.expenses:
+            raw_cat = (e.category or "Other").strip()
+            key = raw_cat.lower()
+            if key not in by_category_display:
+                by_category_display[key] = raw_cat
+            by_category[key] += e.amount
+            by_category_count[key] += 1
+
+            payer = e.paid_by or "Unknown"
+            by_person_category[payer][raw_cat] += e.amount
+
+    # Build sorted by_category list
+    cat_list = [
+        {
+            "category": by_category_display[k],
+            "total": round(v, 2),
+            "count": by_category_count[k],
+        }
+        for k, v in sorted(by_category.items(), key=lambda x: -x[1])
+    ]
+
+    # Convert person->category dicts to sorted lists
+    person_cat_out = {
+        person: sorted(
+            [{"category": cat, "total": round(amt, 2)} for cat, amt in cats.items()],
+            key=lambda x: -x["total"],
+        )
+        for person, cats in by_person_category.items()
+    }
+
+    return {
+        "by_category": cat_list,
+        "by_person_category": person_cat_out,
+    }
