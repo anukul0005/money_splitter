@@ -83,22 +83,25 @@ export default function Home() {
   const [loading,    setLoading]    = useState(true)
   const [error,      setError]      = useState('')
 
-  const load = () => {
+  const load = async () => {
     setLoading(true)
     setError('')
-    const calls = [
-      getOverview(),
-      getGlobalAnalytics(admin ? '' : user?.name ?? ''),
-    ]
-    if (user?.name) calls.push(getUserSummary(user.name))
-    Promise.all(calls)
-      .then(([o, a, u]) => {
-        setOverview(o.data)
-        setAnalytics(a.data)
-        if (u) setUserStats(u.data)
-      })
-      .catch(() => setError('Could not reach server. The API may be waking up — please try again in 30 seconds.'))
-      .finally(() => setLoading(false))
+    try {
+      const coreCalls = [getOverview()]
+      if (user?.name) coreCalls.push(getUserSummary(user.name))
+      const [o, u] = await Promise.all(coreCalls)
+      setOverview(o.data)
+      if (u) setUserStats(u.data)
+
+      // Analytics load independently — failure here doesn't break the page
+      getGlobalAnalytics(admin ? '' : user?.name ?? '')
+        .then((a) => setAnalytics(a.data))
+        .catch(() => {})
+    } catch {
+      setError('Could not reach server. The API may be waking up — please try again in 30 seconds.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => { load() }, [])

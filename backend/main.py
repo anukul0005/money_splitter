@@ -22,7 +22,10 @@ def _settle_existing_historical():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_tables()
-    _settle_existing_historical()
+    try:
+        _settle_existing_historical()
+    except Exception as e:
+        print(f"[warn] startup settle migration failed (non-fatal): {e}")
     yield
 
 
