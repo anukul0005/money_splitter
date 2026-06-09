@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getOverview, getUserSummary, getGlobalAnalytics, getUserGroupBalances } from '../api'
+import { getGroups, getOverview, getUserSummary, getGlobalAnalytics, getUserGroupBalances } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser, isAdmin } from '../UserContext'
 
@@ -99,6 +99,7 @@ export default function Home() {
   const user = useUser()
   const admin = isAdmin(user)
 
+  const [groups,      setGroups]      = useState([])
   const [overview,    setOverview]    = useState([])
   const [userStats,   setUserStats]   = useState(null)
   const [analytics,   setAnalytics]   = useState(null)
@@ -110,10 +111,11 @@ export default function Home() {
     setLoading(true)
     setError('')
     try {
-      const coreCalls = [getOverview()]
+      const coreCalls = [getOverview(), getGroups()]
       if (user?.name) coreCalls.push(getUserSummary(user.name))
-      const [o, u] = await Promise.all(coreCalls)
+      const [o, g, u] = await Promise.all(coreCalls)
       setOverview(o.data)
+      setGroups(g.data)
       if (u) setUserStats(u.data)
 
       // These load independently — failures don't break the page
@@ -134,7 +136,13 @@ export default function Home() {
 
   useEffect(() => { load() }, [])
 
-  const activeOverview = overview.filter((g) => !g.is_historical)
+  const myGroups = admin
+    ? groups
+    : groups.filter((g) =>
+        (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase())
+      )
+  const myGroupIds     = new Set(myGroups.map((g) => g.id))
+  const activeOverview = overview.filter((g) => !g.is_historical && myGroupIds.has(g.id))
   const totalSpend     = activeOverview.reduce((s, g) => s + g.total, 0)
 
   if (loading) return <LoadingSpinner />
