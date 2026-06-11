@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from collections import defaultdict
@@ -12,10 +14,13 @@ router = APIRouter(prefix="/stats", tags=["stats"])
 @router.get("/user-summary", response_model=dict)
 def get_user_summary(name: str, db: Session = Depends(get_db)):
     """Cross-group personal stats for a named member."""
+    from routers.settlements import _calculate
+
     groups = db.query(Group).all()
     total_paid  = 0.0
     total_share = 0.0
     groups_count = 0
+    pending_net = 0.0
 
     for g in groups:
         if g.is_historical:
@@ -56,11 +61,17 @@ def get_user_summary(name: str, db: Session = Depends(get_db)):
                     if user_settled:
                         total_paid += member_share
 
+        # Net from pending transactions is correct; raw paid-share stays positive
+        # for creditor even when all debtors have settled.
+        settlement = _calculate(g)
+        pending_net += sum(t.amount for t in settlement.transactions if t.to_member.lower()   == name.lower())
+        pending_net -= sum(t.amount for t in settlement.transactions if t.from_member.lower() == name.lower())
+
     return {
         "name": name,
         "total_paid":  round(total_paid,  2),
         "total_share": round(total_share, 2),
-        "net":         round(total_paid - total_share, 2),
+        "net":         round(pending_net, 2),
         "groups_count": groups_count,
     }
 
@@ -81,16 +92,19 @@ def get_user_group_balances(name: str, db: Session = Depends(get_db)):
             continue
 
         settlement = _calculate(g)
-        user_balance = next(
-            (b for b in settlement.balances if b.member.lower() == name.lower()),
-            None,
-        )
-        if user_balance and abs(user_balance.net) > 0.01:
+        # Use pending transactions rather than raw paid-share net.
+        # Raw net stays positive for the creditor even after all debtors settle,
+        # because settlement only adjusts debtor paid amounts. Transactions
+        # correctly reflect zero outstanding debt once everyone has settled.
+        pending_to   = sum(t.amount for t in settlement.transactions if t.to_member.lower()   == name.lower())
+        pending_from = sum(t.amount for t in settlement.transactions if t.from_member.lower() == name.lower())
+        pending_net  = round(pending_to - pending_from, 2)
+        if abs(pending_net) > 0.01:
             result.append({
                 "group_id": g.id,
                 "name": g.name,
                 "emoji": g.emoji or "💰",
-                "net": round(user_balance.net, 2),
+                "net": pending_net,
                 "category": g.category or "",
             })
 
@@ -99,9 +113,44 @@ def get_user_group_balances(name: str, db: Session = Depends(get_db)):
     return result
 
 
+def _expense_participants(e, group_member_names: list[str]) -> list[str]:
+    """Names of everyone who has a share in this expense."""
+    if e.split_json:
+        try:
+            return list(_json.loads(e.split_json).keys())
+        except Exception:
+            return []
+    if e.participants:
+        return [p.strip() for p in e.participants.split(",")]
+    return group_member_names
+
+
+def _member_share(e, name: str) -> float | None:
+    """The named member's share of this expense, or None if they don't participate."""
+    if e.split_json:
+        try:
+            splits = _json.loads(e.split_json)
+            for k, v in splits.items():
+                if k.lower() == name.lower():
+                    return float(v)
+            return None
+        except Exception:
+            return None
+    if e.participants:
+        parts = [p.strip().lower() for p in e.participants.split(",")]
+        if name.lower() not in parts:
+            return None
+    return e.individual_amount if e.individual_amount else (e.amount / max(e.divider, 1))
+
+
 @router.get("/global-analytics", response_model=dict)
 def get_global_analytics(name: str = "", db: Session = Depends(get_db)):
-    """Cross-group analytics: overall by expense category + per-person category breakdown."""
+    """Cross-group analytics: overall by expense category + per-person category breakdown.
+
+    When `name` is given, the per-person breakdown shows that user's own
+    category-wise share of expenses shared with each other member
+    (i.e. "my spends with X, by category").
+    """
     groups = db.query(Group).all()
 
     by_category: dict[str, float] = defaultdict(float)
@@ -117,6 +166,8 @@ def get_global_analytics(name: str = "", db: Session = Depends(get_db)):
             if name.lower() not in member_names_lower:
                 continue
 
+        group_member_names = [m.name for m in g.members]
+
         for e in g.expenses:
             raw_cat = (e.category or "Other").strip()
             key = raw_cat.lower()
@@ -125,8 +176,17 @@ def get_global_analytics(name: str = "", db: Session = Depends(get_db)):
             by_category[key] += e.amount
             by_category_count[key] += 1
 
-            payer = e.paid_by or "Unknown"
-            by_person_category[payer][raw_cat] += e.amount
+            if name:
+                member_share = _member_share(e, name)
+                if member_share is None:
+                    continue
+                for p in _expense_participants(e, group_member_names):
+                    if p.lower() == name.lower():
+                        continue
+                    by_person_category[p][raw_cat] += member_share
+            else:
+                payer = e.paid_by or "Unknown"
+                by_person_category[payer][raw_cat] += e.amount
 
     cat_list = [
         {"category": by_category_display[k], "total": round(v, 2), "count": by_category_count[k]}
