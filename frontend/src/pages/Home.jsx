@@ -157,11 +157,10 @@ export default function Home() {
     </div>
   )
 
-  const net         = userStats?.net ?? 0
-  const netPositive = net >= 0
-
   const oweGroups  = balances.filter((g) => g.net < 0)
   const owedGroups = balances.filter((g) => g.net > 0)
+  const totalOwe   = oweGroups.reduce((s, g) => s + Math.abs(g.net), 0)
+  const totalOwed  = owedGroups.reduce((s, g) => s + g.net, 0)
 
   const byCategory    = analytics?.by_category ?? []
   const byPersonCat   = analytics?.by_person_category ?? {}
@@ -191,20 +190,16 @@ export default function Home() {
             </p>
             <div className="grid grid-cols-3 gap-2">
               <div className="card text-center py-3">
-                <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide leading-tight">Total Paid</p>
-                <p className="text-sm font-black text-gray-900 mt-1">{INR(userStats.total_paid)}</p>
+                <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide leading-tight">Unsettled Groups</p>
+                <p className="text-sm font-black text-gray-900 mt-1">{balances.length}</p>
               </div>
-              <div className="card text-center py-3">
-                <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide leading-tight">My Share</p>
-                <p className="text-sm font-black text-gray-900 mt-1">{INR(userStats.total_share)}</p>
+              <div className="card text-center py-3 bg-red-50 border-red-200">
+                <p className="text-[10px] text-red-500 font-semibold uppercase tracking-wide leading-tight">You Owe</p>
+                <p className="text-sm font-black text-red-600 mt-1">{INR(totalOwe)}</p>
               </div>
-              <div className="card text-center py-3">
-                <p className={`text-[10px] font-semibold uppercase tracking-wide leading-tight ${netPositive ? 'text-brand-600' : 'text-red-500'}`}>
-                  {netPositive ? 'Owed to me' : 'I owe'}
-                </p>
-                <p className={`text-sm font-black mt-1 ${netPositive ? 'text-brand-600' : 'text-red-500'}`}>
-                  {INR(Math.abs(net))}
-                </p>
+              <div className="card text-center py-3 bg-green-50 border-green-200">
+                <p className="text-[10px] text-green-600 font-semibold uppercase tracking-wide leading-tight">Owed to You</p>
+                <p className="text-sm font-black text-green-600 mt-1">{INR(totalOwed)}</p>
               </div>
             </div>
           </div>
