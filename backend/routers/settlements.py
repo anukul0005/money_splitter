@@ -44,6 +44,8 @@ def _calculate(group: Group) -> SettlementOut:
                     settled_map[p].setdefault(payer, 0.0)
                     settled_map[p][payer] += member_share
                     paid[p] += member_share  # treat as if debtor repaid their share
+                    if payer in paid:
+                        paid[payer] -= member_share  # payer received that repayment, so it's no longer owed to them
         else:
             for p in participants:
                 if p in share:
@@ -52,6 +54,8 @@ def _calculate(group: Group) -> SettlementOut:
                     settled_map[p].setdefault(payer, 0.0)
                     settled_map[p][payer] += individual
                     paid[p] += individual  # treat as if debtor repaid their share
+                    if payer in paid:
+                        paid[payer] -= individual  # payer received that repayment, so it's no longer owed to them
 
     balances: list[BalanceEntry] = []
     net_map: dict[str, float] = {}
