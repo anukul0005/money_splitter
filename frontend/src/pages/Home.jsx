@@ -175,6 +175,9 @@ export default function Home() {
     <div className="pb-24 md:pb-8">
       {/* Header */}
       <div className="bg-gradient-to-br from-field-800 to-field-950 text-white px-5 pt-10 md:pt-8 pb-6 md:rounded-b-3xl border-b border-field-700">
+        {user?.name && (
+          <p className="text-white/60 text-sm font-bold capitalize mb-1">{user.name}</p>
+        )}
         <p className="text-brand-400/70 text-xs font-bold uppercase tracking-widest">Total spent (active groups)</p>
         <h1 className="text-4xl font-black mt-1 tracking-tight">{INR(totalSpend)}</h1>
         <p className="text-green-200/40 text-xs mt-1 font-medium">{activeOverview.length} active groups</p>
