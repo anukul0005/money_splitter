@@ -124,7 +124,7 @@ export default function Home() {
           .then((r) => setBalances(r.data))
           .catch(() => {})
       }
-      getGlobalAnalytics(admin ? '' : user?.name ?? '')
+      getGlobalAnalytics(user?.name ?? '')
         .then((a) => setAnalytics(a.data))
         .catch(() => {})
     } catch {
