@@ -64,22 +64,16 @@ function PersonCategoryCard({ person, cats }) {
 
   return (
     <div className="card p-3">
-      <div className="flex items-center gap-2 mb-2">
-        <div className="w-7 h-7 rounded-full bg-amber-100 border border-amber-300 flex items-center justify-center text-xs font-black text-amber-700 uppercase shrink-0">
-          {person[0]}
-        </div>
-        <div className="min-w-0">
-          <p className="text-xs font-bold text-gray-900 truncate capitalize">{person}</p>
-          {top && <p className="text-[10px] text-gray-400 truncate">Top: {top.category}</p>}
-        </div>
-        {top && <span className="ml-auto text-xs font-black text-gray-800 shrink-0">{INR(top.total)}</span>}
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <p className="text-sm font-bold text-gray-900 capitalize">{person}</p>
+        {top && <span className="text-xs font-black text-gray-800 shrink-0">{INR(top.total)}</span>}
       </div>
       <div className="space-y-1.5">
         {cats.slice(0, 4).map((c, i) => (
           <div key={c.category}>
-            <div className="flex justify-between items-baseline mb-0.5">
-              <span className="text-[10px] font-semibold text-gray-600 uppercase tracking-wide leading-tight">{c.category}</span>
-              <span className="text-[10px] font-bold text-gray-700 ml-1 shrink-0">{INR(c.total)}</span>
+            <div className="flex justify-between items-baseline mb-0.5 gap-2">
+              <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide leading-tight">{c.category}</span>
+              <span className="text-xs font-bold text-gray-700 shrink-0">{INR(c.total)}</span>
             </div>
             <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
               <div
@@ -274,7 +268,7 @@ export default function Home() {
         {personEntries.length > 0 && (
           <div>
             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Category by Person</p>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {personEntries.map(([person, cats]) => (
                 <PersonCategoryCard key={person} person={person} cats={cats} />
               ))}
