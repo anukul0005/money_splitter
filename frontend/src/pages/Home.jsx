@@ -134,13 +134,13 @@ export default function Home() {
   const totalOwe   = oweGroups.reduce((s, g) => s + Math.abs(g.net), 0)
   const totalOwed  = owedGroups.reduce((s, g) => s + g.net, 0)
 
-  // Every group is bucketed by its exact member set; a master card only
-  // forms when 2+ groups share that set — groups whose member set is unique
-  // stay solo. Unsettled entries (master or solo, based on any nonzero
-  // balance for the logged-in user) show first; settled ones are tucked
-  // behind a "show settled" toggle.
+  // Every group (2+ members) is linked to a master group named after its
+  // members — even if it's the only group with that exact member set, so no
+  // group ever shows under its own custom name on Home. Groups with a single
+  // member (nothing to link) fall through to the solo list. Unsettled
+  // entries show first; settled ones are tucked behind a "show settled" toggle.
   const unsettledGroupIds = new Set(balances.map((b) => b.group_id))
-  const { masters: allMasters, solo: soloGroups } = buildMasterGroups(myGroups.filter((g) => !g.is_historical))
+  const { masters: allMasters, solo: soloGroups } = buildMasterGroups(myGroups.filter((g) => !g.is_historical), 1)
   const unsettledMasters = allMasters.filter((m) => m.groups.some((g) => unsettledGroupIds.has(g.id)))
   const settledMasters   = allMasters.filter((m) => !m.groups.some((g) => unsettledGroupIds.has(g.id)))
   const unsettledSolo    = soloGroups.filter((g) => unsettledGroupIds.has(g.id))
@@ -207,7 +207,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* Groups (master groupings + solo groups; unsettled first, settled behind a toggle) */}
+        {/* Groups (every group linked to a master group by members; unsettled first, settled behind a toggle) */}
         {(allMasters.length > 0 || soloGroups.length > 0) && (
           <div>
             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Groups</p>

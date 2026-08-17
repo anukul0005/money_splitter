@@ -16,7 +16,9 @@ export function nameList(names) {
 }
 
 // groups: array of GroupSummary-like objects with { id, member_names, total_amount, ... }
-export function buildMasterGroups(groups) {
+// minGroups: minimum groups sharing a member set to form a master (default 2 —
+// pass 1 to link every group to a master, even ones whose member set is unique).
+export function buildMasterGroups(groups, minGroups = 2) {
   const byPair = new Map()
   for (const g of groups) {
     const names = g.member_names ?? []
@@ -29,7 +31,7 @@ export function buildMasterGroups(groups) {
   const masters = []
   const consolidatedIds = new Set()
   for (const entry of byPair.values()) {
-    if (entry.groups.length >= 2) {
+    if (entry.groups.length >= minGroups) {
       masters.push({
         key: entry.key,
         name: nameList(entry.names),
