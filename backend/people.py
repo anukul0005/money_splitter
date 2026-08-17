@@ -1,9 +1,11 @@
 # Static registry mapping known member names to their notification email + initials.
-# Extend this as more people join the group; matching is case-insensitive on full name.
+# Extend this as more people join the group; matching is case-insensitive and keyed
+# on whatever name string is actually stored on the Member record (e.g. "Anukul",
+# not necessarily the full "Anukul Gupta").
 
 PEOPLE = {
-    "anukul gupta": {"initials": "AG", "email": "anukul0005@gmail.com"},
-    "anubhav singh": {"initials": "AS", "email": "anubha.singh10@gmail.com"},
+    "anukul": {"initials": "AG", "email": "anukul0005@gmail.com"},
+    "anubhav": {"initials": "AS", "email": "anubha.singh10@gmail.com"},
 }
 
 

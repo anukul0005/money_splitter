@@ -2,9 +2,21 @@
 // 2-person membership into a single "master group" for display purposes.
 // Sub-groups themselves are never modified — this is purely a view-layer grouping.
 
+// Known people are often stored under just their first name (e.g. "Anukul"),
+// which alone can't yield distinct 2-letter initials. Mirrors backend/people.py.
+const KNOWN_INITIALS = {
+  anukul: 'AG',
+  anubhav: 'AS',
+}
+
 export function initialsOf(name) {
-  const parts = (name || '').trim().split(/\s+/).filter(Boolean)
-  return parts.slice(0, 2).map((p) => p[0].toUpperCase()).join('') || '?'
+  const trimmed = (name || '').trim()
+  const known = KNOWN_INITIALS[trimmed.toLowerCase()]
+  if (known) return known
+
+  const parts = trimmed.split(/\s+/).filter(Boolean)
+  if (parts.length >= 2) return parts.slice(0, 2).map((p) => p[0].toUpperCase()).join('')
+  return (parts[0]?.slice(0, 2).toUpperCase()) || '?'
 }
 
 export function pairKey(names) {
