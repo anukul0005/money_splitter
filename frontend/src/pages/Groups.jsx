@@ -30,7 +30,10 @@ export default function Groups() {
     filter === 'all' ? true : filter === 'historical' ? g.is_historical : !g.is_historical
   )
 
-  const { masters, solo } = buildMasterGroups(filtered)
+  // minGroups=1: every 2+ member group gets linked to a master group, even
+  // ones whose exact member set is currently unique (e.g. "Mumbai with
+  // Apoorv") — matches Home's behavior instead of leaving them as solo cards.
+  const { masters, solo } = buildMasterGroups(filtered, 1)
 
   if (loading) return <LoadingSpinner />
 
