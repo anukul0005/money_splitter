@@ -194,7 +194,7 @@ export default function Home() {
 
         {/* Admin quick actions */}
         {admin && (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <button className="btn-primary py-3 text-sm" onClick={() => nav('/groups/new')}>
               + New Group
             </button>
@@ -203,6 +203,12 @@ export default function Home() {
               onClick={() => nav('/add')}
             >
               + Add Expense
+            </button>
+            <button
+              className="bg-amber-100 border border-amber-300 text-amber-800 hover:bg-amber-200 active:scale-95 font-bold px-4 py-3 transition-all duration-150 w-full text-center text-sm"
+              onClick={() => nav('/groups/monthly')}
+            >
+              + Monthly
             </button>
           </div>
         )}

@@ -90,7 +90,7 @@ export default function GroupDetail() {
   const handleDeleteGroup = async () => {
     if (!confirm(`Delete group "${group.name}" and all its expenses? This cannot be undone.`)) return
     await deleteGroup(id)
-    nav('/groups')
+    nav('/')
   }
 
   if (loading) return <LoadingSpinner />
