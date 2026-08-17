@@ -39,42 +39,22 @@ function BalanceGroupCard({ group, nav }) {
   )
 }
 
-function MasterBalanceCard({ master, nav }) {
-  const [open, setOpen] = useState(false)
+// Static summary card, collapsed only — no expand/sub-group breakdown on Home.
+function MasterBalanceCard({ master }) {
   const owes = master.net < 0
 
   return (
-    <div>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className={`w-full text-left border px-4 py-3 flex items-center gap-3 active:scale-95 transition-all duration-150 ${
-          owes
-            ? 'bg-red-50 border-red-200 hover:bg-red-100'
-            : 'bg-green-50 border-green-200 hover:bg-green-100'
-        }`}
-      >
-        <div className="shrink-0 w-8 h-8 rounded-full bg-brand-400 text-gray-900 flex items-center justify-center text-[10px] font-black">
-          {master.label}
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-bold text-gray-900 truncate">{master.names.join(' & ')}</p>
-          <p className={`text-xs font-semibold mt-0.5 ${owes ? 'text-red-600' : 'text-green-600'}`}>
-            {owes ? `You owe ${INR(Math.abs(master.net))}` : `You're owed ${INR(master.net)}`} · {master.items.length} groups
-          </p>
-        </div>
-        <svg
-          className={`w-4 h-4 shrink-0 transition-transform ${owes ? 'text-red-400' : 'text-green-500'} ${open ? 'rotate-90' : ''}`}
-          fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-        </svg>
-      </button>
-
-      {open && (
-        <div className="space-y-2 mt-2 pl-3 border-l-2 border-amber-200">
-          {master.items.map((g) => <BalanceGroupCard key={g.group_id} group={g} nav={nav} />)}
-        </div>
-      )}
+    <div
+      className={`w-full text-left border px-4 py-3 flex items-center gap-3 ${
+        owes ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'
+      }`}
+    >
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-bold text-gray-900 truncate">{master.name}</p>
+        <p className={`text-xs font-semibold mt-0.5 ${owes ? 'text-red-600' : 'text-green-600'}`}>
+          {owes ? `You owe ${INR(Math.abs(master.net))}` : `You're owed ${INR(master.net)}`} · {master.items.length} groups
+        </p>
+      </div>
     </div>
   )
 }
@@ -272,7 +252,7 @@ export default function Home() {
           <div>
             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Linked Groups</p>
             <div className="grid grid-cols-1 gap-3">
-              {linkedMasters.map((m) => <MasterGroupCard key={m.key} master={m} />)}
+              {linkedMasters.map((m) => <MasterGroupCard key={m.key} master={m} collapsible={false} />)}
             </div>
           </div>
         )}
@@ -282,7 +262,7 @@ export default function Home() {
           <div>
             <p className="text-xs font-bold text-red-400 uppercase tracking-widest mb-2">You Owe</p>
             <div className="space-y-2">
-              {oweConsolidated.masters.map((m) => <MasterBalanceCard key={m.key} master={m} nav={nav} />)}
+              {oweConsolidated.masters.map((m) => <MasterBalanceCard key={m.key} master={m} />)}
               {oweConsolidated.solo.map((g) => <BalanceGroupCard key={g.group_id} group={g} nav={nav} />)}
             </div>
           </div>
@@ -293,7 +273,7 @@ export default function Home() {
           <div>
             <p className="text-xs font-bold text-green-500 uppercase tracking-widest mb-2">Owed to You</p>
             <div className="space-y-2">
-              {owedConsolidated.masters.map((m) => <MasterBalanceCard key={m.key} master={m} nav={nav} />)}
+              {owedConsolidated.masters.map((m) => <MasterBalanceCard key={m.key} master={m} />)}
               {owedConsolidated.solo.map((g) => <BalanceGroupCard key={g.group_id} group={g} nav={nav} />)}
             </div>
           </div>

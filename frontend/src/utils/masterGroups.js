@@ -1,30 +1,18 @@
 // Consolidates groups (or per-group balances) that share the exact same
-// 2-person membership into a single "master group" for display purposes.
-// Sub-groups themselves are never modified — this is purely a view-layer grouping.
-
-// Known people are often stored under just their first name (e.g. "Anukul"),
-// which alone can't yield distinct 2-letter initials. Mirrors backend/people.py.
-const KNOWN_INITIALS = {
-  anukul: 'AG',
-  anubhav: 'AS',
-}
-
-export function initialsOf(name) {
-  const trimmed = (name || '').trim()
-  const known = KNOWN_INITIALS[trimmed.toLowerCase()]
-  if (known) return known
-
-  const parts = trimmed.split(/\s+/).filter(Boolean)
-  if (parts.length >= 2) return parts.slice(0, 2).map((p) => p[0].toUpperCase()).join('')
-  return (parts[0]?.slice(0, 2).toUpperCase()) || '?'
-}
+// membership across multiple groups into a single "master group" for display
+// purposes. Sub-groups themselves are never modified — this is purely a
+// view-layer grouping.
 
 export function pairKey(names) {
   return names.map((n) => n.trim().toLowerCase()).sort().join('|')
 }
 
-export function pairLabel(names) {
-  return names.map(initialsOf).sort().join(' & ')
+// Human-readable name list: "Anukul, Ajay" for 2, "Anukul, Anubhav & Ajay" for 3+.
+export function nameList(names) {
+  if (!names || names.length === 0) return ''
+  if (names.length === 1) return names[0]
+  if (names.length === 2) return names.join(', ')
+  return `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`
 }
 
 // groups: array of GroupSummary-like objects with { id, member_names, total_amount, ... }
@@ -44,7 +32,7 @@ export function buildMasterGroups(groups) {
     if (entry.groups.length >= 2) {
       masters.push({
         key: entry.key,
-        label: pairLabel(entry.names),
+        name: nameList(entry.names),
         names: entry.names,
         groups: entry.groups,
         totalAmount: entry.groups.reduce((s, g) => s + (g.total_amount ?? 0), 0),
@@ -76,7 +64,7 @@ export function buildMasterBalances(entries, groupsById) {
     if (entry.items.length >= 2) {
       masters.push({
         key: entry.key,
-        label: pairLabel(entry.names),
+        name: nameList(entry.names),
         names: entry.names,
         items: entry.items,
         net: entry.items.reduce((s, i) => s + i.net, 0),
