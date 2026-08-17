@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getGroups, getOverview, getUserSummary, getGlobalAnalytics, getUserGroupBalances, getFriends } from '../api'
+import { getGroups, getOverview, getUserSummary, getGlobalAnalytics, getUserGroupBalances } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser, isAdmin } from '../UserContext'
+import { buildMasterGroups } from '../utils/masterGroups'
+import MasterGroupCard from '../components/MasterGroupCard'
+import GroupCard from '../components/GroupCard'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 
@@ -10,37 +13,6 @@ const PALETTE = [
   '#f97316','#eab308','#22c55e','#06b6d4','#3b82f6',
   '#8b5cf6','#ec4899','#ef4444','#14b8a6','#f59e0b',
 ]
-
-function FriendRow({ friend, nav }) {
-  const settled = Math.abs(friend.net) < 0.01
-  const owes = friend.net < 0
-
-  return (
-    <button
-      onClick={() => nav(`/friends/${encodeURIComponent(friend.name)}`)}
-      className={`w-full text-left border px-4 py-3 flex items-center gap-3 active:scale-95 transition-all duration-150 ${
-        settled
-          ? 'bg-white border-amber-100 hover:bg-amber-50'
-          : owes
-            ? 'bg-red-50 border-red-200 hover:bg-red-100'
-            : 'bg-green-50 border-green-200 hover:bg-green-100'
-      }`}
-    >
-      <div className="shrink-0 w-9 h-9 rounded-full bg-field-800 text-white flex items-center justify-center text-xs font-black">
-        {friend.name?.[0]?.toUpperCase() ?? '?'}
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-bold text-gray-900 truncate">{friend.name}</p>
-        <p className={`text-xs font-semibold mt-0.5 ${settled ? 'text-gray-400' : owes ? 'text-red-600' : 'text-green-600'}`}>
-          {settled ? 'Settled up' : owes ? `You owe ${INR(Math.abs(friend.net))}` : `Owes you ${INR(friend.net)}`}
-        </p>
-      </div>
-      <svg className="w-4 h-4 text-gray-300 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-      </svg>
-    </button>
-  )
-}
 
 function CategoryBar({ category, total, maxTotal, color, count }) {
   const pct = maxTotal > 0 ? Math.max(4, (total / maxTotal) * 100) : 4
@@ -103,7 +75,6 @@ export default function Home() {
   const [userStats,   setUserStats]   = useState(null)
   const [analytics,   setAnalytics]   = useState(null)
   const [balances,    setBalances]    = useState([])
-  const [friends,     setFriends]     = useState([])
   const [loading,     setLoading]     = useState(true)
   const [error,       setError]       = useState('')
   const [showSettled, setShowSettled] = useState(false)
@@ -123,9 +94,6 @@ export default function Home() {
       if (user?.name) {
         getUserGroupBalances(user.name)
           .then((r) => setBalances(r.data))
-          .catch(() => {})
-        getFriends(user.name)
-          .then((r) => setFriends(r.data))
           .catch(() => {})
       }
       getGlobalAnalytics(user?.name ?? '')
@@ -166,8 +134,17 @@ export default function Home() {
   const totalOwe   = oweGroups.reduce((s, g) => s + Math.abs(g.net), 0)
   const totalOwed  = owedGroups.reduce((s, g) => s + g.net, 0)
 
-  const unsettledFriends = friends.filter((f) => Math.abs(f.net) > 0.01)
-  const settledFriends   = friends.filter((f) => Math.abs(f.net) <= 0.01)
+  // Every group (2+ members) is linked to a master group named after its
+  // members — even if it's the only group with that exact member set, so no
+  // group ever shows under its own custom name on Home. Groups with a single
+  // member (nothing to link) fall through to the solo list. Unsettled
+  // entries show first; settled ones are tucked behind a "show settled" toggle.
+  const unsettledGroupIds = new Set(balances.map((b) => b.group_id))
+  const { masters: allMasters, solo: soloGroups } = buildMasterGroups(myGroups.filter((g) => !g.is_historical), 1)
+  const unsettledMasters = allMasters.filter((m) => m.groups.some((g) => unsettledGroupIds.has(g.id)))
+  const settledMasters   = allMasters.filter((m) => !m.groups.some((g) => unsettledGroupIds.has(g.id)))
+  const unsettledSolo    = soloGroups.filter((g) => unsettledGroupIds.has(g.id))
+  const settledSolo      = soloGroups.filter((g) => !unsettledGroupIds.has(g.id))
 
   const byCategory    = analytics?.by_category ?? []
   const byPersonCat   = analytics?.by_person_category ?? {}
@@ -230,25 +207,27 @@ export default function Home() {
           </div>
         )}
 
-        {/* Friends (everyone who's shared a group with you; unsettled first) */}
-        {friends.length > 0 && (
+        {/* Groups (every group linked to a master group by members; unsettled first, settled behind a toggle) */}
+        {(allMasters.length > 0 || soloGroups.length > 0) && (
           <div>
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Friends</p>
-            <div className="space-y-2">
-              {unsettledFriends.map((f) => <FriendRow key={f.name} friend={f} nav={nav} />)}
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Groups</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {unsettledMasters.map((m) => <MasterGroupCard key={m.key} master={m} />)}
+              {unsettledSolo.map((g) => <GroupCard key={g.id} group={g} />)}
             </div>
 
-            {settledFriends.length > 0 && (
+            {(settledMasters.length + settledSolo.length) > 0 && (
               showSettled ? (
-                <div className="space-y-2 mt-2">
-                  {settledFriends.map((f) => <FriendRow key={f.name} friend={f} nav={nav} />)}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                  {settledMasters.map((m) => <MasterGroupCard key={m.key} master={m} />)}
+                  {settledSolo.map((g) => <GroupCard key={g.id} group={g} />)}
                 </div>
               ) : (
                 <button
                   onClick={() => setShowSettled(true)}
-                  className="w-full mt-2 py-2 text-xs font-bold text-gray-500 bg-amber-50 border border-amber-200 hover:bg-amber-100 active:scale-[0.98] transition-all"
+                  className="w-full mt-3 py-2 text-xs font-bold text-gray-500 bg-amber-50 border border-amber-200 hover:bg-amber-100 active:scale-[0.98] transition-all"
                 >
-                  Show {settledFriends.length} settled friend{settledFriends.length > 1 ? 's' : ''}
+                  Show {settledMasters.length + settledSolo.length} settled group{(settledMasters.length + settledSolo.length) > 1 ? 's' : ''}
                 </button>
               )
             )}

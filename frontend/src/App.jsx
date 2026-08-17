@@ -12,6 +12,7 @@ import EditGroup   from './pages/EditGroup'
 import History     from './pages/History'
 import Login       from './pages/Login'
 import MasterGroupDetail from './pages/MasterGroupDetail'
+import Friends           from './pages/Friends'
 import FriendDetail      from './pages/FriendDetail'
 import { UserContext } from './UserContext'
 
@@ -56,6 +57,7 @@ export default function App() {
                 <Route path="/add"        element={<AddExpense />} />
                 <Route path="/history"    element={<History />} />
                 <Route path="/master/:key" element={<MasterGroupDetail />} />
+                <Route path="/friends" element={<Friends />} />
                 <Route path="/friends/:name" element={<FriendDetail />} />
               </Routes>
             </div>
