@@ -76,6 +76,7 @@ export default function Home() {
   const [balances,    setBalances]    = useState([])
   const [loading,     setLoading]     = useState(true)
   const [error,       setError]       = useState('')
+  const [showSettled, setShowSettled] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -132,9 +133,14 @@ export default function Home() {
   const totalOwe   = oweGroups.reduce((s, g) => s + Math.abs(g.net), 0)
   const totalOwed  = owedGroups.reduce((s, g) => s + g.net, 0)
 
-  // Always-visible master groupings — independent of settlement status, so a
-  // fully-settled pair (e.g. Anukul & Anubhav) still shows up on the dashboard.
-  const { masters: linkedMasters } = buildMasterGroups(myGroups.filter((g) => !g.is_historical))
+  // Every group is bucketed by its exact member set; a master card only forms
+  // when 2+ groups share that set. Unsettled ones (any sub-group with a
+  // nonzero balance for the logged-in user) show first; settled ones are
+  // tucked behind a "show settled" toggle.
+  const unsettledGroupIds = new Set(balances.map((b) => b.group_id))
+  const { masters: allMasters } = buildMasterGroups(myGroups.filter((g) => !g.is_historical))
+  const unsettledMasters = allMasters.filter((m) => m.groups.some((g) => unsettledGroupIds.has(g.id)))
+  const settledMasters   = allMasters.filter((m) => !m.groups.some((g) => unsettledGroupIds.has(g.id)))
 
   const byCategory    = analytics?.by_category ?? []
   const byPersonCat   = analytics?.by_person_category ?? {}
@@ -197,13 +203,28 @@ export default function Home() {
           </div>
         )}
 
-        {/* Linked Groups (master groupings, always visible regardless of balance) */}
-        {linkedMasters.length > 0 && (
+        {/* Linked Groups (master groupings; unsettled first, settled behind a toggle) */}
+        {allMasters.length > 0 && (
           <div>
             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Linked Groups</p>
             <div className="grid grid-cols-1 gap-3">
-              {linkedMasters.map((m) => <MasterGroupCard key={m.key} master={m} collapsible={false} />)}
+              {unsettledMasters.map((m) => <MasterGroupCard key={m.key} master={m} collapsible={false} />)}
             </div>
+
+            {settledMasters.length > 0 && (
+              showSettled ? (
+                <div className="grid grid-cols-1 gap-3 mt-3">
+                  {settledMasters.map((m) => <MasterGroupCard key={m.key} master={m} collapsible={false} />)}
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowSettled(true)}
+                  className="w-full mt-3 py-2 text-xs font-bold text-gray-500 bg-amber-50 border border-amber-200 hover:bg-amber-100 active:scale-[0.98] transition-all"
+                >
+                  Show {settledMasters.length} settled group{settledMasters.length > 1 ? 's' : ''}
+                </button>
+              )
+            )}
           </div>
         )}
 

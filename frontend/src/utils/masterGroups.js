@@ -1,7 +1,7 @@
 // Consolidates groups (or per-group balances) that share the exact same
-// membership across multiple groups into a single "master group" for display
-// purposes. Sub-groups themselves are never modified — this is purely a
-// view-layer grouping.
+// membership (any number of members) across multiple groups into a single
+// "master group" for display purposes. Sub-groups themselves are never
+// modified — this is purely a view-layer grouping.
 
 export function pairKey(names) {
   return names.map((n) => n.trim().toLowerCase()).sort().join('|')
@@ -20,7 +20,7 @@ export function buildMasterGroups(groups) {
   const byPair = new Map()
   for (const g of groups) {
     const names = g.member_names ?? []
-    if (names.length !== 2) continue
+    if (names.length < 2) continue
     const key = pairKey(names)
     if (!byPair.has(key)) byPair.set(key, { key, names, groups: [] })
     byPair.get(key).groups.push(g)
@@ -52,7 +52,7 @@ export function buildMasterBalances(entries, groupsById) {
   for (const e of entries) {
     const g = groupsById.get(e.group_id)
     const names = g?.member_names ?? []
-    if (names.length !== 2) continue
+    if (names.length < 2) continue
     const key = pairKey(names)
     if (!byPair.has(key)) byPair.set(key, { key, names, items: [] })
     byPair.get(key).items.push(e)
