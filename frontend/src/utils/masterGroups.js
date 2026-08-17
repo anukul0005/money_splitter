@@ -46,35 +46,3 @@ export function buildMasterGroups(groups, minGroups = 2) {
   const solo = groups.filter((g) => !consolidatedIds.has(g.id))
   return { masters, solo }
 }
-
-// entries: array of balance-summary objects with { group_id, net, ... }
-// groupsById: Map of group_id -> GroupSummary (for member_names lookup)
-export function buildMasterBalances(entries, groupsById) {
-  const byPair = new Map()
-  for (const e of entries) {
-    const g = groupsById.get(e.group_id)
-    const names = g?.member_names ?? []
-    if (names.length < 2) continue
-    const key = pairKey(names)
-    if (!byPair.has(key)) byPair.set(key, { key, names, items: [] })
-    byPair.get(key).items.push(e)
-  }
-
-  const masters = []
-  const consolidatedIds = new Set()
-  for (const entry of byPair.values()) {
-    if (entry.items.length >= 2) {
-      masters.push({
-        key: entry.key,
-        name: nameList(entry.names),
-        names: entry.names,
-        items: entry.items,
-        net: entry.items.reduce((s, i) => s + i.net, 0),
-      })
-      entry.items.forEach((i) => consolidatedIds.add(i.group_id))
-    }
-  }
-
-  const solo = entries.filter((e) => !consolidatedIds.has(e.group_id))
-  return { masters, solo }
-}

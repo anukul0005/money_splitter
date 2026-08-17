@@ -143,6 +143,58 @@ def _member_share(e, name: str) -> float | None:
     return e.individual_amount if e.individual_amount else (e.amount / max(e.divider, 1))
 
 
+def _pairwise_group_debts(g: Group) -> dict[tuple[str, str], float]:
+    """(debtor, creditor) -> amount debtor still owes creditor within this group,
+    excluding any expense-share the debtor has already settled directly."""
+    debts: dict[tuple[str, str], float] = defaultdict(float)
+    group_member_names = [m.name for m in g.members]
+    for e in g.expenses:
+        payer = e.paid_by
+        if not payer:
+            continue
+        settled = {s.lower() for s in (_json.loads(e.settled_by) if e.settled_by else [])}
+        for p in _expense_participants(e, group_member_names):
+            if p.lower() == payer.lower() or p.lower() in settled:
+                continue
+            share = _member_share(e, p)
+            if share is not None:
+                debts[(p, payer)] += share
+    return debts
+
+
+@router.get("/friends", response_model=list[dict])
+def get_friends(name: str, db: Session = Depends(get_db)):
+    """Net balance with every person who shares an active group with `name`."""
+    name_l = name.strip().lower()
+    groups = db.query(Group).filter(Group.is_historical == False).all()  # noqa: E712
+
+    net: dict[str, float] = {}
+    display: dict[str, str] = {}
+
+    for g in groups:
+        member_names = [m.name for m in g.members]
+        if name_l not in [n.lower() for n in member_names]:
+            continue
+
+        for n in member_names:
+            if n.lower() != name_l:
+                net.setdefault(n.lower(), 0.0)
+                display.setdefault(n.lower(), n)
+
+        for (debtor, creditor), amt in _pairwise_group_debts(g).items():
+            dl, cl = debtor.lower(), creditor.lower()
+            if dl == name_l and cl != name_l:
+                net[cl] = net.get(cl, 0.0) - amt
+                display.setdefault(cl, creditor)
+            elif cl == name_l and dl != name_l:
+                net[dl] = net.get(dl, 0.0) + amt
+                display.setdefault(dl, debtor)
+
+    result = [{"name": display[k], "net": round(v, 2)} for k, v in net.items()]
+    result.sort(key=lambda r: (-abs(r["net"]), r["name"].lower()))
+    return result
+
+
 @router.get("/global-analytics", response_model=dict)
 def get_global_analytics(name: str = "", db: Session = Depends(get_db)):
     """Cross-group analytics: overall by expense category + per-person category breakdown.

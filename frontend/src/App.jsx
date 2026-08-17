@@ -11,6 +11,8 @@ import MonthlyGroup from './pages/MonthlyGroup'
 import EditGroup   from './pages/EditGroup'
 import History     from './pages/History'
 import Login       from './pages/Login'
+import MasterGroupDetail from './pages/MasterGroupDetail'
+import FriendDetail      from './pages/FriendDetail'
 import { UserContext } from './UserContext'
 
 const SESSION_KEY = 'splitter_session_v2'
@@ -53,6 +55,8 @@ export default function App() {
                 <Route path="/groups/:id/edit" element={<EditGroup />} />
                 <Route path="/add"        element={<AddExpense />} />
                 <Route path="/history"    element={<History />} />
+                <Route path="/master/:key" element={<MasterGroupDetail />} />
+                <Route path="/friends/:name" element={<FriendDetail />} />
               </Routes>
             </div>
           </div>
