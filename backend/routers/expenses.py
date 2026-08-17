@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import Group, Expense
 from schemas import ExpenseCreate, ExpenseOut, SettleRequest
+from emailer import notify_group_activity
 
 router = APIRouter(prefix="/expenses", tags=["expenses"])
 
@@ -19,7 +20,8 @@ def list_expenses(group_id: int, db: Session = Depends(get_db)):
 
 @router.post("/", response_model=ExpenseOut, status_code=201)
 def create_expense(payload: ExpenseCreate, db: Session = Depends(get_db)):
-    if not db.query(Group).filter(Group.id == payload.group_id).first():
+    group = db.query(Group).filter(Group.id == payload.group_id).first()
+    if not group:
         raise HTTPException(404, "Group not found")
 
     individual = payload.individual_amount or _compute_individual(payload.amount, payload.divider)
@@ -39,6 +41,13 @@ def create_expense(payload: ExpenseCreate, db: Session = Depends(get_db)):
     db.add(expense)
     db.commit()
     db.refresh(expense)
+
+    try:
+        summary = f"{expense.title or expense.category or 'Expense'}: ₹{expense.amount} paid by {expense.paid_by}"
+        notify_group_activity(group, expense.paid_by, "added a new expense", summary)
+    except Exception as e:
+        print(f"[email] expense notification failed: {e}")
+
     return expense
 
 
@@ -90,6 +99,15 @@ def settle_expense(expense_id: int, payload: SettleRequest, db: Session = Depend
     expense.settled_by = json.dumps(settled)
     db.commit()
     db.refresh(expense)
+
+    if payload.settled:
+        try:
+            group = db.query(Group).filter(Group.id == expense.group_id).first()
+            summary = f"{member} settled up their share of \"{expense.title or expense.category or 'an expense'}\" (₹{expense.individual_amount or expense.amount})"
+            notify_group_activity(group, member, "recorded a payment", summary)
+        except Exception as e:
+            print(f"[email] settlement notification failed: {e}")
+
     return expense
 
 

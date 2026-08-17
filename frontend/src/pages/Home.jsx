@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { getGroups, getOverview, getUserSummary, getGlobalAnalytics, getUserGroupBalances } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser, isAdmin } from '../UserContext'
+import { buildMasterBalances } from '../utils/masterGroups'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 
@@ -34,6 +35,46 @@ function BalanceGroupCard({ group, nav }) {
         {owes ? '↑' : '↓'}
       </div>
     </button>
+  )
+}
+
+function MasterBalanceCard({ master, nav }) {
+  const [open, setOpen] = useState(false)
+  const owes = master.net < 0
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className={`w-full text-left border px-4 py-3 flex items-center gap-3 active:scale-95 transition-all duration-150 ${
+          owes
+            ? 'bg-red-50 border-red-200 hover:bg-red-100'
+            : 'bg-green-50 border-green-200 hover:bg-green-100'
+        }`}
+      >
+        <div className="shrink-0 w-8 h-8 rounded-full bg-brand-400 text-gray-900 flex items-center justify-center text-[10px] font-black">
+          {master.label}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold text-gray-900 truncate">{master.names.join(' & ')}</p>
+          <p className={`text-xs font-semibold mt-0.5 ${owes ? 'text-red-600' : 'text-green-600'}`}>
+            {owes ? `You owe ${INR(Math.abs(master.net))}` : `You're owed ${INR(master.net)}`} · {master.items.length} groups
+          </p>
+        </div>
+        <svg
+          className={`w-4 h-4 shrink-0 transition-transform ${owes ? 'text-red-400' : 'text-green-500'} ${open ? 'rotate-90' : ''}`}
+          fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="space-y-2 mt-2 pl-3 border-l-2 border-amber-200">
+          {master.items.map((g) => <BalanceGroupCard key={g.group_id} group={g} nav={nav} />)}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -151,10 +192,14 @@ export default function Home() {
     </div>
   )
 
+  const groupsById = new Map(groups.map((g) => [g.id, g]))
   const oweGroups  = balances.filter((g) => g.net < 0)
   const owedGroups = balances.filter((g) => g.net > 0)
   const totalOwe   = oweGroups.reduce((s, g) => s + Math.abs(g.net), 0)
   const totalOwed  = owedGroups.reduce((s, g) => s + g.net, 0)
+
+  const oweConsolidated  = buildMasterBalances(oweGroups, groupsById)
+  const owedConsolidated = buildMasterBalances(owedGroups, groupsById)
 
   const byCategory    = analytics?.by_category ?? []
   const byPersonCat   = analytics?.by_person_category ?? {}
@@ -222,7 +267,8 @@ export default function Home() {
           <div>
             <p className="text-xs font-bold text-red-400 uppercase tracking-widest mb-2">You Owe</p>
             <div className="space-y-2">
-              {oweGroups.map((g) => <BalanceGroupCard key={g.group_id} group={g} nav={nav} />)}
+              {oweConsolidated.masters.map((m) => <MasterBalanceCard key={m.key} master={m} nav={nav} />)}
+              {oweConsolidated.solo.map((g) => <BalanceGroupCard key={g.group_id} group={g} nav={nav} />)}
             </div>
           </div>
         )}
@@ -232,7 +278,8 @@ export default function Home() {
           <div>
             <p className="text-xs font-bold text-green-500 uppercase tracking-widest mb-2">Owed to You</p>
             <div className="space-y-2">
-              {owedGroups.map((g) => <BalanceGroupCard key={g.group_id} group={g} nav={nav} />)}
+              {owedConsolidated.masters.map((m) => <MasterBalanceCard key={m.key} master={m} nav={nav} />)}
+              {owedConsolidated.solo.map((g) => <BalanceGroupCard key={g.group_id} group={g} nav={nav} />)}
             </div>
           </div>
         )}

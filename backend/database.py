@@ -7,6 +7,9 @@ from functools import lru_cache
 class Settings(BaseSettings):
     database_url: str
     allowed_origins: str = "http://localhost:5173"
+    frontend_url: str = "http://localhost:5173"
+    smtp_sender: str = ""
+    smtp_app_password: str = ""
 
     class Config:
         env_file = ".env"

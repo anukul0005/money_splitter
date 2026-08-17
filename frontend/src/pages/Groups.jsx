@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getGroups } from '../api'
 import GroupCard from '../components/GroupCard'
+import MasterGroupCard from '../components/MasterGroupCard'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser, isAdmin } from '../UserContext'
+import { buildMasterGroups } from '../utils/masterGroups'
 
 export default function Groups() {
   const nav = useNavigate()
@@ -27,6 +29,8 @@ export default function Groups() {
   const filtered = visibleGroups.filter((g) =>
     filter === 'all' ? true : filter === 'historical' ? g.is_historical : !g.is_historical
   )
+
+  const { masters, solo } = buildMasterGroups(filtered)
 
   if (loading) return <LoadingSpinner />
 
@@ -65,7 +69,8 @@ export default function Groups() {
       </div>
 
       <div className="px-5 mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-        {filtered.map((g) => <GroupCard key={g.id} group={g} />)}
+        {masters.map((m) => <MasterGroupCard key={m.key} master={m} />)}
+        {solo.map((g) => <GroupCard key={g.id} group={g} />)}
         {filtered.length === 0 && (
           <div className="col-span-2 text-center py-16 text-gray-400">
             <svg className="w-10 h-10 mx-auto mb-2 text-gray-300" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
