@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { getGroups, getOverview, getUserSummary, getGlobalAnalytics, getUserGroupBalances } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser, isAdmin } from '../UserContext'
-import { buildMasterBalances } from '../utils/masterGroups'
+import { buildMasterBalances, buildMasterGroups } from '../utils/masterGroups'
+import MasterGroupCard from '../components/MasterGroupCard'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 
@@ -201,6 +202,10 @@ export default function Home() {
   const oweConsolidated  = buildMasterBalances(oweGroups, groupsById)
   const owedConsolidated = buildMasterBalances(owedGroups, groupsById)
 
+  // Always-visible master groupings — independent of settlement status, so a
+  // fully-settled pair (e.g. Anukul & Anubhav) still shows up on the dashboard.
+  const { masters: linkedMasters } = buildMasterGroups(myGroups.filter((g) => !g.is_historical))
+
   const byCategory    = analytics?.by_category ?? []
   const byPersonCat   = analytics?.by_person_category ?? {}
   const maxCatTotal   = byCategory[0]?.total ?? 1
@@ -259,6 +264,16 @@ export default function Home() {
             >
               + Add Expense
             </button>
+          </div>
+        )}
+
+        {/* Linked Groups (master groupings, always visible regardless of balance) */}
+        {linkedMasters.length > 0 && (
+          <div>
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Linked Groups</p>
+            <div className="grid grid-cols-1 gap-3">
+              {linkedMasters.map((m) => <MasterGroupCard key={m.key} master={m} />)}
+            </div>
           </div>
         )}
 
