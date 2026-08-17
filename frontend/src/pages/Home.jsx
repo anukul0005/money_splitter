@@ -5,6 +5,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser, isAdmin } from '../UserContext'
 import { buildMasterGroups } from '../utils/masterGroups'
 import MasterGroupCard from '../components/MasterGroupCard'
+import GroupCard from '../components/GroupCard'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 
@@ -133,14 +134,17 @@ export default function Home() {
   const totalOwe   = oweGroups.reduce((s, g) => s + Math.abs(g.net), 0)
   const totalOwed  = owedGroups.reduce((s, g) => s + g.net, 0)
 
-  // Every group is bucketed by its exact member set; a master card only forms
-  // when 2+ groups share that set. Unsettled ones (any sub-group with a
-  // nonzero balance for the logged-in user) show first; settled ones are
-  // tucked behind a "show settled" toggle.
+  // Every group is bucketed by its exact member set; a master card only
+  // forms when 2+ groups share that set — groups whose member set is unique
+  // stay solo. Unsettled entries (master or solo, based on any nonzero
+  // balance for the logged-in user) show first; settled ones are tucked
+  // behind a "show settled" toggle.
   const unsettledGroupIds = new Set(balances.map((b) => b.group_id))
-  const { masters: allMasters } = buildMasterGroups(myGroups.filter((g) => !g.is_historical))
+  const { masters: allMasters, solo: soloGroups } = buildMasterGroups(myGroups.filter((g) => !g.is_historical))
   const unsettledMasters = allMasters.filter((m) => m.groups.some((g) => unsettledGroupIds.has(g.id)))
   const settledMasters   = allMasters.filter((m) => !m.groups.some((g) => unsettledGroupIds.has(g.id)))
+  const unsettledSolo    = soloGroups.filter((g) => unsettledGroupIds.has(g.id))
+  const settledSolo      = soloGroups.filter((g) => !unsettledGroupIds.has(g.id))
 
   const byCategory    = analytics?.by_category ?? []
   const byPersonCat   = analytics?.by_person_category ?? {}
@@ -203,25 +207,27 @@ export default function Home() {
           </div>
         )}
 
-        {/* Linked Groups (master groupings; unsettled first, settled behind a toggle) */}
-        {allMasters.length > 0 && (
+        {/* Groups (master groupings + solo groups; unsettled first, settled behind a toggle) */}
+        {(allMasters.length > 0 || soloGroups.length > 0) && (
           <div>
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Linked Groups</p>
-            <div className="grid grid-cols-1 gap-3">
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Groups</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {unsettledMasters.map((m) => <MasterGroupCard key={m.key} master={m} collapsible={false} />)}
+              {unsettledSolo.map((g) => <GroupCard key={g.id} group={g} />)}
             </div>
 
-            {settledMasters.length > 0 && (
+            {(settledMasters.length + settledSolo.length) > 0 && (
               showSettled ? (
-                <div className="grid grid-cols-1 gap-3 mt-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
                   {settledMasters.map((m) => <MasterGroupCard key={m.key} master={m} collapsible={false} />)}
+                  {settledSolo.map((g) => <GroupCard key={g.id} group={g} />)}
                 </div>
               ) : (
                 <button
                   onClick={() => setShowSettled(true)}
                   className="w-full mt-3 py-2 text-xs font-bold text-gray-500 bg-amber-50 border border-amber-200 hover:bg-amber-100 active:scale-[0.98] transition-all"
                 >
-                  Show {settledMasters.length} settled group{settledMasters.length > 1 ? 's' : ''}
+                  Show {settledMasters.length + settledSolo.length} settled group{(settledMasters.length + settledSolo.length) > 1 ? 's' : ''}
                 </button>
               )
             )}
