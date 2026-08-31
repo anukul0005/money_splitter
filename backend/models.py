@@ -12,6 +12,11 @@ class User(Base):
     password_hash = Column(String(128), nullable=False)
     salt = Column(String(64), nullable=False)
     is_admin = Column(Boolean, default=False)
+    # Self-serve password reset: the answer is hashed with its own salt, exactly
+    # like the password, so a database leak doesn't hand over the recovery route.
+    recovery_question = Column(String(200), nullable=True)
+    recovery_answer_hash = Column(String(128), nullable=True)
+    recovery_salt = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

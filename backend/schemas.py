@@ -8,6 +8,9 @@ from datetime import datetime
 class UserSignup(BaseModel):
     name: str
     password: str
+    # Optional at signup, but the only way to reset without an admin later
+    recovery_question: Optional[str] = None
+    recovery_answer: Optional[str] = None
 
 class UserLogin(BaseModel):
     name: str
@@ -18,7 +21,27 @@ class UserOut(BaseModel):
     name: str
     is_admin: bool
     created_at: Optional[datetime] = None
+    # Deliberately no recovery fields here: UserOut is returned by list_users,
+    # which would otherwise hand out every user's recovery question at once.
+    # The reset page reads a single question from /users/recovery-question.
     model_config = {"from_attributes": True}
+
+
+class SetRecovery(BaseModel):
+    current_password: str
+    question: str
+    answer: str
+
+class ResetPassword(BaseModel):
+    name: str
+    answer: str
+    new_password: str
+
+class AdminReset(BaseModel):
+    admin_name: str
+    admin_password: str
+    target_name: str
+    new_password: str
 
 
 # ─── Member ──────────────────────────────────────────────────────────────────

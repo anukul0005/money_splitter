@@ -68,6 +68,15 @@ def create_tables():
         conn.execute(text(
             "ALTER TABLE expenses ADD COLUMN IF NOT EXISTS settled_by TEXT"
         ))
+        conn.execute(text(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS recovery_question VARCHAR(200)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS recovery_answer_hash VARCHAR(128)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS recovery_salt VARCHAR(64)"
+        ))
         conn.commit()
 
     # `payments`, `activities` and `activity_seen` are created by create_all

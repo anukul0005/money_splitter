@@ -11,6 +11,7 @@ import MonthlyGroup from './pages/MonthlyGroup'
 import EditGroup   from './pages/EditGroup'
 import History     from './pages/History'
 import Login       from './pages/Login'
+import ResetPassword from './pages/ResetPassword'
 import MasterGroupDetail from './pages/MasterGroupDetail'
 import Friends           from './pages/Friends'
 import FriendDetail      from './pages/FriendDetail'
@@ -35,7 +36,18 @@ export default function App() {
     window.location.reload()
   }
 
-  if (!user) return <Login onLogin={setUser} />
+  // Logged out, the only routed page is the password reset — everything else
+  // falls through to the login screen.
+  if (!user) {
+    return (
+      <BrowserRouter>
+        <Routes>
+          <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="*" element={<Login onLogin={setUser} />} />
+        </Routes>
+      </BrowserRouter>
+    )
+  }
 
   return (
     <UserContext.Provider value={user}>

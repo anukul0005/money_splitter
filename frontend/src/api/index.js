@@ -10,6 +10,14 @@ export const signupUser     = (data)        => api.post('/users/signup', data)
 export const listUsers      = ()            => api.get('/users/')
 export const changePassword = (id, data)   => api.patch(`/users/${id}/password`, data)
 
+// ── Password recovery ─────────────────────────────────────────────────────────
+// A user who set a recovery question can reset from /reset-password on their
+// own; anyone who hasn't needs an admin, who uses the same page.
+export const setRecovery        = (id, data) => api.patch(`/users/${id}/recovery`, data)
+export const getRecoveryQuestion = (name)    => api.get('/users/recovery-question', { params: { name } })
+export const resetPassword      = (data)     => api.post('/users/reset-password', data)
+export const adminResetPassword = (data)     => api.post('/users/admin-reset', data)
+
 // ── Groups ────────────────────────────────────────────────────────────────────
 export const getGroups   = ()            => api.get('/groups/')
 export const getGroup    = (id)          => api.get(`/groups/${id}`)

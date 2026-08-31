@@ -1,27 +1,39 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { loginUser, signupUser } from '../api'
 
 const SESSION_KEY = 'splitter_session_v2'
 
+const RECOVERY_QUESTIONS = [
+  'What was the name of your first school?',
+  'What city were you born in?',
+  "What is your oldest sibling's nickname?",
+  'What was the name of your first pet?',
+  'What is your favourite dish?',
+]
+
 const FEATURES = [
   { icon: '💸', text: 'Track who paid what in groups' },
   { icon: '⚖️', text: 'Auto-calculate who owes whom' },
-  { icon: '✅', text: 'Mark debts settled when paid' },
+  { icon: '✅', text: 'Record payments to settle up' },
   { icon: '📊', text: 'View full spending history' },
 ]
 
 export default function Login({ onLogin }) {
+  const nav = useNavigate()
   const [mode, setMode]         = useState('login') // 'login' | 'signup'
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPw, setConfirmPw] = useState('')
   const [showPw, setShowPw]     = useState(false)
+  // Recovery question captured at signup so the user can reset without an admin
+  const [recQuestion, setRecQuestion] = useState(RECOVERY_QUESTIONS[0])
+  const [recAnswer, setRecAnswer]     = useState('')
   const [error, setError]       = useState('')
   const [loading, setLoading]   = useState(false)
-  const [forgotOpen, setForgotOpen] = useState(false)
 
   const switchMode = (m) => {
-    setMode(m); setError(''); setUsername(''); setPassword(''); setConfirmPw('')
+    setMode(m); setError(''); setUsername(''); setPassword(''); setConfirmPw(''); setRecAnswer('')
   }
 
   const handleLogin = async (e) => {
@@ -49,9 +61,17 @@ export default function Login({ onLogin }) {
     const name = username.trim()
     if (!name || !password) { setError('Please fill in all fields.'); return }
     if (password !== confirmPw) { setError('Passwords do not match.'); return }
+    if (recAnswer.trim().length < 3) {
+      setError('Set a recovery answer (3+ characters) so you can reset your own password later.')
+      return
+    }
     setLoading(true)
     try {
-      const res = await signupUser({ name, password })
+      const res = await signupUser({
+        name, password,
+        recovery_question: recQuestion,
+        recovery_answer: recAnswer,
+      })
       const u = res.data
       const s = { name: u.name, isAdmin: u.is_admin, id: u.id }
       localStorage.setItem(SESSION_KEY, JSON.stringify(s))
@@ -194,7 +214,7 @@ export default function Login({ onLogin }) {
                 <div className="text-center pt-1">
                   <button
                     type="button"
-                    onClick={() => setForgotOpen(true)}
+                    onClick={() => nav('/reset-password')}
                     className="text-[11px] font-bold text-brand-600 hover:text-brand-700 tracking-wide underline-offset-2 hover:underline"
                   >
                     Forgot password?
@@ -263,6 +283,30 @@ export default function Login({ onLogin }) {
                   />
                 </div>
 
+                {/* Recovery question — the only way to reset without an admin */}
+                <div className="border-t border-amber-200 pt-4">
+                  <label className="label">Recovery question</label>
+                  <select
+                    className="input"
+                    value={recQuestion}
+                    onChange={e => setRecQuestion(e.target.value)}
+                  >
+                    {RECOVERY_QUESTIONS.map(q => <option key={q} value={q}>{q}</option>)}
+                  </select>
+                  <input
+                    className="input mt-2"
+                    placeholder="Your answer"
+                    value={recAnswer}
+                    onChange={e => setRecAnswer(e.target.value)}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                  />
+                  <p className="text-[10px] text-gray-400 mt-1 leading-relaxed">
+                    Lets you reset your own password if you forget it. Capitalisation doesn't matter.
+                  </p>
+                </div>
+
                 {error && (
                   <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-md px-3 py-2">
                     {error}
@@ -283,34 +327,6 @@ export default function Login({ onLogin }) {
         </p>
       </div>
 
-      {/* ── Forgot password modal ── */}
-      {forgotOpen && (
-        <div
-          className="fixed inset-0 bg-field-950/85 flex items-center justify-center z-50 px-5"
-          onClick={() => setForgotOpen(false)}
-        >
-          <div
-            className="bg-cream border border-amber-100 shadow-2xl p-6 max-w-xs w-full"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-xl">🔑</span>
-              <h3 className="text-sm font-black text-gray-800 tracking-wide">Forgot Password?</h3>
-            </div>
-            <p className="text-xs text-gray-500 leading-relaxed mb-5">
-              Password resets are managed by the admins. Please contact{' '}
-              <span className="font-black text-gray-700">Anukul</span> or{' '}
-              <span className="font-black text-gray-700">Anubhav</span> to reset your account password.
-            </p>
-            <button
-              onClick={() => setForgotOpen(false)}
-              className="btn-primary"
-            >
-              GOT IT
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
