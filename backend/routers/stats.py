@@ -164,17 +164,26 @@ def _pairwise_group_debts(g: Group) -> dict[tuple[str, str], float]:
 
 @router.get("/friends", response_model=list[dict])
 def get_friends(name: str, db: Session = Depends(get_db)):
-    """Net balance with every person who shares an active group with `name`."""
+    """Net balance with every person who shares an active group with `name`.
+
+    Each friend also carries a per-group `groups` breakdown so the UI can show
+    where the overall net actually comes from.
+    """
     name_l = name.strip().lower()
     groups = db.query(Group).filter(Group.is_historical == False).all()  # noqa: E712
 
     net: dict[str, float] = {}
     display: dict[str, str] = {}
+    # friend -> group_id -> net owed between `name` and that friend in that group
+    per_group: dict[str, dict[int, float]] = defaultdict(lambda: defaultdict(float))
+    group_names: dict[int, str] = {}
 
     for g in groups:
         member_names = [m.name for m in g.members]
         if name_l not in [n.lower() for n in member_names]:
             continue
+
+        group_names[g.id] = g.name
 
         for n in member_names:
             if n.lower() != name_l:
@@ -186,11 +195,22 @@ def get_friends(name: str, db: Session = Depends(get_db)):
             if dl == name_l and cl != name_l:
                 net[cl] = net.get(cl, 0.0) - amt
                 display.setdefault(cl, creditor)
+                per_group[cl][g.id] -= amt
             elif cl == name_l and dl != name_l:
                 net[dl] = net.get(dl, 0.0) + amt
                 display.setdefault(dl, debtor)
+                per_group[dl][g.id] += amt
 
-    result = [{"name": display[k], "net": round(v, 2)} for k, v in net.items()]
+    result = []
+    for k, v in net.items():
+        breakdown = [
+            {"group_id": gid, "name": group_names.get(gid, ""), "net": round(amt, 2)}
+            for gid, amt in per_group.get(k, {}).items()
+            if abs(amt) > 0.01
+        ]
+        breakdown.sort(key=lambda r: -abs(r["net"]))
+        result.append({"name": display[k], "net": round(v, 2), "groups": breakdown})
+
     result.sort(key=lambda r: (-abs(r["net"]), r["name"].lower()))
     return result
 

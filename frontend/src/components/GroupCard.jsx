@@ -2,8 +2,16 @@ import { useNavigate } from 'react-router-dom'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 
-export default function GroupCard({ group }) {
+/**
+ * `friendBalance` — optional { name, net } describing what this group
+ * contributes to the running balance with one specific friend. Shown when the
+ * card is reached from that friend's page, so the overall figure is traceable
+ * back to the individual groups that make it up. net < 0 means you owe them.
+ */
+export default function GroupCard({ group, friendBalance }) {
   const nav = useNavigate()
+
+  const fb = friendBalance && Math.abs(friendBalance.net) > 0.01 ? friendBalance : null
 
   return (
     <div
@@ -32,6 +40,18 @@ export default function GroupCard({ group }) {
             </>
           )}
         </div>
+
+        {fb && (
+          <p
+            className={`text-xs font-semibold mt-1.5 ${
+              fb.net < 0 ? 'text-red-600' : 'text-green-600'
+            }`}
+          >
+            {fb.net < 0
+              ? `You owe ${fb.name} ${INR(Math.abs(fb.net))} here`
+              : `${fb.name} owes you ${INR(fb.net)} here`}
+          </p>
+        )}
       </div>
       <svg className="w-4 h-4 text-gray-300 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />

@@ -15,6 +15,8 @@ export default function FriendDetail() {
 
   const [groups,  setGroups]  = useState([])
   const [net,     setNet]     = useState(0)
+  // group_id -> what that group contributes to the balance with this friend
+  const [byGroup, setByGroup] = useState({})
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -27,16 +29,22 @@ export default function FriendDetail() {
         setGroups(g.data)
         const match = f.data.find((x) => x.name.toLowerCase() === friendName.toLowerCase())
         setNet(match?.net ?? 0)
+        setByGroup(
+          Object.fromEntries((match?.groups ?? []).map((x) => [x.group_id, x.net]))
+        )
       })
       .finally(() => setLoading(false))
   }, [friendName])
 
   if (loading) return <LoadingSpinner />
 
-  const shared = groups.filter((g) =>
-    (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase()) &&
-    (g.member_names ?? []).some((n) => n.toLowerCase() === friendName.toLowerCase())
-  )
+  const shared = groups
+    .filter((g) =>
+      (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase()) &&
+      (g.member_names ?? []).some((n) => n.toLowerCase() === friendName.toLowerCase())
+    )
+    // groups that actually contribute to the balance first, largest first
+    .sort((a, b) => Math.abs(byGroup[b.id] ?? 0) - Math.abs(byGroup[a.id] ?? 0))
 
   const settled = Math.abs(net) < 0.01
   const owes = net < 0
@@ -53,7 +61,13 @@ export default function FriendDetail() {
       </div>
 
       <div className="px-5 mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-        {shared.map((g) => <GroupCard key={g.id} group={g} />)}
+        {shared.map((g) => (
+          <GroupCard
+            key={g.id}
+            group={g}
+            friendBalance={{ name: friendName, net: byGroup[g.id] ?? 0 }}
+          />
+        ))}
         {shared.length === 0 && (
           <div className="col-span-2 text-center py-16 text-gray-400">
             <p className="text-sm">No shared groups</p>
