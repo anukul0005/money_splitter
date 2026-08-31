@@ -21,9 +21,6 @@ function FriendRow({ friend, nav }) {
             : 'bg-green-50 border-green-200 hover:bg-green-100'
       }`}
     >
-      <div className="shrink-0 w-9 h-9 rounded-full bg-field-800 text-white flex items-center justify-center text-xs font-black">
-        {friend.name?.[0]?.toUpperCase() ?? '?'}
-      </div>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-bold text-gray-900 truncate">{friend.name}</p>
         <p className={`text-xs font-semibold mt-0.5 ${settled ? 'text-gray-400' : owes ? 'text-red-600' : 'text-green-600'}`}>
