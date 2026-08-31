@@ -1,6 +1,24 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getRecoveryQuestion, resetPassword } from '../api'
+import { getRecoveryQuestion, resetPassword, redeemCode } from '../api'
+
+const KEY_QUESTION = 'Enter your 6-digit recovery key'
+
+const RECOVERY_QUESTIONS = [
+  KEY_QUESTION,
+  'What was the name of your first school?',
+  'What city were you born in?',
+  "What is your oldest sibling's nickname?",
+  'What was the name of your first pet?',
+  'What is your favourite dish?',
+]
+
+/** Cryptographically random 6-digit key. */
+function makeKey() {
+  const buf = new Uint32Array(1)
+  crypto.getRandomValues(buf)
+  return String(buf[0] % 1000000).padStart(6, '0')
+}
 
 /**
  * Standalone /reset-password route.
@@ -24,6 +42,11 @@ export default function ResetPassword() {
   const [loading, setLoading]   = useState(false)
   const [noRecovery, setNoRecovery] = useState(false)
 
+  // Redeeming a one-time code issued by an admin
+  const [code, setCode]       = useState('')
+  const [newQ, setNewQ]       = useState(RECOVERY_QUESTIONS[0])
+  const [newA, setNewA]       = useState('')
+
   const handleLookup = async (e) => {
     e.preventDefault()
     setError('')
@@ -40,6 +63,31 @@ export default function ResetPassword() {
       }
     } catch {
       setError('Could not reach the server. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleRedeem = async (e) => {
+    e.preventDefault()
+    setError('')
+    if (!username.trim()) return setError('Enter your username.')
+    if (code.trim().length !== 6) return setError('Enter the 6-digit code from your admin.')
+    if (next.length < 4) return setError('New password must be at least 4 characters.')
+    if (next !== confirm) return setError('New passwords do not match.')
+    if (newA.trim().length < 3) return setError('Set a security answer (3+ characters).')
+    setLoading(true)
+    try {
+      await redeemCode({
+        name: username.trim(),
+        code: code.trim(),
+        new_password: next,
+        question: newQ,
+        answer: newA,
+      })
+      setStep('done')
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Could not use that code.')
     } finally {
       setLoading(false)
     }
@@ -75,7 +123,11 @@ export default function ResetPassword() {
         <div className="px-6 py-4 border-b border-amber-200">
           <h2 className="text-sm font-bold text-gray-800">Reset your password</h2>
           <p className="text-xs text-gray-400 mt-0.5">
-            {step === 'done' ? 'All set' : 'Answer your recovery question to set a new one'}
+            {step === 'done'
+              ? 'All set'
+              : step === 'code'
+              ? 'Redeem a one-time code'
+              : 'Answer your security question to set a new password'}
           </p>
         </div>
 
@@ -105,7 +157,7 @@ export default function ResetPassword() {
                 <div className="text-xs bg-amber-50 border border-amber-300 rounded-md px-3 py-2.5 space-y-2">
                   <p className="text-gray-600 leading-relaxed">
                     This account has no security question set, so it can't be reset here.
-                    Ask an admin to issue you one, or to set a new password for you.
+                    Ask an admin for a one-time code, then use the link below.
                   </p>
                   <p className="text-gray-500 leading-relaxed">
                     Once you're back in, set your own from
@@ -116,6 +168,113 @@ export default function ResetPassword() {
 
               <button type="submit" className="btn-primary" disabled={loading}>
                 {loading ? 'Checking…' : 'Continue'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setStep('code'); setError('') }}
+                className="w-full text-[11px] font-semibold text-brand-600 hover:text-brand-700 hover:underline underline-offset-2"
+              >
+                I have a one-time code from an admin
+              </button>
+            </form>
+          )}
+
+          {/* ── Redeem a one-time code ── */}
+          {step === 'code' && (
+            <form onSubmit={handleRedeem} className="space-y-4">
+              <p className="text-xs text-gray-500 leading-relaxed">
+                Enter the code your admin gave you, then pick a security question of
+                your own so you can reset yourself next time.
+              </p>
+
+              <div>
+                <label className="label">Username</label>
+                <input
+                  className="input"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                />
+              </div>
+
+              <div>
+                <label className="label">One-time code</label>
+                <input
+                  className="input tracking-[0.3em] font-bold"
+                  inputMode="numeric"
+                  maxLength={6}
+                  placeholder="000000"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+                />
+              </div>
+
+              <div>
+                <label className="label">New password</label>
+                <input
+                  className="input"
+                  type={showPw ? 'text' : 'password'}
+                  value={next}
+                  onChange={(e) => setNext(e.target.value)}
+                  autoCapitalize="none"
+                />
+              </div>
+
+              <div>
+                <label className="label">Confirm new password</label>
+                <input
+                  className="input"
+                  type={showPw ? 'text' : 'password'}
+                  value={confirm}
+                  onChange={(e) => setConfirm(e.target.value)}
+                  autoCapitalize="none"
+                />
+              </div>
+
+              <div className="border-t border-amber-200 pt-4">
+                <label className="label">Your security question</label>
+                <select className="input" value={newQ} onChange={(e) => setNewQ(e.target.value)}>
+                  {RECOVERY_QUESTIONS.map((q) => <option key={q} value={q}>{q}</option>)}
+                </select>
+                <div className="flex gap-2 mt-2">
+                  <input
+                    className="input flex-1 tracking-widest font-bold"
+                    placeholder="Your answer"
+                    value={newA}
+                    onChange={(e) => setNewA(e.target.value)}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => { setNewQ(KEY_QUESTION); setNewA(makeKey()) }}
+                    className="px-3 bg-amber-100 border border-amber-300 rounded-md text-[11px] font-bold text-gray-600 hover:bg-amber-200 flex-shrink-0"
+                  >
+                    Generate
+                  </button>
+                </div>
+                <p className="text-[10px] text-gray-400 mt-1">
+                  Save this — it's stored hashed and can't be shown again.
+                </p>
+              </div>
+
+              {error && (
+                <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{error}</p>
+              )}
+
+              <button type="submit" className="btn-primary" disabled={loading}>
+                {loading ? 'Saving…' : 'Set password & question'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setStep('lookup'); setError(''); setCode('') }}
+                className="w-full text-[11px] font-semibold text-gray-400 hover:text-gray-600"
+              >
+                ← Back
               </button>
             </form>
           )}

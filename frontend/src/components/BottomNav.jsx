@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import ChangePasswordModal from './ChangePasswordModal'
+import { isAdmin } from '../UserContext'
 
 const items = [
   { to: '/',        label: 'Home',    icon: HomeIcon },
@@ -70,6 +71,15 @@ export default function BottomNav({ user, onLogout }) {
             <>
               <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
               <div className="absolute bottom-14 right-0 bg-field-900 border border-field-700 rounded-md shadow-xl z-50 w-44 py-1">
+                {isAdmin(user) && (
+                  <NavLink
+                    to="/admin/codes"
+                    onClick={() => setMenuOpen(false)}
+                    className="block w-full text-left px-4 py-2.5 text-xs font-semibold text-slate-300/60 hover:text-brand-400 hover:bg-field-800 transition-colors"
+                  >
+                    One-time codes
+                  </NavLink>
+                )}
                 <button
                   onClick={() => { setMenuOpen(false); setShowChangePw(true) }}
                   className="w-full text-left px-4 py-2.5 text-xs font-semibold text-slate-300/60 hover:text-brand-400 hover:bg-field-800 transition-colors"

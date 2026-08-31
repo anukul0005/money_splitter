@@ -7,7 +7,7 @@ from database import get_db
 from models import User
 from schemas import (
     UserSignup, UserLogin, UserOut, SetRecovery, ResetPassword,
-    AdminReset, AdminSetRecovery,
+    AdminReset, AdminSetRecovery, AdminIssueCode, RedeemCode,
 )
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -207,6 +207,105 @@ def admin_reset_password(payload: AdminReset, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(target)
     return target
+
+
+CODE_TTL_HOURS = 24
+
+
+@router.post("/admin-issue-code", response_model=dict)
+def admin_issue_code(payload: AdminIssueCode, db: Session = Depends(get_db)):
+    """Mint a one-time 6-digit code for another user.
+
+    Authorised by the admin's own passkey. Returned exactly once — only the
+    hash is stored, so it cannot be read back afterwards.
+    """
+    admin = _require_admin(payload.admin_name, payload.admin_answer, db)
+
+    target_name = (payload.target_name or "").strip()
+    if not target_name:
+        raise HTTPException(400, "Pick who the code is for")
+    if target_name.lower() == admin.name.lower():
+        raise HTTPException(400, "Issue the code to someone else — use your own passkey to reset yourself")
+
+    target = db.query(User).filter(User.name.ilike(target_name)).first()
+    if not target:
+        raise HTTPException(404, f"No user named {target_name}")
+
+    code = str(secrets.randbelow(1000000)).zfill(6)
+    expires = datetime.now(timezone.utc) + timedelta(hours=CODE_TTL_HOURS)
+    target.otc_salt = secrets.token_hex(16)
+    target.otc_hash = _hash(code, target.otc_salt)
+    target.otc_expires_at = expires
+    # A fresh code should not inherit an old lockout
+    target.reset_fail_count = 0
+    target.reset_locked_until = None
+    db.commit()
+
+    return {
+        "target": target.name,
+        "code": code,
+        "expires_at": expires.isoformat(),
+        "expires_in_hours": CODE_TTL_HOURS,
+    }
+
+
+@router.post("/redeem-code", response_model=UserOut)
+def redeem_code(payload: RedeemCode, db: Session = Depends(get_db)):
+    """Spend a one-time code: set a new password and your own security
+    question. The code is cleared on success and cannot be reused."""
+    if len(payload.new_password or "") < 4:
+        raise HTTPException(400, "New password must be at least 4 characters")
+
+    question = payload.question.strip()
+    answer = _norm_answer(payload.answer)
+    if not question:
+        raise HTTPException(400, "Pick a security question")
+    if len(answer) < 3:
+        raise HTTPException(400, "Answer must be at least 3 characters")
+
+    user = db.query(User).filter(User.name.ilike(payload.name.strip())).first()
+    now = datetime.now(timezone.utc)
+    generic = "That code isn't valid. Ask an admin for a new one."
+
+    # Same lockout counter as the reset page, so codes can't be brute-forced
+    if user and user.reset_locked_until is not None:
+        locked = user.reset_locked_until
+        if locked.tzinfo is None:
+            locked = locked.replace(tzinfo=timezone.utc)
+        if locked > now:
+            mins = max(1, int((locked - now).total_seconds() // 60) + 1)
+            raise HTTPException(429, f"Too many wrong attempts. Try again in {mins} minute(s).")
+
+    if not user or not user.otc_hash or not user.otc_salt:
+        raise HTTPException(401, generic)
+
+    expires = user.otc_expires_at
+    if expires is not None and expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if expires is None or expires < now:
+        raise HTTPException(401, "That code has expired. Ask an admin for a new one.")
+
+    if not secrets.compare_digest(user.otc_hash, _hash((payload.code or "").strip(), user.otc_salt)):
+        user.reset_fail_count = (user.reset_fail_count or 0) + 1
+        if user.reset_fail_count >= MAX_RESET_ATTEMPTS:
+            user.reset_locked_until = now + timedelta(minutes=LOCKOUT_MINUTES)
+            user.reset_fail_count = 0
+        db.commit()
+        raise HTTPException(401, generic)
+
+    _set_password(user, payload.new_password)
+    user.recovery_salt = secrets.token_hex(16)
+    user.recovery_answer_hash = _hash(answer, user.recovery_salt)
+    user.recovery_question = question
+    # Burn the code
+    user.otc_hash = None
+    user.otc_salt = None
+    user.otc_expires_at = None
+    user.reset_fail_count = 0
+    user.reset_locked_until = None
+    db.commit()
+    db.refresh(user)
+    return user
 
 
 @router.post("/admin-set-recovery", response_model=UserOut)

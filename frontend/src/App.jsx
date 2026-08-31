@@ -13,10 +13,11 @@ import History     from './pages/History'
 import Login       from './pages/Login'
 import ResetPassword from './pages/ResetPassword'
 import AdminRecovery from './pages/AdminRecovery'
+import AdminCodes    from './pages/AdminCodes'
 import MasterGroupDetail from './pages/MasterGroupDetail'
 import Friends           from './pages/Friends'
 import FriendDetail      from './pages/FriendDetail'
-import { UserContext } from './UserContext'
+import { UserContext, isAdmin } from './UserContext'
 
 const SESSION_KEY = 'splitter_session_v2'
 
@@ -73,6 +74,10 @@ export default function App() {
                 <Route path="/master/:key" element={<MasterGroupDetail />} />
                 <Route path="/friends" element={<Friends />} />
                 <Route path="/friends/:name" element={<FriendDetail />} />
+                {/* Admin-only: the route simply does not exist for others */}
+                {isAdmin(user) && (
+                  <Route path="/admin/codes" element={<AdminCodes />} />
+                )}
               </Routes>
             </div>
           </div>

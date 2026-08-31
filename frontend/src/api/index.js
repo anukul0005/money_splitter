@@ -19,6 +19,10 @@ export const resetPassword      = (data)     => api.post('/users/reset-password'
 export const adminResetPassword = (data)     => api.post('/users/admin-reset', data)
 export const adminSetRecovery   = (data)     => api.post('/users/admin-set-recovery', data)
 export const listUsersBasic     = ()         => api.get('/users/')
+// One-time codes: an admin mints one for another user; that user spends it to
+// set a new password and their own security question.
+export const adminIssueCode     = (data)     => api.post('/users/admin-issue-code', data)
+export const redeemCode         = (data)     => api.post('/users/redeem-code', data)
 
 // ── Groups ────────────────────────────────────────────────────────────────────
 export const getGroups   = ()            => api.get('/groups/')

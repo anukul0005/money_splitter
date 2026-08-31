@@ -45,6 +45,22 @@ class AdminReset(BaseModel):
     target_name: str
     new_password: str
 
+class AdminIssueCode(BaseModel):
+    """A logged-in admin mints a one-time code for another user, authorised by
+    the admin's own 6-digit passkey."""
+    admin_name: str
+    admin_answer: str
+    target_name: str
+
+class RedeemCode(BaseModel):
+    """The target user spends that code to set a new password and their own
+    security question in one step."""
+    name: str
+    code: str
+    new_password: str
+    question: str
+    answer: str
+
 class AdminSetRecovery(BaseModel):
     """An admin sets (or replaces) the security question of another user."""
     admin_name: str
