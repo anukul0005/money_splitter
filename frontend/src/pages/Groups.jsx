@@ -44,13 +44,13 @@ export default function Groups() {
           <h1 className="text-xl font-black tracking-tight">Groups</h1>
           <div className="flex items-center gap-2">
             <button
-              className="bg-amber-100 text-amber-800 text-xs font-bold px-3 py-1.5 border border-amber-300"
+              className="bg-amber-100 text-amber-800 text-xs font-bold px-3 py-1.5 border border-amber-300 rounded-md"
               onClick={() => nav('/groups/monthly')}
             >
               + Monthly
             </button>
             {admin && (
-              <button className="bg-brand-400 text-gray-900 text-xs font-bold px-3 py-1.5 shadow-sm" onClick={() => nav('/groups/new')}>
+              <button className="bg-brand-400 text-white text-xs font-bold px-3 py-1.5 shadow-sm" onClick={() => nav('/groups/new')}>
                 + New
               </button>
             )}
@@ -62,7 +62,7 @@ export default function Groups() {
               key={f}
               onClick={() => setFilter(f)}
               className={`px-3 py-1 text-xs font-bold transition-colors border ${
-                filter === f ? 'bg-brand-400 text-gray-900 border-brand-400' : 'bg-amber-50 border-amber-200 text-gray-500'
+                filter === f ? 'bg-brand-400 text-white border-brand-400' : 'bg-amber-50 border-amber-200 text-gray-500'
               }`}
             >
               {f}

@@ -40,7 +40,7 @@ export default function App() {
   return (
     <UserContext.Provider value={user}>
       <BrowserRouter>
-        <div className="flex min-h-screen bg-field-900">
+        <div className="flex min-h-screen bg-canvas">
           {/* Desktop sidebar */}
           <Sidebar user={user} onLogout={handleLogout} />
 

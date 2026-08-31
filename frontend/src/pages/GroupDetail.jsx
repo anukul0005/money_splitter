@@ -303,7 +303,7 @@ export default function GroupDetail() {
               </svg>
             </button>
             <button
-              className="bg-brand-400 text-gray-900 text-xs font-bold px-3 py-1.5 shadow-sm ml-1"
+              className="bg-brand-400 text-white text-xs font-bold px-3 py-1.5 shadow-sm ml-1"
               onClick={() => nav(`/add?group=${id}`)}
             >
               + Add
@@ -319,7 +319,7 @@ export default function GroupDetail() {
               onClick={() => setTab(v)}
               className={`flex-1 py-2 text-xs font-bold transition-colors border ${
                 tab === v
-                  ? 'bg-brand-400 text-gray-900 border-brand-400'
+                  ? 'bg-brand-400 text-white border-brand-400'
                   : 'text-gray-500 border-transparent hover:bg-amber-50'
               }`}
             >
@@ -430,7 +430,7 @@ export default function GroupDetail() {
                     <p className="text-xs text-gray-400 mt-0.5">
                       {e.paid_by} · {e.date || '—'}
                       {e.payment_mode && (
-                        <span className="ml-1.5 inline-block bg-amber-50 border border-amber-200 px-1.5 py-px text-[10px] font-bold text-amber-700 tracking-wide">
+                        <span className="ml-1.5 inline-block bg-amber-50 border border-amber-200 rounded-md px-1.5 py-px text-[10px] font-bold text-amber-700 tracking-wide">
                           {e.payment_mode.replace('_', ' ').toUpperCase()}
                         </span>
                       )}
@@ -438,7 +438,7 @@ export default function GroupDetail() {
 
                     {/* Custom / gentleman's split — per-member breakdown */}
                     {splitEntries && (
-                      <div className="mt-1.5 border border-amber-300 bg-amber-50/60 px-2 py-1.5 space-y-1">
+                      <div className="mt-1.5 border border-amber-300 rounded-md bg-amber-50/60 px-2 py-1.5 space-y-1">
                         <p className="text-[10px] font-black text-amber-700 tracking-widest mb-0.5">
                           {splitLabel}
                         </p>
@@ -503,9 +503,9 @@ export default function GroupDetail() {
                         <div key={name} className="flex items-center gap-2">
                           <span className="text-xs font-semibold text-gray-600 flex-1 min-w-0 truncate">{name}</span>
                           {settled ? (
-                            <span className="text-[10px] font-bold text-green-700 bg-green-50 border border-green-200 px-1.5 py-0.5 flex-shrink-0">✓ Settled</span>
+                            <span className="text-[10px] font-bold text-green-700 bg-green-50 border border-green-200 rounded-md px-1.5 py-0.5 flex-shrink-0">✓ Settled</span>
                           ) : (
-                            <span className="text-[10px] font-bold text-red-600 bg-red-50 border border-red-100 px-1.5 py-0.5 flex-shrink-0">owes {INR(owed)}</span>
+                            <span className="text-[10px] font-bold text-red-600 bg-red-50 border border-red-100 rounded-md px-1.5 py-0.5 flex-shrink-0">owes {INR(owed)}</span>
                           )}
                           {isPayer && (
                             <button
@@ -612,7 +612,7 @@ export default function GroupDetail() {
                     onClick={() => setChartView(v)}
                     className={`px-3 py-1.5 text-xs font-bold transition-colors border ${
                       chartView === v
-                        ? 'bg-brand-400 text-gray-900 border-brand-400'
+                        ? 'bg-brand-400 text-white border-brand-400'
                         : 'bg-amber-50 border-amber-200 text-gray-500'
                     }`}
                   >
@@ -750,7 +750,7 @@ export default function GroupDetail() {
               <div className="space-y-2">
                 {/* Past (settled) payments */}
                 {settlement.past_payments && settlement.past_payments.map((p, i) => (
-                  <div key={`past-${i}`} className="flex items-center gap-2 bg-green-50 border border-green-200 px-3 py-2.5">
+                  <div key={`past-${i}`} className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-md px-3 py-2.5">
                     <svg className="w-4 h-4 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                     </svg>
@@ -767,7 +767,7 @@ export default function GroupDetail() {
                 ))}
                 {/* Pending payments */}
                 {settlement.transactions.map((t, i) => (
-                  <div key={`pending-${i}`} className="flex items-center gap-2 bg-red-50 border border-red-100 px-3 py-2.5">
+                  <div key={`pending-${i}`} className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-md px-3 py-2.5">
                     <span className="font-bold text-sm text-red-700 flex-shrink-0">{t.from_member}</span>
                     <svg className="w-4 h-4 text-red-400 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />

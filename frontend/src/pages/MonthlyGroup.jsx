@@ -99,7 +99,7 @@ export default function MonthlyGroup() {
             <select
               value={monthMonth}
               onChange={(e) => setMonthMonth(Number(e.target.value))}
-              className="mt-2 w-full border border-amber-200 bg-cream text-gray-800 font-bold text-sm px-3 py-3 appearance-none focus:outline-none focus:border-brand-400"
+              className="mt-2 w-full border border-amber-200 rounded-md bg-cream text-gray-800 font-bold text-sm px-3 py-3 appearance-none focus:outline-none focus:border-brand-400"
             >
               {MONTH_FULL.map((name, i) => (
                 <option key={i} value={i + 1}>{name}</option>
@@ -111,7 +111,7 @@ export default function MonthlyGroup() {
             <select
               value={monthYearNum}
               onChange={(e) => setMonthYearNum(Number(e.target.value))}
-              className="mt-2 w-full border border-amber-200 bg-cream text-gray-800 font-bold text-sm px-3 py-3 appearance-none focus:outline-none focus:border-brand-400"
+              className="mt-2 w-full border border-amber-200 rounded-md bg-cream text-gray-800 font-bold text-sm px-3 py-3 appearance-none focus:outline-none focus:border-brand-400"
             >
               {yearOptions.map((y) => (
                 <option key={y} value={y}>{y}</option>
@@ -121,7 +121,7 @@ export default function MonthlyGroup() {
         </div>
 
         {/* Status card */}
-        <div className="border border-amber-200 bg-amber-50/60 px-4 py-3 space-y-1">
+        <div className="border border-amber-200 rounded-md bg-amber-50/60 px-4 py-3 space-y-1">
           <p className="text-[10px] font-black text-amber-700 tracking-widest">GROUP NAME</p>
           <p className="text-sm font-bold text-gray-800">{targetName}</p>
           {exactMatch
@@ -131,7 +131,7 @@ export default function MonthlyGroup() {
         </div>
 
         {error && (
-          <p className="text-sm text-red-500 bg-red-50 border border-red-100 px-4 py-3">{error}</p>
+          <p className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-md px-4 py-3">{error}</p>
         )}
       </div>
 

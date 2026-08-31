@@ -33,19 +33,19 @@ export default function BottomNav({ user, onLogout }) {
             end={to === '/'}
             className={({ isActive }) =>
               `flex flex-col items-center gap-0.5 flex-1 py-2 transition-colors ${
-                highlight ? 'text-gray-900' : isActive ? 'text-brand-400' : 'text-green-200/40'
+                highlight ? 'text-white' : isActive ? 'text-brand-400' : 'text-slate-300/40'
               }`
             }
           >
             {({ isActive }) =>
               highlight ? (
-                <span className="bg-brand-400 p-2 -mt-5 shadow-lg shadow-brand-400/40 ring-4 ring-field-950">
+                <span className="bg-brand-400 p-2 -mt-5 rounded-lg shadow-lg shadow-brand-400/40 ring-4 ring-field-950">
                   <Icon />
                 </span>
               ) : (
                 <>
                   <Icon />
-                  <span className={`text-[10px] font-semibold ${isActive ? 'text-brand-400' : 'text-green-200/40'}`}>
+                  <span className={`text-[10px] font-semibold ${isActive ? 'text-brand-400' : 'text-slate-300/40'}`}>
                     {label}
                   </span>
                 </>
@@ -58,27 +58,27 @@ export default function BottomNav({ user, onLogout }) {
         <div className="relative flex-1">
           <button
             onClick={() => setMenuOpen(v => !v)}
-            className="flex flex-col items-center gap-0.5 w-full py-2 text-green-200/40 active:scale-95 transition-transform"
+            className="flex flex-col items-center gap-0.5 w-full py-2 text-slate-300/40 active:scale-95 transition-transform"
           >
-            <span className="w-6 h-6 bg-brand-400/15 border border-brand-400/30 flex items-center justify-center font-black text-brand-400 text-xs">
+            <span className="w-6 h-6 bg-brand-400/15 border border-brand-400/30 rounded flex items-center justify-center font-black text-brand-400 text-xs">
               {user?.name?.[0]?.toUpperCase() || '?'}
             </span>
-            <span className="text-[10px] font-semibold text-green-200/40">Account</span>
+            <span className="text-[10px] font-semibold text-slate-300/40">Account</span>
           </button>
 
           {menuOpen && (
             <>
               <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
-              <div className="absolute bottom-14 right-0 bg-field-900 border border-field-700 shadow-xl z-50 w-44 py-1">
+              <div className="absolute bottom-14 right-0 bg-field-900 border border-field-700 rounded-md shadow-xl z-50 w-44 py-1">
                 <button
                   onClick={() => { setMenuOpen(false); setShowChangePw(true) }}
-                  className="w-full text-left px-4 py-2.5 text-xs font-semibold text-green-200/60 hover:text-brand-400 hover:bg-field-800 transition-colors"
+                  className="w-full text-left px-4 py-2.5 text-xs font-semibold text-slate-300/60 hover:text-brand-400 hover:bg-field-800 transition-colors"
                 >
                   Change password
                 </button>
                 <button
                   onClick={handleLogout}
-                  className="w-full text-left px-4 py-2.5 text-xs font-semibold text-green-200/60 hover:text-red-400 hover:bg-field-800 transition-colors"
+                  className="w-full text-left px-4 py-2.5 text-xs font-semibold text-slate-300/60 hover:text-red-400 hover:bg-field-800 transition-colors"
                 >
                   Sign out
                 </button>

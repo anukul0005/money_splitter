@@ -310,7 +310,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
                   onClick={() => setCategory((prev) => prev === c ? '' : c)}
                   className={`px-3 py-1.5 text-xs font-bold transition-colors border ${
                     category === c
-                      ? 'bg-brand-400 text-gray-900 border-brand-400'
+                      ? 'bg-brand-400 text-white border-brand-400'
                       : 'bg-cream text-gray-400 border-amber-200 hover:text-gray-700'
                   }`}
                 >
@@ -341,7 +341,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
                   onClick={() => setPaymentMode(pm.value)}
                   className={`px-3 py-1.5 text-xs font-bold transition-colors border ${
                     paymentMode === pm.value
-                      ? 'bg-brand-400 text-gray-900 border-brand-400'
+                      ? 'bg-brand-400 text-white border-brand-400'
                       : 'bg-cream text-gray-400 border-amber-200 hover:text-gray-700'
                   }`}
                 >
@@ -355,14 +355,14 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
           {members.length > 1 && (
           <div>
             <label className="label">Split</label>
-            <div className="flex border border-amber-200">
+            <div className="flex border border-amber-200 rounded-md">
               {['equal', 'custom'].map((mode) => (
                 <button
                   key={mode}
                   onClick={() => handleSplitModeChange(mode)}
                   className={`flex-1 py-2.5 text-xs font-bold tracking-widest transition-colors border-r last:border-r-0 border-amber-200 ${
                     splitMode === mode
-                      ? 'bg-brand-400 text-gray-900'
+                      ? 'bg-brand-400 text-white'
                       : 'bg-cream text-gray-400 hover:text-gray-700'
                   }`}
                 >
@@ -375,7 +375,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
 
           {/* Equal split preview */}
           {members.length > 1 && splitMode === 'equal' && (
-            <div className="border border-amber-200 bg-amber-50/50 px-3 py-2.5 space-y-1.5">
+            <div className="border border-amber-200 rounded-md bg-amber-50/50 px-3 py-2.5 space-y-1.5">
               <p className="text-[10px] font-black text-amber-700 tracking-widest mb-1">Equal split</p>
               {members.map((m) => (
                 <div key={m} className="flex items-center justify-between">
@@ -388,7 +388,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
 
           {/* Custom split — % and ₹ linked bidirectionally */}
           {members.length > 1 && splitMode === 'custom' && (
-            <div className="border border-amber-200 bg-amber-50/50 px-3 py-3 space-y-2">
+            <div className="border border-amber-200 rounded-md bg-amber-50/50 px-3 py-3 space-y-2">
               <p className="text-[10px] font-black text-amber-700 tracking-widest mb-1">{getSplitLabel()}</p>
               {members.map((m) => {
                 const pct = customPcts[m] ?? ''
@@ -427,7 +427,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
           )}
 
           {error && (
-            <p className="text-xs text-red-500 bg-red-50 border border-red-100 px-3 py-2">{error}</p>
+            <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-md px-3 py-2">{error}</p>
           )}
         </div>
 
@@ -437,7 +437,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
           style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 1.25rem)' }}
         >
           <button
-            className="flex-1 py-3 text-xs font-bold text-gray-500 border border-amber-200 hover:bg-amber-50 active:scale-95 transition-all"
+            className="flex-1 py-3 text-xs font-bold text-gray-500 border border-amber-200 rounded-md hover:bg-amber-50 active:scale-95 transition-all"
             onClick={onClose}
           >
             Cancel

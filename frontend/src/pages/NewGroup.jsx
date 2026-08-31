@@ -83,7 +83,7 @@ export default function NewGroup() {
                 onClick={() => setForm((f) => ({ ...f, category: f.category === c ? '' : c }))}
                 className={`px-3 py-1.5 text-xs font-bold border transition-colors capitalize ${
                   form.category === c
-                    ? 'bg-brand-400 text-gray-900 border-brand-400'
+                    ? 'bg-brand-400 text-white border-brand-400'
                     : 'bg-cream text-gray-400 border-amber-200 hover:text-gray-700'
                 }`}
               >
@@ -107,7 +107,7 @@ export default function NewGroup() {
             <button
               type="button"
               onClick={addMember}
-              className="bg-brand-400 text-gray-900 px-4 font-bold text-sm shadow-sm"
+              className="bg-brand-400 text-white px-4 font-bold text-sm shadow-sm"
             >
               Add
             </button>
@@ -118,7 +118,7 @@ export default function NewGroup() {
               {members.map((m) => (
                 <span
                   key={m}
-                  className="flex items-center gap-1.5 bg-brand-400/15 text-brand-700 border border-brand-400/30 px-3 py-1.5 text-sm font-bold"
+                  className="flex items-center gap-1.5 bg-brand-400/15 text-brand-700 border border-brand-400/30 rounded-md px-3 py-1.5 text-sm font-bold"
                 >
                   {m}
                   <button type="button" onClick={() => removeMember(m)} className="text-brand-400 hover:text-brand-700">
@@ -130,7 +130,7 @@ export default function NewGroup() {
           )}
         </div>
 
-        {error && <p className="text-sm text-red-500 bg-red-50 border border-red-100 px-4 py-3">{error}</p>}
+        {error && <p className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-md px-4 py-3">{error}</p>}
 
         <button type="submit" className="btn-primary" disabled={submitting}>
           {submitting ? 'Creating…' : `Create Group with ${members.length} member${members.length !== 1 ? 's' : ''}`}

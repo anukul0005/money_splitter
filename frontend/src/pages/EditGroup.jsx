@@ -131,7 +131,7 @@ export default function EditGroup() {
                 onClick={() => setCategory((prev) => prev === c ? '' : c)}
                 className={`px-3 py-1.5 text-xs font-bold border transition-colors capitalize ${
                   category === c
-                    ? 'bg-brand-400 text-gray-900 border-brand-400'
+                    ? 'bg-brand-400 text-white border-brand-400'
                     : 'bg-cream text-gray-400 border-amber-200 hover:text-gray-700'
                 }`}
               >
@@ -214,14 +214,14 @@ export default function EditGroup() {
             <button
               type="button"
               onClick={addNew}
-              className="bg-brand-400 text-gray-900 px-4 font-bold text-sm shadow-sm"
+              className="bg-brand-400 text-white px-4 font-bold text-sm shadow-sm"
             >
               Add
             </button>
           </div>
         </div>
 
-        {error && <p className="text-sm text-red-500 bg-red-50 border border-red-100 px-4 py-3">{error}</p>}
+        {error && <p className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-md px-4 py-3">{error}</p>}
 
         <button type="submit" className="btn-primary" disabled={submitting}>
           {submitting ? 'Saving…' : 'Save Changes'}

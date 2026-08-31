@@ -456,7 +456,7 @@ export default function History() {
     <div className="flex flex-col items-center justify-center min-h-[60vh] px-5 text-center">
       <p className="text-4xl mb-3">😴</p>
       <p className="text-sm text-gray-600 mb-4">{error}</p>
-      <button onClick={load} className="bg-brand-400 text-gray-900 px-5 py-2 text-sm font-bold shadow-md">Retry</button>
+      <button onClick={load} className="bg-brand-400 text-white px-5 py-2 text-sm font-bold shadow-md">Retry</button>
     </div>
   )
 
@@ -469,20 +469,20 @@ export default function History() {
         <h1 className="text-3xl font-black mt-1 tracking-tight">{INR(totalSpend)}</h1>
         <div className="flex gap-4 mt-2 flex-wrap">
           <div>
-            <p className="text-green-200/40 text-[10px] font-bold uppercase tracking-widest">Groups</p>
+            <p className="text-slate-300/40 text-[10px] font-bold uppercase tracking-widest">Groups</p>
             <p className="text-white font-black text-sm">{visibleGroups.length}</p>
           </div>
           <div>
-            <p className="text-green-200/40 text-[10px] font-bold uppercase tracking-widest">Avg / Month</p>
+            <p className="text-slate-300/40 text-[10px] font-bold uppercase tracking-widest">Avg / Month</p>
             <p className="text-white font-black text-sm">{INR(Math.round(avgMonthly))}</p>
           </div>
           <div>
-            <p className="text-green-200/40 text-[10px] font-bold uppercase tracking-widest">Peak Month</p>
+            <p className="text-slate-300/40 text-[10px] font-bold uppercase tracking-widest">Peak Month</p>
             <p className="text-white font-black text-sm">{maxMonthLbl || '—'}</p>
           </div>
           {topCategory && (
             <div>
-              <p className="text-green-200/40 text-[10px] font-bold uppercase tracking-widest">Top Category</p>
+              <p className="text-slate-300/40 text-[10px] font-bold uppercase tracking-widest">Top Category</p>
               <p className="text-white font-black text-sm">{topCategory}</p>
             </div>
           )}
@@ -503,7 +503,7 @@ export default function History() {
                     onClick={() => setTimeFilter(v)}
                     className={`px-2 py-1 text-[10px] font-bold border transition-colors ${
                       timeFilter === v
-                        ? 'bg-brand-400 text-gray-900 border-brand-400'
+                        ? 'bg-brand-400 text-white border-brand-400'
                         : 'bg-cream text-gray-400 border-amber-200 hover:text-gray-700'
                     }`}
                   >
@@ -613,7 +613,7 @@ export default function History() {
                       onClick={() => setSelectedYear(y)}
                       className={`px-2 py-1 text-[10px] font-bold border transition-colors ${
                         selectedYear === y
-                          ? 'bg-brand-400 text-gray-900 border-brand-400'
+                          ? 'bg-brand-400 text-white border-brand-400'
                           : 'bg-cream text-gray-400 border-amber-200 hover:text-gray-700'
                       }`}
                     >

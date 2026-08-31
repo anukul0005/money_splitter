@@ -123,7 +123,7 @@ export default function Home() {
     <div className="flex flex-col items-center justify-center min-h-[60vh] px-5 text-center">
       <p className="text-4xl mb-3">😴</p>
       <p className="text-sm text-gray-600 mb-4">{error}</p>
-      <button onClick={load} className="bg-brand-400 text-gray-900 px-5 py-2 rounded-xl text-sm font-bold shadow-md">
+      <button onClick={load} className="bg-brand-400 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-md">
         Retry
       </button>
     </div>
@@ -164,7 +164,7 @@ export default function Home() {
         )}
         <p className="text-brand-400/70 text-xs font-bold uppercase tracking-widest">Total spent (active groups)</p>
         <h1 className="text-4xl font-black mt-1 tracking-tight">{INR(totalSpend)}</h1>
-        <p className="text-green-200/40 text-xs mt-1 font-medium">{activeOverview.length} active groups</p>
+        <p className="text-slate-300/40 text-xs mt-1 font-medium">{activeOverview.length} active groups</p>
       </div>
 
       <div className="px-5 mt-5 space-y-5">
@@ -199,13 +199,13 @@ export default function Home() {
               + New Group
             </button>
             <button
-              className="bg-cream border border-amber-200 hover:bg-cream-200 active:scale-95 text-gray-800 font-bold px-4 py-3 transition-all duration-150 w-full text-center text-sm"
+              className="bg-cream border border-amber-200 rounded-md hover:bg-cream-200 active:scale-95 text-gray-800 font-bold px-4 py-3 transition-all duration-150 w-full text-center text-sm"
               onClick={() => nav('/add')}
             >
               + Add Expense
             </button>
             <button
-              className="bg-amber-100 border border-amber-300 text-amber-800 hover:bg-amber-200 active:scale-95 font-bold px-4 py-3 transition-all duration-150 w-full text-center text-sm"
+              className="bg-amber-100 border border-amber-300 rounded-md text-amber-800 hover:bg-amber-200 active:scale-95 font-bold px-4 py-3 transition-all duration-150 w-full text-center text-sm"
               onClick={() => nav('/groups/monthly')}
             >
               + Monthly
@@ -231,7 +231,7 @@ export default function Home() {
               ) : (
                 <button
                   onClick={() => setShowSettled(true)}
-                  className="w-full mt-3 py-2 text-xs font-bold text-gray-500 bg-amber-50 border border-amber-200 hover:bg-amber-100 active:scale-[0.98] transition-all"
+                  className="w-full mt-3 py-2 text-xs font-bold text-gray-500 bg-amber-50 border border-amber-200 rounded-md hover:bg-amber-100 active:scale-[0.98] transition-all"
                 >
                   Show {settledMasters.length + settledSolo.length} settled group{(settledMasters.length + settledSolo.length) > 1 ? 's' : ''}
                 </button>

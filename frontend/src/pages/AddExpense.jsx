@@ -259,7 +259,7 @@ export default function AddExpense() {
             )}
           </div>
           {successCount > 0 && (
-            <span className="text-xs font-black text-brand-600 bg-brand-400/10 border border-brand-400/20 px-2.5 py-1">
+            <span className="text-xs font-black text-brand-600 bg-brand-400/10 border border-brand-400/20 rounded-md px-2.5 py-1">
               {successCount} added
             </span>
           )}
@@ -268,7 +268,7 @@ export default function AddExpense() {
 
       {/* Success banner */}
       {successCount > 0 && (
-        <div className="mx-5 mt-4 bg-brand-400/10 border border-brand-400/30 px-4 py-2.5 flex items-center justify-between">
+        <div className="mx-5 mt-4 bg-brand-400/10 border border-brand-400/30 rounded-md px-4 py-2.5 flex items-center justify-between">
           <p className="text-sm font-bold text-brand-700">Expense saved. Add another below.</p>
           <button
             className="text-xs font-black text-brand-600 underline"
@@ -319,7 +319,7 @@ export default function AddExpense() {
                     onClick={() => setForm((f) => ({ ...f, paid_by: m.name }))}
                     className={`px-4 py-2 text-sm font-bold transition-colors border ${
                       form.paid_by === m.name
-                        ? 'bg-brand-400 text-gray-900 border-brand-400'
+                        ? 'bg-brand-400 text-white border-brand-400'
                         : 'bg-amber-50 text-gray-700 border-amber-200'
                     }`}
                   >
@@ -344,7 +344,7 @@ export default function AddExpense() {
                 onClick={() => setPaymentMode(pm.value)}
                 className={`px-3 py-1.5 text-xs font-bold transition-colors border ${
                   form.payment_mode === pm.value
-                    ? 'bg-brand-400 text-gray-900 border-brand-400'
+                    ? 'bg-brand-400 text-white border-brand-400'
                     : 'bg-amber-50 text-gray-600 border-amber-200'
                 }`}
               >
@@ -365,7 +365,7 @@ export default function AddExpense() {
                 type="button"
                 onClick={() => setSplitMode('equal')}
                 className={`px-3 py-1.5 text-xs font-bold transition-colors border ${
-                  splitMode === 'equal' ? 'bg-brand-400 text-gray-900 border-brand-400' : 'bg-amber-50 text-gray-600 border-amber-200'
+                  splitMode === 'equal' ? 'bg-brand-400 text-white border-brand-400' : 'bg-amber-50 text-gray-600 border-amber-200'
                 }`}
               >
                 Equal
@@ -404,7 +404,7 @@ export default function AddExpense() {
                     onClick={() => setForm((f) => ({ ...f, divider: String(n) }))}
                     className={`w-12 h-12 text-sm font-bold transition-colors border ${
                       String(form.divider) === String(n)
-                        ? 'bg-brand-400 text-gray-900 border-brand-400'
+                        ? 'bg-brand-400 text-white border-brand-400'
                         : 'bg-amber-50 text-gray-700 border-amber-200'
                     }`}
                   >
@@ -435,7 +435,7 @@ export default function AddExpense() {
                 const pct = gentlemanFlipped ? (i === 0 ? 35 : 65) : (i === 0 ? 65 : 35)
                 const amt = form.amount ? (parseFloat(form.amount) * pct / 100).toFixed(2) : null
                 return (
-                  <div key={m.id} className="flex items-center gap-3 bg-amber-50 border border-amber-200 px-3 py-2.5">
+                  <div key={m.id} className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-md px-3 py-2.5">
                     <span className="text-sm font-bold text-gray-800 flex-1">{m.name}</span>
                     <span className="text-xs font-black text-amber-700 bg-amber-100 px-2 py-0.5">{pct}%</span>
                     {amt && <span className="text-sm font-black text-gray-900">₹{amt}</span>}
@@ -504,7 +504,7 @@ export default function AddExpense() {
                 onClick={() => setForm((f) => ({ ...f, category: f.category === c ? '' : c }))}
                 className={`px-3 py-1.5 text-xs font-bold transition-colors border ${
                   form.category === c
-                    ? 'bg-brand-400 text-gray-900 border-brand-400'
+                    ? 'bg-brand-400 text-white border-brand-400'
                     : 'bg-amber-50 text-gray-600 border-amber-200'
                 }`}
               >
@@ -544,7 +544,7 @@ export default function AddExpense() {
           <textarea className="input resize-none" rows={2} placeholder="Any extra notes…" value={form.notes} onChange={set('notes')} />
         </div>
 
-        {error && <p className="text-sm text-red-600 bg-red-50 border border-red-100 px-4 py-3">{error}</p>}
+        {error && <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-md px-4 py-3">{error}</p>}
 
         <button type="submit" className="btn-primary" disabled={submitting}>
           {submitting ? 'Saving…' : 'Add Expense'}

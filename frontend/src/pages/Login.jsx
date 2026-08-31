@@ -74,16 +74,16 @@ export default function Login({ onLogin }) {
 
         <div className="relative z-10">
           <div className="flex items-center gap-3 mb-10">
-            <div className="w-11 h-11 bg-brand-400 flex items-center justify-center shadow-lg shadow-brand-400/30">
-              <span className="text-field-950 font-black text-xl">S</span>
+            <div className="w-11 h-11 bg-brand-400 rounded-lg flex items-center justify-center shadow-lg shadow-brand-400/30">
+              <span className="text-white font-bold text-xl">S</span>
             </div>
-            <h1 className="text-3xl font-black text-brand-400 tracking-widest">SplitEasy</h1>
+            <h1 className="text-3xl font-bold text-brand-400 tracking-tight">SplitEasy</h1>
           </div>
 
-          <p className="text-2xl font-black text-green-100/80 leading-tight mb-3">
+          <p className="text-2xl font-black text-slate-100/80 leading-tight mb-3">
             Split expenses.<br />Stay friends.
           </p>
-          <p className="text-sm text-green-200/40 font-semibold mb-10 leading-relaxed">
+          <p className="text-sm text-slate-300/40 font-semibold mb-10 leading-relaxed">
             The simplest way to track shared expenses<br />and settle up with your group.
           </p>
 
@@ -91,7 +91,7 @@ export default function Login({ onLogin }) {
             {FEATURES.map(({ icon, text }) => (
               <div key={text} className="flex items-center gap-3.5">
                 <span className="text-xl w-7 flex-shrink-0">{icon}</span>
-                <span className="text-green-100/55 text-sm font-semibold">{text}</span>
+                <span className="text-slate-100/55 text-sm font-semibold">{text}</span>
               </div>
             ))}
           </div>
@@ -104,26 +104,26 @@ export default function Login({ onLogin }) {
         {/* Mobile logo */}
         <div className="md:hidden mb-8 text-center">
           <div className="flex items-center justify-center gap-2.5 mb-2">
-            <div className="w-9 h-9 bg-brand-400 flex items-center justify-center">
-              <span className="text-field-950 font-black text-base">S</span>
+            <div className="w-9 h-9 bg-brand-400 rounded-lg flex items-center justify-center">
+              <span className="text-white font-bold text-base">S</span>
             </div>
-            <h1 className="text-3xl font-black text-brand-400 tracking-widest">SplitEasy</h1>
+            <h1 className="text-3xl font-bold text-brand-400 tracking-tight">SplitEasy</h1>
           </div>
-          <p className="text-green-200/35 text-[10px] font-bold tracking-widest uppercase">
+          <p className="text-slate-300/35 text-[10px] font-bold tracking-widest uppercase">
             Split expenses, stay friends
           </p>
         </div>
 
         {/* Auth card */}
-        <div className="bg-cream shadow-2xl w-full max-w-sm border border-amber-100/50">
+        <div className="bg-cream shadow-2xl w-full max-w-sm border border-amber-200 rounded-xl overflow-hidden">
 
           {/* Tabs */}
           <div className="flex border-b border-amber-200">
             <button
               onClick={() => switchMode('login')}
-              className={`flex-1 py-3.5 text-xs font-black tracking-widest transition-colors ${
+              className={`flex-1 py-3.5 rounded-none text-xs font-bold tracking-widest transition-colors ${
                 mode === 'login'
-                  ? 'bg-brand-400 text-field-950'
+                  ? 'bg-brand-400 text-white'
                   : 'bg-cream text-gray-400 hover:text-gray-600'
               }`}
             >
@@ -131,9 +131,9 @@ export default function Login({ onLogin }) {
             </button>
             <button
               onClick={() => switchMode('signup')}
-              className={`flex-1 py-3.5 text-xs font-black tracking-widest transition-colors border-l border-amber-200 ${
+              className={`flex-1 py-3.5 rounded-none text-xs font-bold tracking-widest transition-colors border-l border-amber-200 ${
                 mode === 'signup'
-                  ? 'bg-brand-400 text-field-950'
+                  ? 'bg-brand-400 text-white'
                   : 'bg-cream text-gray-400 hover:text-gray-600'
               }`}
             >
@@ -182,7 +182,7 @@ export default function Login({ onLogin }) {
                 </div>
 
                 {error && (
-                  <p className="text-xs text-red-500 bg-red-50 border border-red-100 px-3 py-2">
+                  <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-md px-3 py-2">
                     {error}
                   </p>
                 )}
@@ -264,7 +264,7 @@ export default function Login({ onLogin }) {
                 </div>
 
                 {error && (
-                  <p className="text-xs text-red-500 bg-red-50 border border-red-100 px-3 py-2">
+                  <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-md px-3 py-2">
                     {error}
                   </p>
                 )}
@@ -278,7 +278,7 @@ export default function Login({ onLogin }) {
         </div>
 
         {/* Footer hint */}
-        <p className="mt-6 text-[10px] text-green-200/20 font-semibold tracking-widest text-center">
+        <p className="mt-6 text-[10px] text-slate-300/20 font-semibold tracking-widest text-center">
           SPLITEASY · SHARED EXPENSES MADE SIMPLE
         </p>
       </div>
