@@ -14,6 +14,7 @@ import Login       from './pages/Login'
 import ResetPassword from './pages/ResetPassword'
 import AdminRecovery from './pages/AdminRecovery'
 import AdminCodes    from './pages/AdminCodes'
+import Account       from './pages/Account'
 import MasterGroupDetail from './pages/MasterGroupDetail'
 import Friends           from './pages/Friends'
 import FriendDetail      from './pages/FriendDetail'
@@ -74,6 +75,7 @@ export default function App() {
                 <Route path="/master/:key" element={<MasterGroupDetail />} />
                 <Route path="/friends" element={<Friends />} />
                 <Route path="/friends/:name" element={<FriendDetail />} />
+                <Route path="/account" element={<Account />} />
                 {/* Admin-only: the route simply does not exist for others */}
                 {isAdmin(user) && (
                   <Route path="/admin/codes" element={<AdminCodes />} />

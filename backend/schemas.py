@@ -28,9 +28,16 @@ class UserOut(BaseModel):
 
 
 class SetRecovery(BaseModel):
-    current_password: str
+    """Set or regenerate your security answer / passkey.
+
+    Prove yourself with EITHER your current password OR your existing security
+    answer — a passkey is stored hashed and can never be read back, so losing
+    it must still be recoverable by someone who knows the other one.
+    """
     question: str
     answer: str
+    current_password: Optional[str] = None
+    current_answer: Optional[str] = None
 
 class ResetPassword(BaseModel):
     name: str

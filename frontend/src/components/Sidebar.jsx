@@ -1,6 +1,4 @@
-import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
-import ChangePasswordModal from './ChangePasswordModal'
 import { isAdmin } from '../UserContext'
 
 function HomeIcon()    { return <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0h6" /></svg> }
@@ -16,7 +14,6 @@ const items = [
 ]
 
 export default function Sidebar({ user, onLogout }) {
-  const [showChangePw, setShowChangePw] = useState(false)
   return (
     <aside className="hidden md:flex flex-col fixed left-0 top-0 h-screen w-56 bg-field-950 border-r border-field-800 z-40">
       {/* Logo */}
@@ -78,12 +75,12 @@ export default function Sidebar({ user, onLogout }) {
             One-time codes
           </NavLink>
         )}
-        <button
-          onClick={() => setShowChangePw(true)}
-          className="w-full text-left text-xs text-slate-300/50 hover:text-brand-400 font-semibold transition-colors tracking-widest py-1"
+        <NavLink
+          to="/account"
+          className="block w-full text-left text-xs text-slate-300/50 hover:text-brand-400 font-semibold transition-colors tracking-widest py-1"
         >
-          Change password
-        </button>
+          Account & security
+        </NavLink>
         <button
           onClick={onLogout}
           className="w-full text-left text-xs text-slate-300/50 hover:text-red-400 font-semibold transition-colors tracking-widest py-1"
@@ -91,7 +88,6 @@ export default function Sidebar({ user, onLogout }) {
           Sign out
         </button>
       </div>
-      {showChangePw && <ChangePasswordModal user={user} onClose={() => setShowChangePw(false)} />}
     </aside>
   )
 }

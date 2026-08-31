@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
-import ChangePasswordModal from './ChangePasswordModal'
 import { isAdmin } from '../UserContext'
 
 const items = [
@@ -17,7 +16,6 @@ function HistoryIcon() { return <svg className="w-6 h-6" fill="none" stroke="cur
 
 export default function BottomNav({ user, onLogout }) {
   const [menuOpen, setMenuOpen]     = useState(false)
-  const [showChangePw, setShowChangePw] = useState(false)
 
   const handleLogout = () => {
     setMenuOpen(false)
@@ -80,12 +78,13 @@ export default function BottomNav({ user, onLogout }) {
                     One-time codes
                   </NavLink>
                 )}
-                <button
-                  onClick={() => { setMenuOpen(false); setShowChangePw(true) }}
-                  className="w-full text-left px-4 py-2.5 text-xs font-semibold text-slate-300/60 hover:text-brand-400 hover:bg-field-800 transition-colors"
+                <NavLink
+                  to="/account"
+                  onClick={() => setMenuOpen(false)}
+                  className="block w-full text-left px-4 py-2.5 text-xs font-semibold text-slate-300/60 hover:text-brand-400 hover:bg-field-800 transition-colors"
                 >
-                  Change password
-                </button>
+                  Account & security
+                </NavLink>
                 <button
                   onClick={handleLogout}
                   className="w-full text-left px-4 py-2.5 text-xs font-semibold text-slate-300/60 hover:text-red-400 hover:bg-field-800 transition-colors"
@@ -97,7 +96,6 @@ export default function BottomNav({ user, onLogout }) {
           )}
         </div>
       </div>
-      {showChangePw && <ChangePasswordModal user={user} onClose={() => setShowChangePw(false)} />}
     </nav>
   )
 }

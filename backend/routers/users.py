@@ -97,24 +97,37 @@ def change_password(user_id: int, payload: dict, db: Session = Depends(get_db)):
 
 @router.patch("/{user_id}/recovery", response_model=UserOut)
 def set_recovery(user_id: int, payload: SetRecovery, db: Session = Depends(get_db)):
-    """Set or replace the recovery question. Gated on the current password so a
-    borrowed session can't quietly swap in a recovery route of its own."""
+    """Set, replace, or regenerate your security answer / 6-digit passkey.
+
+    Authorised by your current password OR your existing security answer.
+    Either is proof of identity, and offering both means a lost passkey is
+    recoverable by someone who still knows their password, and vice versa.
+    """
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(404, "User not found")
-    if user.password_hash != _hash(payload.current_password, user.salt):
-        raise HTTPException(401, "Current password is incorrect")
+
+    if payload.current_password:
+        if user.password_hash != _hash(payload.current_password, user.salt):
+            raise HTTPException(401, "Current password is incorrect")
+    elif payload.current_answer:
+        # Shares the reset lockout, so this isn't a softer way in
+        _check_answer(user, payload.current_answer, db)
+    else:
+        raise HTTPException(400, "Enter your current password or your security answer")
 
     question = payload.question.strip()
     answer = _norm_answer(payload.answer)
     if not question:
-        raise HTTPException(400, "Pick a recovery question")
+        raise HTTPException(400, "Pick a security question")
     if len(answer) < 3:
-        raise HTTPException(400, "Recovery answer must be at least 3 characters")
+        raise HTTPException(400, "Answer must be at least 3 characters")
 
     user.recovery_salt = secrets.token_hex(16)
     user.recovery_answer_hash = _hash(answer, user.recovery_salt)
     user.recovery_question = question
+    user.reset_fail_count = 0
+    user.reset_locked_until = None
     db.commit()
     db.refresh(user)
     return user
