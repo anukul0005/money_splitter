@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getRecoveryQuestion, resetPassword, adminResetPassword } from '../api'
+import { getRecoveryQuestion, resetPassword } from '../api'
 
 /**
  * Standalone /reset-password route.
@@ -24,15 +24,6 @@ export default function ResetPassword() {
   const [loading, setLoading]   = useState(false)
   const [noRecovery, setNoRecovery] = useState(false)
 
-  // Admin fallback
-  const [adminOpen, setAdminOpen] = useState(false)
-  const [adminForm, setAdminForm] = useState({
-    admin_name: '', admin_password: '', target_name: '', new_password: '',
-  })
-  const [adminError, setAdminError]     = useState('')
-  const [adminLoading, setAdminLoading] = useState(false)
-  const [adminDone, setAdminDone]       = useState('')
-
   const handleLookup = async (e) => {
     e.preventDefault()
     setError('')
@@ -43,7 +34,6 @@ export default function ResetPassword() {
       const r = await getRecoveryQuestion(username.trim())
       if (!r.data.has_recovery) {
         setNoRecovery(true)
-        setAdminForm((f) => ({ ...f, target_name: username.trim() }))
       } else {
         setQuestion(r.data.question)
         setStep('answer')
@@ -69,27 +59,6 @@ export default function ResetPassword() {
       setError(err.response?.data?.detail || 'Could not reset your password.')
     } finally {
       setLoading(false)
-    }
-  }
-
-  const handleAdminReset = async (e) => {
-    e.preventDefault()
-    setAdminError('')
-    setAdminDone('')
-    const f = adminForm
-    if (!f.admin_name || !f.admin_password || !f.target_name || !f.new_password) {
-      return setAdminError('All fields are required.')
-    }
-    if (f.new_password.length < 4) return setAdminError('New password must be at least 4 characters.')
-    setAdminLoading(true)
-    try {
-      await adminResetPassword(f)
-      setAdminDone(`Password reset for ${f.target_name}. Share it with them and ask them to set a recovery question.`)
-      setAdminForm((x) => ({ ...x, admin_password: '', new_password: '' }))
-    } catch (err) {
-      setAdminError(err.response?.data?.detail || 'Could not reset that password.')
-    } finally {
-      setAdminLoading(false)
     }
   }
 
@@ -135,13 +104,12 @@ export default function ResetPassword() {
               {noRecovery && (
                 <div className="text-xs bg-amber-50 border border-amber-300 rounded-md px-3 py-2.5 space-y-2">
                   <p className="text-gray-600 leading-relaxed">
-                    This account has no recovery question set, so it can't be reset here.
-                    An admin can set a new password for you below.
+                    This account has no security question set, so it can't be reset here.
+                    Ask an admin to issue you one, or to set a new password for you.
                   </p>
                   <p className="text-gray-500 leading-relaxed">
-                    Once you're back in, set a recovery question from
-                    <span className="font-semibold text-gray-700"> Account → Change password</span> so
-                    next time you can do this yourself.
+                    Once you're back in, set your own from
+                    <span className="font-semibold text-gray-700"> Account security → Recovery</span>.
                   </p>
                 </div>
               )}
@@ -247,80 +215,15 @@ export default function ResetPassword() {
         )}
       </div>
 
-      {/* ── Admin fallback ── */}
-      <div className="w-full max-w-sm mt-4">
+      <div className="w-full max-w-sm mt-4 text-center">
         <button
-          onClick={() => setAdminOpen((v) => !v)}
-          className="w-full text-center text-[11px] font-semibold text-slate-300/50 hover:text-slate-100 py-2"
+          onClick={() => nav('/admin-recovery')}
+          className="text-[11px] font-semibold text-slate-300/50 hover:text-slate-100 py-2"
         >
-          {adminOpen ? 'Hide admin reset' : "Admin? Reset someone else's password"}
+          Admin? Reset a password or issue a security question
         </button>
-
-        {adminOpen && (
-          <form
-            onSubmit={handleAdminReset}
-            className="bg-cream border border-amber-200 rounded-xl shadow-xl p-5 space-y-3 mt-1"
-          >
-            <p className="text-xs text-gray-500 leading-relaxed">
-              For users who never set a recovery question. Confirm with your own admin login.
-            </p>
-
-            <div>
-              <label className="label">Your admin username</label>
-              <input
-                className="input"
-                value={adminForm.admin_name}
-                onChange={(e) => setAdminForm((f) => ({ ...f, admin_name: e.target.value }))}
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-              />
-            </div>
-            <div>
-              <label className="label">Your admin password</label>
-              <input
-                className="input"
-                type="password"
-                value={adminForm.admin_password}
-                onChange={(e) => setAdminForm((f) => ({ ...f, admin_password: e.target.value }))}
-                autoCapitalize="none"
-              />
-            </div>
-            <div>
-              <label className="label">Reset password for</label>
-              <input
-                className="input"
-                placeholder="Their username"
-                value={adminForm.target_name}
-                onChange={(e) => setAdminForm((f) => ({ ...f, target_name: e.target.value }))}
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-              />
-            </div>
-            <div>
-              <label className="label">Their new password</label>
-              <input
-                className="input"
-                value={adminForm.new_password}
-                onChange={(e) => setAdminForm((f) => ({ ...f, new_password: e.target.value }))}
-                autoCapitalize="none"
-              />
-            </div>
-
-            {adminError && (
-              <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{adminError}</p>
-            )}
-            {adminDone && (
-              <p className="text-xs text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2">{adminDone}</p>
-            )}
-
-            <button type="submit" className="btn-primary" disabled={adminLoading}>
-              {adminLoading ? 'Resetting…' : 'Reset their password'}
-            </button>
-          </form>
-        )}
       </div>
+
     </div>
   )
 }

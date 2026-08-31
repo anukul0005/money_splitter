@@ -17,6 +17,8 @@ export const setRecovery        = (id, data) => api.patch(`/users/${id}/recovery
 export const getRecoveryQuestion = (name)    => api.get('/users/recovery-question', { params: { name } })
 export const resetPassword      = (data)     => api.post('/users/reset-password', data)
 export const adminResetPassword = (data)     => api.post('/users/admin-reset', data)
+export const adminSetRecovery   = (data)     => api.post('/users/admin-set-recovery', data)
+export const listUsersBasic     = ()         => api.get('/users/')
 
 // ── Groups ────────────────────────────────────────────────────────────────────
 export const getGroups   = ()            => api.get('/groups/')

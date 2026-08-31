@@ -1,10 +1,14 @@
 import hashlib
 import secrets
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db
 from models import User
-from schemas import UserSignup, UserLogin, UserOut, SetRecovery, ResetPassword, AdminReset
+from schemas import (
+    UserSignup, UserLogin, UserOut, SetRecovery, ResetPassword,
+    AdminReset, AdminSetRecovery,
+)
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -125,20 +129,60 @@ def get_recovery_question(name: str, db: Session = Depends(get_db)):
     return {"has_recovery": True, "question": user.recovery_question}
 
 
+MAX_RESET_ATTEMPTS = 5
+LOCKOUT_MINUTES = 15
+GENERIC_ANSWER_ERROR = "That answer doesn't match our records."
+
+
+def _check_answer(user: User | None, answer: str, db: Session) -> User:
+    """Verify a recovery answer, counting failures so a 6-digit key can't be
+    walked through by a script. Raises on any failure; returns the user on
+    success. The error is identical for unknown user / no recovery / wrong
+    answer, so this can't be used to enumerate accounts."""
+    now = datetime.now(timezone.utc)
+
+    if user and user.reset_locked_until is not None:
+        locked_until = user.reset_locked_until
+        if locked_until.tzinfo is None:
+            locked_until = locked_until.replace(tzinfo=timezone.utc)
+        if locked_until > now:
+            mins = max(1, int((locked_until - now).total_seconds() // 60) + 1)
+            raise HTTPException(429, f"Too many wrong attempts. Try again in {mins} minute(s).")
+
+    if not user or not user.recovery_answer_hash or not user.recovery_salt:
+        raise HTTPException(401, GENERIC_ANSWER_ERROR)
+
+    expected = _hash(_norm_answer(answer), user.recovery_salt)
+    if not secrets.compare_digest(user.recovery_answer_hash, expected):
+        user.reset_fail_count = (user.reset_fail_count or 0) + 1
+        if user.reset_fail_count >= MAX_RESET_ATTEMPTS:
+            user.reset_locked_until = now + timedelta(minutes=LOCKOUT_MINUTES)
+            user.reset_fail_count = 0
+        db.commit()
+        raise HTTPException(401, GENERIC_ANSWER_ERROR)
+
+    # Clean slate on success
+    user.reset_fail_count = 0
+    user.reset_locked_until = None
+    return user
+
+
+def _require_admin(payload_name: str, answer: str, db: Session) -> User:
+    admin = db.query(User).filter(User.name.ilike((payload_name or "").strip())).first()
+    admin = _check_answer(admin, answer, db)
+    if not (admin.is_admin or admin.name.lower() in ADMIN_NAMES):
+        raise HTTPException(403, "Only admins can do that")
+    return admin
+
+
 @router.post("/reset-password", response_model=UserOut)
 def reset_password(payload: ResetPassword, db: Session = Depends(get_db)):
-    """Self-serve reset: correct recovery answer buys a new password."""
+    """Self-serve reset: the correct recovery answer buys a new password."""
     if len(payload.new_password or "") < 4:
         raise HTTPException(400, "New password must be at least 4 characters")
 
     user = db.query(User).filter(User.name.ilike(payload.name.strip())).first()
-    # Same message whether the user is unknown, has no recovery set, or answered
-    # wrong — otherwise this endpoint becomes a username/answer oracle.
-    generic = "That answer doesn't match our records."
-    if not user or not user.recovery_answer_hash or not user.recovery_salt:
-        raise HTTPException(401, generic)
-    if user.recovery_answer_hash != _hash(_norm_answer(payload.answer), user.recovery_salt):
-        raise HTTPException(401, generic)
+    user = _check_answer(user, payload.answer, db)
 
     _set_password(user, payload.new_password)
     db.commit()
@@ -148,13 +192,10 @@ def reset_password(payload: ResetPassword, db: Session = Depends(get_db)):
 
 @router.post("/admin-reset", response_model=UserOut)
 def admin_reset_password(payload: AdminReset, db: Session = Depends(get_db)):
-    """Fallback for users who never set a recovery question: an admin proves
-    themselves with their own password and sets a new one for the target."""
-    admin = db.query(User).filter(User.name.ilike(payload.admin_name.strip())).first()
-    if not admin or admin.password_hash != _hash(payload.admin_password, admin.salt):
-        raise HTTPException(401, "Admin credentials are incorrect")
-    if not (admin.is_admin or admin.name.lower() in ADMIN_NAMES):
-        raise HTTPException(403, "Only admins can reset another user's password")
+    """An admin sets a new password for someone else. The admin proves
+    themselves with their own recovery key, so a locked-out admin can still
+    help — which a password check would not allow."""
+    _require_admin(payload.admin_name, payload.admin_answer, db)
     if len(payload.new_password or "") < 4:
         raise HTTPException(400, "New password must be at least 4 characters")
 
@@ -163,6 +204,32 @@ def admin_reset_password(payload: AdminReset, db: Session = Depends(get_db)):
         raise HTTPException(404, f"No user named {payload.target_name}")
 
     _set_password(target, payload.new_password)
+    db.commit()
+    db.refresh(target)
+    return target
+
+
+@router.post("/admin-set-recovery", response_model=UserOut)
+def admin_set_recovery(payload: AdminSetRecovery, db: Session = Depends(get_db)):
+    """An admin creates or replaces another user's security question."""
+    _require_admin(payload.admin_name, payload.admin_answer, db)
+
+    question = payload.question.strip()
+    answer = _norm_answer(payload.answer)
+    if not question:
+        raise HTTPException(400, "Pick a security question")
+    if len(answer) < 3:
+        raise HTTPException(400, "Answer must be at least 3 characters")
+
+    target = db.query(User).filter(User.name.ilike(payload.target_name.strip())).first()
+    if not target:
+        raise HTTPException(404, f"No user named {payload.target_name}")
+
+    target.recovery_salt = secrets.token_hex(16)
+    target.recovery_answer_hash = _hash(answer, target.recovery_salt)
+    target.recovery_question = question
+    target.reset_fail_count = 0
+    target.reset_locked_until = None
     db.commit()
     db.refresh(target)
     return target

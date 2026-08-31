@@ -38,10 +38,20 @@ class ResetPassword(BaseModel):
     new_password: str
 
 class AdminReset(BaseModel):
+    """Admins authenticate with their own recovery answer, not their password —
+    a locked-out admin still needs to be able to help someone else."""
     admin_name: str
-    admin_password: str
+    admin_answer: str
     target_name: str
     new_password: str
+
+class AdminSetRecovery(BaseModel):
+    """An admin sets (or replaces) the security question of another user."""
+    admin_name: str
+    admin_answer: str
+    target_name: str
+    question: str
+    answer: str
 
 
 # ─── Member ──────────────────────────────────────────────────────────────────

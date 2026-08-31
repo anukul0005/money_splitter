@@ -1,7 +1,11 @@
 import { useState } from 'react'
 import { changePassword, setRecovery } from '../api'
+import { generateKey } from '../pages/AdminRecovery'
+
+const KEY_QUESTION = 'Enter your 6-digit recovery key'
 
 const RECOVERY_QUESTIONS = [
+  KEY_QUESTION,
   'What was the name of your first school?',
   'What city were you born in?',
   "What is your oldest sibling's nickname?",
@@ -116,14 +120,27 @@ export default function ChangePasswordModal({ user, onClose }) {
 
             <div>
               <label className="label">Your answer</label>
-              <input
-                className="input"
-                value={recAnswer}
-                onChange={e => setRecAnswer(e.target.value)}
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-              />
+              <div className="flex gap-2">
+                <input
+                  className="input flex-1 tracking-widest font-bold"
+                  value={recAnswer}
+                  onChange={e => setRecAnswer(e.target.value)}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                />
+                <button
+                  type="button"
+                  onClick={() => { setRecQuestion(KEY_QUESTION); setRecAnswer(generateKey()) }}
+                  className="px-3 bg-amber-100 border border-amber-300 rounded-md text-[11px] font-bold text-gray-600 hover:bg-amber-200 flex-shrink-0"
+                >
+                  Generate
+                </button>
+              </div>
+              <p className="text-[10px] text-gray-400 mt-1 leading-relaxed">
+                Save this somewhere safe before you hit Save — it's stored hashed
+                and can never be shown to you again.
+              </p>
             </div>
 
             <div>

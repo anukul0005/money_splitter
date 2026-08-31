@@ -12,6 +12,7 @@ import EditGroup   from './pages/EditGroup'
 import History     from './pages/History'
 import Login       from './pages/Login'
 import ResetPassword from './pages/ResetPassword'
+import AdminRecovery from './pages/AdminRecovery'
 import MasterGroupDetail from './pages/MasterGroupDetail'
 import Friends           from './pages/Friends'
 import FriendDetail      from './pages/FriendDetail'
@@ -43,6 +44,7 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="/admin-recovery" element={<AdminRecovery />} />
           <Route path="*" element={<Login onLogin={setUser} />} />
         </Routes>
       </BrowserRouter>

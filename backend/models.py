@@ -17,6 +17,10 @@ class User(Base):
     recovery_question = Column(String(200), nullable=True)
     recovery_answer_hash = Column(String(128), nullable=True)
     recovery_salt = Column(String(64), nullable=True)
+    # A 6-digit key is only a million combinations, so reset attempts are
+    # counted and locked out rather than left open to a scripted guess.
+    reset_fail_count = Column(Integer, default=0)
+    reset_locked_until = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
