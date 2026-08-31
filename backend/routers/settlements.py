@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db
 from models import Group
-from schemas import SettlementOut, BalanceEntry, Transaction, PastPayment
+from schemas import SettlementOut, BalanceEntry, Transaction, PastPayment, PaymentOut
 
 router = APIRouter(prefix="/settlements", tags=["settlements"])
 
@@ -57,6 +57,16 @@ def _calculate(group: Group) -> SettlementOut:
                     if payer in paid:
                         paid[payer] -= individual  # payer received that repayment, so it's no longer owed to them
 
+    # Recorded payments move money for real: the payer has now covered that much
+    # of their share, and the recipient is owed that much less.
+    for pay in getattr(group, "payments", []) or []:
+        amt = float(pay.amount or 0)
+        for m in member_names:
+            if m.lower() == (pay.from_member or "").lower():
+                paid[m] += amt
+            elif m.lower() == (pay.to_member or "").lower():
+                paid[m] -= amt
+
     balances: list[BalanceEntry] = []
     net_map: dict[str, float] = {}
 
@@ -102,7 +112,19 @@ def _calculate(group: Group) -> SettlementOut:
         if debt[j][1] < 0.01:
             j += 1
 
-    return SettlementOut(group_id=group.id, balances=balances, transactions=transactions, past_payments=past_payments)
+    recorded = sorted(
+        (getattr(group, "payments", []) or []),
+        key=lambda p: (p.date or "", p.id or 0),
+        reverse=True,
+    )
+
+    return SettlementOut(
+        group_id=group.id,
+        balances=balances,
+        transactions=transactions,
+        past_payments=past_payments,
+        payments=[PaymentOut.model_validate(p) for p in recorded],
+    )
 
 
 @router.get("/{group_id}", response_model=SettlementOut)

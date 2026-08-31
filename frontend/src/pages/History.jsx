@@ -18,7 +18,7 @@ Chart.register(
   CategoryScale, LinearScale,
   Tooltip, Legend,
 )
-Chart.defaults.font.family = "'Barlow Condensed', sans-serif"
+Chart.defaults.font.family = "'Space Grotesk', system-ui, sans-serif"
 
 const INR      = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 const fmtMonth = (yyyymm) => {
@@ -41,7 +41,7 @@ const CAT_COLORS  = {
   other:    '#94a3b8',
 }
 const PALETTE    = ['#ef4444','#f97316','#eab308','#22c55e','#06b6d4','#3b82f6','#8b5cf6','#ec4899','#14b8a6','#f59e0b']
-const CHART_FONT = { size: 11, family: "'Barlow Condensed', sans-serif" }
+const CHART_FONT = { size: 11, family: "'Space Grotesk', system-ui, sans-serif" }
 
 export default function History() {
   const nav   = useNavigate()
@@ -399,7 +399,7 @@ export default function History() {
         grid: { color: '#f1f5f9' },
       },
       y: {
-        ticks: { font: { size: 10, family: "'Barlow Condensed', sans-serif" }, autoSkip: false },
+        ticks: { font: { size: 10, family: "'Space Grotesk', system-ui, sans-serif" }, autoSkip: false },
         grid: { display: false },
       },
     },
@@ -434,7 +434,7 @@ export default function History() {
       legend: {
         display: true,
         position: 'bottom',
-        labels: { font: { size: 10, family: "'Barlow Condensed', sans-serif" }, boxWidth: 8, padding: 10 },
+        labels: { font: { size: 10, family: "'Space Grotesk', system-ui, sans-serif" }, boxWidth: 8, padding: 10 },
       },
       tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${INR(c.parsed.y)}` } },
     },

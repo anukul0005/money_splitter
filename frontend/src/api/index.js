@@ -22,10 +22,21 @@ export const getExpenses   = (groupId)   => api.get(`/expenses/group/${groupId}`
 export const createExpense = (data)      => api.post('/expenses/', data)
 export const updateExpense = (id, data)  => api.put(`/expenses/${id}`, data)
 export const deleteExpense = (id)        => api.delete(`/expenses/${id}`)
-export const settleExpense = (id, data)  => api.patch(`/expenses/${id}/settle`, data)
 
 // ── Settlements ───────────────────────────────────────────────────────────────
 export const getSettlement = (groupId)   => api.get(`/settlements/${groupId}`)
+
+// ── Payments ──────────────────────────────────────────────────────────────────
+// Recording a payment pays down what one member owes another; enough of them
+// and the pair is settled. Replaces the old per-expense "mark settled" flag.
+export const getPayments    = (groupId)  => api.get(`/payments/group/${groupId}`)
+export const createPayment  = (data)     => api.post('/payments/', data)
+export const deletePayment  = (id)       => api.delete(`/payments/${id}`)
+
+// ── Activity feed ─────────────────────────────────────────────────────────────
+export const getActivity      = (name, limit = 40) => api.get('/activity/', { params: { name, limit } })
+export const getUnreadCount   = (name)   => api.get('/activity/unread-count', { params: { name } })
+export const markActivitySeen = (name)   => api.post('/activity/seen', null, { params: { name } })
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
 export const getGroupStats      = (groupId) => api.get(`/stats/${groupId}`)

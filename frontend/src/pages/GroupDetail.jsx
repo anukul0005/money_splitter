@@ -6,13 +6,12 @@ import {
   LineElement, PointElement, LineController, Filler,
 } from 'chart.js'
 import { Bar, Doughnut, Line } from 'react-chartjs-2'
-import { getGroup, getSettlement, getGroupStats, deleteExpense, deleteGroup, settleExpense } from '../api'
+import { getGroup, getSettlement, getGroupStats, deleteExpense, deleteGroup, createPayment, deletePayment } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ExpenseEditModal from '../components/ExpenseEditModal'
-import { useUser } from '../UserContext'
 
 Chart.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend, ArcElement, DoughnutController, BarController, LineElement, PointElement, LineController, Filler)
-Chart.defaults.font.family = "'Barlow Condensed', sans-serif"
+Chart.defaults.font.family = "'Space Grotesk', system-ui, sans-serif"
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 const PALETTE = ['#ef4444','#f97316','#eab308','#22c55e','#06b6d4','#3b82f6','#8b5cf6','#ec4899']
@@ -34,7 +33,7 @@ const donutPctPlugin = {
         const pos = el.tooltipPosition()
         ctx.save()
         ctx.fillStyle = '#fff'
-        ctx.font = "bold 11px 'Barlow Condensed', sans-serif"
+        ctx.font = "bold 11px 'Space Grotesk', system-ui, sans-serif"
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
         ctx.fillText(`${pct}%`, pos.x, pos.y)
@@ -49,8 +48,6 @@ export default function GroupDetail() {
   const { id } = useParams()
   const nav = useNavigate()
 
-  const currentUser = useUser()
-
   const [group, setGroup]               = useState(null)
   const [settlement, setSettlement]     = useState(null)
   const [stats, setStats]               = useState(null)
@@ -59,6 +56,14 @@ export default function GroupDetail() {
   const [chartView, setChartView]       = useState('member')
   const [editingExpense, setEditingExp] = useState(null)   // expense being edited
   const [hoveredDayIdx, setHoveredDayIdx] = useState(null)
+
+  // Record-payment form (Settle Up tab)
+  const [payForm, setPayForm] = useState({
+    from_member: '', to_member: '', amount: '', note: '',
+    date: new Date().toISOString().slice(0, 10),
+  })
+  const [paySaving, setPaySaving] = useState(false)
+  const [payError, setPayError]   = useState('')
 
   const fetchData = () =>
     Promise.all([getGroup(id), getSettlement(id), getGroupStats(id)])
@@ -82,8 +87,43 @@ export default function GroupDetail() {
     reload()
   }
 
-  const handleSettle = async (expenseId, member, settled) => {
-    await settleExpense(expenseId, { member, settled })
+  // ── Record payment ──────────────────────────────────────────────────────────
+  const handleRecordPayment = async (e) => {
+    e.preventDefault()
+    const amt = parseFloat(payForm.amount)
+    if (!payForm.from_member || !payForm.to_member) return setPayError('Pick who paid whom.')
+    if (payForm.from_member === payForm.to_member) return setPayError('A payment needs two different people.')
+    if (!amt || amt <= 0) return setPayError('Enter an amount greater than zero.')
+
+    setPaySaving(true)
+    setPayError('')
+    try {
+      await createPayment({
+        group_id: Number(id),
+        from_member: payForm.from_member,
+        to_member: payForm.to_member,
+        amount: amt,
+        date: payForm.date,
+        note: payForm.note || null,
+      })
+      setPayForm((f) => ({ ...f, amount: '', note: '' }))
+      reload()
+    } catch (err) {
+      setPayError(err.response?.data?.detail || 'Could not record that payment.')
+    } finally {
+      setPaySaving(false)
+    }
+  }
+
+  // Clicking a suggested transaction pre-fills the form with it
+  const prefillPayment = (t) => {
+    setPayForm((f) => ({ ...f, from_member: t.from_member, to_member: t.to_member, amount: String(t.amount) }))
+    setPayError('')
+  }
+
+  const handleDeletePayment = async (paymentId) => {
+    if (!confirm('Remove this recorded payment? The debt will come back.')) return
+    await deletePayment(paymentId)
     reload()
   }
 
@@ -134,8 +174,8 @@ export default function GroupDetail() {
       tooltip: { callbacks: { label: (c) => ` ${INR(c.parsed.x)}` } },
     },
     scales: {
-      x: { ticks: { callback: (v) => `₹${(v/1000).toFixed(0)}k`, font: { size: 11, family: "'Barlow Condensed'" } }, grid: { color: '#f1f5f9' } },
-      y: { ticks: { font: { size: 12, family: "'Barlow Condensed'" } }, grid: { display: false } },
+      x: { ticks: { callback: (v) => `₹${(v/1000).toFixed(0)}k`, font: { size: 11, family: "'Space Grotesk'" } }, grid: { color: '#f1f5f9' } },
+      y: { ticks: { font: { size: 12, family: "'Space Grotesk'" } }, grid: { display: false } },
     },
   }
 
@@ -254,7 +294,7 @@ export default function GroupDetail() {
     scales: {
       x: {
         ticks: {
-          font: { size: 11, family: "'Barlow Condensed'" },
+          font: { size: 11, family: "'Space Grotesk'" },
           maxRotation: 0,
           callback: (val, i) => {
             const raw = dailyLabels[i]
@@ -400,12 +440,6 @@ export default function GroupDetail() {
             const debtors = actualParticipants.filter(
               (n) => n.toLowerCase() !== e.paid_by?.toLowerCase()
             )
-            const settledList = (() => {
-              try { return e.settled_by ? JSON.parse(e.settled_by) : [] }
-              catch { return [] }
-            })()
-            const isSettled = (n) => settledList.some((s) => s.toLowerCase() === n.toLowerCase())
-            const isPayer = currentUser?.name?.toLowerCase() === e.paid_by?.toLowerCase()
             const getOwed = (name) => {
               if (e.split_json) {
                 try { const obj = JSON.parse(e.split_json); return obj[name] ?? 0 }
@@ -493,35 +527,18 @@ export default function GroupDetail() {
                   </div>
                 </div>
 
-                {/* Settlement status — shown when there are debtors */}
+                {/* Who owes what for this expense. Clearing a debt happens in
+                    the Settle Up tab by recording a payment, not per expense. */}
                 {debtors.length > 0 && (
                   <div className="mt-2.5 border-t border-amber-100 pt-2.5 space-y-1.5">
-                    {debtors.map((name) => {
-                      const settled = isSettled(name)
-                      const owed    = getOwed(name)
-                      return (
-                        <div key={name} className="flex items-center gap-2">
-                          <span className="text-xs font-semibold text-gray-600 flex-1 min-w-0 truncate">{name}</span>
-                          {settled ? (
-                            <span className="text-[10px] font-bold text-green-700 bg-green-50 border border-green-200 rounded-md px-1.5 py-0.5 flex-shrink-0">✓ Settled</span>
-                          ) : (
-                            <span className="text-[10px] font-bold text-red-600 bg-red-50 border border-red-100 rounded-md px-1.5 py-0.5 flex-shrink-0">owes {INR(owed)}</span>
-                          )}
-                          {isPayer && (
-                            <button
-                              onClick={() => handleSettle(e.id, name, !settled)}
-                              className={`text-[10px] font-bold px-1.5 py-0.5 border transition-colors flex-shrink-0 ${
-                                settled
-                                  ? 'text-gray-400 border-gray-200 hover:text-red-500 hover:border-red-200'
-                                  : 'text-brand-600 border-brand-400/40 hover:bg-brand-400/10'
-                              }`}
-                            >
-                              {settled ? 'Undo' : 'Mark settled'}
-                            </button>
-                          )}
-                        </div>
-                      )
-                    })}
+                    {debtors.map((name) => (
+                      <div key={name} className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-gray-600 flex-1 min-w-0 truncate">{name}</span>
+                        <span className="text-[10px] font-bold text-gray-500 bg-amber-50 border border-amber-200 rounded-md px-1.5 py-0.5 flex-shrink-0">
+                          share {INR(getOwed(name))}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -765,17 +782,135 @@ export default function GroupDetail() {
                     </div>
                   </div>
                 ))}
-                {/* Pending payments */}
+                {/* Still outstanding — tap one to pre-fill the payment form */}
                 {settlement.transactions.map((t, i) => (
-                  <div key={`pending-${i}`} className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-md px-3 py-2.5">
+                  <button
+                    key={`pending-${i}`}
+                    type="button"
+                    onClick={() => prefillPayment(t)}
+                    title="Record this payment"
+                    className="w-full text-left flex items-center gap-2 bg-red-50 border border-red-100 rounded-md px-3 py-2.5 hover:bg-red-100 active:scale-[0.99] transition-all"
+                  >
                     <span className="font-bold text-sm text-red-700 flex-shrink-0">{t.from_member}</span>
                     <svg className="w-4 h-4 text-red-400 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
                     </svg>
                     <span className="font-bold text-sm text-red-700 flex-1 min-w-0 truncate">{t.to_member}</span>
                     <span className="font-black text-brand-700 text-sm flex-shrink-0">{INR(t.amount)}</span>
-                  </div>
+                  </button>
                 ))}
+              </div>
+            )}
+          </div>
+
+          {/* ── Record a payment ── */}
+          <div className="card md:col-span-2">
+            <h3 className="text-xs font-bold text-gray-500 mb-1">Record a payment</h3>
+            <p className="text-xs text-gray-400 mb-3">
+              Logging a real transfer reduces what one person owes the other — or clears it entirely.
+              {settlement.transactions.length > 0 && ' Tap a row above to fill this in.'}
+            </p>
+
+            <form onSubmit={handleRecordPayment} className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Who paid</label>
+                  <select
+                    className="input"
+                    value={payForm.from_member}
+                    onChange={(ev) => setPayForm((f) => ({ ...f, from_member: ev.target.value }))}
+                  >
+                    <option value="">Select…</option>
+                    {group.members.map((m) => <option key={m.id} value={m.name}>{m.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Paid to</label>
+                  <select
+                    className="input"
+                    value={payForm.to_member}
+                    onChange={(ev) => setPayForm((f) => ({ ...f, to_member: ev.target.value }))}
+                  >
+                    <option value="">Select…</option>
+                    {group.members.map((m) => <option key={m.id} value={m.name}>{m.name}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Amount (₹)</label>
+                  <input
+                    className="input font-bold"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    placeholder="0"
+                    value={payForm.amount}
+                    onChange={(ev) => setPayForm((f) => ({ ...f, amount: ev.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="label">Date</label>
+                  <input
+                    className="input"
+                    type="date"
+                    value={payForm.date}
+                    onChange={(ev) => setPayForm((f) => ({ ...f, date: ev.target.value }))}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="label">Note (optional)</label>
+                <input
+                  className="input"
+                  placeholder="e.g. UPI, cash"
+                  value={payForm.note}
+                  onChange={(ev) => setPayForm((f) => ({ ...f, note: ev.target.value }))}
+                />
+              </div>
+
+              {payError && (
+                <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{payError}</p>
+              )}
+
+              <button type="submit" className="btn-primary" disabled={paySaving}>
+                {paySaving ? 'Recording…' : 'Record payment'}
+              </button>
+            </form>
+
+            {/* Payments already recorded */}
+            {settlement.payments?.length > 0 && (
+              <div className="mt-5 border-t border-amber-200 pt-4">
+                <h4 className="text-xs font-bold text-gray-500 mb-2">Recorded payments</h4>
+                <div className="space-y-2">
+                  {settlement.payments.map((p) => (
+                    <div key={p.id} className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-md px-3 py-2">
+                      <svg className="w-4 h-4 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                      <span className="text-sm text-green-800 flex-1 min-w-0 truncate">
+                        <span className="font-bold">{p.from_member}</span>
+                        <span className="text-green-600"> paid </span>
+                        <span className="font-bold">{p.to_member}</span>
+                        {p.note && <span className="text-xs text-green-600"> · {p.note}</span>}
+                      </span>
+                      <span className="text-xs text-gray-400 flex-shrink-0 hidden sm:inline">{p.date || ''}</span>
+                      <span className="font-black text-green-700 text-sm flex-shrink-0">{INR(p.amount)}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleDeletePayment(p.id)}
+                        className="p-1 text-gray-300 hover:text-red-500 transition-colors flex-shrink-0"
+                        title="Remove this payment"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>

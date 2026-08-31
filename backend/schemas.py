@@ -68,11 +68,6 @@ class ExpenseOut(ExpenseBase):
     model_config = {"from_attributes": True}
 
 
-class SettleRequest(BaseModel):
-    member: str
-    settled: bool
-
-
 # ─── Group ───────────────────────────────────────────────────────────────────
 
 class GroupBase(BaseModel):
@@ -134,11 +129,56 @@ class PastPayment(BaseModel):
     settled_amount: float   # already paid
     total_owed: float       # original debt before any settling
 
+
+# ─── Payment ──────────────────────────────────────────────────────────────────
+
+class PaymentCreate(BaseModel):
+    group_id: int
+    from_member: str
+    to_member: str
+    amount: float
+    date: Optional[str] = None
+    note: Optional[str] = None
+
+    @field_validator("amount")
+    @classmethod
+    def amount_must_be_positive(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("amount must be positive")
+        return round(v, 2)
+
+class PaymentOut(BaseModel):
+    id: int
+    group_id: int
+    from_member: str
+    to_member: str
+    amount: float
+    date: Optional[str] = None
+    note: Optional[str] = None
+    created_at: Optional[datetime] = None
+    model_config = {"from_attributes": True}
+
+
 class SettlementOut(BaseModel):
     group_id: int
     balances: list[BalanceEntry]
     transactions: list[Transaction]
     past_payments: list[PastPayment] = []
+    payments: list[PaymentOut] = []
+
+
+# ─── Activity ─────────────────────────────────────────────────────────────────
+
+class ActivityOut(BaseModel):
+    id: int
+    group_id: int
+    group_name: Optional[str] = None
+    actor: Optional[str] = None
+    verb: str
+    summary: Optional[str] = None
+    created_at: Optional[datetime] = None
+    unread: bool = False
+    model_config = {"from_attributes": True}
 
 
 # ─── Stats ───────────────────────────────────────────────────────────────────

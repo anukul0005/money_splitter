@@ -69,3 +69,6 @@ def create_tables():
             "ALTER TABLE expenses ADD COLUMN IF NOT EXISTS settled_by TEXT"
         ))
         conn.commit()
+
+    # `payments`, `activities` and `activity_seen` are created by create_all
+    # above; nothing to backfill since they start empty.

@@ -3,8 +3,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db
 from models import Group, Expense
-from schemas import ExpenseCreate, ExpenseOut, SettleRequest
+from schemas import ExpenseCreate, ExpenseOut
 from emailer import notify_group_activity
+from activity import record_activity
 
 router = APIRouter(prefix="/expenses", tags=["expenses"])
 
@@ -39,11 +40,15 @@ def create_expense(payload: ExpenseCreate, db: Session = Depends(get_db)):
         notes=payload.notes,
     )
     db.add(expense)
+    db.flush()
+
+    summary = f"{expense.title or expense.category or 'Expense'}: ₹{expense.amount:,.0f} paid by {expense.paid_by}"
+    record_activity(db, group, expense.paid_by, "added an expense", summary)
+
     db.commit()
     db.refresh(expense)
 
     try:
-        summary = f"{expense.title or expense.category or 'Expense'}: ₹{expense.amount} paid by {expense.paid_by}"
         notify_group_activity(group, expense.paid_by, "added a new expense", summary)
     except Exception as e:
         print(f"[email] expense notification failed: {e}")
@@ -71,43 +76,12 @@ def update_expense(expense_id: int, payload: ExpenseCreate, db: Session = Depend
     expense.notes = payload.notes
     # settled_by is intentionally not reset on edit
 
+    group = db.query(Group).filter(Group.id == expense.group_id).first()
+    summary = f"{expense.title or expense.category or 'Expense'}: ₹{expense.amount:,.0f} paid by {expense.paid_by}"
+    record_activity(db, group, expense.paid_by, "edited an expense", summary)
+
     db.commit()
     db.refresh(expense)
-    return expense
-
-
-@router.patch("/{expense_id}/settle", response_model=ExpenseOut)
-def settle_expense(expense_id: int, payload: SettleRequest, db: Session = Depends(get_db)):
-    expense = db.query(Expense).filter(Expense.id == expense_id).first()
-    if not expense:
-        raise HTTPException(404, "Expense not found")
-
-    settled: list[str] = []
-    if expense.settled_by:
-        try:
-            settled = json.loads(expense.settled_by)
-        except Exception:
-            settled = []
-
-    member = payload.member.strip()
-    if payload.settled:
-        if member not in settled:
-            settled.append(member)
-    else:
-        settled = [m for m in settled if m != member]
-
-    expense.settled_by = json.dumps(settled)
-    db.commit()
-    db.refresh(expense)
-
-    if payload.settled:
-        try:
-            group = db.query(Group).filter(Group.id == expense.group_id).first()
-            summary = f"{member} settled up their share of \"{expense.title or expense.category or 'an expense'}\" (₹{expense.individual_amount or expense.amount})"
-            notify_group_activity(group, member, "recorded a payment", summary)
-        except Exception as e:
-            print(f"[email] settlement notification failed: {e}")
-
     return expense
 
 
@@ -116,5 +90,10 @@ def delete_expense(expense_id: int, db: Session = Depends(get_db)):
     expense = db.query(Expense).filter(Expense.id == expense_id).first()
     if not expense:
         raise HTTPException(404, "Expense not found")
+
+    group = db.query(Group).filter(Group.id == expense.group_id).first()
+    summary = f"{expense.title or expense.category or 'Expense'}: ₹{expense.amount:,.0f}"
+    record_activity(db, group, expense.paid_by, "deleted an expense", summary)
+
     db.delete(expense)
     db.commit()

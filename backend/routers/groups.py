@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import Group, Member, Expense
 from schemas import GroupCreate, GroupOut, GroupSummary, GroupUpdate
+from activity import record_activity
 
 router = APIRouter(prefix="/groups", tags=["groups"])
 
@@ -83,6 +84,14 @@ def create_group(payload: GroupCreate, db: Session = Depends(get_db)):
     for name in payload.members:
         db.add(Member(group_id=group.id, name=name.strip()))
 
+    # The monthly flow creates groups named "MONTHLY EXPENSES <MON> <YEAR>";
+    # it reuses the "personal" category, so the name is what identifies it.
+    kind = "monthly group" if group.name.upper().startswith("MONTHLY EXPENSES") else "group"
+    record_activity(
+        db, group, None, f"created a new {kind}",
+        f"{group.name} · {len(payload.members)} member{'s' if len(payload.members) != 1 else ''}",
+    )
+
     db.commit()
     db.refresh(group)
     return group
@@ -130,6 +139,8 @@ def update_group(group_id: int, payload: GroupUpdate, db: Session = Depends(get_
         if stripped and stripped.lower() not in existing_names:
             db.add(Member(group_id=group_id, name=stripped))
             existing_names.add(stripped.lower())
+
+    record_activity(db, group, None, "updated the group", group.name)
 
     db.commit()
     db.refresh(group)

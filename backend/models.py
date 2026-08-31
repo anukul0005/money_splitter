@@ -28,6 +28,7 @@ class Group(Base):
 
     members = relationship("Member", back_populates="group", cascade="all, delete-orphan", lazy="selectin")
     expenses = relationship("Expense", back_populates="group", cascade="all, delete-orphan", lazy="selectin")
+    payments = relationship("Payment", back_populates="group", cascade="all, delete-orphan", lazy="selectin")
 
 
 class Member(Base):
@@ -61,3 +62,52 @@ class Expense(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     group = relationship("Group", back_populates="expenses")
+
+
+class Payment(Base):
+    """A real transfer of money between two members of a group.
+
+    Recording one reduces what `from_member` owes `to_member` by `amount`;
+    enough of them and the pair is settled. This replaces the old per-expense
+    "mark as settled" flag as the user-facing way to clear a debt.
+    """
+
+    __tablename__ = "payments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    group_id = Column(Integer, ForeignKey("groups.id", ondelete="CASCADE"), nullable=False)
+    from_member = Column(String(100), nullable=False)
+    to_member = Column(String(100), nullable=False)
+    amount = Column(Float, nullable=False)
+    date = Column(String(20), nullable=True)
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    group = relationship("Group", back_populates="payments")
+
+
+class Activity(Base):
+    """One entry in the in-app notification feed.
+
+    Always scoped to a group: only that group's members ever see it, which is
+    what keeps a change invisible to users who aren't affected by it.
+    """
+
+    __tablename__ = "activities"
+
+    id = Column(Integer, primary_key=True, index=True)
+    group_id = Column(Integer, ForeignKey("groups.id", ondelete="CASCADE"), nullable=False, index=True)
+    group_name = Column(String(200), nullable=True)   # denormalised so deleted groups still read well
+    actor = Column(String(100), nullable=True)
+    verb = Column(String(100), nullable=False)        # "added an expense", "recorded a payment", …
+    summary = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class ActivitySeen(Base):
+    """Per-user high-water mark for the notification bell's unread count."""
+
+    __tablename__ = "activity_seen"
+
+    user_name = Column(String(100), primary_key=True)
+    last_seen_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -6,6 +6,7 @@ import { useUser, isAdmin } from '../UserContext'
 import { buildMasterGroups } from '../utils/masterGroups'
 import MasterGroupCard from '../components/MasterGroupCard'
 import GroupCard from '../components/GroupCard'
+import NotificationBell from '../components/NotificationBell'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 
@@ -115,7 +116,6 @@ export default function Home() {
       )
   const myGroupIds     = new Set(myGroups.map((g) => g.id))
   const activeOverview = overview.filter((g) => !g.is_historical && myGroupIds.has(g.id))
-  const totalSpend     = activeOverview.reduce((s, g) => s + g.total, 0)
 
   if (loading) return <LoadingSpinner />
 
@@ -140,11 +140,33 @@ export default function Home() {
   // member (nothing to link) fall through to the solo list. Unsettled
   // entries show first; settled ones are tucked behind a "show settled" toggle.
   const unsettledGroupIds = new Set(balances.map((b) => b.group_id))
+  // group_id -> unsettled amount, used to rank what the user sees first
+  const netByGroup = Object.fromEntries(balances.map((b) => [b.group_id, Math.abs(b.net)]))
   const { masters: allMasters, solo: soloGroups } = buildMasterGroups(myGroups.filter((g) => !g.is_historical), 1)
   const unsettledMasters = allMasters.filter((m) => m.groups.some((g) => unsettledGroupIds.has(g.id)))
   const settledMasters   = allMasters.filter((m) => !m.groups.some((g) => unsettledGroupIds.has(g.id)))
   const unsettledSolo    = soloGroups.filter((g) => unsettledGroupIds.has(g.id))
   const settledSolo      = soloGroups.filter((g) => !unsettledGroupIds.has(g.id))
+
+  // Only the three biggest unsettled entries show by default; the rest sit
+  // behind "Show all". A master's weight is everything unsettled inside it.
+  const unsettledEntries = [
+    ...unsettledMasters.map((m) => ({
+      key: `m-${m.key}`,
+      amount: m.groups.reduce((s, g) => s + (netByGroup[g.id] ?? 0), 0),
+      node: <MasterGroupCard key={m.key} master={m} />,
+    })),
+    ...unsettledSolo.map((g) => ({
+      key: `g-${g.id}`,
+      amount: netByGroup[g.id] ?? 0,
+      node: <GroupCard key={g.id} group={g} />,
+    })),
+  ].sort((a, b) => b.amount - a.amount)
+
+  const TOP_N = 3
+  const topUnsettled  = unsettledEntries.slice(0, TOP_N)
+  const restUnsettled = unsettledEntries.slice(TOP_N)
+  const hiddenCount   = restUnsettled.length + settledMasters.length + settledSolo.length
 
   const byCategory    = analytics?.by_category ?? []
   const byPersonCat   = analytics?.by_person_category ?? {}
@@ -159,12 +181,16 @@ export default function Home() {
     <div className="pb-24 md:pb-8">
       {/* Header */}
       <div className="bg-gradient-to-br from-field-800 to-field-950 text-white px-5 pt-10 md:pt-8 pb-6 md:rounded-b-3xl border-b border-field-700">
-        {user?.name && (
-          <p className="text-white/60 text-sm font-bold capitalize mb-1">{user.name}</p>
-        )}
-        <p className="text-brand-400/70 text-xs font-bold uppercase tracking-widest">Total spent (active groups)</p>
-        <h1 className="text-4xl font-black mt-1 tracking-tight">{INR(totalSpend)}</h1>
-        <p className="text-slate-300/40 text-xs mt-1 font-medium">{activeOverview.length} active groups</p>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            {user?.name && (
+              <p className="text-white/60 text-sm font-bold capitalize">{user.name}</p>
+            )}
+            <h1 className="text-2xl font-bold mt-0.5 tracking-tight">Your balances</h1>
+            <p className="text-slate-300/40 text-xs mt-1 font-medium">{activeOverview.length} active groups</p>
+          </div>
+          <NotificationBell user={user} />
+        </div>
       </div>
 
       <div className="px-5 mt-5 space-y-5">
@@ -175,18 +201,14 @@ export default function Home() {
             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">
               {user?.name}'s Overview
             </p>
-            <div className="grid grid-cols-3 gap-2">
-              <div className="card text-center py-3">
-                <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide leading-tight">Unsettled Groups</p>
-                <p className="text-sm font-black text-gray-900 mt-1">{balances.length}</p>
-              </div>
-              <div className="card text-center py-3 bg-red-50 border-red-200">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="card text-center py-4 bg-red-50 border-red-200">
                 <p className="text-[10px] text-red-500 font-semibold uppercase tracking-wide leading-tight">You Owe</p>
-                <p className="text-sm font-black text-red-600 mt-1">{INR(totalOwe)}</p>
+                <p className="text-lg font-black text-red-600 mt-1">{INR(totalOwe)}</p>
               </div>
-              <div className="card text-center py-3 bg-green-50 border-green-200">
+              <div className="card text-center py-4 bg-green-50 border-green-200">
                 <p className="text-[10px] text-green-600 font-semibold uppercase tracking-wide leading-tight">Owed to You</p>
-                <p className="text-sm font-black text-green-600 mt-1">{INR(totalOwed)}</p>
+                <p className="text-lg font-black text-green-600 mt-1">{INR(totalOwed)}</p>
               </div>
             </div>
           </div>
@@ -216,24 +238,34 @@ export default function Home() {
         {/* Groups (every group linked to a master group by members; unsettled first, settled behind a toggle) */}
         {(allMasters.length > 0 || soloGroups.length > 0) && (
           <div>
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Groups</p>
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">
+              {topUnsettled.length > 0 ? 'Top unsettled groups' : 'Groups'}
+            </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {unsettledMasters.map((m) => <MasterGroupCard key={m.key} master={m} />)}
-              {unsettledSolo.map((g) => <GroupCard key={g.id} group={g} />)}
+              {topUnsettled.map((e) => e.node)}
             </div>
 
-            {(settledMasters.length + settledSolo.length) > 0 && (
+            {hiddenCount > 0 && (
               showSettled ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-                  {settledMasters.map((m) => <MasterGroupCard key={m.key} master={m} />)}
-                  {settledSolo.map((g) => <GroupCard key={g.id} group={g} />)}
-                </div>
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                    {restUnsettled.map((e) => e.node)}
+                    {settledMasters.map((m) => <MasterGroupCard key={m.key} master={m} />)}
+                    {settledSolo.map((g) => <GroupCard key={g.id} group={g} />)}
+                  </div>
+                  <button
+                    onClick={() => setShowSettled(false)}
+                    className="w-full mt-3 py-2 text-xs font-bold text-gray-500 bg-amber-50 border border-amber-200 rounded-md hover:bg-amber-100 active:scale-[0.98] transition-all"
+                  >
+                    Show less
+                  </button>
+                </>
               ) : (
                 <button
                   onClick={() => setShowSettled(true)}
                   className="w-full mt-3 py-2 text-xs font-bold text-gray-500 bg-amber-50 border border-amber-200 rounded-md hover:bg-amber-100 active:scale-[0.98] transition-all"
                 >
-                  Show {settledMasters.length + settledSolo.length} settled group{(settledMasters.length + settledSolo.length) > 1 ? 's' : ''}
+                  Show {hiddenCount} more group{hiddenCount > 1 ? 's' : ''}
                 </button>
               )
             )}

@@ -145,7 +145,8 @@ def _member_share(e, name: str) -> float | None:
 
 def _pairwise_group_debts(g: Group) -> dict[tuple[str, str], float]:
     """(debtor, creditor) -> amount debtor still owes creditor within this group,
-    excluding any expense-share the debtor has already settled directly."""
+    after subtracting any payments already recorded between the pair (and any
+    legacy per-expense settle marks)."""
     debts: dict[tuple[str, str], float] = defaultdict(float)
     group_member_names = [m.name for m in g.members]
     for e in g.expenses:
@@ -159,7 +160,40 @@ def _pairwise_group_debts(g: Group) -> dict[tuple[str, str], float]:
             share = _member_share(e, p)
             if share is not None:
                 debts[(p, payer)] += share
-    return debts
+
+    # A recorded payment pays down what the sender owes the recipient. Anything
+    # beyond the outstanding debt flips the pair around (the sender overpaid).
+    for pay in (getattr(g, "payments", []) or []):
+        amt = float(pay.amount or 0)
+        if amt <= 0:
+            continue
+        frm, to = pay.from_member, pay.to_member
+        key = next(
+            (k for k in debts
+             if k[0].lower() == (frm or "").lower() and k[1].lower() == (to or "").lower()),
+            None,
+        )
+        if key is None:
+            debts[(frm, to)] -= amt
+        else:
+            debts[key] -= amt
+
+    # Normalise: a negative debt is really a debt the other way round
+    for (debtor, creditor) in list(debts.keys()):
+        amt = debts[(debtor, creditor)]
+        if amt < -0.01:
+            debts[(debtor, creditor)] = 0.0
+            rev = next(
+                (k for k in debts
+                 if k[0].lower() == creditor.lower() and k[1].lower() == debtor.lower()),
+                None,
+            )
+            if rev is None:
+                debts[(creditor, debtor)] = -amt
+            else:
+                debts[rev] += -amt
+
+    return {k: v for k, v in debts.items() if abs(v) > 0.01}
 
 
 @router.get("/friends", response_model=list[dict])
