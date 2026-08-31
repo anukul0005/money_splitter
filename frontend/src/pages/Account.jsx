@@ -2,24 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { changePassword, setRecovery, getRecoveryQuestion } from '../api'
 import { useUser, isAdmin } from '../UserContext'
-
-export const KEY_QUESTION = 'Enter your 6-digit recovery key'
-
-export const RECOVERY_QUESTIONS = [
-  KEY_QUESTION,
-  'What was the name of your first school?',
-  'What city were you born in?',
-  "What is your oldest sibling's nickname?",
-  'What was the name of your first pet?',
-  'What is your favourite dish?',
-]
-
-/** Cryptographically random 6-digit key. */
-export function generateKey() {
-  const buf = new Uint32Array(1)
-  crypto.getRandomValues(buf)
-  return String(buf[0] % 1000000).padStart(6, '0')
-}
+import { ALL_QUESTIONS, RECOVERY_QUESTIONS, KEY_QUESTION, generateKey } from '../utils/security'
 
 /**
  * /account — everything about your own login, in one place.
@@ -36,7 +19,7 @@ export default function Account() {
   const [existing, setExisting] = useState(null)   // current question, or null
 
   // ── Security answer ──
-  const [question, setQuestion] = useState(RECOVERY_QUESTIONS[0])
+  const [question, setQuestion] = useState(RECOVERY_QUESTIONS[0])   // a real question, not the passkey
   const [answer, setAnswer]     = useState('')
   const [proofKind, setProof]   = useState('password')   // password | answer
   const [proof, setProofValue]  = useState('')
@@ -63,6 +46,8 @@ export default function Account() {
       .catch(() => setExisting(null))
   }, [user?.name])
 
+  const isKey = question === KEY_QUESTION
+
   const handleSecurity = async (e) => {
     e.preventDefault()
     setSecError(''); setSecDone('')
@@ -76,7 +61,8 @@ export default function Account() {
         ...(proofKind === 'password' ? { current_password: proof } : { current_answer: proof }),
       })
       setExisting(question)
-      setSecDone('Saved. Keep your answer somewhere safe — it can never be shown to you again.')
+      setSecDone('Saved')
+      setAnswer('')
       setProofValue('')
     } catch (err) {
       setSecError(err.response?.data?.detail || 'Could not save that.')
@@ -94,7 +80,7 @@ export default function Account() {
     setPwBusy(true)
     try {
       await changePassword(user.id, { current_password: current, new_password: next })
-      setPwDone('Password updated.')
+      setPwDone('Saved')
       setCurrent(''); setNext(''); setConfirm('')
     } catch (err) {
       setPwError(err.response?.data?.detail || 'Failed to change password.')
@@ -138,9 +124,13 @@ export default function Account() {
           <form onSubmit={handleSecurity} className="space-y-3">
             <div>
               <label className="label">Question</label>
-              <select className="input" value={question} onChange={(e) => setQuestion(e.target.value)}>
-                {RECOVERY_QUESTIONS.map((q) => <option key={q} value={q}>{q}</option>)}
-                {existing && !RECOVERY_QUESTIONS.includes(existing) && (
+              <select
+                className="input"
+                value={question}
+                onChange={(e) => { setQuestion(e.target.value); setAnswer('') }}
+              >
+                {ALL_QUESTIONS.map((q) => <option key={q} value={q}>{q}</option>)}
+                {existing && !ALL_QUESTIONS.includes(existing) && (
                   <option value={existing}>{existing}</option>
                 )}
               </select>
@@ -150,25 +140,33 @@ export default function Account() {
               <label className="label">{existing ? 'New answer' : 'Your answer'}</label>
               <div className="flex gap-2">
                 <input
-                  className="input flex-1 tracking-widest font-bold"
+                  className={`input flex-1 ${isKey ? 'tracking-[0.3em] font-bold' : ''}`}
+                  placeholder={isKey ? '000000' : 'Type your answer'}
+                  inputMode={isKey ? 'numeric' : 'text'}
+                  maxLength={isKey ? 6 : undefined}
                   value={answer}
-                  onChange={(e) => setAnswer(e.target.value)}
+                  onChange={(e) => setAnswer(isKey ? e.target.value.replace(/\D/g, '') : e.target.value)}
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck={false}
                 />
-                <button
-                  type="button"
-                  onClick={() => { setQuestion(KEY_QUESTION); setAnswer(generateKey()) }}
-                  className="px-3 bg-amber-100 border border-amber-300 rounded-md text-[11px] font-bold text-gray-600 hover:bg-amber-200 flex-shrink-0"
-                  title="Generate a random 6-digit passkey"
-                >
-                  Generate
-                </button>
+                {/* Only offered for the passkey option, so it can never overwrite
+                    an answer you typed to a real question. */}
+                {isKey && (
+                  <button
+                    type="button"
+                    onClick={() => setAnswer(generateKey())}
+                    className="px-3 bg-amber-100 border border-amber-300 rounded-md text-[11px] font-bold text-gray-600 hover:bg-amber-200 flex-shrink-0"
+                    title="Generate a random 6-digit passkey"
+                  >
+                    Generate
+                  </button>
+                )}
               </div>
               <p className="text-[10px] text-gray-400 mt-1 leading-relaxed">
-                Write it down before saving — it's stored hashed, so nobody, including
-                you, can read it back later. Capitalisation doesn't matter.
+                {isKey
+                  ? "Write the code down before saving — it's stored hashed, so nobody, including you, can read it back later."
+                  : "Your answer is hashed before it's stored, so nobody can read it back — remember it exactly. Capitalisation and extra spaces don't matter."}
               </p>
             </div>
 
@@ -203,7 +201,11 @@ export default function Account() {
             </div>
 
             {secError && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{secError}</p>}
-            {secDone && <p className="text-xs text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2">{secDone}</p>}
+            {secDone && (
+              <p className="text-sm font-bold text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2 text-center">
+                ✓ {secDone}
+              </p>
+            )}
 
             <button type="submit" className="btn-primary" disabled={secBusy}>
               {secBusy ? 'Saving…' : existing ? 'Update answer' : 'Save answer'}
@@ -263,7 +265,11 @@ export default function Account() {
             </div>
 
             {pwError && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{pwError}</p>}
-            {pwDone && <p className="text-xs text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2">{pwDone}</p>}
+            {pwDone && (
+              <p className="text-sm font-bold text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2 text-center">
+                ✓ {pwDone}
+              </p>
+            )}
 
             <button type="submit" className="btn-primary" disabled={pwBusy}>
               {pwBusy ? 'Updating…' : 'Update password'}

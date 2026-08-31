@@ -1,24 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getRecoveryQuestion, resetPassword, redeemCode } from '../api'
-
-const KEY_QUESTION = 'Enter your 6-digit recovery key'
-
-const RECOVERY_QUESTIONS = [
-  KEY_QUESTION,
-  'What was the name of your first school?',
-  'What city were you born in?',
-  "What is your oldest sibling's nickname?",
-  'What was the name of your first pet?',
-  'What is your favourite dish?',
-]
-
-/** Cryptographically random 6-digit key. */
-function makeKey() {
-  const buf = new Uint32Array(1)
-  crypto.getRandomValues(buf)
-  return String(buf[0] % 1000000).padStart(6, '0')
-}
+import { ALL_QUESTIONS, RECOVERY_QUESTIONS, KEY_QUESTION, generateKey } from '../utils/security'
 
 /**
  * Standalone /reset-password route.
@@ -44,7 +27,7 @@ export default function ResetPassword() {
 
   // Redeeming a one-time code issued by an admin
   const [code, setCode]       = useState('')
-  const [newQ, setNewQ]       = useState(RECOVERY_QUESTIONS[0])
+  const [newQ, setNewQ]       = useState(RECOVERY_QUESTIONS[0])   // real question by default
   const [newA, setNewA]       = useState('')
 
   const handleLookup = async (e) => {
@@ -236,29 +219,37 @@ export default function ResetPassword() {
 
               <div className="border-t border-amber-200 pt-4">
                 <label className="label">Your security question</label>
-                <select className="input" value={newQ} onChange={(e) => setNewQ(e.target.value)}>
-                  {RECOVERY_QUESTIONS.map((q) => <option key={q} value={q}>{q}</option>)}
+                <select
+                  className="input"
+                  value={newQ}
+                  onChange={(e) => { setNewQ(e.target.value); setNewA('') }}
+                >
+                  {ALL_QUESTIONS.map((q) => <option key={q} value={q}>{q}</option>)}
                 </select>
                 <div className="flex gap-2 mt-2">
                   <input
-                    className="input flex-1 tracking-widest font-bold"
-                    placeholder="Your answer"
+                    className={`input flex-1 ${newQ === KEY_QUESTION ? 'tracking-[0.3em] font-bold' : ''}`}
+                    placeholder={newQ === KEY_QUESTION ? '000000' : 'Type your answer'}
+                    inputMode={newQ === KEY_QUESTION ? 'numeric' : 'text'}
+                    maxLength={newQ === KEY_QUESTION ? 6 : undefined}
                     value={newA}
-                    onChange={(e) => setNewA(e.target.value)}
+                    onChange={(e) => setNewA(newQ === KEY_QUESTION ? e.target.value.replace(/\D/g, '') : e.target.value)}
                     autoCapitalize="none"
                     autoCorrect="off"
                     spellCheck={false}
                   />
-                  <button
-                    type="button"
-                    onClick={() => { setNewQ(KEY_QUESTION); setNewA(makeKey()) }}
-                    className="px-3 bg-amber-100 border border-amber-300 rounded-md text-[11px] font-bold text-gray-600 hover:bg-amber-200 flex-shrink-0"
-                  >
-                    Generate
-                  </button>
+                  {newQ === KEY_QUESTION && (
+                    <button
+                      type="button"
+                      onClick={() => setNewA(generateKey())}
+                      className="px-3 bg-amber-100 border border-amber-300 rounded-md text-[11px] font-bold text-gray-600 hover:bg-amber-200 flex-shrink-0"
+                    >
+                      Generate
+                    </button>
+                  )}
                 </div>
                 <p className="text-[10px] text-gray-400 mt-1">
-                  Save this — it's stored hashed and can't be shown again.
+                  Remember this exactly — it's stored hashed and can't be shown again.
                 </p>
               </div>
 

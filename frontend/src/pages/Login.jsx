@@ -1,16 +1,9 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { loginUser, signupUser } from '../api'
+import { RECOVERY_QUESTIONS } from '../utils/security'
 
 const SESSION_KEY = 'splitter_session_v2'
-
-const RECOVERY_QUESTIONS = [
-  'What was the name of your first school?',
-  'What city were you born in?',
-  "What is your oldest sibling's nickname?",
-  'What was the name of your first pet?',
-  'What is your favourite dish?',
-]
 
 const FEATURES = [
   { icon: '💸', text: 'Track who paid what in groups' },
@@ -295,7 +288,7 @@ export default function Login({ onLogin }) {
                   </select>
                   <input
                     className="input mt-2"
-                    placeholder="Your answer"
+                    placeholder="Type your answer"
                     value={recAnswer}
                     onChange={e => setRecAnswer(e.target.value)}
                     autoCapitalize="none"

@@ -3,15 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import {
   getRecoveryQuestion, adminResetPassword, adminSetRecovery, listUsersBasic,
 } from '../api'
+import { KEY_QUESTION, generateKey } from '../utils/security'
 
-/** Cryptographically random 6-digit key, uniformly distributed. */
-export function generateKey() {
-  const buf = new Uint32Array(1)
-  crypto.getRandomValues(buf)
-  return String(buf[0] % 1000000).padStart(6, '0')
-}
-
-const KEY_QUESTION = 'Enter your 6-digit recovery key'
 
 /**
  * /admin-recovery — an admin unlocks with their own recovery key, then can
