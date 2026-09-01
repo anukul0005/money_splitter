@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useParams, useLocation, useNavigate } from 'react-router-dom'
-import { getGroups } from '../api'
+import { getGroups, getAggregateStats } from '../api'
 import GroupCard from '../components/GroupCard'
 import LoadingSpinner from '../components/LoadingSpinner'
+import StatsPanel from '../components/StatsPanel'
 import { buildMasterGroups } from '../utils/masterGroups'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
@@ -14,6 +15,20 @@ export default function MasterGroupDetail() {
 
   const [master,  setMaster]  = useState(location.state?.master ?? null)
   const [loading, setLoading] = useState(!location.state?.master)
+  const [showStats, setShowStats] = useState(false)
+  const [stats, setStats]         = useState(null)
+  const [statsLoading, setStatsLoading] = useState(false)
+
+  // Stats are consolidated across every group in the master, so they're
+  // fetched once the user actually asks for them rather than on page load.
+  useEffect(() => {
+    if (!showStats || stats || !master) return
+    setStatsLoading(true)
+    getAggregateStats(master.groups.map((g) => g.id))
+      .then((r) => setStats(r.data))
+      .catch(() => setStats(null))
+      .finally(() => setStatsLoading(false))
+  }, [showStats, master])
 
   useEffect(() => {
     if (location.state?.master) return
@@ -41,14 +56,42 @@ export default function MasterGroupDetail() {
   return (
     <div className="pb-24 md:pb-8">
       <div className="px-5 pt-10 md:pt-6 pb-4 bg-cream sticky top-0 z-10 border-b border-amber-100/60">
-        <button onClick={() => nav(-1)} className="text-xs font-bold text-gray-400 mb-2">← Back</button>
+        <div className="flex items-start justify-between gap-3">
+          <button onClick={() => nav(-1)} className="text-xs font-bold text-gray-400 mb-2">← Back</button>
+          <button
+            onClick={() => setShowStats((v) => !v)}
+            title={showStats ? 'Back to groups' : 'Stats across all these groups'}
+            aria-label="Stats"
+            aria-pressed={showStats}
+            className={`flex-shrink-0 flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-bold active:scale-95 transition-all shadow-sm border ${
+              showStats
+                ? 'bg-brand-400 border-brand-400 text-white'
+                : 'bg-cream border-amber-200 text-gray-500 hover:bg-amber-50'
+            }`}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6m4 6V5m4 14v-9M4 21h16" />
+            </svg>
+            Stats
+          </button>
+        </div>
         <h1 className="text-xl font-black tracking-tight">{master.name}</h1>
         <p className="text-xs text-gray-400 mt-1">{master.groups.length} groups · {INR(master.totalAmount)} total</p>
       </div>
 
-      <div className="px-5 mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-        {master.groups.map((g) => <GroupCard key={g.id} group={g} />)}
-      </div>
+      {showStats ? (
+        statsLoading ? <LoadingSpinner /> : (
+          <StatsPanel
+            stats={stats}
+            expenses={stats?.expenses ?? []}
+            isSolo={(master.names ?? []).length === 1}
+          />
+        )
+      ) : (
+        <div className="px-5 mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+          {master.groups.map((g) => <GroupCard key={g.id} group={g} />)}
+        </div>
+      )}
     </div>
   )
 }

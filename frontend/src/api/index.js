@@ -57,6 +57,8 @@ export const markActivitySeen = (name)   => api.post('/activity/seen', null, { p
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
 export const getGroupStats      = (groupId) => api.get(`/stats/${groupId}`)
+// Combined stats across a master group's set of groups
+export const getAggregateStats  = (ids)     => api.get('/stats/aggregate', { params: { ids: ids.join(',') } })
 export const getOverview        = ()        => api.get('/stats/overview/all')
 export const getUserSummary     = (name)    => api.get('/stats/user-summary', { params: { name } })
 export const getGlobalAnalytics     = (name) => api.get('/stats/global-analytics', { params: name ? { name } : {} })

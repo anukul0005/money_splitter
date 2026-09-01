@@ -276,6 +276,61 @@ def get_global_analytics(name: str = "", db: Session = Depends(get_db)):
     return {"by_category": cat_list, "by_person_category": person_cat_out}
 
 
+@router.get("/aggregate", response_model=dict)
+def get_aggregate_stats(ids: str, db: Session = Depends(get_db)):
+    """Combined stats for several groups at once — the master group view.
+
+    A master group is a set of groups sharing the exact same membership, so
+    "who paid how much" and "spend by category" only mean something when they
+    are summed across the whole set. Same shape as /stats/{group_id}, plus the
+    raw (date, amount) pairs the distribution table and daily line need.
+    """
+    try:
+        wanted = [int(x) for x in ids.split(",") if x.strip()]
+    except ValueError:
+        raise HTTPException(400, "ids must be a comma-separated list of group ids")
+    if not wanted:
+        raise HTTPException(400, "no group ids given")
+
+    groups = db.query(Group).filter(Group.id.in_(wanted)).all()
+    if not groups:
+        raise HTTPException(404, "No such groups")
+
+    by_cat: dict[str, float] = defaultdict(float)
+    by_cat_display: dict[str, str] = {}
+    by_member: dict[str, float] = defaultdict(float)
+    expenses: list[dict] = []
+    members: set[str] = set()
+
+    for g in groups:
+        for m in g.members:
+            members.add(m.name)
+        for e in g.expenses:
+            raw = (e.category or "Other").strip()
+            key = raw.lower()
+            by_cat_display.setdefault(key, raw)
+            by_cat[key] += e.amount
+            by_member[e.paid_by] += e.amount
+            expenses.append({"date": e.date, "amount": e.amount})
+
+    return {
+        "total": round(sum(x["amount"] for x in expenses), 2),
+        "group_count": len(groups),
+        "expense_count": len(expenses),
+        "member_count": len(members),
+        "member_names": sorted(members),
+        "by_category": [
+            {"category": by_cat_display[k], "total": round(v, 2)}
+            for k, v in sorted(by_cat.items(), key=lambda x: -x[1])
+        ],
+        "by_member": [
+            {"member": k, "total_paid": round(v, 2)}
+            for k, v in sorted(by_member.items(), key=lambda x: -x[1])
+        ],
+        "expenses": expenses,
+    }
+
+
 @router.get("/overview/all", response_model=list[dict])
 def get_overview(db: Session = Depends(get_db)):
     """Returns per-group totals for the homepage chart."""
