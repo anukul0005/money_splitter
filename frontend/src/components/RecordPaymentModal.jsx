@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { getGroups, createPaymentAuto } from '../api'
+import { getGroups, createPaymentAuto, updatePayment, deletePayment } from '../api'
 import { useUser } from '../UserContext'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
@@ -11,15 +11,23 @@ const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigi
  * specific groups, so the server places the amount against the outstanding
  * balance (largest first, split across groups if one doesn't cover it).
  * `prefillFriend` preselects the other side.
+ *
+ * Pass `payment` to correct an existing one instead. Balances are derived from
+ * payments rather than stored, so amending the row is enough — every group
+ * total and friend balance it touches recomputes on the next read.
  */
-export default function RecordPaymentModal({ onClose, onSaved, prefillFriend }) {
+export default function RecordPaymentModal({ onClose, onSaved, prefillFriend, payment }) {
   const user = useUser()
+  const editing = !!payment
 
   const [people, setPeople]   = useState([])
   const [loading, setLoading] = useState(true)
   const [form, setForm] = useState({
-    from_member: '', to_member: prefillFriend || '', amount: '', note: '',
-    date: new Date().toISOString().slice(0, 10),
+    from_member: payment?.from_member || '',
+    to_member:   payment?.to_member || prefillFriend || '',
+    amount:      payment ? String(payment.amount) : '',
+    note:        payment?.note || '',
+    date:        payment?.date || new Date().toISOString().slice(0, 10),
   })
   const [error, setError] = useState('')
   const [busy, setBusy]   = useState(false)
@@ -64,21 +72,37 @@ export default function RecordPaymentModal({ onClose, onSaved, prefillFriend }) 
     const amt = parseFloat(form.amount)
     if (!amt || amt <= 0) return setError('Enter an amount greater than zero.')
 
+    const body = {
+      from_member: form.from_member,
+      to_member: form.to_member,
+      amount: amt,
+      date: form.date,
+      note: form.note || null,
+      recorded_by: user?.name || null,
+    }
+
     setBusy(true)
     try {
-      await createPaymentAuto({
-        from_member: form.from_member,
-        to_member: form.to_member,
-        amount: amt,
-        date: form.date,
-        note: form.note || null,
-        recorded_by: user?.name || null,
-      })
+      if (editing) await updatePayment(payment.id, body)
+      else await createPaymentAuto(body)
       onSaved?.()
       onClose?.()
     } catch (err) {
-      setError(err.response?.data?.detail || 'Could not record that payment.')
+      setError(err.response?.data?.detail || 'Could not save that payment.')
     } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = async () => {
+    if (!confirm('Delete this payment? The balances it settled will go back up.')) return
+    setBusy(true)
+    try {
+      await deletePayment(payment.id, user?.name)
+      onSaved?.()
+      onClose?.()
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Could not delete that payment.')
       setBusy(false)
     }
   }
@@ -93,14 +117,15 @@ export default function RecordPaymentModal({ onClose, onSaved, prefillFriend }) 
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-amber-200">
-          <h3 className="text-xs font-bold text-gray-800">Record a payment</h3>
+          <h3 className="text-xs font-bold text-gray-800">{editing ? 'Edit payment' : 'Record a payment'}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-base leading-none">×</button>
         </div>
 
         <form onSubmit={submit} className="p-4 space-y-2.5">
           <p className="text-[11px] text-gray-500 leading-snug">
-            Logging a real transfer reduces what one person owes the other — or clears it.
-            It's applied to whichever groups that debt sits in.
+            {editing
+              ? 'Correcting this updates every balance it affected — the old amount is undone first.'
+              : "Logging a real transfer reduces what one person owes the other — or clears it. It's applied to whichever group that debt sits in."}
           </p>
 
           <div className="grid grid-cols-2 gap-2.5">
@@ -173,8 +198,19 @@ export default function RecordPaymentModal({ onClose, onSaved, prefillFriend }) 
           )}
 
           <button type="submit" className="btn-primary text-sm py-2.5" disabled={busy}>
-            {busy ? 'Recording…' : 'Record payment'}
+            {busy ? 'Saving…' : editing ? 'Save changes' : 'Record payment'}
           </button>
+
+          {editing && (
+            <button
+              type="button"
+              onClick={remove}
+              disabled={busy}
+              className="w-full text-center text-[11px] font-bold text-red-500 hover:text-red-600 py-1"
+            >
+              Delete this payment
+            </button>
+          )}
         </form>
       </div>
     </div>

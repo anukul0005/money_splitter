@@ -47,7 +47,9 @@ export const getPayments    = (groupId)  => api.get(`/payments/group/${groupId}`
 export const createPayment  = (data)     => api.post('/payments/', data)
 // No group_id — the server places it against the outstanding debt
 export const createPaymentAuto = (data)  => api.post('/payments/auto', data)
-export const deletePayment  = (id)       => api.delete(`/payments/${id}`)
+// Editing a payment re-derives every balance it touches — nothing is stored
+export const updatePayment  = (id, data) => api.put(`/payments/${id}`, data)
+export const deletePayment  = (id, by)   => api.delete(`/payments/${id}`, { params: by ? { by } : {} })
 export const paymentsBetween = (a, b)    => api.get('/payments/between', { params: { a, b, viewer: a } })
 
 // ── Activity feed ─────────────────────────────────────────────────────────────

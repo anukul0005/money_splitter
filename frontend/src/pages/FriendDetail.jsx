@@ -31,6 +31,7 @@ export default function FriendDetail() {
   const [byGroup, setByGroup] = useState({})
   const [payments, setPayments] = useState([])
   const [payOpen, setPayOpen]   = useState(false)
+  const [editingPayment, setEditingPayment] = useState(null)
   const [loading, setLoading] = useState(true)
 
   const load = () => {
@@ -110,18 +111,27 @@ export default function FriendDetail() {
               friendBalance={{ name: friendName, net: byGroup[row.data.id] ?? 0 }}
             />
           ) : (
-            /* A settlement, sitting between the groups at the time it happened */
-            <div key={row.key} className="flex items-center gap-2 py-0.5">
+            /* A settlement, sitting between the groups at the time it happened.
+               Tap it to correct an amount, a date or who paid whom. */
+            <button
+              key={row.key}
+              onClick={() => setEditingPayment(row.data)}
+              title="Edit this payment"
+              className="w-full flex items-center gap-2 py-0.5 group"
+            >
               <span className="h-px flex-1 bg-green-200" />
-              <span className="flex items-center gap-1.5 text-[11px] font-bold text-green-700 whitespace-nowrap">
+              <span className="flex items-center gap-1.5 text-[11px] font-bold text-green-700 whitespace-nowrap group-hover:text-green-800">
                 <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
                 {row.data.from_member} paid {row.data.to_member} {INR(row.data.amount)}
                 <span className="font-normal text-gray-400">· {stamp(row.data.recorded_at)}</span>
+                <svg className="w-2.5 h-2.5 text-gray-300 group-hover:text-gray-500" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
               </span>
               <span className="h-px flex-1 bg-green-200" />
-            </div>
+            </button>
           )
         )}
         {timeline.length === 0 && (
@@ -135,6 +145,14 @@ export default function FriendDetail() {
         <RecordPaymentModal
           prefillFriend={friendName}
           onClose={() => setPayOpen(false)}
+          onSaved={load}
+        />
+      )}
+
+      {editingPayment && (
+        <RecordPaymentModal
+          payment={editingPayment}
+          onClose={() => setEditingPayment(null)}
           onSaved={load}
         />
       )}
