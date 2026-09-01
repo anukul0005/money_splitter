@@ -4,6 +4,7 @@
     ../venv/Scripts/python.exe regroup_expenses.py 49                     # dry run
     ../venv/Scripts/python.exe regroup_expenses.py 49 --fix-date 12=2026-08-28
     ../venv/Scripts/python.exe regroup_expenses.py 49 --apply             # write
+    ../venv/Scripts/python.exe regroup_expenses.py 25 --keep-name --apply # trips
 
 Each expense belongs with the people who actually carry it: everyone with a
 non-zero share, plus the payer (who is owed the money even at a zero share).
@@ -91,6 +92,11 @@ def main() -> int:
 
     gid = int(sys.argv[1])
     apply = "--apply" in sys.argv
+    # Trips and events span several days but are one thing. --keep-name files
+    # every split-out member set under the source group's name instead of the
+    # expense's date, so "23 Apr 26 Burhanpur" stays a single trip rather than
+    # fragmenting into one group per day.
+    keep_name = "--keep-name" in sys.argv
     fixes: dict[int, str] = {}
     for i, a in enumerate(sys.argv):
         if a == "--fix-date":
@@ -122,7 +128,7 @@ def main() -> int:
         if len(key) < 2:
             plan[("SOLO", key)].append(e)
             continue
-        plan[(key, label(e.date))].append(e)
+        plan[(key, src.name.strip() if keep_name else label(e.date))].append(e)
 
     print(f'\nSource: grp{src.id} "{src.name}"  members={names}\n')
     for (key, lab), exps in sorted(plan.items(), key=lambda x: str(x[0])):
