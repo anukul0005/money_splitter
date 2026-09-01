@@ -144,55 +144,23 @@ def _member_share(e, name: str) -> float | None:
 
 
 def _pairwise_group_debts(g: Group) -> dict[tuple[str, str], float]:
-    """(debtor, creditor) -> amount debtor still owes creditor within this group,
-    after subtracting any payments already recorded between the pair (and any
-    legacy per-expense settle marks)."""
+    """(debtor, creditor) -> what the debtor still owes the creditor here.
+
+    Delegates to the settlement engine rather than tracking raw pairs, so the
+    Friends page and the group's Settle Up tab can never disagree.
+
+    That matters when a payment doesn't line up with a single pair. If Shubhi's
+    ₹640 share is ₹595 to Anubhav and ₹45 to Anukul and she hands Anubhav the
+    whole ₹640, per-pair bookkeeping leaves her owing Anukul ₹45 while Anubhav
+    owes her ₹45 back — technically true, useless in practice, and it made a
+    fully-paid member look unsettled. Netting across the group collapses that
+    to a single ₹45 from Anubhav to Anukul and shows Shubhi as square.
+    """
+    from routers.settlements import _calculate
+
     debts: dict[tuple[str, str], float] = defaultdict(float)
-    group_member_names = [m.name for m in g.members]
-    for e in g.expenses:
-        payer = e.paid_by
-        if not payer:
-            continue
-        settled = {s.lower() for s in (_json.loads(e.settled_by) if e.settled_by else [])}
-        for p in _expense_participants(e, group_member_names):
-            if p.lower() == payer.lower() or p.lower() in settled:
-                continue
-            share = _member_share(e, p)
-            if share is not None:
-                debts[(p, payer)] += share
-
-    # A recorded payment pays down what the sender owes the recipient. Anything
-    # beyond the outstanding debt flips the pair around (the sender overpaid).
-    for pay in (getattr(g, "payments", []) or []):
-        amt = float(pay.amount or 0)
-        if amt <= 0:
-            continue
-        frm, to = pay.from_member, pay.to_member
-        key = next(
-            (k for k in debts
-             if k[0].lower() == (frm or "").lower() and k[1].lower() == (to or "").lower()),
-            None,
-        )
-        if key is None:
-            debts[(frm, to)] -= amt
-        else:
-            debts[key] -= amt
-
-    # Normalise: a negative debt is really a debt the other way round
-    for (debtor, creditor) in list(debts.keys()):
-        amt = debts[(debtor, creditor)]
-        if amt < -0.01:
-            debts[(debtor, creditor)] = 0.0
-            rev = next(
-                (k for k in debts
-                 if k[0].lower() == creditor.lower() and k[1].lower() == debtor.lower()),
-                None,
-            )
-            if rev is None:
-                debts[(creditor, debtor)] = -amt
-            else:
-                debts[rev] += -amt
-
+    for t in _calculate(g).transactions:
+        debts[(t.from_member, t.to_member)] += t.amount
     return {k: v for k, v in debts.items() if abs(v) > 0.01}
 
 

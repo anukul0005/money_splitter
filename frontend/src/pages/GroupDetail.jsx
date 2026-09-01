@@ -9,6 +9,7 @@ import { Bar, Doughnut, Line } from 'react-chartjs-2'
 import { getGroup, getSettlement, getGroupStats, deleteExpense, deleteGroup, createPayment, deletePayment } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ExpenseEditModal from '../components/ExpenseEditModal'
+import { useUser, isAdmin } from '../UserContext'
 
 Chart.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend, ArcElement, DoughnutController, BarController, LineElement, PointElement, LineController, Filler)
 Chart.defaults.font.family = "'Space Grotesk', system-ui, sans-serif"
@@ -47,6 +48,7 @@ Chart.register(donutPctPlugin)
 export default function GroupDetail() {
   const { id } = useParams()
   const nav = useNavigate()
+  const currentUser = useUser()
 
   const [group, setGroup]               = useState(null)
   const [settlement, setSettlement]     = useState(null)
@@ -105,6 +107,7 @@ export default function GroupDetail() {
         amount: amt,
         date: payForm.date,
         note: payForm.note || null,
+        recorded_by: currentUser?.name || null,
       })
       setPayForm((f) => ({ ...f, amount: '', note: '' }))
       reload()
@@ -135,6 +138,16 @@ export default function GroupDetail() {
 
   if (loading) return <LoadingSpinner />
   if (!group)  return <p className="p-5 text-gray-500">Group not found.</p>
+
+  // Only people who actually bore something here can record a payment. A
+  // member who neither paid for anything nor owes a share has no debt to
+  // settle, so the form would be meaningless for them. Admins keep access
+  // because they do data entry on everyone's behalf.
+  const myBalance = settlement?.balances?.find(
+    (b) => b.member.toLowerCase() === currentUser?.name?.toLowerCase()
+  )
+  const isInvolved = !!myBalance && (Math.abs(myBalance.paid) > 0.01 || Math.abs(myBalance.share) > 0.01)
+  const canRecordPayment = isInvolved || isAdmin(currentUser)
 
   // Horizontal bar chart (member names on y-axis)
   const memberChartData = {
@@ -787,8 +800,8 @@ export default function GroupDetail() {
                   <button
                     key={`pending-${i}`}
                     type="button"
-                    onClick={() => prefillPayment(t)}
-                    title="Record this payment"
+                    onClick={() => canRecordPayment && prefillPayment(t)}
+                    title={canRecordPayment ? 'Record this payment' : undefined}
                     className="w-full text-left flex items-center gap-2 bg-red-50 border border-red-100 rounded-md px-3 py-2.5 hover:bg-red-100 active:scale-[0.99] transition-all"
                   >
                     <span className="font-bold text-sm text-red-700 flex-shrink-0">{t.from_member}</span>
@@ -803,7 +816,16 @@ export default function GroupDetail() {
             )}
           </div>
 
-          {/* ── Record a payment ── */}
+          {/* ── Record a payment — only for people with a stake here ── */}
+          {!canRecordPayment ? (
+            <div className="card md:col-span-2">
+              <h3 className="text-xs font-bold text-gray-500 mb-1">Record a payment</h3>
+              <p className="text-xs text-gray-400 leading-relaxed">
+                You haven't paid for anything or owe a share in this group, so there's
+                nothing for you to settle here.
+              </p>
+            </div>
+          ) : (
           <div className="card md:col-span-2">
             <h3 className="text-xs font-bold text-gray-500 mb-1">Record a payment</h3>
             <p className="text-xs text-gray-400 mb-3">
@@ -914,6 +936,7 @@ export default function GroupDetail() {
               </div>
             )}
           </div>
+          )}
         </div>
       )}
 

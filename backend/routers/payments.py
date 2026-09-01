@@ -52,14 +52,17 @@ def create_payment(payload: PaymentCreate, db: Session = Depends(get_db)):
     )
     db.add(payment)
 
+    # The actor is whoever entered it; the summary says whose debt it settles.
+    # Those differ whenever one member records a payment on another's behalf.
+    recorder = (payload.recorded_by or "").strip() or payment.from_member
     summary = f"{payment.from_member} paid {payment.to_member} {_INR(payment.amount)}"
-    record_activity(db, group, payment.from_member, "recorded a payment", summary)
+    record_activity(db, group, recorder, "recorded a payment", summary)
 
     db.commit()
     db.refresh(payment)
 
     try:
-        notify_group_activity(group, payment.from_member, "recorded a payment", summary)
+        notify_group_activity(group, recorder, "recorded a payment", summary)
     except Exception as e:
         print(f"[email] payment notification failed: {e}")
 

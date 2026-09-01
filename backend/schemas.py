@@ -195,6 +195,9 @@ class PaymentCreate(BaseModel):
     amount: float
     date: Optional[str] = None
     note: Optional[str] = None
+    # Whoever is logged in and doing the recording — not necessarily the payer,
+    # so the activity feed can say who entered it.
+    recorded_by: Optional[str] = None
 
     @field_validator("amount")
     @classmethod
