@@ -105,6 +105,9 @@ class ExpenseBase(BaseModel):
     split_json: Optional[str] = None   # JSON: {memberName: amount} for custom/gentleman splits
     payment_mode: Optional[str] = None  # cash / upi / credit_card / debit_card
     notes: Optional[str] = None
+    # Who is logged in and entering this — not necessarily who paid, so the
+    # activity feed can name the right person.
+    recorded_by: Optional[str] = None
 
     @field_validator("amount")
     @classmethod

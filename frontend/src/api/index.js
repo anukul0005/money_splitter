@@ -35,7 +35,7 @@ export const deleteGroup = (id)          => api.delete(`/groups/${id}`)
 export const getExpenses   = (groupId)   => api.get(`/expenses/group/${groupId}`)
 export const createExpense = (data)      => api.post('/expenses/', data)
 export const updateExpense = (id, data)  => api.put(`/expenses/${id}`, data)
-export const deleteExpense = (id)        => api.delete(`/expenses/${id}`)
+export const deleteExpense = (id, by)    => api.delete(`/expenses/${id}`, { params: by ? { by } : {} })
 
 // ── Settlements ───────────────────────────────────────────────────────────────
 export const getSettlement = (groupId)   => api.get(`/settlements/${groupId}`)
@@ -46,6 +46,7 @@ export const getSettlement = (groupId)   => api.get(`/settlements/${groupId}`)
 export const getPayments    = (groupId)  => api.get(`/payments/group/${groupId}`)
 export const createPayment  = (data)     => api.post('/payments/', data)
 export const deletePayment  = (id)       => api.delete(`/payments/${id}`)
+export const paymentsBetween = (a, b)    => api.get('/payments/between', { params: { a, b } })
 
 // ── Activity feed ─────────────────────────────────────────────────────────────
 export const getActivity      = (name, limit = 40) => api.get('/activity/', { params: { name, limit } })

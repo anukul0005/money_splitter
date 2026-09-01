@@ -43,7 +43,8 @@ def create_expense(payload: ExpenseCreate, db: Session = Depends(get_db)):
     db.flush()
 
     summary = f"{expense.title or expense.category or 'Expense'}: ₹{expense.amount:,.0f} paid by {expense.paid_by}"
-    record_activity(db, group, expense.paid_by, "added an expense", summary)
+    actor = (payload.recorded_by or "").strip() or expense.paid_by
+    record_activity(db, group, actor, "added an expense", summary)
 
     db.commit()
     db.refresh(expense)
@@ -78,7 +79,8 @@ def update_expense(expense_id: int, payload: ExpenseCreate, db: Session = Depend
 
     group = db.query(Group).filter(Group.id == expense.group_id).first()
     summary = f"{expense.title or expense.category or 'Expense'}: ₹{expense.amount:,.0f} paid by {expense.paid_by}"
-    record_activity(db, group, expense.paid_by, "edited an expense", summary)
+    actor = (payload.recorded_by or "").strip() or expense.paid_by
+    record_activity(db, group, actor, "edited an expense", summary)
 
     db.commit()
     db.refresh(expense)
@@ -86,14 +88,14 @@ def update_expense(expense_id: int, payload: ExpenseCreate, db: Session = Depend
 
 
 @router.delete("/{expense_id}", status_code=204)
-def delete_expense(expense_id: int, db: Session = Depends(get_db)):
+def delete_expense(expense_id: int, by: str = "", db: Session = Depends(get_db)):
     expense = db.query(Expense).filter(Expense.id == expense_id).first()
     if not expense:
         raise HTTPException(404, "Expense not found")
 
     group = db.query(Group).filter(Group.id == expense.group_id).first()
     summary = f"{expense.title or expense.category or 'Expense'}: ₹{expense.amount:,.0f}"
-    record_activity(db, group, expense.paid_by, "deleted an expense", summary)
+    record_activity(db, group, by.strip() or expense.paid_by, "deleted an expense", summary)
 
     db.delete(expense)
     db.commit()

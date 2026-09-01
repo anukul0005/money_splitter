@@ -6,10 +6,10 @@ import {
   LineElement, PointElement, LineController, Filler,
 } from 'chart.js'
 import { Bar, Doughnut, Line } from 'react-chartjs-2'
-import { getGroup, getSettlement, getGroupStats, deleteExpense, deleteGroup, createPayment, deletePayment } from '../api'
+import { getGroup, getSettlement, getGroupStats, deleteExpense, deleteGroup } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ExpenseEditModal from '../components/ExpenseEditModal'
-import { useUser, isAdmin } from '../UserContext'
+import { useUser } from '../UserContext'
 
 Chart.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend, ArcElement, DoughnutController, BarController, LineElement, PointElement, LineController, Filler)
 Chart.defaults.font.family = "'Space Grotesk', system-ui, sans-serif"
@@ -59,13 +59,6 @@ export default function GroupDetail() {
   const [editingExpense, setEditingExp] = useState(null)   // expense being edited
   const [hoveredDayIdx, setHoveredDayIdx] = useState(null)
 
-  // Record-payment form (Settle Up tab)
-  const [payForm, setPayForm] = useState({
-    from_member: '', to_member: '', amount: '', note: '',
-    date: new Date().toISOString().slice(0, 10),
-  })
-  const [paySaving, setPaySaving] = useState(false)
-  const [payError, setPayError]   = useState('')
 
   const fetchData = () =>
     Promise.all([getGroup(id), getSettlement(id), getGroupStats(id)])
@@ -85,48 +78,7 @@ export default function GroupDetail() {
 
   const handleDeleteExpense = async (expId) => {
     if (!confirm('Delete this expense?')) return
-    await deleteExpense(expId)
-    reload()
-  }
-
-  // ── Record payment ──────────────────────────────────────────────────────────
-  const handleRecordPayment = async (e) => {
-    e.preventDefault()
-    const amt = parseFloat(payForm.amount)
-    if (!payForm.from_member || !payForm.to_member) return setPayError('Pick who paid whom.')
-    if (payForm.from_member === payForm.to_member) return setPayError('A payment needs two different people.')
-    if (!amt || amt <= 0) return setPayError('Enter an amount greater than zero.')
-
-    setPaySaving(true)
-    setPayError('')
-    try {
-      await createPayment({
-        group_id: Number(id),
-        from_member: payForm.from_member,
-        to_member: payForm.to_member,
-        amount: amt,
-        date: payForm.date,
-        note: payForm.note || null,
-        recorded_by: currentUser?.name || null,
-      })
-      setPayForm((f) => ({ ...f, amount: '', note: '' }))
-      reload()
-    } catch (err) {
-      setPayError(err.response?.data?.detail || 'Could not record that payment.')
-    } finally {
-      setPaySaving(false)
-    }
-  }
-
-  // Clicking a suggested transaction pre-fills the form with it
-  const prefillPayment = (t) => {
-    setPayForm((f) => ({ ...f, from_member: t.from_member, to_member: t.to_member, amount: String(t.amount) }))
-    setPayError('')
-  }
-
-  const handleDeletePayment = async (paymentId) => {
-    if (!confirm('Remove this recorded payment? The debt will come back.')) return
-    await deletePayment(paymentId)
+    await deleteExpense(expId, currentUser?.name)
     reload()
   }
 
@@ -139,15 +91,6 @@ export default function GroupDetail() {
   if (loading) return <LoadingSpinner />
   if (!group)  return <p className="p-5 text-gray-500">Group not found.</p>
 
-  // Only people who actually bore something here can record a payment. A
-  // member who neither paid for anything nor owes a share has no debt to
-  // settle, so the form would be meaningless for them. Admins keep access
-  // because they do data entry on everyone's behalf.
-  const myBalance = settlement?.balances?.find(
-    (b) => b.member.toLowerCase() === currentUser?.name?.toLowerCase()
-  )
-  const isInvolved = !!myBalance && (Math.abs(myBalance.paid) > 0.01 || Math.abs(myBalance.share) > 0.01)
-  const canRecordPayment = isInvolved || isAdmin(currentUser)
 
   // Horizontal bar chart (member names on y-axis)
   const memberChartData = {
@@ -797,12 +740,9 @@ export default function GroupDetail() {
                 ))}
                 {/* Still outstanding — tap one to pre-fill the payment form */}
                 {settlement.transactions.map((t, i) => (
-                  <button
+                  <div
                     key={`pending-${i}`}
-                    type="button"
-                    onClick={() => canRecordPayment && prefillPayment(t)}
-                    title={canRecordPayment ? 'Record this payment' : undefined}
-                    className="w-full text-left flex items-center gap-2 bg-red-50 border border-red-100 rounded-md px-3 py-2.5 hover:bg-red-100 active:scale-[0.99] transition-all"
+                    className="w-full text-left flex items-center gap-2 bg-red-50 border border-red-100 rounded-md px-3 py-2.5"
                   >
                     <span className="font-bold text-sm text-red-700 flex-shrink-0">{t.from_member}</span>
                     <svg className="w-4 h-4 text-red-400 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -810,102 +750,18 @@ export default function GroupDetail() {
                     </svg>
                     <span className="font-bold text-sm text-red-700 flex-1 min-w-0 truncate">{t.to_member}</span>
                     <span className="font-black text-brand-700 text-sm flex-shrink-0">{INR(t.amount)}</span>
-                  </button>
+                  </div>
                 ))}
               </div>
             )}
           </div>
 
-          {/* ── Record a payment — only for people with a stake here ── */}
-          {!canRecordPayment ? (
-            <div className="card md:col-span-2">
-              <h3 className="text-xs font-bold text-gray-500 mb-1">Record a payment</h3>
-              <p className="text-xs text-gray-400 leading-relaxed">
-                You haven't paid for anything or owe a share in this group, so there's
-                nothing for you to settle here.
-              </p>
-            </div>
-          ) : (
+          {/* Recorded payments — read only. Recording now happens from the
+              Friends page, which covers every group in one place. */}
+          {settlement.payments?.length > 0 && (
           <div className="card md:col-span-2">
-            <h3 className="text-xs font-bold text-gray-500 mb-1">Record a payment</h3>
-            <p className="text-xs text-gray-400 mb-3">
-              Logging a real transfer reduces what one person owes the other — or clears it entirely.
-              {settlement.transactions.length > 0 && ' Tap a row above to fill this in.'}
-            </p>
-
-            <form onSubmit={handleRecordPayment} className="space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="label">Who paid</label>
-                  <select
-                    className="input"
-                    value={payForm.from_member}
-                    onChange={(ev) => setPayForm((f) => ({ ...f, from_member: ev.target.value }))}
-                  >
-                    <option value="">Select…</option>
-                    {group.members.map((m) => <option key={m.id} value={m.name}>{m.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="label">Paid to</label>
-                  <select
-                    className="input"
-                    value={payForm.to_member}
-                    onChange={(ev) => setPayForm((f) => ({ ...f, to_member: ev.target.value }))}
-                  >
-                    <option value="">Select…</option>
-                    {group.members.map((m) => <option key={m.id} value={m.name}>{m.name}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="label">Amount (₹)</label>
-                  <input
-                    className="input font-bold"
-                    type="number"
-                    min="0.01"
-                    step="0.01"
-                    placeholder="0"
-                    value={payForm.amount}
-                    onChange={(ev) => setPayForm((f) => ({ ...f, amount: ev.target.value }))}
-                  />
-                </div>
-                <div>
-                  <label className="label">Date</label>
-                  <input
-                    className="input"
-                    type="date"
-                    value={payForm.date}
-                    onChange={(ev) => setPayForm((f) => ({ ...f, date: ev.target.value }))}
-                  />
-                </div>
-              </div>
-
+            <h4 className="text-xs font-bold text-gray-500 mb-2">Recorded payments</h4>
               <div>
-                <label className="label">Note (optional)</label>
-                <input
-                  className="input"
-                  placeholder="e.g. UPI, cash"
-                  value={payForm.note}
-                  onChange={(ev) => setPayForm((f) => ({ ...f, note: ev.target.value }))}
-                />
-              </div>
-
-              {payError && (
-                <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{payError}</p>
-              )}
-
-              <button type="submit" className="btn-primary" disabled={paySaving}>
-                {paySaving ? 'Recording…' : 'Record payment'}
-              </button>
-            </form>
-
-            {/* Payments already recorded */}
-            {settlement.payments?.length > 0 && (
-              <div className="mt-5 border-t border-amber-200 pt-4">
-                <h4 className="text-xs font-bold text-gray-500 mb-2">Recorded payments</h4>
                 <div className="space-y-2">
                   {settlement.payments.map((p) => (
                     <div key={p.id} className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-md px-3 py-2">
@@ -920,16 +776,6 @@ export default function GroupDetail() {
                       </span>
                       <span className="text-xs text-gray-400 flex-shrink-0 hidden sm:inline">{p.date || ''}</span>
                       <span className="font-black text-green-700 text-sm flex-shrink-0">{INR(p.amount)}</span>
-                      <button
-                        type="button"
-                        onClick={() => handleDeletePayment(p.id)}
-                        className="p-1 text-gray-300 hover:text-red-500 transition-colors flex-shrink-0"
-                        title="Remove this payment"
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
                     </div>
                   ))}
                 </div>

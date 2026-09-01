@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getFriends } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
+import RecordPaymentModal from '../components/RecordPaymentModal'
 import { useUser } from '../UserContext'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
@@ -40,11 +41,14 @@ export default function Friends() {
 
   const [friends, setFriends] = useState([])
   const [loading, setLoading] = useState(true)
+  const [payOpen, setPayOpen] = useState(false)
 
-  useEffect(() => {
+  const load = () => {
     if (!user?.name) { setLoading(false); return }
-    getFriends(user.name).then((r) => setFriends(r.data)).finally(() => setLoading(false))
-  }, [user?.name])
+    return getFriends(user.name).then((r) => setFriends(r.data)).finally(() => setLoading(false))
+  }
+
+  useEffect(() => { load() }, [user?.name])
 
   if (loading) return <LoadingSpinner />
 
@@ -54,8 +58,24 @@ export default function Friends() {
   return (
     <div className="pb-24 md:pb-8">
       <div className="px-5 pt-10 md:pt-6 pb-4 bg-cream sticky top-0 z-10 border-b border-amber-100/60">
-        <h1 className="text-xl font-black tracking-tight">Friends</h1>
-        <p className="text-xs text-gray-400 mt-1">Everyone who's shared a group with you</p>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-xl font-black tracking-tight">Friends</h1>
+            <p className="text-xs text-gray-400 mt-1">Everyone who's shared a group with you</p>
+          </div>
+          {/* Record a payment for any group, from one place */}
+          <button
+            onClick={() => setPayOpen(true)}
+            title="Record a payment"
+            aria-label="Record a payment"
+            className="flex-shrink-0 flex items-center gap-1.5 bg-brand-400 hover:bg-brand-500 text-white rounded-md px-3 py-2 text-xs font-bold active:scale-95 transition-all shadow-sm"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 9v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Record
+          </button>
+        </div>
       </div>
 
       <div className="px-5 mt-4 space-y-2">
@@ -74,6 +94,10 @@ export default function Friends() {
           </div>
         )}
       </div>
+
+      {payOpen && (
+        <RecordPaymentModal onClose={() => setPayOpen(false)} onSaved={load} />
+      )}
     </div>
   )
 }

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { updateExpense } from '../api'
+import { useUser } from '../UserContext'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 const r2  = (n) => Math.round(n * 100) / 100
@@ -21,6 +22,7 @@ const CATEGORIES = [
  * Amount is editable. Custom split uses % inputs; amounts are derived.
  */
 export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
+  const currentUser = useUser()
   const members = group.members.map((m) => m.name)
 
   // Parse existing split_json to derive initial percentages
@@ -229,7 +231,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
 
     setSaving(true)
     try {
-      await updateExpense(expense.id, payload)
+      await updateExpense(expense.id, { ...payload, recorded_by: currentUser?.name || null })
       onSave()
     } catch {
       setError('Failed to save. Please try again.')

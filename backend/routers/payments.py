@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from activity import record_activity
@@ -22,6 +23,40 @@ def list_payments(group_id: int, db: Session = Depends(get_db)):
         .order_by(Payment.date.desc(), Payment.id.desc())
         .all()
     )
+
+
+@router.get("/between", response_model=list[dict])
+def payments_between(a: str, b: str, db: Session = Depends(get_db)):
+    """Every payment in either direction between two people, newest first.
+
+    Carries the group name and the exact time it was recorded, so a friend's
+    page can show who paid whom and when.
+    """
+    al, bl = a.strip().lower(), b.strip().lower()
+    rows = (
+        db.query(Payment)
+        .filter(
+            or_(
+                and_(func.lower(Payment.from_member) == al, func.lower(Payment.to_member) == bl),
+                and_(func.lower(Payment.from_member) == bl, func.lower(Payment.to_member) == al),
+            )
+        )
+        .all()
+    )
+    groups = {g.id: g.name for g in db.query(Group).all()}
+    out = [{
+        "id": p.id,
+        "group_id": p.group_id,
+        "group_name": groups.get(p.group_id, ""),
+        "from_member": p.from_member,
+        "to_member": p.to_member,
+        "amount": p.amount,
+        "date": p.date,
+        "note": p.note,
+        "recorded_at": p.created_at.isoformat() if p.created_at else None,
+    } for p in rows]
+    out.sort(key=lambda r: (r["recorded_at"] or "", r["id"]), reverse=True)
+    return out
 
 
 @router.post("/", response_model=PaymentOut, status_code=201)

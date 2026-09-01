@@ -224,6 +224,7 @@ export default function AddExpense() {
         notes:        form.notes || null,
         split_json:   buildSplitJson(),
         payment_mode: form.payment_mode || null,
+        recorded_by:  user?.name || null,
       })
       localStorage.setItem(STORED_GROUP_KEY, form.group_id)
       setSuccessCount((n) => n + 1)
