@@ -97,6 +97,10 @@ def main() -> int:
     # expense's date, so "23 Apr 26 Burhanpur" stays a single trip rather than
     # fragmenting into one group per day.
     keep_name = "--keep-name" in sys.argv
+    # Normally a zero share for someone not in the destination is dropped from
+    # split_json (lossless tidying). --keep-splits leaves split_json exactly as
+    # recorded, for when the splits must not be altered at all.
+    keep_splits = "--keep-splits" in sys.argv
     fixes: dict[int, str] = {}
     for i, a in enumerate(sys.argv):
         if a == "--fix-date":
@@ -163,7 +167,7 @@ def main() -> int:
             e.group_id = dest.id
             # split_json may still carry a 0 for someone not in the destination;
             # dropping it is lossless and keeps the group's breakdown clean.
-            if e.split_json:
+            if e.split_json and not keep_splits:
                 try:
                     sj = json.loads(e.split_json)
                     keep = {k: v for k, v in sj.items()
