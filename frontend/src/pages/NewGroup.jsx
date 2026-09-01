@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createGroup } from '../api'
+import { useUser } from '../UserContext'
 
 export default function NewGroup() {
   const nav = useNavigate()
+  const user = useUser()
   const [form, setForm]             = useState({ name: '', description: '', category: '' })
   const [memberInput, setMInput]    = useState('')
   const [members, setMembers]       = useState([])
@@ -27,7 +29,7 @@ export default function NewGroup() {
 
     setSubmitting(true)
     try {
-      const r = await createGroup({ ...form, emoji: '', members })
+      const r = await createGroup({ ...form, emoji: '', members, created_by: user?.name })
       nav(`/groups/${r.data.id}`)
     } catch (err) {
       setError(err?.response?.data?.detail || 'Something went wrong')

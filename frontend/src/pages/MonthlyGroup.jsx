@@ -58,6 +58,7 @@ export default function MonthlyGroup() {
         category:    'personal',
         emoji:       '💰',
         members:     [user.name],
+        created_by:  user.name,
       })
       nav(`/groups/${r.data.id}`)
     } catch (err) {

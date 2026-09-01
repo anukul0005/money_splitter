@@ -1,62 +1,64 @@
 import { useEffect, useMemo, useState } from 'react'
-import { getGroups, createPayment } from '../api'
+import { getGroups, createPaymentAuto } from '../api'
 import { useUser } from '../UserContext'
 
+const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
+
 /**
- * Record a payment from anywhere — pick the group, then who paid whom.
+ * Record a payment from anywhere — just who paid whom, and how much.
  *
- * Payments belong to a group (that's what they settle), so the group comes
- * first and the member dropdowns follow from it. Only groups the current user
- * belongs to are offered, and `prefillFriend` preselects the group list down
- * to ones shared with that person.
+ * No group picker: a payment settles a debt, and the debt already lives in
+ * specific groups, so the server places the amount against the outstanding
+ * balance (largest first, split across groups if one doesn't cover it).
+ * `prefillFriend` preselects the other side.
  */
 export default function RecordPaymentModal({ onClose, onSaved, prefillFriend }) {
   const user = useUser()
 
-  const [groups, setGroups]   = useState([])
+  const [people, setPeople]   = useState([])
   const [loading, setLoading] = useState(true)
   const [form, setForm] = useState({
-    group_id: '', from_member: '', to_member: '', amount: '', note: '',
+    from_member: '', to_member: prefillFriend || '', amount: '', note: '',
     date: new Date().toISOString().slice(0, 10),
   })
   const [error, setError] = useState('')
   const [busy, setBusy]   = useState(false)
 
+  // Everyone who shares an active group with the current user, plus the user
   useEffect(() => {
     getGroups()
       .then((r) => {
         const mine = r.data.filter((g) =>
           !g.is_historical &&
-          (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase()) &&
-          (!prefillFriend || (g.member_names ?? []).some((n) => n.toLowerCase() === prefillFriend.toLowerCase()))
+          (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase())
         )
-        setGroups(mine)
-        if (mine.length === 1) setForm((f) => ({ ...f, group_id: String(mine[0].id) }))
+        const seen = new Map()
+        mine.forEach((g) => (g.member_names ?? []).forEach((n) => {
+          if (!seen.has(n.toLowerCase())) seen.set(n.toLowerCase(), n)
+        }))
+        const names = [...seen.values()].sort((a, b) => a.localeCompare(b))
+        setPeople(names)
+        setForm((f) => ({
+          ...f,
+          from_member: f.from_member || names.find((n) => n.toLowerCase() === user?.name?.toLowerCase()) || '',
+          to_member: f.to_member || (prefillFriend
+            ? names.find((n) => n.toLowerCase() === prefillFriend.toLowerCase()) || ''
+            : ''),
+        }))
       })
-      .catch(() => setGroups([]))
+      .catch(() => setPeople([]))
       .finally(() => setLoading(false))
   }, [user?.name, prefillFriend])
 
-  const selected = useMemo(
-    () => groups.find((g) => String(g.id) === String(form.group_id)),
-    [groups, form.group_id]
-  )
-
-  // Sensible default once a group is chosen: you paying the friend
-  useEffect(() => {
-    if (!selected) return
-    const names = selected.member_names ?? []
-    const me = names.find((n) => n.toLowerCase() === user?.name?.toLowerCase()) || ''
-    const them = prefillFriend
-      ? names.find((n) => n.toLowerCase() === prefillFriend.toLowerCase()) || ''
-      : ''
-    setForm((f) => ({ ...f, from_member: f.from_member || me, to_member: f.to_member || them }))
-  }, [selected, user?.name, prefillFriend])
+  const preview = useMemo(() => {
+    const amt = parseFloat(form.amount)
+    if (!form.from_member || !form.to_member || !amt || amt <= 0) return ''
+    return `${form.from_member} paid ${form.to_member} ${INR(amt)}`
+  }, [form.from_member, form.to_member, form.amount])
 
   const submit = async (e) => {
     e.preventDefault()
     setError('')
-    if (!form.group_id) return setError('Pick the group this payment settles.')
     if (!form.from_member || !form.to_member) return setError('Pick who paid whom.')
     if (form.from_member === form.to_member) return setError('A payment needs two different people.')
     const amt = parseFloat(form.amount)
@@ -64,8 +66,7 @@ export default function RecordPaymentModal({ onClose, onSaved, prefillFriend }) 
 
     setBusy(true)
     try {
-      await createPayment({
-        group_id: Number(form.group_id),
+      await createPaymentAuto({
         from_member: form.from_member,
         to_member: form.to_member,
         amount: amt,
@@ -82,8 +83,6 @@ export default function RecordPaymentModal({ onClose, onSaved, prefillFriend }) 
     }
   }
 
-  const members = selected?.member_names ?? []
-
   return (
     <div
       className="fixed inset-0 bg-field-950/80 flex items-center justify-center z-50 px-5"
@@ -93,65 +92,47 @@ export default function RecordPaymentModal({ onClose, onSaved, prefillFriend }) 
         className="bg-cream border border-amber-200 rounded-xl shadow-2xl w-full max-w-sm max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-amber-200">
-          <h3 className="text-sm font-bold text-gray-800">Record a payment</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-amber-200">
+          <h3 className="text-xs font-bold text-gray-800">Record a payment</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-base leading-none">×</button>
         </div>
 
-        <form onSubmit={submit} className="p-5 space-y-3">
-          <p className="text-xs text-gray-500 leading-relaxed">
+        <form onSubmit={submit} className="p-4 space-y-2.5">
+          <p className="text-[11px] text-gray-500 leading-snug">
             Logging a real transfer reduces what one person owes the other — or clears it.
+            It's applied to whichever groups that debt sits in.
           </p>
 
-          <div>
-            <label className="label">Group</label>
-            <select
-              className="input"
-              value={form.group_id}
-              onChange={(e) => setForm((f) => ({ ...f, group_id: e.target.value, from_member: '', to_member: '' }))}
-            >
-              <option value="">{loading ? 'Loading…' : 'Select a group…'}</option>
-              {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-            </select>
-            {!loading && groups.length === 0 && (
-              <p className="text-[10px] text-gray-400 mt-1">
-                No shared groups{prefillFriend ? ` with ${prefillFriend}` : ''}.
-              </p>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-2.5">
             <div>
-              <label className="label">Who paid</label>
+              <label className="label text-[10px] mb-1">Who paid</label>
               <select
-                className="input"
+                className="input py-2.5"
                 value={form.from_member}
-                disabled={!selected}
                 onChange={(e) => setForm((f) => ({ ...f, from_member: e.target.value }))}
               >
-                <option value="">Select…</option>
-                {members.map((m) => <option key={m} value={m}>{m}</option>)}
+                <option value="">{loading ? 'Loading…' : 'Select…'}</option>
+                {people.map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
             </div>
             <div>
-              <label className="label">Paid to</label>
+              <label className="label text-[10px] mb-1">Paid to</label>
               <select
-                className="input"
+                className="input py-2.5"
                 value={form.to_member}
-                disabled={!selected}
                 onChange={(e) => setForm((f) => ({ ...f, to_member: e.target.value }))}
               >
-                <option value="">Select…</option>
-                {members.map((m) => <option key={m} value={m}>{m}</option>)}
+                <option value="">{loading ? 'Loading…' : 'Select…'}</option>
+                {people.map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-2.5">
             <div>
-              <label className="label">Amount (₹)</label>
+              <label className="label text-[10px] mb-1">Amount (₹)</label>
               <input
-                className="input font-bold"
+                className="input py-2.5 font-bold"
                 type="number"
                 min="0.01"
                 step="0.01"
@@ -161,9 +142,9 @@ export default function RecordPaymentModal({ onClose, onSaved, prefillFriend }) 
               />
             </div>
             <div>
-              <label className="label">Date</label>
+              <label className="label text-[10px] mb-1">Date</label>
               <input
-                className="input"
+                className="input py-2.5"
                 type="date"
                 value={form.date}
                 onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
@@ -172,20 +153,26 @@ export default function RecordPaymentModal({ onClose, onSaved, prefillFriend }) 
           </div>
 
           <div>
-            <label className="label">Note (optional)</label>
+            <label className="label text-[10px] mb-1">Note (optional)</label>
             <input
-              className="input"
+              className="input py-2.5"
               placeholder="e.g. UPI, cash"
               value={form.note}
               onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
             />
           </div>
 
-          {error && (
-            <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{error}</p>
+          {preview && (
+            <p className="text-[11px] font-bold text-gray-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">
+              {preview}
+            </p>
           )}
 
-          <button type="submit" className="btn-primary" disabled={busy}>
+          {error && (
+            <p className="text-[11px] text-red-600 bg-red-50 border border-red-100 rounded-md px-2.5 py-1.5">{error}</p>
+          )}
+
+          <button type="submit" className="btn-primary text-sm py-2.5" disabled={busy}>
             {busy ? 'Recording…' : 'Record payment'}
           </button>
         </form>

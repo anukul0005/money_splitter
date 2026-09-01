@@ -138,6 +138,7 @@ class GroupBase(BaseModel):
 
 class GroupCreate(GroupBase):
     members: list[str]           # just names at creation time
+    created_by: Optional[str] = None   # whose profile it was created from
 
 class GroupOut(GroupBase):
     id: int
@@ -154,6 +155,7 @@ class GroupUpdate(BaseModel):
     category: Optional[str] = None
     members_add: list[str] = []
     members_remove: list[int] = []
+    updated_by: Optional[str] = None
 
 class GroupSummary(BaseModel):
     id: int
@@ -208,6 +210,24 @@ class PaymentCreate(BaseModel):
         if v <= 0:
             raise ValueError("amount must be positive")
         return round(v, 2)
+
+
+class PaymentAuto(BaseModel):
+    """Same as PaymentCreate minus the group — the server picks it from the debt."""
+    from_member: str
+    to_member: str
+    amount: float
+    date: Optional[str] = None
+    note: Optional[str] = None
+    recorded_by: Optional[str] = None
+
+    @field_validator("amount")
+    @classmethod
+    def amount_must_be_positive(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("amount must be positive")
+        return round(v, 2)
+
 
 class PaymentOut(BaseModel):
     id: int

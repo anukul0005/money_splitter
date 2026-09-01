@@ -88,7 +88,7 @@ def create_group(payload: GroupCreate, db: Session = Depends(get_db)):
     # it reuses the "personal" category, so the name is what identifies it.
     kind = "monthly group" if group.name.upper().startswith("MONTHLY EXPENSES") else "group"
     record_activity(
-        db, group, None, f"created a new {kind}",
+        db, group, (payload.created_by or "").strip() or None, f"created a new {kind}",
         f"{group.name} · {len(payload.members)} member{'s' if len(payload.members) != 1 else ''}",
     )
 
@@ -140,7 +140,7 @@ def update_group(group_id: int, payload: GroupUpdate, db: Session = Depends(get_
             db.add(Member(group_id=group_id, name=stripped))
             existing_names.add(stripped.lower())
 
-    record_activity(db, group, None, "updated the group", group.name)
+    record_activity(db, group, (payload.updated_by or "").strip() or None, "updated the group", group.name)
 
     db.commit()
     db.refresh(group)

@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { getGroup, updateGroup } from '../api/index.js'
 import LoadingSpinner from '../components/LoadingSpinner'
+import { useUser } from '../UserContext'
 
 export default function EditGroup() {
   const { id } = useParams()
   const nav = useNavigate()
+  const user = useUser()
 
   const [loading, setLoading]           = useState(true)
   const [submitting, setSubmitting]     = useState(false)
@@ -73,6 +75,7 @@ export default function EditGroup() {
         is_historical: isHistorical,
         members_add: membersAdd,
         members_remove: toRemove,
+        updated_by: user?.name,
       })
       nav(`/groups/${id}`)
     } catch (err) {
