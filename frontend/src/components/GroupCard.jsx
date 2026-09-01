@@ -15,12 +15,12 @@ export default function GroupCard({ group, friendBalance }) {
 
   return (
     <div
-      className="card flex items-center gap-3 cursor-pointer active:scale-[0.98] transition-transform"
+      className="card p-3.5 flex items-center gap-2.5 cursor-pointer active:scale-[0.98] transition-transform"
       onClick={() => nav(`/groups/${group.id}`)}
     >
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2">
-          <p className="font-bold text-gray-900 min-w-0 flex-1 leading-snug">{group.name}</p>
+          <p className="text-sm font-bold text-gray-900 min-w-0 flex-1 leading-snug">{group.name}</p>
           <span className="font-black text-brand-600 whitespace-nowrap text-sm flex-shrink-0">{INR(group.total_amount)}</span>
         </div>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
@@ -53,7 +53,7 @@ export default function GroupCard({ group, friendBalance }) {
           </p>
         )}
       </div>
-      <svg className="w-4 h-4 text-gray-300 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+      <svg className="w-3.5 h-3.5 text-gray-300 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
       </svg>
     </div>

@@ -206,25 +206,25 @@ export default function Home() {
         {userStats && userStats.groups_count > 0 && (
           <div>
             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">
-              {user?.name}'s Overview
+              Overview
             </p>
             <div className="grid grid-cols-2 gap-3">
               <button
                 onClick={() => nav('/balances/owe')}
-                className="card text-center py-4 bg-red-50 border-red-200 active:scale-[0.98] transition-transform"
+                className="card text-center py-3 px-3 bg-red-50 border-red-200 active:scale-[0.98] transition-transform"
               >
                 <p className="text-[10px] text-red-500 font-semibold uppercase tracking-wide leading-tight">You Owe</p>
-                <p className="text-lg font-black text-red-600 mt-1">{INR(totalOwe)}</p>
+                <p className="text-base font-black text-red-600 mt-0.5">{INR(totalOwe)}</p>
                 <p className="text-[10px] text-red-400 mt-0.5">
                   {owePeople ? `${owePeople} ${owePeople === 1 ? 'person' : 'people'} →` : 'all settled'}
                 </p>
               </button>
               <button
                 onClick={() => nav('/balances/owed')}
-                className="card text-center py-4 bg-green-50 border-green-200 active:scale-[0.98] transition-transform"
+                className="card text-center py-3 px-3 bg-green-50 border-green-200 active:scale-[0.98] transition-transform"
               >
                 <p className="text-[10px] text-green-600 font-semibold uppercase tracking-wide leading-tight">Owed to You</p>
-                <p className="text-lg font-black text-green-600 mt-1">{INR(totalOwed)}</p>
+                <p className="text-base font-black text-green-600 mt-0.5">{INR(totalOwed)}</p>
                 <p className="text-[10px] text-green-500 mt-0.5">
                   {owedPeople ? `${owedPeople} ${owedPeople === 1 ? 'person' : 'people'} →` : 'all settled'}
                 </p>
@@ -236,17 +236,17 @@ export default function Home() {
         {/* Admin quick actions */}
         {admin && (
           <div className="grid grid-cols-3 gap-3">
-            <button className="btn-primary py-3 text-sm" onClick={() => nav('/groups/new')}>
+            <button className="btn-primary py-2.5 px-3 text-xs" onClick={() => nav('/groups/new')}>
               + New Group
             </button>
             <button
-              className="bg-cream border border-amber-200 rounded-md hover:bg-cream-200 active:scale-95 text-gray-800 font-bold px-4 py-3 transition-all duration-150 w-full text-center text-sm"
+              className="bg-cream border border-amber-200 rounded-md hover:bg-cream-200 active:scale-95 text-gray-800 font-bold px-3 py-2.5 transition-all duration-150 w-full text-center text-xs"
               onClick={() => nav('/add')}
             >
               + Add Expense
             </button>
             <button
-              className="bg-amber-100 border border-amber-300 rounded-md text-amber-800 hover:bg-amber-200 active:scale-95 font-bold px-4 py-3 transition-all duration-150 w-full text-center text-sm"
+              className="bg-amber-100 border border-amber-300 rounded-md text-amber-800 hover:bg-amber-200 active:scale-95 font-bold px-3 py-2.5 transition-all duration-150 w-full text-center text-xs"
               onClick={() => nav('/groups/monthly')}
             >
               + Monthly
