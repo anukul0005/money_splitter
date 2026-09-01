@@ -61,7 +61,7 @@ export default function AdminRecovery() {
     e.preventDefault()
     setError('')
     if (!adminName.trim()) return setError('Enter your admin username.')
-    if (!adminAnswer.trim()) return setError('Enter your 6-digit recovery key.')
+    if (!adminAnswer.trim()) return setError('Enter your recovery answer.')
     setUnlocked(true)
     setTarget(adminName.trim())
     setQTarget('')
@@ -124,7 +124,7 @@ export default function AdminRecovery() {
         <div className="px-6 py-4 border-b border-amber-200">
           <h2 className="text-sm font-bold text-gray-800">Admin recovery</h2>
           <p className="text-xs text-gray-400 mt-0.5">
-            {unlocked ? `Signed in as ${adminName}` : 'Unlock with your own 6-digit key'}
+            {unlocked ? `Signed in as ${adminName}` : 'Unlock with your own recovery answer'}
           </p>
         </div>
 
@@ -149,15 +149,26 @@ export default function AdminRecovery() {
                 )}
               </div>
 
+              {/* An admin whose recovery is an ordinary question, not a passkey,
+                  could never type their answer here: the field stripped every
+                  non-digit and capped at six characters. */}
               <div>
-                <label className="label">Your 6-digit recovery key</label>
+                <label className="label">
+                  {question && question !== KEY_QUESTION ? question : 'Your 6-digit recovery key'}
+                </label>
                 <input
-                  className="input tracking-[0.3em] font-bold"
-                  inputMode="numeric"
-                  maxLength={6}
-                  placeholder="000000"
+                  className={question && question !== KEY_QUESTION ? 'input' : 'input tracking-[0.3em] font-bold'}
+                  inputMode={question && question !== KEY_QUESTION ? 'text' : 'numeric'}
+                  maxLength={question && question !== KEY_QUESTION ? 100 : 6}
+                  placeholder={question && question !== KEY_QUESTION ? 'Your answer' : '000000'}
                   value={adminAnswer}
-                  onChange={(e) => setAdminKey(e.target.value.replace(/\D/g, ''))}
+                  onChange={(e) =>
+                    setAdminKey(
+                      question && question !== KEY_QUESTION
+                        ? e.target.value
+                        : e.target.value.replace(/\D/g, '')
+                    )
+                  }
                 />
               </div>
 

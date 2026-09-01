@@ -31,6 +31,12 @@ from models import Group, User
 TOKEN_TTL = timedelta(days=30)
 _SECRET_FILE = Path(__file__).with_name(".secret_key")
 
+# Sent only when the *session* is bad, never when a password, passkey or
+# one-time code is wrong. The client signs the user out on this and nothing
+# else — otherwise mistyping an admin passkey logs the admin out, which is
+# exactly what happened when any 401 was treated as an expired session.
+SESSION_EXPIRED = "Sign in to continue"
+
 
 def _secret() -> bytes:
     """Server signing key, stable across restarts.
@@ -92,11 +98,11 @@ def current_user(request: Request, db: Session = Depends(get_db)) -> User:
     token = header[7:].strip() if header.lower().startswith("bearer ") else ""
     payload = read_token(token) if token else None
     if not payload:
-        raise HTTPException(401, "Sign in to continue")
+        raise HTTPException(401, SESSION_EXPIRED, headers={"WWW-Authenticate": "Bearer"})
 
     user = db.query(User).filter(User.id == payload["uid"]).first()
     if not user:
-        raise HTTPException(401, "Sign in to continue")
+        raise HTTPException(401, SESSION_EXPIRED, headers={"WWW-Authenticate": "Bearer"})
     return user
 
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { adminIssueCode, listUsersBasic, getRecoveryQuestion } from '../api'
 import { useUser, isAdmin } from '../UserContext'
+import { KEY_QUESTION } from '../utils/security'
 
 /**
  * Admin-only: mint a one-time 6-digit code for another user.
@@ -24,6 +25,7 @@ export default function AdminCodes() {
   const [error, setError]     = useState('')
   const [busy, setBusy]       = useState(false)
   const [needs, setNeeds]     = useState({})     // name -> has_recovery
+  const [myQuestion, setMyQuestion] = useState('')   // the admin's own question
 
   useEffect(() => {
     listUsersBasic()
@@ -41,13 +43,25 @@ export default function AdminCodes() {
         setNeeds(flags)
       })
       .catch(() => setUsers([]))
+
+    // Which question this admin actually set. The field used to assume a
+    // 6-digit passkey and strip anything else, so an admin whose recovery is
+    // a normal question could never authorise here at all.
+    if (user?.name) {
+      getRecoveryQuestion(user.name)
+        .then((r) => setMyQuestion(r.data.question || ''))
+        .catch(() => setMyQuestion(''))
+    }
   }, [user?.name])
+
+  const usesKey = myQuestion === KEY_QUESTION || !myQuestion
 
   const handleIssue = async (e) => {
     e.preventDefault()
     setError(''); setIssued(null)
     if (!target) return setError('Pick who the code is for.')
-    if (passkey.length !== 6) return setError('Enter your own 6-digit passkey.')
+    if (usesKey && passkey.length !== 6) return setError('Enter your own 6-digit passkey.')
+    if (!usesKey && passkey.trim().length < 3) return setError('Enter the answer to your security question.')
     setBusy(true)
     try {
       const r = await adminIssueCode({
@@ -102,17 +116,21 @@ export default function AdminCodes() {
             </div>
 
             <div>
-              <label className="label">Your 6-digit passkey</label>
+              <label className="label">
+                {usesKey ? 'Your 6-digit passkey' : myQuestion}
+              </label>
               <input
-                className="input tracking-[0.3em] font-bold"
-                inputMode="numeric"
-                maxLength={6}
-                placeholder="000000"
+                className={usesKey ? 'input tracking-[0.3em] font-bold' : 'input'}
+                inputMode={usesKey ? 'numeric' : 'text'}
+                maxLength={usesKey ? 6 : 100}
+                placeholder={usesKey ? '000000' : 'Your answer'}
                 value={passkey}
-                onChange={(e) => setPasskey(e.target.value.replace(/\D/g, ''))}
+                onChange={(e) =>
+                  setPasskey(usesKey ? e.target.value.replace(/\D/g, '') : e.target.value)
+                }
               />
               <p className="text-[10px] text-gray-400 mt-1">
-                The recovery key on your own account — confirms it's really you.
+                Your own account's recovery answer — confirms it's really you.
               </p>
             </div>
 

@@ -24,10 +24,19 @@ api.interceptors.request.use((config) => {
 
 // An expired or missing token means the stored session is useless — clear it
 // and show the login screen rather than leaving a half-broken page up.
+//
+// Only this exact message signs you out. 401 also means "wrong password",
+// "wrong passkey" and "wrong one-time code", and treating those the same way
+// logged an admin out the moment they mistyped their passkey while issuing a
+// code — the one screen where being logged in matters most.
+const SESSION_EXPIRED = 'Sign in to continue'
+
 api.interceptors.response.use(
   (r) => r,
   (err) => {
-    if (err.response?.status === 401 && getToken()) {
+    const sessionGone =
+      err.response?.status === 401 && err.response?.data?.detail === SESSION_EXPIRED
+    if (sessionGone && getToken()) {
       localStorage.removeItem(SESSION_KEY)
       window.location.reload()
     }
