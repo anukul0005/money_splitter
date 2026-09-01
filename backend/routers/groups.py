@@ -1,8 +1,9 @@
 import json
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from auth import current_user, is_member, member_group
 from database import get_db
-from models import Group, Member, Expense
+from models import Group, Member, Expense, User
 from schemas import GroupCreate, GroupOut, GroupSummary, GroupUpdate
 from activity import record_activity
 
@@ -45,8 +46,10 @@ def _settle_all_expenses(group: Group, db: Session):
 
 
 @router.get("/", response_model=list[GroupSummary])
-def list_groups(db: Session = Depends(get_db)):
-    groups = db.query(Group).all()
+def list_groups(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Only the caller's own groups — the client used to receive all of them
+    and filter in React, which meant the data had already left the server."""
+    groups = [g for g in db.query(Group).all() if is_member(g, caller)]
     rows = []
     for g in groups:
         total = sum(e.amount for e in g.expenses)
@@ -71,7 +74,8 @@ def list_groups(db: Session = Depends(get_db)):
 
 
 @router.post("/", response_model=GroupOut, status_code=201)
-def create_group(payload: GroupCreate, db: Session = Depends(get_db)):
+def create_group(payload: GroupCreate, db: Session = Depends(get_db),
+                 caller: User = Depends(current_user)):
     group = Group(
         name=payload.name,
         description=payload.description,
@@ -89,7 +93,9 @@ def create_group(payload: GroupCreate, db: Session = Depends(get_db)):
     # it reuses the "personal" category, so the name is what identifies it.
     kind = "monthly group" if group.name.upper().startswith("MONTHLY EXPENSES") else "group"
     record_activity(
-        db, group, (payload.created_by or "").strip() or None, f"created a new {kind}",
+        # Actor comes from the token, never the payload — a client shouldn't
+        # be able to attribute its own action to someone else.
+        db, group, caller.name, f"created a new {kind}",
         f"{group.name} · {len(payload.members)} member{'s' if len(payload.members) != 1 else ''}",
     )
 
@@ -99,18 +105,15 @@ def create_group(payload: GroupCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/{group_id}", response_model=GroupOut)
-def get_group(group_id: int, db: Session = Depends(get_db)):
-    group = db.query(Group).filter(Group.id == group_id).first()
-    if not group:
-        raise HTTPException(404, "Group not found")
-    return group
+def get_group(group_id: int, db: Session = Depends(get_db),
+              caller: User = Depends(current_user)):
+    return member_group(group_id, caller, db)
 
 
 @router.patch("/{group_id}", response_model=GroupOut)
-def update_group(group_id: int, payload: GroupUpdate, db: Session = Depends(get_db)):
-    group = db.query(Group).filter(Group.id == group_id).first()
-    if not group:
-        raise HTTPException(404, "Group not found")
+def update_group(group_id: int, payload: GroupUpdate, db: Session = Depends(get_db),
+                 caller: User = Depends(current_user)):
+    group = member_group(group_id, caller, db)
 
     if payload.name is not None:
         group.name = payload.name
@@ -141,7 +144,7 @@ def update_group(group_id: int, payload: GroupUpdate, db: Session = Depends(get_
             db.add(Member(group_id=group_id, name=stripped))
             existing_names.add(stripped.lower())
 
-    record_activity(db, group, (payload.updated_by or "").strip() or None, "updated the group", group.name)
+    record_activity(db, group, caller.name, "updated the group", group.name)
 
     db.commit()
     db.refresh(group)
@@ -149,9 +152,8 @@ def update_group(group_id: int, payload: GroupUpdate, db: Session = Depends(get_
 
 
 @router.delete("/{group_id}", status_code=204)
-def delete_group(group_id: int, db: Session = Depends(get_db)):
-    group = db.query(Group).filter(Group.id == group_id).first()
-    if not group:
-        raise HTTPException(404, "Group not found")
+def delete_group(group_id: int, db: Session = Depends(get_db),
+                 caller: User = Depends(current_user)):
+    group = member_group(group_id, caller, db)
     db.delete(group)
     db.commit()

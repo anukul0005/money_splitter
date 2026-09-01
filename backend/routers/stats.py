@@ -4,16 +4,18 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from collections import defaultdict
 import json as _json
+from auth import current_user, is_member, member_group
 from database import get_db
-from models import Group
+from models import Group, User
 from schemas import GroupStats, CategoryStat, MemberStat, TimelineStat
 
 router = APIRouter(prefix="/stats", tags=["stats"])
 
 
 @router.get("/user-summary", response_model=dict)
-def get_user_summary(name: str, db: Session = Depends(get_db)):
-    """Cross-group personal stats for a named member."""
+def get_user_summary(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Cross-group personal stats for the signed-in member."""
+    name = caller.name
     from routers.settlements import _calculate
 
     groups = db.query(Group).all()
@@ -77,8 +79,9 @@ def get_user_summary(name: str, db: Session = Depends(get_db)):
 
 
 @router.get("/user-group-balances", response_model=list[dict])
-def get_user_group_balances(name: str, db: Session = Depends(get_db)):
-    """Per-group net balance for a named user (non-historical, non-zero balance only)."""
+def get_user_group_balances(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Per-group net balance for the signed-in user (non-historical, non-zero only)."""
+    name = caller.name
     from routers.settlements import _calculate
 
     groups = db.query(Group).all()
@@ -165,13 +168,13 @@ def _pairwise_group_debts(g: Group) -> dict[tuple[str, str], float]:
 
 
 @router.get("/friends", response_model=list[dict])
-def get_friends(name: str, db: Session = Depends(get_db)):
-    """Net balance with every person who shares an active group with `name`.
+def get_friends(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Net balance with every person who shares an active group with the caller.
 
     Each friend also carries a per-group `groups` breakdown so the UI can show
     where the overall net actually comes from.
     """
-    name_l = name.strip().lower()
+    name_l = caller.name.strip().lower()
     groups = db.query(Group).filter(Group.is_historical == False).all()  # noqa: E712
 
     net: dict[str, float] = {}
@@ -218,14 +221,18 @@ def get_friends(name: str, db: Session = Depends(get_db)):
 
 
 @router.get("/global-analytics", response_model=dict)
-def get_global_analytics(name: str = "", db: Session = Depends(get_db)):
+def get_global_analytics(db: Session = Depends(get_db), caller: User = Depends(current_user)):
     """Cross-group analytics: overall by expense category + per-person category breakdown.
 
     When `name` is given, the per-person breakdown shows that user's own
     category-wise share of expenses shared with each other member
     (i.e. "my spends with X, by category").
+
+    Scoped to the caller's own groups — it used to total every group in the
+    database when no name was passed.
     """
-    groups = db.query(Group).all()
+    name = caller.name
+    groups = [g for g in db.query(Group).all() if is_member(g, caller)]
 
     by_category: dict[str, float] = defaultdict(float)
     by_category_count: dict[str, int] = defaultdict(int)
@@ -277,7 +284,8 @@ def get_global_analytics(name: str = "", db: Session = Depends(get_db)):
 
 
 @router.get("/aggregate", response_model=dict)
-def get_aggregate_stats(ids: str, db: Session = Depends(get_db)):
+def get_aggregate_stats(ids: str, db: Session = Depends(get_db),
+                        caller: User = Depends(current_user)):
     """Combined stats for several groups at once — the master group view.
 
     A master group is a set of groups sharing the exact same membership, so
@@ -292,7 +300,8 @@ def get_aggregate_stats(ids: str, db: Session = Depends(get_db)):
     if not wanted:
         raise HTTPException(400, "no group ids given")
 
-    groups = db.query(Group).filter(Group.id.in_(wanted)).all()
+    groups = [g for g in db.query(Group).filter(Group.id.in_(wanted)).all()
+              if is_member(g, caller)]
     if not groups:
         raise HTTPException(404, "No such groups")
 
@@ -332,9 +341,9 @@ def get_aggregate_stats(ids: str, db: Session = Depends(get_db)):
 
 
 @router.get("/overview/all", response_model=list[dict])
-def get_overview(db: Session = Depends(get_db)):
-    """Returns per-group totals for the homepage chart."""
-    groups = db.query(Group).all()
+def get_overview(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Per-group totals for the homepage chart, for the caller's groups only."""
+    groups = [g for g in db.query(Group).all() if is_member(g, caller)]
     return [
         {
             "id": g.id,
@@ -350,10 +359,9 @@ def get_overview(db: Session = Depends(get_db)):
 # NOTE: /{group_id} must stay LAST — literal routes above must be registered first
 # so FastAPI matches them before the catch-all int parameter route.
 @router.get("/{group_id}", response_model=GroupStats)
-def get_group_stats(group_id: int, db: Session = Depends(get_db)):
-    group = db.query(Group).filter(Group.id == group_id).first()
-    if not group:
-        raise HTTPException(404, "Group not found")
+def get_group_stats(group_id: int, db: Session = Depends(get_db),
+                    caller: User = Depends(current_user)):
+    group = member_group(group_id, caller, db)
 
     expenses = group.expenses
     total = round(sum(e.amount for e in expenses), 2)

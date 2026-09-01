@@ -40,7 +40,7 @@ export default function GroupDetail() {
 
   const handleDeleteExpense = async (expId) => {
     if (!confirm('Delete this expense?')) return
-    await deleteExpense(expId, currentUser?.name)
+    await deleteExpense(expId)
     reload()
   }
 

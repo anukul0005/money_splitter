@@ -27,6 +27,11 @@ class UserOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class LoginOut(UserOut):
+    """A successful login, plus the token that proves it on later requests."""
+    token: str
+
+
 class SetRecovery(BaseModel):
     """Set or regenerate your security answer / passkey.
 

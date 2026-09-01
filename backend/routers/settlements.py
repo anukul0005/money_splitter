@@ -1,8 +1,9 @@
 import json
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from auth import current_user, member_group
 from database import get_db
-from models import Group
+from models import Group, User
 from schemas import SettlementOut, BalanceEntry, Transaction, PastPayment, PaymentOut
 
 router = APIRouter(prefix="/settlements", tags=["settlements"])
@@ -128,8 +129,6 @@ def _calculate(group: Group) -> SettlementOut:
 
 
 @router.get("/{group_id}", response_model=SettlementOut)
-def get_settlement(group_id: int, db: Session = Depends(get_db)):
-    group = db.query(Group).filter(Group.id == group_id).first()
-    if not group:
-        raise HTTPException(404, "Group not found")
-    return _calculate(group)
+def get_settlement(group_id: int, db: Session = Depends(get_db),
+                   caller: User = Depends(current_user)):
+    return _calculate(member_group(group_id, caller, db))

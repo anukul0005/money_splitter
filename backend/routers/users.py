@@ -3,10 +3,11 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from auth import create_token, current_user, require_admin
 from database import get_db
 from models import User
 from schemas import (
-    UserSignup, UserLogin, UserOut, SetRecovery, ResetPassword,
+    UserSignup, UserLogin, UserOut, LoginOut, SetRecovery, ResetPassword,
     AdminReset, AdminSetRecovery, AdminIssueCode, RedeemCode,
 )
 
@@ -61,24 +62,31 @@ def signup(payload: UserSignup, db: Session = Depends(get_db)):
     return user
 
 
-@router.post("/login", response_model=UserOut)
+@router.post("/login", response_model=LoginOut)
 def login(payload: UserLogin, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.name.ilike(payload.name.strip())).first()
     if not user:
         raise HTTPException(401, "Incorrect username or password")
-    if user.password_hash != _hash(payload.password, user.salt):
+    if not secrets.compare_digest(user.password_hash, _hash(payload.password, user.salt)):
         raise HTTPException(401, "Incorrect username or password")
-    return user
+    return LoginOut(
+        id=user.id, name=user.name, is_admin=user.is_admin,
+        created_at=user.created_at, token=create_token(user),
+    )
 
 
 @router.get("/", response_model=list[UserOut])
-def list_users(db: Session = Depends(get_db)):
+def list_users(db: Session = Depends(get_db), _: User = Depends(current_user)):
+    """Names only, and only for people already signed in — the group editor
+    needs them to offer members to add."""
     return db.query(User).order_by(User.created_at).all()
 
 
 @router.patch("/{user_id}/password", response_model=UserOut)
-def change_password(user_id: int, payload: dict, db: Session = Depends(get_db)):
-    from pydantic import BaseModel
+def change_password(user_id: int, payload: dict, db: Session = Depends(get_db),
+                    caller: User = Depends(current_user)):
+    if caller.id != user_id:
+        raise HTTPException(403, "You can only change your own password")
     current = payload.get("current_password", "")
     new = payload.get("new_password", "")
     if not current or not new:
@@ -96,13 +104,16 @@ def change_password(user_id: int, payload: dict, db: Session = Depends(get_db)):
 
 
 @router.patch("/{user_id}/recovery", response_model=UserOut)
-def set_recovery(user_id: int, payload: SetRecovery, db: Session = Depends(get_db)):
+def set_recovery(user_id: int, payload: SetRecovery, db: Session = Depends(get_db),
+                 caller: User = Depends(current_user)):
     """Set, replace, or regenerate your security answer / 6-digit passkey.
 
     Authorised by your current password OR your existing security answer.
     Either is proof of identity, and offering both means a lost passkey is
     recoverable by someone who still knows their password, and vice versa.
     """
+    if caller.id != user_id:
+        raise HTTPException(403, "You can only change your own recovery settings")
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(404, "User not found")
@@ -348,7 +359,8 @@ def admin_set_recovery(payload: AdminSetRecovery, db: Session = Depends(get_db))
 
 
 @router.delete("/{user_id}", status_code=204)
-def delete_user(user_id: int, db: Session = Depends(get_db)):
+def delete_user(user_id: int, db: Session = Depends(get_db),
+                _: User = Depends(require_admin)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(404, "User not found")

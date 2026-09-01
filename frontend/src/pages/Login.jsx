@@ -37,7 +37,8 @@ export default function Login({ onLogin }) {
     try {
       const res = await loginUser({ name: username.trim(), password })
       const u = res.data
-      const s = { name: u.name, isAdmin: u.is_admin, id: u.id }
+      // The token is what every later request is authorised with
+      const s = { name: u.name, isAdmin: u.is_admin, id: u.id, token: u.token }
       localStorage.setItem(SESSION_KEY, JSON.stringify(s))
       onLogin(s)
       window.location.reload()
@@ -66,9 +67,12 @@ export default function Login({ onLogin }) {
         recovery_answer: recAnswer,
       })
       const u = res.data
-      const s = { name: u.name, isAdmin: u.is_admin, id: u.id }
+      // Signup doesn't issue a token, so sign in straight away to get one
+      const li = await loginUser({ name, password })
+      const s = { name: u.name, isAdmin: u.is_admin, id: u.id, token: li.data.token }
       localStorage.setItem(SESSION_KEY, JSON.stringify(s))
       onLogin(s)
+      window.location.reload()
     } catch (err) {
       const detail = err.response?.data?.detail || 'Signup failed.'
       setError(detail === 'Username already taken' ? 'Username already taken. Please choose a different one.' : detail)

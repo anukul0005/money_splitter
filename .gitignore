@@ -14,3 +14,6 @@ Thumbs.db
 
 # Database snapshots — contain password/recovery hashes, never commit
 backend/backups/
+
+# Session signing key — never commit; committing it lets anyone forge a login
+backend/.secret_key

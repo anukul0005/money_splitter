@@ -98,7 +98,7 @@ export default function RecordPaymentModal({ onClose, onSaved, prefillFriend, pa
     if (!confirm('Delete this payment? The balances it settled will go back up.')) return
     setBusy(true)
     try {
-      await deletePayment(payment.id, user?.name)
+      await deletePayment(payment.id)
       onSaved?.()
       onClose?.()
     } catch (err) {

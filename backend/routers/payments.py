@@ -2,9 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from activity import record_activity
+from auth import current_user, is_member, member_group
 from database import get_db
 from emailer import notify_group_activity
-from models import Group, Payment
+from models import Group, Payment, User
 from schemas import PaymentAuto, PaymentCreate, PaymentOut
 
 router = APIRouter(prefix="/payments", tags=["payments"])
@@ -15,7 +16,9 @@ def _INR(v: float) -> str:
 
 
 @router.get("/group/{group_id}", response_model=list[PaymentOut])
-def list_payments(group_id: int, db: Session = Depends(get_db)):
+def list_payments(group_id: int, db: Session = Depends(get_db),
+                  caller: User = Depends(current_user)):
+    member_group(group_id, caller, db)
     return (
         db.query(Payment)
         .filter(Payment.group_id == group_id)
@@ -25,8 +28,9 @@ def list_payments(group_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/between", response_model=list[dict])
-def payments_between(a: str, b: str, viewer: str = "", db: Session = Depends(get_db)):
-    """Payments involving `b`, as seen from `a`'s friend page. Newest first.
+def payments_between(b: str, db: Session = Depends(get_db),
+                     caller: User = Depends(current_user)):
+    """Payments involving `b`, as seen from the caller's friend page. Newest first.
 
     Restricting this to transfers between exactly `a` and `b` hid real
     settlements: Shubhi paying Anubhav ₹640 never appeared on Anukul's page for
@@ -35,10 +39,11 @@ def payments_between(a: str, b: str, viewer: str = "", db: Session = Depends(get
     side, limited to groups the viewer belongs to — the viewer can only ever
     see money movement inside their own groups.
 
-    `viewer` defaults to `a` and exists so the membership check stays explicit.
+    Who is looking is taken from the token: when it was a query parameter,
+    anyone could read anyone else's settlement history by typing their name.
     """
-    al, bl = a.strip().lower(), b.strip().lower()
-    watcher = (viewer.strip() or a.strip()).lower()
+    bl = b.strip().lower()
+    watcher = caller.name.lower()
 
     all_groups = db.query(Group).all()
     groups = {g.id: g.name for g in all_groups}
@@ -48,14 +53,13 @@ def payments_between(a: str, b: str, viewer: str = "", db: Session = Depends(get
         if watcher in {m.name.lower() for m in g.members}
     }
 
+    # Every payment this friend is party to, inside groups the caller shares —
+    # not just the caller's own half of it.
     rows = [
         p for p in db.query(Payment).all()
         if p.group_id in visible
         and bl in (p.from_member.lower(), p.to_member.lower())
     ]
-    # `al` is unused as a filter on purpose: the viewer wants this friend's
-    # settlement history in their shared groups, not just their own half of it.
-    del al
 
     out = [{
         "id": p.id,
@@ -125,7 +129,8 @@ def _resolve_group(db: Session, frm: str, to: str, ignore_payment_id: int | None
 
 
 @router.post("/auto", response_model=PaymentOut, status_code=201)
-def create_payment_auto(payload: PaymentAuto, db: Session = Depends(get_db)):
+def create_payment_auto(payload: PaymentAuto, db: Session = Depends(get_db),
+                        caller: User = Depends(current_user)):
     """Record a transfer without naming a group — the debt decides where it lands.
 
     One transfer is one record. We attach the whole amount to the group where
@@ -135,6 +140,10 @@ def create_payment_auto(payload: PaymentAuto, db: Session = Depends(get_db)):
     """
     frm, to = payload.from_member.strip(), payload.to_member.strip()
     group = _resolve_group(db, frm, to)
+    # You can record a payment on someone else's behalf, but only inside a
+    # group you're in — otherwise this endpoint would write into any group.
+    if not is_member(group, caller):
+        raise HTTPException(403, f"You're not in {group.name}")
 
     names = {m.name.lower(): m.name for m in group.members}
     payment = Payment(
@@ -147,7 +156,7 @@ def create_payment_auto(payload: PaymentAuto, db: Session = Depends(get_db)):
     )
     db.add(payment)
 
-    recorder = (payload.recorded_by or "").strip() or payment.from_member
+    recorder = caller.name
     summary = f"{payment.from_member} paid {payment.to_member} {_INR(payment.amount)}"
     record_activity(db, group, recorder, "recorded a payment", summary)
 
@@ -163,7 +172,8 @@ def create_payment_auto(payload: PaymentAuto, db: Session = Depends(get_db)):
 
 
 @router.put("/{payment_id}", response_model=PaymentOut)
-def update_payment(payment_id: int, payload: PaymentAuto, db: Session = Depends(get_db)):
+def update_payment(payment_id: int, payload: PaymentAuto, db: Session = Depends(get_db),
+                   caller: User = Depends(current_user)):
     """Correct a payment that was entered wrong.
 
     Balances are derived from payments rather than stored, so amending the row
@@ -174,6 +184,7 @@ def update_payment(payment_id: int, payload: PaymentAuto, db: Session = Depends(
     payment = db.query(Payment).filter(Payment.id == payment_id).first()
     if not payment:
         raise HTTPException(404, "Payment not found")
+    member_group(payment.group_id, caller, db)   # must be in the group it belongs to
 
     frm, to = payload.from_member.strip(), payload.to_member.strip()
     pair_changed = (
@@ -183,6 +194,9 @@ def update_payment(payment_id: int, payload: PaymentAuto, db: Session = Depends(
 
     if pair_changed:
         group = _resolve_group(db, frm, to, ignore_payment_id=payment.id)
+        # Re-homing must not move the payment into a group you can't see
+        if not is_member(group, caller):
+            raise HTTPException(403, f"You're not in {group.name}")
     else:
         group = db.query(Group).filter(Group.id == payment.group_id).first()
         if not group:
@@ -201,7 +215,7 @@ def update_payment(payment_id: int, payload: PaymentAuto, db: Session = Depends(
     payment.note = payload.note
 
     after = f"{payment.from_member} paid {payment.to_member} {_INR(payment.amount)}"
-    editor = (payload.recorded_by or "").strip() or payment.from_member
+    editor = caller.name
     summary = after if before == after else f"{before} → {after}"
     record_activity(db, group, editor, "edited a payment", summary)
 
@@ -211,10 +225,9 @@ def update_payment(payment_id: int, payload: PaymentAuto, db: Session = Depends(
 
 
 @router.post("/", response_model=PaymentOut, status_code=201)
-def create_payment(payload: PaymentCreate, db: Session = Depends(get_db)):
-    group = db.query(Group).filter(Group.id == payload.group_id).first()
-    if not group:
-        raise HTTPException(404, "Group not found")
+def create_payment(payload: PaymentCreate, db: Session = Depends(get_db),
+                   caller: User = Depends(current_user)):
+    group = member_group(payload.group_id, caller, db)
 
     member_names = {m.name.lower(): m.name for m in group.members}
     frm = payload.from_member.strip()
@@ -240,7 +253,7 @@ def create_payment(payload: PaymentCreate, db: Session = Depends(get_db)):
 
     # The actor is whoever entered it; the summary says whose debt it settles.
     # Those differ whenever one member records a payment on another's behalf.
-    recorder = (payload.recorded_by or "").strip() or payment.from_member
+    recorder = caller.name
     summary = f"{payment.from_member} paid {payment.to_member} {_INR(payment.amount)}"
     record_activity(db, group, recorder, "recorded a payment", summary)
 
@@ -256,15 +269,16 @@ def create_payment(payload: PaymentCreate, db: Session = Depends(get_db)):
 
 
 @router.delete("/{payment_id}", status_code=204)
-def delete_payment(payment_id: int, by: str = "", db: Session = Depends(get_db)):
+def delete_payment(payment_id: int, db: Session = Depends(get_db),
+                   caller: User = Depends(current_user)):
     payment = db.query(Payment).filter(Payment.id == payment_id).first()
     if not payment:
         raise HTTPException(404, "Payment not found")
 
-    group = db.query(Group).filter(Group.id == payment.group_id).first()
+    group = member_group(payment.group_id, caller, db)
     summary = f"{payment.from_member} → {payment.to_member} {_INR(payment.amount)}"
     # Whoever is logged in did this, not necessarily the person who paid
-    record_activity(db, group, by.strip() or payment.from_member, "deleted a payment", summary)
+    record_activity(db, group, caller.name, "deleted a payment", summary)
 
     db.delete(payment)
     db.commit()

@@ -21,13 +21,25 @@ from models import Activity, Payment
 
 
 def pair_net(db, a: str, b: str) -> float:
-    """What b owes a across everything, via the live settlement engine."""
-    from routers.stats import get_friends
+    """What b owes a across everything, via the live settlement engine.
 
-    for f in get_friends(name=a, db=db):
-        if f["name"].lower() == b.lower():
-            return round(f["net"], 2)
-    return 0.0
+    /stats/friends now takes its identity from the request token, so this
+    script builds the same view directly rather than calling the endpoint.
+    """
+    from collections import defaultdict
+
+    from models import Group
+    from routers.stats import _pairwise_group_debts
+
+    al, bl = a.lower(), b.lower()
+    net = 0.0
+    for g in db.query(Group).filter(Group.is_historical == False).all():  # noqa: E712
+        for (debtor, creditor), amt in _pairwise_group_debts(g).items():
+            if debtor.lower() == al and creditor.lower() == bl:
+                net -= amt
+            elif debtor.lower() == bl and creditor.lower() == al:
+                net += amt
+    return round(net, 2)
 
 
 def main() -> int:

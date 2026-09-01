@@ -3,8 +3,9 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from auth import current_user
 from database import get_db
-from models import Activity, ActivitySeen, Group, Member
+from models import Activity, ActivitySeen, Group, Member, User
 from schemas import ActivityOut
 
 router = APIRouter(prefix="/activity", tags=["activity"])
@@ -40,8 +41,15 @@ def _is_unread(created_at, last_seen) -> bool:
 
 
 @router.get("/", response_model=list[ActivityOut])
-def list_activity(name: str, limit: int = 40, db: Session = Depends(get_db)):
-    """The feed for one user: activity in their groups only, newest first."""
+def list_activity(limit: int = 40, db: Session = Depends(get_db),
+                  caller: User = Depends(current_user)):
+    """The caller's feed: activity in their groups only, newest first.
+
+    Whose feed this is comes from the token. While it was a query parameter
+    the group filtering below was real but pointless — anyone could ask for
+    anyone else's feed by typing their name.
+    """
+    name = caller.name
     group_ids = _visible_group_ids(name, db)
     if not group_ids:
         return []
@@ -64,7 +72,8 @@ def list_activity(name: str, limit: int = 40, db: Session = Depends(get_db)):
 
 
 @router.get("/unread-count", response_model=dict)
-def unread_count(name: str, db: Session = Depends(get_db)):
+def unread_count(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    name = caller.name
     group_ids = _visible_group_ids(name, db)
     if not group_ids:
         return {"count": 0}
@@ -77,9 +86,9 @@ def unread_count(name: str, db: Session = Depends(get_db)):
 
 
 @router.post("/seen", response_model=dict)
-def mark_seen(name: str, db: Session = Depends(get_db)):
-    """Move the user's high-water mark to now, clearing the unread badge."""
-    clean = name.strip()
+def mark_seen(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Move the caller's high-water mark to now, clearing the unread badge."""
+    clean = caller.name.strip()
     row = db.query(ActivitySeen).filter(ActivitySeen.user_name.ilike(clean)).first()
     now = datetime.now(timezone.utc)
     if row:

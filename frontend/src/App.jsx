@@ -29,7 +29,11 @@ function getStoredUser() {
     const s = localStorage.getItem(SESSION_KEY)
     if (!s) return null
     const u = JSON.parse(s)
-    return u?.name ? u : null
+    // A session without a token can't authorise anything, so treat it as
+    // signed out. Sessions saved before tokens existed land here and are
+    // asked to sign in again, rather than showing an app where every
+    // request fails.
+    return u?.name && u?.token ? u : null
   } catch { return null }
 }
 

@@ -4,6 +4,37 @@ const BASE = import.meta.env.VITE_API_URL || '/api'
 
 const api = axios.create({ baseURL: BASE })
 
+// ── Session token ─────────────────────────────────────────────────────────────
+// The backend identifies the caller from this token and nothing else. It used
+// to trust a `name` query parameter, which meant anyone could read anyone
+// else's data by typing their name.
+const SESSION_KEY = 'splitter_session_v2'
+
+export function getToken() {
+  try {
+    return JSON.parse(localStorage.getItem(SESSION_KEY) || '{}').token || ''
+  } catch { return '' }
+}
+
+api.interceptors.request.use((config) => {
+  const t = getToken()
+  if (t) config.headers.Authorization = `Bearer ${t}`
+  return config
+})
+
+// An expired or missing token means the stored session is useless — clear it
+// and show the login screen rather than leaving a half-broken page up.
+api.interceptors.response.use(
+  (r) => r,
+  (err) => {
+    if (err.response?.status === 401 && getToken()) {
+      localStorage.removeItem(SESSION_KEY)
+      window.location.reload()
+    }
+    return Promise.reject(err)
+  }
+)
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
 export const loginUser      = (data)        => api.post('/users/login', data)
 export const signupUser     = (data)        => api.post('/users/signup', data)
@@ -35,7 +66,7 @@ export const deleteGroup = (id)          => api.delete(`/groups/${id}`)
 export const getExpenses   = (groupId)   => api.get(`/expenses/group/${groupId}`)
 export const createExpense = (data)      => api.post('/expenses/', data)
 export const updateExpense = (id, data)  => api.put(`/expenses/${id}`, data)
-export const deleteExpense = (id, by)    => api.delete(`/expenses/${id}`, { params: by ? { by } : {} })
+export const deleteExpense = (id)        => api.delete(`/expenses/${id}`)
 
 // ── Settlements ───────────────────────────────────────────────────────────────
 export const getSettlement = (groupId)   => api.get(`/settlements/${groupId}`)
@@ -49,20 +80,21 @@ export const createPayment  = (data)     => api.post('/payments/', data)
 export const createPaymentAuto = (data)  => api.post('/payments/auto', data)
 // Editing a payment re-derives every balance it touches — nothing is stored
 export const updatePayment  = (id, data) => api.put(`/payments/${id}`, data)
-export const deletePayment  = (id, by)   => api.delete(`/payments/${id}`, { params: by ? { by } : {} })
-export const paymentsBetween = (a, b)    => api.get('/payments/between', { params: { a, b, viewer: a } })
+export const deletePayment  = (id)       => api.delete(`/payments/${id}`)
+// `a` is ignored: the viewer is whoever the token says it is
+export const paymentsBetween = (a, b)    => api.get('/payments/between', { params: { b } })
 
 // ── Activity feed ─────────────────────────────────────────────────────────────
-export const getActivity      = (name, limit = 40) => api.get('/activity/', { params: { name, limit } })
-export const getUnreadCount   = (name)   => api.get('/activity/unread-count', { params: { name } })
-export const markActivitySeen = (name)   => api.post('/activity/seen', null, { params: { name } })
+export const getActivity      = (name, limit = 40) => api.get('/activity/', { params: { limit } })
+export const getUnreadCount   = (name)   => api.get('/activity/unread-count')
+export const markActivitySeen = (name)   => api.post('/activity/seen')
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
 export const getGroupStats      = (groupId) => api.get(`/stats/${groupId}`)
 // Combined stats across a master group's set of groups
 export const getAggregateStats  = (ids)     => api.get('/stats/aggregate', { params: { ids: ids.join(',') } })
 export const getOverview        = ()        => api.get('/stats/overview/all')
-export const getUserSummary     = (name)    => api.get('/stats/user-summary', { params: { name } })
-export const getGlobalAnalytics     = (name) => api.get('/stats/global-analytics', { params: name ? { name } : {} })
-export const getUserGroupBalances   = (name) => api.get('/stats/user-group-balances', { params: { name } })
-export const getFriends             = (name) => api.get('/stats/friends', { params: { name } })
+export const getUserSummary     = (name)    => api.get('/stats/user-summary')
+export const getGlobalAnalytics     = (name) => api.get('/stats/global-analytics')
+export const getUserGroupBalances   = (name) => api.get('/stats/user-group-balances')
+export const getFriends             = (name) => api.get('/stats/friends')
