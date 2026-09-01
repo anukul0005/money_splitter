@@ -59,13 +59,22 @@ export default function FriendDetail() {
 
   if (loading) return <LoadingSpinner />
 
-  const shared = groups
-    .filter((g) =>
-      (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase()) &&
-      (g.member_names ?? []).some((n) => n.toLowerCase() === friendName.toLowerCase())
-    )
-    // groups that actually contribute to the balance first, largest first
-    .sort((a, b) => Math.abs(byGroup[b.id] ?? 0) - Math.abs(byGroup[a.id] ?? 0))
+  const shared = groups.filter((g) =>
+    (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase()) &&
+    (g.member_names ?? []).some((n) => n.toLowerCase() === friendName.toLowerCase())
+  )
+
+  // One timeline: the date-named groups, with each payment slotted in at the
+  // point it was recorded, rather than a separate payments list at the bottom.
+  const timeline = [
+    ...shared.map((g) => ({
+      kind: 'group', key: `g${g.id}`, at: g.last_activity || '', data: g,
+    })),
+    ...payments.map((p) => ({
+      kind: 'payment', key: `p${p.id}`,
+      at: (p.recorded_at || p.date || '').slice(0, 10), data: p,
+    })),
+  ].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
 
   const settled = Math.abs(net) < 0.01
   const owes = net < 0
@@ -92,52 +101,32 @@ export default function FriendDetail() {
         <p className="text-xs text-gray-400 mt-0.5">{shared.length} shared group{shared.length !== 1 ? 's' : ''}</p>
       </div>
 
-      <div className="px-5 mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-        {shared.map((g) => (
-          <GroupCard
-            key={g.id}
-            group={g}
-            friendBalance={{ name: friendName, net: byGroup[g.id] ?? 0 }}
-          />
-        ))}
-        {shared.length === 0 && (
-          <div className="col-span-2 text-center py-16 text-gray-400">
-            <p className="text-sm">No shared groups</p>
-          </div>
-        )}
-      </div>
-
-      {/* Payments already settled between the two of you */}
-      <div className="px-5 mt-6">
-        <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">
-          Payments with {friendName}
-        </p>
-        {payments.length === 0 ? (
-          <div className="card text-center py-6">
-            <p className="text-sm text-gray-400">No payments recorded yet</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {payments.map((p) => (
-              <div key={p.id} className="card p-3.5 flex items-center gap-2.5">
-                <svg className="w-4 h-4 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+      <div className="px-5 mt-4 space-y-3">
+        {timeline.map((row) =>
+          row.kind === 'group' ? (
+            <GroupCard
+              key={row.key}
+              group={row.data}
+              friendBalance={{ name: friendName, net: byGroup[row.data.id] ?? 0 }}
+            />
+          ) : (
+            /* A settlement, sitting between the groups at the time it happened */
+            <div key={row.key} className="flex items-center gap-2 py-0.5">
+              <span className="h-px flex-1 bg-green-200" />
+              <span className="flex items-center gap-1.5 text-[11px] font-bold text-green-700 whitespace-nowrap">
+                <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-gray-900 truncate">
-                    {p.from_member} <span className="font-normal text-gray-500">paid</span> {p.to_member}
-                  </p>
-                  <p className="text-[11px] text-gray-400 mt-0.5">
-                    {p.group_name}
-                    {p.note ? ` · ${p.note}` : ''}
-                  </p>
-                  <p className="text-[10px] text-gray-400 mt-0.5">
-                    recorded {stamp(p.recorded_at)}
-                  </p>
-                </div>
-                <span className="text-sm font-black text-green-700 flex-shrink-0">{INR(p.amount)}</span>
-              </div>
-            ))}
+                {row.data.from_member} paid {row.data.to_member} {INR(row.data.amount)}
+                <span className="font-normal text-gray-400">· {stamp(row.data.recorded_at)}</span>
+              </span>
+              <span className="h-px flex-1 bg-green-200" />
+            </div>
+          )
+        )}
+        {timeline.length === 0 && (
+          <div className="text-center py-16 text-gray-400">
+            <p className="text-sm">No shared groups</p>
           </div>
         )}
       </div>

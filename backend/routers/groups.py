@@ -64,6 +64,7 @@ def list_groups(db: Session = Depends(get_db)):
             total_amount=round(total, 2),
             member_names=[m.name for m in g.members],
             created_at=g.created_at,
+            last_activity=sort_key,
         )))
     rows.sort(key=lambda x: x[0], reverse=True)
     return [s for _, s in rows]

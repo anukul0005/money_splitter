@@ -168,6 +168,8 @@ class GroupSummary(BaseModel):
     total_amount: float
     member_names: list[str] = []
     created_at: Optional[datetime] = None
+    # Date this group sits on in a timeline: its latest expense, else creation
+    last_activity: Optional[str] = None
     model_config = {"from_attributes": True}
 
 

@@ -48,7 +48,7 @@ export const createPayment  = (data)     => api.post('/payments/', data)
 // No group_id — the server places it against the outstanding debt
 export const createPaymentAuto = (data)  => api.post('/payments/auto', data)
 export const deletePayment  = (id)       => api.delete(`/payments/${id}`)
-export const paymentsBetween = (a, b)    => api.get('/payments/between', { params: { a, b } })
+export const paymentsBetween = (a, b)    => api.get('/payments/between', { params: { a, b, viewer: a } })
 
 // ── Activity feed ─────────────────────────────────────────────────────────────
 export const getActivity      = (name, limit = 40) => api.get('/activity/', { params: { name, limit } })

@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from activity import record_activity
@@ -26,24 +25,38 @@ def list_payments(group_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/between", response_model=list[dict])
-def payments_between(a: str, b: str, db: Session = Depends(get_db)):
-    """Every payment in either direction between two people, newest first.
+def payments_between(a: str, b: str, viewer: str = "", db: Session = Depends(get_db)):
+    """Payments involving `b`, as seen from `a`'s friend page. Newest first.
 
-    Carries the group name and the exact time it was recorded, so a friend's
-    page can show who paid whom and when.
+    Restricting this to transfers between exactly `a` and `b` hid real
+    settlements: Shubhi paying Anubhav ₹640 never appeared on Anukul's page for
+    Shubhi, even though that payment is what cleared Shubhi's balance in a
+    group all three share. So we return every payment where `b` is on either
+    side, limited to groups the viewer belongs to — the viewer can only ever
+    see money movement inside their own groups.
+
+    `viewer` defaults to `a` and exists so the membership check stays explicit.
     """
     al, bl = a.strip().lower(), b.strip().lower()
-    rows = (
-        db.query(Payment)
-        .filter(
-            or_(
-                and_(func.lower(Payment.from_member) == al, func.lower(Payment.to_member) == bl),
-                and_(func.lower(Payment.from_member) == bl, func.lower(Payment.to_member) == al),
-            )
-        )
-        .all()
-    )
-    groups = {g.id: g.name for g in db.query(Group).all()}
+    watcher = (viewer.strip() or a.strip()).lower()
+
+    all_groups = db.query(Group).all()
+    groups = {g.id: g.name for g in all_groups}
+    # Groups the viewer is actually in — everything else is none of their business
+    visible = {
+        g.id for g in all_groups
+        if watcher in {m.name.lower() for m in g.members}
+    }
+
+    rows = [
+        p for p in db.query(Payment).all()
+        if p.group_id in visible
+        and bl in (p.from_member.lower(), p.to_member.lower())
+    ]
+    # `al` is unused as a filter on purpose: the viewer wants this friend's
+    # settlement history in their shared groups, not just their own half of it.
+    del al
+
     out = [{
         "id": p.id,
         "group_id": p.group_id,
@@ -59,94 +72,72 @@ def payments_between(a: str, b: str, db: Session = Depends(get_db)):
     return out
 
 
-@router.post("/auto", response_model=list[PaymentOut], status_code=201)
+@router.post("/auto", response_model=PaymentOut, status_code=201)
 def create_payment_auto(payload: PaymentAuto, db: Session = Depends(get_db)):
     """Record a transfer without naming a group — the debt decides where it lands.
 
-    A payment settles a debt, and a debt already lives in specific groups, so
-    asking the user which one is asking them to repeat what the balances
-    already know. We look up what `from_member` still owes `to_member` across
-    every active shared group and pay those down largest-first, splitting the
-    amount across groups when one group doesn't cover it. Anything left over
-    after all debts are cleared goes on the largest of them as an advance.
+    One transfer is one record. A payment still has to be attached to a group
+    (that's what the settlement engine nets against), so we attach the whole
+    amount to the group where `from_member` owes `to_member` the most, rather
+    than carving it into a row per group. The pair's overall balance comes out
+    identical either way; a single row is what the user actually did.
     """
     from routers.stats import _pairwise_group_debts
 
     frm, to = payload.from_member.strip(), payload.to_member.strip()
     if frm.lower() == to.lower():
         raise HTTPException(400, "A payment needs two different people")
-    if payload.amount <= 0:
-        raise HTTPException(400, "Enter an amount greater than zero")
 
-    # (group, what frm still owes to here), biggest debt first
-    owed: list[tuple[Group, float]] = []
+    best: tuple[Group, float] | None = None   # group with the largest debt frm -> to
     shared: list[Group] = []
     for g in db.query(Group).filter(Group.is_historical == False).all():  # noqa: E712
-        names = {m.name.lower(): m.name for m in g.members}
+        names = {m.name.lower() for m in g.members}
         if frm.lower() not in names or to.lower() not in names:
             continue
         shared.append(g)
         for (debtor, creditor), amt in _pairwise_group_debts(g).items():
             if debtor.lower() == frm.lower() and creditor.lower() == to.lower():
-                owed.append((g, amt))
+                if best is None or amt > best[1]:
+                    best = (g, amt)
 
     if not shared:
         raise HTTPException(400, f"{frm} and {to} have no active group in common")
-    owed.sort(key=lambda x: -x[1])
 
-    # Spread the payment over the outstanding debts, largest first
-    allocations: list[tuple[Group, float]] = []
-    left = round(payload.amount, 2)
-    for g, amt in owed:
-        if left <= 0.01:
-            break
-        take = round(min(left, amt), 2)
-        allocations.append((g, take))
-        left = round(left - take, 2)
-
-    if left > 0.01:
-        # Overpayment, or nothing outstanding at all: park the remainder on the
-        # group with the largest debt, or the only shared group if there's one.
-        if allocations:
-            g, amt = allocations[-1]
-            allocations[-1] = (g, round(amt + left, 2))
-        elif len(shared) == 1:
-            allocations.append((shared[0], left))
-        else:
-            raise HTTPException(
-                400,
-                f"{frm} doesn't owe {to} anything right now, and they share "
-                f"{len(shared)} groups — open the group to record this one.",
-            )
-
-    recorder = (payload.recorded_by or "").strip() or frm
-    out = []
-    for g, amt in allocations:
-        names = {m.name.lower(): m.name for m in g.members}
-        payment = Payment(
-            group_id=g.id,
-            from_member=names[frm.lower()],
-            to_member=names[to.lower()],
-            amount=amt,
-            date=payload.date,
-            note=payload.note,
+    if best is not None:
+        group = best[0]
+    elif len(shared) == 1:
+        group = shared[0]
+    else:
+        raise HTTPException(
+            400,
+            f"{frm} doesn't owe {to} anything right now, and they share "
+            f"{len(shared)} groups — open the group to record this one.",
         )
-        db.add(payment)
-        summary = f"{payment.from_member} paid {payment.to_member} {_INR(amt)}"
-        record_activity(db, g, recorder, "recorded a payment", summary)
-        out.append((payment, g, summary))
+
+    names = {m.name.lower(): m.name for m in group.members}
+    payment = Payment(
+        group_id=group.id,
+        from_member=names[frm.lower()],
+        to_member=names[to.lower()],
+        amount=round(payload.amount, 2),
+        date=payload.date,
+        note=payload.note,
+    )
+    db.add(payment)
+
+    recorder = (payload.recorded_by or "").strip() or payment.from_member
+    summary = f"{payment.from_member} paid {payment.to_member} {_INR(payment.amount)}"
+    record_activity(db, group, recorder, "recorded a payment", summary)
 
     db.commit()
-    for p, _, _ in out:
-        db.refresh(p)
+    db.refresh(payment)
 
-    for _, g, summary in out:
-        try:
-            notify_group_activity(g, recorder, "recorded a payment", summary)
-        except Exception as e:
-            print(f"[email] payment notification failed: {e}")
+    try:
+        notify_group_activity(group, recorder, "recorded a payment", summary)
+    except Exception as e:
+        print(f"[email] payment notification failed: {e}")
 
-    return [p for p, _, _ in out]
+    return payment
 
 
 @router.post("/", response_model=PaymentOut, status_code=201)
