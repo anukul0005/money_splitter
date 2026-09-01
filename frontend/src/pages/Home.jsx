@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getGroups, getOverview, getUserSummary, getGlobalAnalytics, getUserGroupBalances } from '../api'
+import { getGroups, getOverview, getUserSummary, getGlobalAnalytics, getUserGroupBalances, getFriends } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser, isAdmin } from '../UserContext'
 import { buildMasterGroups } from '../utils/masterGroups'
@@ -75,7 +75,8 @@ export default function Home() {
   const [overview,    setOverview]    = useState([])
   const [userStats,   setUserStats]   = useState(null)
   const [analytics,   setAnalytics]   = useState(null)
-  const [balances,    setBalances]    = useState([])
+  const [balances,    setBalances]    = useState([])   // per-group, ranks the group list
+  const [friends,     setFriends]     = useState([])   // per-person netted, drives the headline
   const [loading,     setLoading]     = useState(true)
   const [error,       setError]       = useState('')
   const [showSettled, setShowSettled] = useState(false)
@@ -95,6 +96,9 @@ export default function Home() {
       if (user?.name) {
         getUserGroupBalances(user.name)
           .then((r) => setBalances(r.data))
+          .catch(() => {})
+        getFriends(user.name)
+          .then((r) => setFriends(r.data))
           .catch(() => {})
       }
       getGlobalAnalytics(user?.name ?? '')
@@ -129,10 +133,13 @@ export default function Home() {
     </div>
   )
 
-  const oweGroups  = balances.filter((g) => g.net < 0)
-  const owedGroups = balances.filter((g) => g.net > 0)
-  const totalOwe   = oweGroups.reduce((s, g) => s + Math.abs(g.net), 0)
-  const totalOwed  = owedGroups.reduce((s, g) => s + g.net, 0)
+  // Netted per person across every group: what you'd actually settle up.
+  // Summing groups in isolation double-counts debts that cancel each other —
+  // owing Divyank in one group while he owes you more in two others.
+  const totalOwe  = friends.filter((f) => f.net < -0.01).reduce((s, f) => s + Math.abs(f.net), 0)
+  const totalOwed = friends.filter((f) => f.net >  0.01).reduce((s, f) => s + f.net, 0)
+  const owePeople  = friends.filter((f) => f.net < -0.01).length
+  const owedPeople = friends.filter((f) => f.net >  0.01).length
 
   // Every group (2+ members) is linked to a master group named after its
   // members — even if it's the only group with that exact member set, so no
@@ -202,14 +209,26 @@ export default function Home() {
               {user?.name}'s Overview
             </p>
             <div className="grid grid-cols-2 gap-3">
-              <div className="card text-center py-4 bg-red-50 border-red-200">
+              <button
+                onClick={() => nav('/balances/owe')}
+                className="card text-center py-4 bg-red-50 border-red-200 active:scale-[0.98] transition-transform"
+              >
                 <p className="text-[10px] text-red-500 font-semibold uppercase tracking-wide leading-tight">You Owe</p>
                 <p className="text-lg font-black text-red-600 mt-1">{INR(totalOwe)}</p>
-              </div>
-              <div className="card text-center py-4 bg-green-50 border-green-200">
+                <p className="text-[10px] text-red-400 mt-0.5">
+                  {owePeople ? `${owePeople} ${owePeople === 1 ? 'person' : 'people'} →` : 'all settled'}
+                </p>
+              </button>
+              <button
+                onClick={() => nav('/balances/owed')}
+                className="card text-center py-4 bg-green-50 border-green-200 active:scale-[0.98] transition-transform"
+              >
                 <p className="text-[10px] text-green-600 font-semibold uppercase tracking-wide leading-tight">Owed to You</p>
                 <p className="text-lg font-black text-green-600 mt-1">{INR(totalOwed)}</p>
-              </div>
+                <p className="text-[10px] text-green-500 mt-0.5">
+                  {owedPeople ? `${owedPeople} ${owedPeople === 1 ? 'person' : 'people'} →` : 'all settled'}
+                </p>
+              </button>
             </div>
           </div>
         )}
