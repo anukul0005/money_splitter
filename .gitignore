@@ -11,3 +11,6 @@ dist/
 
 .DS_Store
 Thumbs.db
+
+# Database snapshots — contain password/recovery hashes, never commit
+backend/backups/
