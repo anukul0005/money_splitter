@@ -52,6 +52,14 @@ def _secret() -> bytes:
     if env:
         return env.encode()
     if not _SECRET_FILE.exists():
+        # Loud on purpose. On a host with an ephemeral disk (Render, Fly,
+        # Railway) this runs again after every restart with a fresh key, and
+        # the only symptom users see is being signed out for no reason.
+        print(
+            "[auth] SECRET_KEY is not set — generating a local key file.\n"
+            "[auth] On a host with an ephemeral disk this regenerates on every\n"
+            "[auth] restart and signs every user out. Set SECRET_KEY in the env."
+        )
         _SECRET_FILE.write_text(secrets.token_hex(32), encoding="utf8")
     return _SECRET_FILE.read_text(encoding="utf8").strip().encode()
 

@@ -49,11 +49,10 @@ export default function Groups() {
             >
               + Monthly
             </button>
-            {admin && (
-              <button className="bg-brand-400 text-white text-xs font-bold px-3 py-1.5 shadow-sm" onClick={() => nav('/groups/new')}>
-                + New
-              </button>
-            )}
+            {/* Anyone can start a group — they're a member of whatever they make */}
+            <button className="bg-brand-400 text-white text-xs font-bold px-3 py-1.5 shadow-sm" onClick={() => nav('/groups/new')}>
+              + New
+            </button>
           </div>
         </div>
         <div className="flex gap-2 mt-3">

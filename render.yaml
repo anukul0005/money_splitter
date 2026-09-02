@@ -10,3 +10,10 @@ services:
         sync: false          # set manually in Render dashboard
       - key: ALLOWED_ORIGINS
         sync: false          # e.g. https://your-app.vercel.app
+      # Signs session tokens. Render's disk is ephemeral, so the on-disk
+      # fallback key is regenerated on every restart — and a free instance
+      # restarts whenever it spins down after idling, which signed everyone
+      # out at apparently random times. generateValue makes Render mint this
+      # once and keep it, so sessions survive restarts and redeploys.
+      - key: SECRET_KEY
+        generateValue: true

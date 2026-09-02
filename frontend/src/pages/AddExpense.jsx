@@ -283,7 +283,17 @@ export default function AddExpense() {
       <form onSubmit={handleSubmit} className="px-5 mt-5 space-y-4 max-w-2xl">
         {/* Group */}
         <div>
-          <label className="label">Group *</label>
+          <div className="flex items-center justify-between">
+            <label className="label">Group *</label>
+            {/* The expense you're entering may not have a group yet */}
+            <button
+              type="button"
+              onClick={() => nav('/groups/new')}
+              className="text-[11px] font-bold text-brand-600 hover:text-brand-700 mb-1.5"
+            >
+              + New group
+            </button>
+          </div>
           <select className="input" value={form.group_id} onChange={set('group_id')}>
             <option value="">Select a group…</option>
             {userGroups.map((g) => (

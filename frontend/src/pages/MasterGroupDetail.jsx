@@ -58,6 +58,19 @@ export default function MasterGroupDetail() {
       <div className="px-5 pt-10 md:pt-6 pb-4 bg-cream sticky top-0 z-10 border-b border-amber-100/60">
         <div className="flex items-start justify-between gap-3">
           <button onClick={() => nav(-1)} className="text-xs font-bold text-gray-400 mb-2">← Back</button>
+          <div className="flex items-center gap-2">
+          {/* A master group is one fixed member set, so a new group inside it
+              is almost always those same people — prefill them. */}
+          <button
+            onClick={() => nav(`/groups/new?members=${encodeURIComponent((master.names ?? []).join(','))}`)}
+            title={`New group with ${master.name}`}
+            className="flex-shrink-0 flex items-center gap-1.5 bg-cream border border-amber-200 text-gray-500 hover:bg-amber-50 rounded-md px-3 py-1.5 text-xs font-bold active:scale-95 transition-all shadow-sm"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            New
+          </button>
           <button
             onClick={() => setShowStats((v) => !v)}
             title={showStats ? 'Back to groups' : 'Stats across all these groups'}
@@ -74,6 +87,7 @@ export default function MasterGroupDetail() {
             </svg>
             Stats
           </button>
+          </div>
         </div>
         <h1 className="text-xl font-black tracking-tight">{master.name}</h1>
         <p className="text-xs text-gray-400 mt-1">{master.groups.length} groups · {INR(master.totalAmount)} total</p>

@@ -1,25 +1,59 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { createGroup } from '../api'
+import { useEffect, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { createGroup, getGroups } from '../api'
 import { useUser } from '../UserContext'
 
 export default function NewGroup() {
   const nav = useNavigate()
   const user = useUser()
+  const [params] = useSearchParams()
+
   const [form, setForm]             = useState({ name: '', description: '', category: '' })
   const [memberInput, setMInput]    = useState('')
-  const [members, setMembers]       = useState([])
+  // You are added by default: the API only shows you groups you're in, so a
+  // group created without yourself would vanish the moment it was made.
+  const [members, setMembers]       = useState(() => {
+    const pre = (params.get('members') || '')
+      .split(',').map((x) => x.trim()).filter(Boolean)
+    if (pre.length) return pre
+    return user?.name ? [user.name] : []
+  })
+  const [known, setKnown]           = useState([])   // people you already share groups with
   const [submitting, setSubmitting] = useState(false)
   const [error, setError]           = useState('')
 
-  const addMember = () => {
-    const name = memberInput.trim()
-    if (!name || members.includes(name)) return
+  // Suggest the people you actually split with, commonest first, so the usual
+  // handful never has to be typed out.
+  useEffect(() => {
+    getGroups()
+      .then((r) => {
+        const freq = new Map()
+        r.data.forEach((g) => (g.member_names ?? []).forEach((n) => {
+          freq.set(n, (freq.get(n) || 0) + 1)
+        }))
+        setKnown([...freq.entries()].sort((a, b) => b[1] - a[1]).map(([n]) => n))
+      })
+      .catch(() => setKnown([]))
+  }, [])
+
+  const addName = (raw) => {
+    const name = (raw || '').trim()
+    if (!name) return
+    // Case-insensitive: "anjali" and "Anjali" must not become two members
+    if (members.some((m) => m.toLowerCase() === name.toLowerCase())) return
     setMembers((m) => [...m, name])
-    setMInput('')
   }
 
+  const addMember = () => { addName(memberInput); setMInput('') }
+
   const removeMember = (name) => setMembers((m) => m.filter((x) => x !== name))
+
+  const suggestions = known.filter(
+    (n) => !members.some((m) => m.toLowerCase() === n.toLowerCase())
+  )
+  const includesMe = !user?.name || members.some(
+    (m) => m.toLowerCase() === user.name.toLowerCase()
+  )
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -115,6 +149,26 @@ export default function NewGroup() {
             </button>
           </div>
 
+          {suggestions.length > 0 && (
+            <div className="mt-3">
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">
+                Tap to add
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {suggestions.slice(0, 12).map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => addName(n)}
+                    className="bg-cream border border-amber-200 text-gray-600 hover:bg-amber-50 hover:text-gray-900 rounded-md px-2.5 py-1 text-xs font-bold active:scale-95 transition-all"
+                  >
+                    + {n}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {members.length > 0 && (
             <div className="flex flex-wrap gap-2 mt-3">
               {members.map((m) => (
@@ -131,6 +185,13 @@ export default function NewGroup() {
             </div>
           )}
         </div>
+
+        {!includesMe && (
+          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-4 py-3">
+            You're not in this group, so it won't appear anywhere for you once
+            it's created — only its members can see it.
+          </p>
+        )}
 
         {error && <p className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-md px-4 py-3">{error}</p>}
 

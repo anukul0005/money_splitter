@@ -233,9 +233,9 @@ export default function Home() {
           </div>
         )}
 
-        {/* Admin quick actions */}
-        {admin && (
-          <div className="grid grid-cols-3 gap-3">
+        {/* Quick actions — available to everyone, not just admins: anyone can
+            start a group, and they're a member of whatever they create. */}
+        <div className="grid grid-cols-3 gap-3">
             <button className="btn-primary py-2.5 px-3 text-xs" onClick={() => nav('/groups/new')}>
               + New Group
             </button>
@@ -250,9 +250,8 @@ export default function Home() {
               onClick={() => nav('/groups/monthly')}
             >
               + Monthly
-            </button>
-          </div>
-        )}
+          </button>
+        </div>
 
         {/* Groups (every group linked to a master group by members; unsettled first, settled behind a toggle) */}
         {(allMasters.length > 0 || soloGroups.length > 0) && (
