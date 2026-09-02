@@ -107,3 +107,8 @@ export const getUserSummary     = (name)    => api.get('/stats/user-summary')
 export const getGlobalAnalytics     = (name) => api.get('/stats/global-analytics')
 export const getUserGroupBalances   = (name) => api.get('/stats/user-group-balances')
 export const getFriends             = (name) => api.get('/stats/friends')
+
+// ── Drink recommender ─────────────────────────────────────────────────────────
+// Prices come from scraped state excise listings; history from your own spend.
+export const getRecommendMeta = ()      => api.get('/recommend/meta')
+export const getRecommendation = (p)    => api.get('/recommend/', { params: p })

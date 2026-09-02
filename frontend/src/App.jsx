@@ -20,6 +20,7 @@ import Balances      from './pages/Balances'
 import MasterGroupDetail from './pages/MasterGroupDetail'
 import Friends           from './pages/Friends'
 import FriendDetail      from './pages/FriendDetail'
+import Recommend         from './pages/Recommend'
 import { UserContext, isAdmin } from './UserContext'
 
 const SESSION_KEY = 'splitter_session_v2'
@@ -77,6 +78,7 @@ export default function App() {
                 <Route path="/groups/:id" element={<GroupDetail />} />
                 <Route path="/groups/:id/edit" element={<EditGroup />} />
                 <Route path="/add"        element={<AddExpense />} />
+                <Route path="/recommend"  element={<Recommend />} />
                 <Route path="/history"    element={<History />} />
                 <Route path="/master/:key" element={<MasterGroupDetail />} />
                 <Route path="/friends" element={<Friends />} />

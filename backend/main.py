@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from database import create_tables, get_settings
-from routers import groups, expenses, settlements, stats, users, payments, activity
+from routers import groups, expenses, settlements, stats, users, payments, activity, recommend
 
 
 def _settle_existing_historical():
@@ -49,6 +49,7 @@ app.include_router(settlements.router)
 app.include_router(stats.router)
 app.include_router(payments.router)
 app.include_router(activity.router)
+app.include_router(recommend.router)
 
 
 @app.get("/health")

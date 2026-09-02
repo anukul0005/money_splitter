@@ -2,15 +2,17 @@ import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { isAdmin } from '../UserContext'
 
+// The raised centre key is the recommender. Adding an expense is still one
+// tap from Home's quick actions and from "+ Add" inside any group.
 const items = [
-  { to: '/',        label: 'Home',    icon: HomeIcon },
-  { to: '/add',     label: 'Add',     icon: AddIcon, highlight: true },
-  { to: '/friends', label: 'Friends', icon: FriendsIcon },
-  { to: '/history', label: 'History', icon: HistoryIcon },
+  { to: '/',          label: 'Home',      icon: HomeIcon },
+  { to: '/recommend', label: 'Recommend', icon: GlassIcon, highlight: true },
+  { to: '/friends',   label: 'Friends',   icon: FriendsIcon },
+  { to: '/history',   label: 'History',   icon: HistoryIcon },
 ]
 
 function HomeIcon()    { return <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0h6" /></svg> }
-function AddIcon()     { return <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg> }
+function GlassIcon()   { return <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M8 21h8m-4 0v-6m-6.5-11h13l-1.2 6.2A5 5 0 0 1 12.4 14h-.8a5 5 0 0 1-4.9-3.8L5.5 4z" /></svg> }
 function FriendsIcon() { return <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14c-4.418 0-8 2.239-8 5v1h16v-1c0-2.761-3.582-5-8-5z" /></svg> }
 function HistoryIcon() { return <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> }
 
