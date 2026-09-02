@@ -5,6 +5,7 @@ import RecordPaymentModal from '../components/RecordPaymentModal'
 import GroupCard from '../components/GroupCard'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser } from '../UserContext'
+import { isSettled } from '../utils/money'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 
@@ -77,7 +78,7 @@ export default function FriendDetail() {
     })),
   ].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
 
-  const settled = Math.abs(net) < 0.01
+  const settled = isSettled(net)
   const owes = net < 0
 
   return (

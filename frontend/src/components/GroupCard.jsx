@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom'
+import { isSettled } from '../utils/money'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 
@@ -11,7 +12,7 @@ const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigi
 export default function GroupCard({ group, friendBalance }) {
   const nav = useNavigate()
 
-  const fb = friendBalance && Math.abs(friendBalance.net) > 0.01 ? friendBalance : null
+  const fb = friendBalance && !isSettled(friendBalance.net) ? friendBalance : null
 
   return (
     <div

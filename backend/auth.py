@@ -17,10 +17,10 @@ from __future__ import annotations
 import base64
 import hmac
 import json
-import secrets
+import os
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from hashlib import sha256
-from pathlib import Path
 
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -29,7 +29,6 @@ from database import get_db
 from models import Group, User
 
 TOKEN_TTL = timedelta(days=30)
-_SECRET_FILE = Path(__file__).with_name(".secret_key")
 
 # Sent only when the *session* is bad, never when a password, passkey or
 # one-time code is wrong. The client signs the user out on this and nothing
@@ -38,30 +37,36 @@ _SECRET_FILE = Path(__file__).with_name(".secret_key")
 SESSION_EXPIRED = "Sign in to continue"
 
 
+@lru_cache(maxsize=1)
 def _secret() -> bytes:
-    """Server signing key, stable across restarts.
+    """Server signing key. Must be identical before and after a restart.
 
-    Kept in a gitignored file rather than generated per-process, so a restart
-    doesn't silently log everyone out. Set SECRET_KEY in the environment to
-    override — required if you ever run more than one backend instance, since
-    each would otherwise mint its own file and reject the other's tokens.
+    SECRET_KEY from the environment wins. Without it we *derive* a key from
+    DATABASE_URL rather than generating a random one, because a random key has
+    to be stored somewhere and there is nowhere reliable to put it: a free
+    Render instance spins down when idle and comes back with an empty disk, so
+    a key written to a file is a new key every time the app wakes — and every
+    session dies with it. That is what "logged out for no reason after being
+    idle" was.
+
+    Deriving instead means the key is a pure function of config the server
+    already has, so it survives restarts, redeploys and cold starts with no
+    setup. It is not a substitute for SECRET_KEY: anyone holding DATABASE_URL
+    could mint tokens — though they could equally read the whole database
+    directly, so it adds no meaningful exposure. Rotating the database
+    password changes the derived key and signs everyone out once.
     """
-    import os
-
     env = os.getenv("SECRET_KEY", "").strip()
     if env:
         return env.encode()
-    if not _SECRET_FILE.exists():
-        # Loud on purpose. On a host with an ephemeral disk (Render, Fly,
-        # Railway) this runs again after every restart with a fresh key, and
-        # the only symptom users see is being signed out for no reason.
-        print(
-            "[auth] SECRET_KEY is not set — generating a local key file.\n"
-            "[auth] On a host with an ephemeral disk this regenerates on every\n"
-            "[auth] restart and signs every user out. Set SECRET_KEY in the env."
-        )
-        _SECRET_FILE.write_text(secrets.token_hex(32), encoding="utf8")
-    return _SECRET_FILE.read_text(encoding="utf8").strip().encode()
+
+    from database import get_settings
+
+    return hmac.new(
+        b"money-splitter/session-key/v1",
+        get_settings().database_url.encode(),
+        sha256,
+    ).digest()
 
 
 def _b64(raw: bytes) -> str:

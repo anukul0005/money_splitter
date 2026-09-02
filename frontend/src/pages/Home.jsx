@@ -4,6 +4,7 @@ import { getGroups, getOverview, getUserSummary, getGlobalAnalytics, getUserGrou
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser, isAdmin } from '../UserContext'
 import { buildMasterGroups } from '../utils/masterGroups'
+import { owes, owed } from '../utils/money'
 import MasterGroupCard from '../components/MasterGroupCard'
 import GroupCard from '../components/GroupCard'
 import NotificationBell from '../components/NotificationBell'
@@ -136,10 +137,12 @@ export default function Home() {
   // Netted per person across every group: what you'd actually settle up.
   // Summing groups in isolation double-counts debts that cancel each other —
   // owing Divyank in one group while he owes you more in two others.
-  const totalOwe  = friends.filter((f) => f.net < -0.01).reduce((s, f) => s + Math.abs(f.net), 0)
-  const totalOwed = friends.filter((f) => f.net >  0.01).reduce((s, f) => s + f.net, 0)
-  const owePeople  = friends.filter((f) => f.net < -0.01).length
-  const owedPeople = friends.filter((f) => f.net >  0.01).length
+  // Same threshold as the Friends list, so the headline total and the rows
+  // that explain it can never disagree.
+  const totalOwe  = friends.filter((f) => owes(f.net)).reduce((s, f) => s + Math.abs(f.net), 0)
+  const totalOwed = friends.filter((f) => owed(f.net)).reduce((s, f) => s + f.net, 0)
+  const owePeople  = friends.filter((f) => owes(f.net)).length
+  const owedPeople = friends.filter((f) => owed(f.net)).length
 
   // Every group (2+ members) is linked to a master group named after its
   // members — even if it's the only group with that exact member set, so no

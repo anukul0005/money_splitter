@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { getFriends } from '../api'
 import { useUser } from '../UserContext'
+import { owes, owed } from '../utils/money'
 import LoadingSpinner from '../components/LoadingSpinner'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
@@ -34,7 +35,7 @@ export default function Balances() {
   if (loading) return <LoadingSpinner />
 
   const rows = friends
-    .filter((f) => (owing ? f.net < -0.01 : f.net > 0.01))
+    .filter((f) => (owing ? owes(f.net) : owed(f.net)))
     .sort((a, b) => Math.abs(b.net) - Math.abs(a.net))
 
   const total = rows.reduce((s, f) => s + Math.abs(f.net), 0)

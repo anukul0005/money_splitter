@@ -4,11 +4,12 @@ import { getFriends } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import RecordPaymentModal from '../components/RecordPaymentModal'
 import { useUser } from '../UserContext'
+import { isSettled } from '../utils/money'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 
 function FriendRow({ friend, nav }) {
-  const settled = Math.abs(friend.net) < 0.01
+  const settled = isSettled(friend.net)
   const owes = friend.net < 0
 
   return (
@@ -52,8 +53,8 @@ export default function Friends() {
 
   if (loading) return <LoadingSpinner />
 
-  const unsettled = friends.filter((f) => Math.abs(f.net) > 0.01)
-  const settled   = friends.filter((f) => Math.abs(f.net) <= 0.01)
+  const unsettled = friends.filter((f) => !isSettled(f.net))
+  const settled   = friends.filter((f) => isSettled(f.net))
 
   return (
     <div className="pb-24 md:pb-8">
