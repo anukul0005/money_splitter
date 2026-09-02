@@ -1,10 +1,15 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getRecommendMeta, getRecommendation, getFriends } from '../api'
+
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser } from '../UserContext'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+
+// Shown if /recommend/meta can't be reached, so the form is never dead. The
+// server is still the authority — a state missing real prices 404s on submit.
+const FALLBACK_STATES = ['Delhi', 'Maharashtra', 'Uttar Pradesh']
 
 const STRENGTHS = [
   ['light',  'Light',  '~120ml each'],
@@ -34,14 +39,38 @@ export default function Recommend() {
   const [error, setError]     = useState('')
   const [busy, setBusy]       = useState(false)
 
+  // Two independent calls, loaded independently. They used to share a
+  // Promise.all, so a failure in either left the state dropdown empty with a
+  // generic message and no way to tell which one broke.
   useEffect(() => {
-    Promise.all([getRecommendMeta(), getFriends(user?.name)])
-      .then(([m, f]) => {
+    getRecommendMeta()
+      .then((m) => {
+        // A misrouted /api can return the SPA's index.html with a 200, which
+        // axios hands over as a string. Treat anything that isn't the shape we
+        // expect as a failure instead of silently rendering an empty form.
+        const states = m.data?.states
+        if (!Array.isArray(states) || states.length === 0) {
+          throw Object.assign(new Error('bad meta'), { badShape: true })
+        }
         setMeta(m.data)
-        setState(m.data.states[0] || '')
-        setFriends(f.data.map((x) => x.name))
+        setState((cur) => cur || states[0])
       })
-      .catch(() => setError('Could not load the price data.'))
+      .catch((err) => {
+        const code = err.response?.status
+        setMeta({ states: FALLBACK_STATES, sources: {} })
+        setState((cur) => cur || FALLBACK_STATES[0])
+        setError(
+          err.badShape
+            ? 'The API returned the web page instead of data — VITE_API_URL is probably not pointing at the backend.'
+            : code === 404
+              ? 'The backend is running an older build without the recommender — redeploy it.'
+              : `Could not load prices (${code || 'network error'}).`
+        )
+      })
+
+    getFriends(user?.name)
+      .then((f) => setFriends(f.data.map((x) => x.name)))
+      .catch(() => setFriends([]))
   }, [user?.name])
 
   // People in the room = you + everyone picked, unless you override the count
@@ -59,12 +88,18 @@ export default function Recommend() {
       })
       setResult(r.data)
     } catch (err) {
-      setError(err.response?.data?.detail || 'Could not work that out.')
+      const code = err.response?.status
+      setError(
+        err.response?.data?.detail ||
+        (code === 404
+          ? 'The server does not have the recommender yet — redeploy the backend.'
+          : `Could not work that out (${code || 'network error'}).`)
+      )
       setResult(null)
     } finally { setBusy(false) }
   }
 
-  if (!meta && !error) return <LoadingSpinner />
+  if (!meta) return <LoadingSpinner />
 
   const hist = result?.history
 
