@@ -40,11 +40,17 @@ DRINK_RE = re.compile(
     re.I,
 )
 
-# What you walk out with. Spirits come in exactly three sizes and everyone
-# names them this way; beer is the fourth answer to the same question, so it
-# sits in the same control rather than being a permanent extra list below.
+# How much the group is drinking between them, in the sizes spirits are sold
+# in. 180ml across two people is 90ml each — it is a total for the room, not
+# an allowance per head. Beer is the fourth answer to the same question.
 BOTTLE_SIZES = (180, 375, 750)
 BOTTLE_CHOICES = ("180", "375", "750", "beer")
+
+# Budget is a range rather than a ceiling, because "around 500" is what people
+# actually mean. Too narrow a range matches nothing on a price list that moves
+# in fifties, so a span this small is rejected rather than quietly returning
+# an empty list.
+MIN_BUDGET_SPAN = 60
 
 # Spirits are sold in exactly these three, and everyone names them this way.
 # Anything else in the price table (90ml nips, litres, 200ml travel bottles)
@@ -121,14 +127,13 @@ def _units(volume_ml: float, abv: float) -> float:
     return round(volume_ml * abv / 100, 1)
 
 
-def _pick(bottles: list[Bottle], budget: float, people: int, bottle_ml: int,
-          favourites: list[str]) -> list[dict]:
-    """The best bottles of the chosen size that the budget covers.
+def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
+          bottle_ml: int, favourites: list[str]) -> list[dict]:
+    """Every bottle of the chosen size priced inside the budget range.
 
-    "Best" is approximated by price: within a state and a size, a dearer
-    bottle is the better one often enough for this to be useful, and it is the
-    only quality signal in the data. So the list is the most you can afford
-    first, working down — not the cheapest that technically fits.
+    Ordered dearest first: within one state and one size, price is the only
+    quality signal in the data, and a dearer bottle is the better one often
+    enough for that to be useful.
     """
     fav = {f.lower() for f in favourites}
     out: list[dict] = []
@@ -139,7 +144,7 @@ def _pick(bottles: list[Bottle], budget: float, people: int, bottle_ml: int,
         if b.size_ml != bottle_ml:
             continue
         price = b.mid
-        if price > budget:
+        if price < lo or price > hi:
             continue
 
         abv, abv_known = abv_for(b.brand, b.kind)
@@ -157,7 +162,7 @@ def _pick(bottles: list[Bottle], budget: float, people: int, bottle_ml: int,
             "total": round(price),
             # What the budget would actually stretch to, said plainly rather
             # than silently picking a quantity on the user's behalf.
-            "budget_buys": int(budget // price) if price > 0 else 0,
+            "budget_buys": int(hi // price) if price > 0 else 0,
             "per_head": round(price / max(people, 1)),
             "ml_per_head": round(bottle_ml / max(people, 1)),
             "abv": abv,
@@ -174,26 +179,25 @@ def _pick(bottles: list[Bottle], budget: float, people: int, bottle_ml: int,
     return out[:8]
 
 
-def _beers(bottles: list[Bottle], budget: float, people: int,
+def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
            favourites: list[str] | None = None) -> list[dict]:
-    """Beer options as their own cards, sized to the budget.
+    """Beer rounds whose total lands inside the budget range.
 
-    Two each is the default round. If that overruns the budget the count comes
-    down rather than the beer being dropped, so a tight budget still gets an
-    answer instead of an empty list.
+    A beer's unit price is small next to any sensible budget, so the round is
+    what gets priced, not the bottle: as many as the top of the range buys,
+    capped at six each so a large budget doesn't suggest something absurd.
     """
     fav = {f.lower() for f in (favourites or [])}
     out: list[dict] = []
     for b in bottles:
         if b.kind != "beer":
             continue
-        qty = max(1, people * 2)
+        qty = min(int(hi // b.mid), people * 6)
+        if qty < 1:
+            continue
         cost = b.mid * qty
-        if cost > budget:
-            qty = int(budget // b.mid)
-            if qty < 1:
-                continue
-            cost = b.mid * qty
+        if cost < lo:
+            continue
         abv, abv_known = abv_for(b.brand, b.kind)
         volume = b.size_ml * qty
         out.append({
@@ -220,6 +224,20 @@ def _beers(bottles: list[Bottle], budget: float, people: int,
     return out[:6]
 
 
+def _band(bottles: list[Bottle], bottle_ml: int, is_beer: bool) -> dict | None:
+    """Cheapest and dearest of the chosen size in this state."""
+    if is_beer:
+        rows = [b for b in bottles if b.kind == "beer"]
+    else:
+        rows = [
+            b for b in bottles
+            if b.size_ml == bottle_ml and b.kind in ("whisky", "rum", "vodka", "gin")
+        ]
+    if not rows:
+        return None
+    return {"min": round(min(r.mid for r in rows)), "max": round(max(r.mid for r in rows))}
+
+
 @router.get("/meta", response_model=dict)
 def meta(_: User = Depends(current_user)):
     """States we have real prices for, and where those prices came from."""
@@ -229,6 +247,7 @@ def meta(_: User = Depends(current_user)):
         "sources": SOURCES,
         "abv_sources": ABV_SOURCES,
         "row_count": len(BOTTLES),
+        "min_budget_span": MIN_BUDGET_SPAN,
         "bottle_choices": [
             {"value": str(ml), "name": SPIRIT_SIZES[ml].title(), "hint": f"{ml}ml"}
             for ml in BOTTLE_SIZES
@@ -240,7 +259,8 @@ def meta(_: User = Depends(current_user)):
 def recommend(
     state: str,
     people: int = 2,
-    budget: float = 2000,
+    budget_min: float = 500,
+    budget_max: float = 1000,
     bottle: str = "750",
     names: str = "",
     db: Session = Depends(get_db),
@@ -248,8 +268,14 @@ def recommend(
 ):
     if people < 1:
         raise HTTPException(400, "There has to be at least one of you")
-    if budget <= 0:
+    if budget_min < 0 or budget_max <= 0:
         raise HTTPException(400, "Set a budget above zero")
+    if budget_max - budget_min < MIN_BUDGET_SPAN:
+        raise HTTPException(
+            400,
+            f"Widen the budget - the range needs to be at least "
+            f"Rs {MIN_BUDGET_SPAN} (e.g. 500-560, not 500-530).",
+        )
     if bottle not in BOTTLE_CHOICES:
         raise HTTPException(400, f"Pick one of {BOTTLE_CHOICES}")
     is_beer = bottle == "beer"
@@ -268,15 +294,18 @@ def recommend(
     hist = _history(db, caller, people_names)
     # The selector decides what you are buying. Beer alongside every spirit
     # answer would make choosing "beer" mean nothing.
-    picks = [] if is_beer else _pick(bottles, budget, people, bottle_ml, hist["favourites"])
-    beers = _beers(bottles, budget, people, hist["favourites"]) if is_beer else []
+    picks = ([] if is_beer else
+             _pick(bottles, budget_min, budget_max, people, bottle_ml, hist["favourites"]))
+    beers = (_beers(bottles, budget_min, budget_max, people, hist["favourites"])
+             if is_beer else [])
 
     return {
         "state": state,
         "ncr": list(NCR),
         "people": people,
-        "budget": budget,
-        "budget_per_head": round(budget / people),
+        "budget_min": budget_min,
+        "budget_max": budget_max,
+        "budget_per_head": round(budget_max / people),
         "bottle": bottle,
         "bottle_ml": bottle_ml,
         "is_beer": is_beer,
@@ -285,6 +314,9 @@ def recommend(
         "picks": picks,
         # Says why a list is empty: no rows at all for this size in this state
         # is a different problem from everything being over budget.
+        # What that size actually costs here, so an empty list can say "they
+        # run Rs 95-250" instead of leaving you guessing at the range.
+        "price_band": _band(bottles, bottle_ml, is_beer),
         "size_available": any(
             b.kind == "beer" if is_beer else
             (b.size_ml == bottle_ml and b.kind in ("whisky", "rum", "vodka", "gin"))

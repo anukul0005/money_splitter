@@ -208,23 +208,29 @@ def build() -> Path:
         ("750 ml", "full"),
     ], w1=26)
     body(p,
-         "You pick the size you intend to buy - not a per-person allowance. Given that size and a "
-         "budget, the recommender lists the bottles of that size the budget covers, best first.")
+         "You pick how much the group is drinking between them, in those sizes - a total for the "
+         "room, not an allowance per head. 180 ml across two people is 90 ml each, and the cards "
+         "say so. Given that and a budget range, the recommender lists every bottle of that size "
+         "priced inside the range, dearest first.")
     body(p,
          "'Best' is approximated by price. Within one state and one size, a dearer bottle is the "
          "better one often enough to be useful, and price is the only quality signal in the data. "
          "So the list starts with the most you can afford and works down, rather than the cheapest "
          "thing that technically fits. A brand you already drink wins a tie.")
     body(p,
-         "Each card also says what the budget would stretch to - 'budget buys 3' - rather than "
-         "silently choosing a quantity on your behalf.")
+         "Budget is a range rather than a ceiling, because 'around 500' is what people mean. It has "
+         "to be at least Rs 60 wide: a price list that moves in fifties will not reliably contain "
+         "anything inside a Rs 30 window, and an empty result from too narrow a range looks like a "
+         "missing brand rather than a bad question. When a range does come back empty, the answer "
+         "carries what that size actually costs in that state - 'they run Rs 310-940 here' - so a "
+         "dead end tells you how to fix it.")
 
     mono(p, [
-        "  Gurugram, full (750 ml), budget Rs 900, 4 people",
+        "  Gurugram, quarter (180 ml) between 2 people, Rs 100-250",
         "",
-        "     Antiquity Blue           Rs 895    Rs 224 / head   buys 1",
-        "     McDowell's Single Malt   Rs 850    Rs 212 / head   buys 1",
-        "     Blenders Pride           Rs 730    Rs 182 / head   buys 1",
+        "     Antiquity Blue           Rs 250    90 ml each",
+        "     McDowell's Single Malt   Rs 250    90 ml each",
+        "     Smirnoff                 Rs 200    90 ml each",
     ])
     body(p,
          "An empty list distinguishes its two causes. Nothing published at that size in that state "

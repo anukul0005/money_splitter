@@ -11,14 +11,16 @@ const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigi
 // server is still the authority — a state missing real prices 404s on submit.
 const FALLBACK_STATES = ['Delhi', 'Maharashtra', 'Uttar Pradesh']
 
-// What you intend to buy — not a per-person amount. Beer is the fourth
-// answer to the same question, so it belongs in the same control.
+// How much the group is drinking between them. 180ml across two people is
+// 90ml each, so the hint is computed from the head count rather than fixed.
 const BOTTLES = [
-  ['180',  'Quarter', '180ml'],
-  ['375',  'Half',    '375ml'],
-  ['750',  'Full',    '750ml'],
-  ['beer', 'Beer',    'by the bottle'],
+  ['180',  'Quarter', 180],
+  ['375',  'Half',    375],
+  ['750',  'Full',    750],
+  ['beer', 'Beer',    null],
 ]
+
+const MIN_SPAN = 60
 
 const pct = (v, known) => `${known ? '' : '~'}${v}% ABV`
 
@@ -40,7 +42,8 @@ export default function Recommend() {
   // parseFloat('') -> 0, so the box refilled itself with a "0" you had to
   // delete before every edit, and a budget of 0 got sent to the server.
   const [people, setPeople]   = useState('2')
-  const [budget, setBudget]   = useState('2000')
+  const [budgetMin, setBudgetMin] = useState('500')
+  const [budgetMax, setBudgetMax] = useState('1000')
   const [bottle, setBottle] = useState('750')
   const [withWho, setWithWho] = useState([])
   const [result, setResult]   = useState(null)
@@ -82,8 +85,10 @@ export default function Recommend() {
   }, [user?.name])
 
   const peopleN = Math.max(1, parseInt(people, 10) || 0)
-  const budgetN = Math.max(0, parseFloat(budget) || 0)
-  const canRun = state && peopleN >= 1 && budgetN > 0
+  const loN = Math.max(0, parseFloat(budgetMin) || 0)
+  const hiN = Math.max(0, parseFloat(budgetMax) || 0)
+  const spanOk = hiN - loN >= MIN_SPAN
+  const canRun = state && peopleN >= 1 && hiN > 0 && spanOk
 
   // People in the room = you + everyone picked, unless you override the count
   const toggle = (n) => setWithWho((w) => {
@@ -96,7 +101,7 @@ export default function Recommend() {
     setError(''); setBusy(true)
     try {
       const r = await getRecommendation({
-        state, people: peopleN, budget: budgetN, bottle,
+        state, people: peopleN, budget_min: loN, budget_max: hiN, bottle,
         names: withWho.join(','),
       })
       setResult(r.data)
@@ -172,19 +177,40 @@ export default function Recommend() {
               />
             </div>
             <div>
-              <label className="label">Budget (₹)</label>
+              <label className="label">Budget from (₹)</label>
               <input
-                className="input font-bold" type="number" min="0" step="100"
+                className="input font-bold" type="number" min="0" step="50"
                 inputMode="numeric"
-                value={budget}
-                onChange={(e) => setBudget(e.target.value)}
-                onBlur={() => setBudget((v) => (parseFloat(v) > 0 ? String(parseFloat(v)) : ''))}
+                value={budgetMin}
+                onChange={(e) => setBudgetMin(e.target.value)}
               />
             </div>
           </div>
 
+          {/* A range, not a ceiling — "around 500" is what people mean. It has
+              to be wide enough to catch something on a list that moves in
+              fifties, so the far end is nudged up rather than rejected. */}
           <div>
-            <label className="label">Bottle size</label>
+            <label className="label">Budget to (₹)</label>
+            <input
+              className="input font-bold" type="number" min="0" step="50"
+              inputMode="numeric"
+              value={budgetMax}
+              onChange={(e) => setBudgetMax(e.target.value)}
+              onBlur={() => setBudgetMax((v) => {
+                const hi = parseFloat(v) || 0
+                return String(hi - loN >= MIN_SPAN ? hi : loN + MIN_SPAN)
+              })}
+            />
+            <p className={`text-[10px] mt-1 ${spanOk ? 'text-gray-400' : 'text-red-500'}`}>
+              {spanOk
+                ? `₹${loN.toLocaleString('en-IN')} – ₹${hiN.toLocaleString('en-IN')}`
+                : `The range has to be at least ₹${MIN_SPAN} wide — ₹500–₹560, not ₹500–₹530.`}
+            </p>
+          </div>
+
+          <div>
+            <label className="label">How much between you</label>
             <div className="grid grid-cols-4 gap-2">
               {BOTTLES.map(([v, label, hint]) => (
                 <button
@@ -198,12 +224,18 @@ export default function Recommend() {
                   }`}
                 >
                   {label}
-                  <span className="block text-[9px] font-normal opacity-70">{hint}</span>
+                  <span className="block text-[9px] font-normal opacity-70">
+                    {hint === null ? 'bottles' : `${hint}ml`}
+                  </span>
                 </button>
               ))}
             </div>
+            {/* The number people actually care about: what that works out to
+                each once it's shared out. */}
             <p className="text-[10px] text-gray-400 mt-1">
-              What you want to buy. Best within budget comes first.
+              {bottle === 'beer'
+                ? 'Total for the group, split between you.'
+                : `${bottle}ml between ${peopleN} ${peopleN === 1 ? 'person' : 'people'} · ${Math.round(Number(bottle) / peopleN)}ml each.`}
             </p>
           </div>
 
@@ -245,16 +277,23 @@ export default function Recommend() {
           <div className="space-y-2">
             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">
               {result.is_beer ? 'Beer' : `${result.bottle_name} bottles`} ·{' '}
-              {result.people} people · {INR(result.budget)}
+              {result.people} people · {INR(result.budget_min)}–{INR(result.budget_max)}
             </p>
 
             {result.picks.length === 0 && result.beers.length === 0 && (
               <div className="card text-center py-6">
                 <p className="text-sm text-gray-400">
-                  {result.size_available
-                    ? `Nothing ${result.is_beer ? 'in beer' : `at ${result.bottle_ml}ml`} in ${result.state} comes in under ${INR(result.budget)}.`
-                    : `No ${result.is_beer ? 'beer' : `${result.bottle_ml}ml`} prices published for ${result.state} yet.`}
+                  {!result.size_available
+                    ? `No ${result.is_beer ? 'beer' : `${result.bottle_ml}ml`} prices published for ${result.state} yet.`
+                    : `Nothing ${result.is_beer ? 'in beer' : `at ${result.bottle_ml}ml`} in ${result.state} falls between ${INR(result.budget_min)} and ${INR(result.budget_max)}.`}
                 </p>
+                {/* Dead ends are the common case with a narrow range, so say
+                    what the size actually costs instead of leaving them to guess */}
+                {result.size_available && result.price_band && (
+                  <p className="text-xs text-gray-500 mt-1.5">
+                    They run <span className="font-bold">{INR(result.price_band.min)}–{INR(result.price_band.max)}</span> here.
+                  </p>
+                )}
               </div>
             )}
 
