@@ -208,9 +208,10 @@ def build() -> Path:
         ("750 ml", "full"),
     ], w1=26)
     body(p,
-         "An evening's demand is estimated in millilitres - roughly one quarter a head for a normal "
-         "night - but that number is never shown, because nobody buys 540 ml. It is a target that "
-         "gets converted into whole bottles.")
+         "How heavy a night is asked in those same three sizes: you pick the bottle each person is "
+         "drinking their way through. Asking it in millilitres was asking for a conversion nobody "
+         "does out loud - people say 'a quarter each', not 'a 260 ml night'. The target is simply "
+         "people x that size, and it gets converted into whole bottles.")
     body(p,
          "_best_combo() then solves a tiny three-coin problem: which combination of quarters, halves "
          "and fulls covers the target most cheaply. With three denominations and small counts, brute "
@@ -226,6 +227,30 @@ def build() -> Path:
          "Overshoot is allowed up to a half-bottle. A tighter cap looked more principled and was "
          "wrong in practice: it rejected a single full for three people, which overshoots by 210 ml "
          "and is obviously what anyone would buy.")
+
+    h2(p, "Strength, and what each person actually gets")
+    body(p,
+         "Every card carries the drink's strength as % ABV, and every card says what the basket "
+         "works out to per person - both in millilitres and in millilitres of pure alcohol. That "
+         "last figure is the only fair way to compare a strong beer against a mild one, or beer "
+         "against spirits.")
+    body(p,
+         "It also exposes when the budget cannot buy the night you asked for. Ask for a full each "
+         "for four people on a small budget and the card will still say what it can afford, with "
+         "'188 ml each' underneath - which is the honest answer rather than a silent downgrade.")
+    body(p,
+         "ABV is a property of the brand rather than the state, so unlike price it is a single "
+         "table. Brands whose strength was actually published carry that figure; everything else "
+         "falls back to the category typical - 42.8% for Indian-made spirits by excise convention, "
+         "40% for imported - and is prefixed with a tilde on screen so a typical is never presented "
+         "as a label reading.")
+
+    h2(p, "Beer")
+    body(p,
+         "Beer gets its own cards rather than a single afterthought line, sized to the budget: two "
+         "each is the default round, and if that overruns the budget the count comes down rather "
+         "than the beer disappearing. They are ordered strongest first, so the list reads as a real "
+         "choice between a session beer and a strong one.")
 
     # ── Page 3 ───────────────────────────────────────────────────────────────
     p.add_page()

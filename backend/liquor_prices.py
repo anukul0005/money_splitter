@@ -88,6 +88,53 @@ NCR = ("Uttar Pradesh", "Delhi", "Gurugram (Haryana)")
 
 WHISKY, RUM, VODKA, BEER, GIN, WINE = "whisky", "rum", "vodka", "beer", "gin", "wine"
 
+# ── Alcohol strength ─────────────────────────────────────────────────────────
+# ABV is a property of the brand, not the state, so unlike price it is one
+# table. Only brands whose strength was actually published are listed; anything
+# else falls back to a category typical, and the API says which of the two it
+# gave you so the UI never presents a guess as a label reading.
+ABV_SOURCES = {
+    "madiradeals-abv": "https://madiradeals.com/kingfisher-beer-alcohol-percentage-in-india/",
+    "wikipedia-abv": "https://en.wikipedia.org/wiki/Indian_whisky",
+    "restaurantindia-abv": "https://www.indianretailer.com/article/retail-business/retail-trends/top-10-strongest-beer-brands-india",
+}
+
+ABV_BY_BRAND = {
+    # Beer — per-variant, published
+    "kingfisher premium": 4.8, "kingfisher": 4.8, "kingfisher strong": 8.0,
+    "kingfisher ultra": 5.0, "kingfisher ultra max": 7.0,
+    "tuborg green": 4.6, "tuborg": 4.6, "tuborg strong": 8.0,
+    "budweiser": 5.0, "budweiser magnum": 6.5,
+    "carlsberg": 4.8, "carlsberg elephant strong": 7.2,
+    "bira 91 white": 4.7, "bira 91 blonde": 4.5,
+    "heineken": 5.0, "corona": 4.5, "corona extra": 4.5,
+    "haywards 5000": 7.0, "godfather strong": 8.0,
+    "hoegaarden": 4.9, "stella artois": 5.0, "asahi super dry": 5.0,
+    "erdinger wheat": 5.3, "kronenbourg 1664 blanc": 5.0,
+    "foster's lager": 5.0, "royal challenge": 5.0,
+    "bad monkey super strong": 8.0, "bee young crafted strong": 7.0,
+    "amstel light": 3.5, "bro code": 5.0,
+    # Spirits — published brand figures
+    "old monk": 42.8, "officer's choice": 42.8, "imperial blue": 42.8,
+    "absolut": 40.0, "absolut lime": 40.0, "absolut mandrin": 40.0,
+    "absolut raspberi": 40.0,
+    "smirnoff": 37.5, "bacardi": 40.0, "bacardi white": 40.0,
+    "bacardi black": 40.0, "bacardi apple": 32.0,
+}
+
+# Indian-made spirits are bottled at 42.8% by long-standing excise convention;
+# imported and international brands sit at 40%. Used only when the brand isn't
+# in the table above, and always flagged as a typical rather than a reading.
+ABV_TYPICAL = {WHISKY: 42.8, RUM: 42.8, VODKA: 40.0, GIN: 40.0, BEER: 5.0, WINE: 12.5}
+
+
+def abv_for(brand: str, kind: str) -> tuple[float, bool]:
+    """(strength, is_published). False means it's the category typical."""
+    hit = ABV_BY_BRAND.get(" ".join(brand.lower().replace(".", "").split()))
+    if hit is not None:
+        return hit, True
+    return ABV_TYPICAL.get(kind, 40.0), False
+
 
 @dataclass(frozen=True)
 class Bottle:

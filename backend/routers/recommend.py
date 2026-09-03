@@ -20,7 +20,10 @@ from sqlalchemy.orm import Session
 
 from auth import current_user, is_member
 from database import get_db
-from liquor_prices import BOTTLES, NCR, SOURCES, STATES, Bottle, across_sizes, for_state
+from liquor_prices import (
+    ABV_SOURCES, BOTTLES, NCR, SOURCES, STATES, Bottle, abv_for, across_sizes,
+    for_state,
+)
 from models import Group, User
 
 router = APIRouter(prefix="/recommend", tags=["recommend"])
@@ -37,10 +40,10 @@ DRINK_RE = re.compile(
     re.I,
 )
 
-# Roughly what one person drinks in an evening, in ml of spirit. This is only
-# the demand estimate — nobody buys 540ml, so it is never shown. It is turned
-# into whole bottles below.
-ML_PER_HEAD = {"light": 120, "normal": 180, "heavy": 260}
+# How heavy a night, expressed as the bottle each person is drinking their way
+# through. Asking in millilitres was asking people to do a conversion they
+# never do out loud — nobody says "a 260ml night", they say "a quarter each".
+PER_HEAD_SIZES = (180, 375, 750)
 
 # Spirits are sold in exactly these three, and everyone names them this way.
 # Anything else in the price table (90ml nips, litres, 200ml travel bottles)
@@ -161,14 +164,19 @@ def _history(db: Session, caller: User, names: list[str]) -> dict:
     }
 
 
-def _pick(bottles: list[Bottle], budget: float, people: int, strength: str,
+def _units(volume_ml: float, abv: float) -> float:
+    """Millilitres of pure alcohol — the only fair way to compare a strong
+    beer against a mild one, or beer against spirits."""
+    return round(volume_ml * abv / 100, 1)
+
+
+def _pick(bottles: list[Bottle], budget: float, people: int, target_ml: int,
           favourites: list[str]) -> list[dict]:
     """Suggest what to actually buy: whole bottles, in real shop sizes.
 
     Ranked by: something they already drink, then how close the volume is to
     what this many people would get through, then price.
     """
-    target_ml = ML_PER_HEAD.get(strength, 180) * max(people, 1)
     fav = {f.lower() for f in favourites}
 
     # brand -> {size: price} for the three sizes spirits are actually sold in
@@ -198,6 +206,7 @@ def _pick(bottles: list[Bottle], budget: float, people: int, strength: str,
 
         volume = sum(sz * n for sz, n in combo.items())
         ref = meta[brand]
+        abv, abv_known = abv_for(brand, ref.kind)
 
         compare = across_sizes(brand, combo)
         priced = [c for c in compare if c["total"] is not None]
@@ -212,6 +221,10 @@ def _pick(bottles: list[Bottle], budget: float, people: int, strength: str,
             "combo_label": _combo_label(combo),
             "total": round(cost),
             "total_ml": volume,
+            "ml_per_head": round(volume / max(people, 1)),
+            "abv": abv,
+            "abv_known": abv_known,
+            "alcohol_ml_per_head": _units(volume / max(people, 1), abv),
             "is_favourite": brand.lower() in fav,
             "per_head": round(cost / max(people, 1)),
             "source": ref.source,
@@ -227,6 +240,49 @@ def _pick(bottles: list[Bottle], budget: float, people: int, strength: str,
     return out[:6]
 
 
+def _beers(bottles: list[Bottle], budget: float, people: int) -> list[dict]:
+    """Beer options as their own cards, sized to the budget.
+
+    Two each is the default round. If that overruns the budget the count comes
+    down rather than the beer being dropped, so a tight budget still gets an
+    answer instead of an empty list.
+    """
+    out: list[dict] = []
+    for b in bottles:
+        if b.kind != "beer":
+            continue
+        qty = max(1, people * 2)
+        cost = b.mid * qty
+        if cost > budget:
+            qty = int(budget // b.mid)
+            if qty < 1:
+                continue
+            cost = b.mid * qty
+        abv, abv_known = abv_for(b.brand, b.kind)
+        volume = b.size_ml * qty
+        out.append({
+            "brand": b.brand,
+            "size_ml": b.size_ml,
+            "qty": qty,
+            "unit_price": b.price,
+            "unit_price_max": b.price_max,
+            "total": round(cost),
+            "total_ml": volume,
+            "ml_per_head": round(volume / max(people, 1)),
+            "bottles_per_head": round(qty / max(people, 1), 1),
+            "abv": abv,
+            "abv_known": abv_known,
+            "alcohol_ml_per_head": _units(volume / max(people, 1), abv),
+            "per_head": round(cost / max(people, 1)),
+            "source": b.source,
+        })
+
+    # Strongest first among what fits, so the cards read as a real choice
+    # between a session beer and a strong one rather than an arbitrary list.
+    out.sort(key=lambda r: (-r["abv"], r["total"]))
+    return out[:6]
+
+
 @router.get("/meta", response_model=dict)
 def meta(_: User = Depends(current_user)):
     """States we have real prices for, and where those prices came from."""
@@ -234,8 +290,9 @@ def meta(_: User = Depends(current_user)):
         "states": STATES,
         "ncr": list(NCR),
         "sources": SOURCES,
+        "abv_sources": ABV_SOURCES,
         "row_count": len(BOTTLES),
-        "strengths": list(ML_PER_HEAD),
+        "per_head_sizes": list(PER_HEAD_SIZES),
     }
 
 
@@ -244,7 +301,7 @@ def recommend(
     state: str,
     people: int = 2,
     budget: float = 2000,
-    strength: str = "normal",
+    per_head_ml: int = 180,
     names: str = "",
     db: Session = Depends(get_db),
     caller: User = Depends(current_user),
@@ -253,6 +310,8 @@ def recommend(
         raise HTTPException(400, "There has to be at least one of you")
     if budget <= 0:
         raise HTTPException(400, "Set a budget above zero")
+    if per_head_ml not in PER_HEAD_SIZES:
+        raise HTTPException(400, f"Pick one of {PER_HEAD_SIZES} ml per person")
 
     bottles = for_state(state)
     if not bottles:
@@ -265,12 +324,9 @@ def recommend(
 
     people_names = [n for n in (names or "").split(",") if n.strip()]
     hist = _history(db, caller, people_names)
-    picks = _pick(bottles, budget, people, strength, hist["favourites"])
-
-    beers = sorted(
-        [b for b in bottles if b.kind == "beer"], key=lambda b: b.mid
-    )
-    beer = beers[0] if beers else None
+    target_ml = per_head_ml * people
+    picks = _pick(bottles, budget, people, target_ml, hist["favourites"])
+    beers = _beers(bottles, budget, people)
 
     return {
         "state": state,
@@ -278,13 +334,11 @@ def recommend(
         "people": people,
         "budget": budget,
         "budget_per_head": round(budget / people),
-        "strength": strength,
+        "per_head_ml": per_head_ml,
+        "target_ml": target_ml,
         "history": hist,
         "picks": picks,
-        "beer_option": None if not beer else {
-            "brand": beer.brand, "size_ml": beer.size_ml,
-            "qty": people * 2, "unit_price": beer.price,
-            "total": round(beer.mid * people * 2), "source": beer.source,
-        },
+        "beers": beers,
         "sources": SOURCES,
+        "abv_sources": ABV_SOURCES,
     }

@@ -11,12 +11,15 @@ const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigi
 // server is still the authority — a state missing real prices 404s on submit.
 const FALLBACK_STATES = ['Delhi', 'Maharashtra', 'Uttar Pradesh']
 
-// Described in bottles, because that's what you buy. A quarter is 180ml.
-const STRENGTHS = [
-  ['light',  'Light',  '⅔ qtr each'],
-  ['normal', 'Normal', '1 qtr each'],
-  ['heavy',  'Heavy',  '1½ qtr each'],
+// How heavy a night, asked in the sizes bottles actually come in. Nobody
+// says "a 260ml night"; they say "a quarter each".
+const PER_HEAD = [
+  [180, 'Quarter', '180ml each'],
+  [375, 'Half',    '375ml each'],
+  [750, 'Full',    '750ml each'],
 ]
+
+const pct = (v, known) => `${known ? '' : '~'}${v}% ABV`
 
 /**
  * What to drink, for this many people, on this budget.
@@ -37,7 +40,7 @@ export default function Recommend() {
   // delete before every edit, and a budget of 0 got sent to the server.
   const [people, setPeople]   = useState('2')
   const [budget, setBudget]   = useState('2000')
-  const [strength, setStrength] = useState('normal')
+  const [perHead, setPerHead] = useState(180)
   const [withWho, setWithWho] = useState([])
   const [result, setResult]   = useState(null)
   const [error, setError]     = useState('')
@@ -92,7 +95,7 @@ export default function Recommend() {
     setError(''); setBusy(true)
     try {
       const r = await getRecommendation({
-        state, people: peopleN, budget: budgetN, strength,
+        state, people: peopleN, budget: budgetN, per_head_ml: perHead,
         names: withWho.join(','),
       })
       setResult(r.data)
@@ -182,13 +185,13 @@ export default function Recommend() {
           <div>
             <label className="label">How heavy a night</label>
             <div className="flex gap-2">
-              {STRENGTHS.map(([v, label, hint]) => (
+              {PER_HEAD.map(([v, label, hint]) => (
                 <button
                   key={v}
                   type="button"
-                  onClick={() => setStrength(v)}
+                  onClick={() => setPerHead(v)}
                   className={`flex-1 rounded-md px-2 py-1.5 text-xs font-bold border transition-all ${
-                    strength === v
+                    perHead === v
                       ? 'bg-brand-400 border-brand-400 text-white'
                       : 'bg-cream border-amber-200 text-gray-500 hover:bg-amber-50'
                   }`}
@@ -198,6 +201,9 @@ export default function Recommend() {
                 </button>
               ))}
             </div>
+            <p className="text-[10px] text-gray-400 mt-1">
+              A bottle each — the total gets rounded to whole bottles you can buy.
+            </p>
           </div>
 
           <button onClick={run} className="btn-primary" disabled={busy || !canRun}>
@@ -257,6 +263,9 @@ export default function Recommend() {
                       </span>
                     )}
                   </p>
+                  <span className="badge bg-amber-100 text-gray-600 border border-amber-200 flex-shrink-0">
+                    {pct(p.abv, p.abv_known)}
+                  </span>
                   <p className="text-sm font-black text-brand-600 flex-shrink-0">{INR(p.total)}</p>
                 </div>
                 {/* What you actually ask for at the counter */}
@@ -266,8 +275,13 @@ export default function Recommend() {
                     {' '}· {p.combo.map((c) => `${c.size_ml}ml`).join(' + ')} · {p.kind}
                   </span>
                 </p>
+                {/* How much that actually is per person, which is the thing
+                    the bottle count hides once the group gets bigger */}
                 <p className="text-[10px] text-gray-400 mt-0.5">
-                  {INR(p.per_head)} a head · {p.total_ml}ml total
+                  {INR(p.per_head)} a head · {p.total_ml}ml total ·{' '}
+                  <span className="text-gray-500 font-semibold">
+                    {p.ml_per_head}ml each ({p.alcohol_ml_per_head}ml pure alcohol)
+                  </span>
                 </p>
 
                 {/* Same bottle across the NCR — these are a drive apart, and
@@ -297,16 +311,40 @@ export default function Recommend() {
               </div>
             ))}
 
-            {result.beer_option && (
-              <div className="card p-3.5 flex items-baseline gap-2">
-                <p className="text-sm font-bold text-gray-700 flex-1">
-                  or {result.beer_option.qty} × {result.beer_option.brand}
-                  <span className="text-[11px] text-gray-400 font-normal">
-                    {' '}({result.beer_option.size_ml}ml)
-                  </span>
+            {result.beers?.length > 0 && (
+              <>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest pt-3">
+                  Beer · strongest first
                 </p>
-                <p className="text-sm font-black text-gray-700">{INR(result.beer_option.total)}</p>
-              </div>
+                {result.beers.map((b, i) => (
+                  <div key={`${b.brand}-${b.size_ml}-${i}`} className="card p-3.5">
+                    <div className="flex items-baseline gap-2">
+                      <p className="text-sm font-black text-gray-900 flex-1 min-w-0 truncate">
+                        {b.brand}
+                      </p>
+                      <span className="badge bg-amber-100 text-gray-600 border border-amber-200 flex-shrink-0">
+                        {pct(b.abv, b.abv_known)}
+                      </span>
+                      <p className="text-sm font-black text-brand-600 flex-shrink-0">{INR(b.total)}</p>
+                    </div>
+                    <p className="text-[11px] font-bold text-gray-700 mt-0.5">
+                      {b.qty} × {b.size_ml}ml
+                      <span className="font-normal text-gray-400">
+                        {' '}·{' '}
+                        {b.unit_price_max && b.unit_price_max !== b.unit_price
+                          ? `${INR(b.unit_price)}–${INR(b.unit_price_max)}`
+                          : INR(b.unit_price)} each
+                      </span>
+                    </p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      {INR(b.per_head)} a head ·{' '}
+                      <span className="text-gray-500 font-semibold">
+                        {b.bottles_per_head} bottles each ({b.alcohol_ml_per_head}ml pure alcohol)
+                      </span>
+                    </p>
+                  </div>
+                ))}
+              </>
             )}
 
             {/* Say plainly where the numbers came from and how stale they are */}
