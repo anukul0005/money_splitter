@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { getRecommendMeta, getRecommendation, getFriends } from '../api'
 
 import LoadingSpinner from '../components/LoadingSpinner'
+import RecommendTabs from '../components/RecommendTabs'
+import RecommendFood from './RecommendFood'
 import { useUser } from '../UserContext'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
@@ -37,6 +39,9 @@ export default function Recommend() {
   const nav  = useNavigate()
   const user = useUser()
 
+  // Drinks and food are two tables answering the same question, so they share
+  // a route and a tab rather than being two entries in the nav.
+  const [tab, setTab]         = useState('drinks')
   const [meta, setMeta]       = useState(null)
   const [friends, setFriends] = useState([])
   const [state, setState]     = useState('')
@@ -134,6 +139,11 @@ export default function Recommend() {
     } finally { setBusy(false) }
   }
 
+  // Below every hook, so switching tabs never changes the hook order. Food
+  // returns before the drinks meta check because it loads its own table and
+  // shouldn't sit behind a spinner waiting for prices it doesn't use.
+  if (tab === 'food') return <RecommendFood tab={tab} setTab={setTab} />
+
   if (!meta) return <LoadingSpinner />
 
   const hist = result?.history
@@ -146,6 +156,7 @@ export default function Recommend() {
         <p className="text-xs text-gray-400 mt-1">
           Priced for your state, ranked by what you actually buy
         </p>
+        <RecommendTabs tab={tab} setTab={setTab} />
       </div>
 
       <div className="px-5 mt-4 space-y-4 max-w-2xl">
