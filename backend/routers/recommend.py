@@ -349,11 +349,17 @@ def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
 
 def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
            favourites: list[str] | None = None) -> list[dict]:
-    """Beer rounds whose total lands inside the budget range.
+    """Beers you can buy, priced by the bottle.
 
-    A beer's unit price is small next to any sensible budget, so the round is
-    what gets priced, not the bottle: as many as the top of the range buys,
-    capped at six each so a large budget doesn't suggest something absurd.
+    This used to price a whole round and lead with that — "Rs 960" for six
+    bottles — which is not a number anybody recognises. A beer has a price and
+    it is the price of one bottle, so that is what a card shows now. How many
+    the budget stretches to is a separate, smaller line, because it is a
+    consequence of the budget rather than a property of the beer.
+
+    Only the top of the budget does any work here: a single bottle almost
+    never costs as much as the bottom of a sensible range, so filtering on it
+    would throw away every beer on the list.
     """
     fav = [f.lower() for f in (favourites or [])]
     out: list[dict] = []
@@ -363,28 +369,27 @@ def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
         # Same containment rule as the spirits: "Budweiser" has to match
         # "Budweiser Magnum Beer" or the ranking never sees a favourite.
         is_fav = any(f in b.brand.lower() for f in fav)
-        qty = min(int(hi // b.mid), people * 6)
-        if qty < 1:
-            continue
-        cost = b.mid * qty
-        if cost < lo:
-            continue
+        unit = b.mid
+        if unit <= 0 or unit > hi:
+            continue                      # the budget won't buy even one
+        buys = int(hi // unit)
         abv, abv_known = abv_for(b.brand, b.kind)
-        volume = b.size_ml * qty
         out.append({
             "brand": b.brand,
+            "kind": b.kind,
             "size_ml": b.size_ml,
-            "qty": qty,
+            # The headline: one bottle.
+            "price": round(unit),
             "unit_price": b.price,
             "unit_price_max": b.price_max,
-            "total": round(cost),
-            "total_ml": volume,
-            "ml_per_head": round(volume / max(people, 1)),
-            "bottles_per_head": round(qty / max(people, 1), 1),
+            # What the budget does with that, kept separate from the price.
+            "budget_buys": buys,
+            "bottles_per_head": round(buys / max(people, 1), 1),
+            # One each for the group, which is the round people actually order.
+            "round_for_group": round(unit * max(people, 1)),
             "abv": abv,
             "abv_known": abv_known,
-            "alcohol_ml_per_head": _units(volume / max(people, 1), abv),
-            "per_head": round(cost / max(people, 1)),
+            "alcohol_ml_per_bottle": _units(b.size_ml, abv),
             "is_favourite": is_fav,
             "is_override": b.source == "manual-override",
             "source": b.source,
@@ -392,8 +397,8 @@ def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
 
     # Beers you actually buy first, then strongest among what fits, so the
     # cards read as a real choice rather than an arbitrary list.
-    out.sort(key=lambda r: (not r["is_favourite"], -r["abv"], r["total"]))
-    return out[:6]
+    out.sort(key=lambda r: (not r["is_favourite"], -r["abv"], r["price"]))
+    return out[:8]
 
 
 def _band(bottles: list[Bottle], bottle_ml: int, is_beer: bool) -> dict | None:

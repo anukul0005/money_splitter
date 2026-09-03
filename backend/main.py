@@ -45,6 +45,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def no_caching(request, call_next):
+    """Never let one person's data be served to the next one.
+
+    Identity used to travel in the URL (`?name=Utkarsh`), which meant every
+    user fetched different URLs and a cache could not confuse them. Once
+    identity moved into the Authorization header — which is the right place
+    for it — everyone started requesting the *same* URLs, and a browser
+    holding a cached /stats/overview/all from the previous account would
+    happily hand it to the next one. That is why people saw someone else's
+    groups and numbers until the page was refreshed.
+
+    Every response here is personal and cheap to recompute, so none of it
+    should ever be stored. `Vary` is belt and braces for any proxy in front
+    of us that caches despite being told not to.
+    """
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Vary"] = "Authorization"
+    return response
+
 app.include_router(users.router)
 app.include_router(groups.router)
 app.include_router(expenses.router)

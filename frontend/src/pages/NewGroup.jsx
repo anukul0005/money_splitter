@@ -8,16 +8,20 @@ export default function NewGroup() {
   const user = useUser()
   const [params] = useSearchParams()
 
+  // Members handed over by a supergroup. Coming from one, the people are
+  // already decided — that is what the supergroup is — so being asked to pick
+  // them again is a question with only one right answer.
+  const preset = (params.get('members') || '')
+    .split(',').map((x) => x.trim()).filter(Boolean)
+  const fromSupergroup = preset.length > 0
+
   const [form, setForm]             = useState({ name: '', description: '', category: '' })
   const [memberInput, setMInput]    = useState('')
   // You are added by default: the API only shows you groups you're in, so a
   // group created without yourself would vanish the moment it was made.
-  const [members, setMembers]       = useState(() => {
-    const pre = (params.get('members') || '')
-      .split(',').map((x) => x.trim()).filter(Boolean)
-    if (pre.length) return pre
-    return user?.name ? [user.name] : []
-  })
+  const [members, setMembers]       = useState(() =>
+    preset.length ? preset : (user?.name ? [user.name] : [])
+  )
   const [known, setKnown]           = useState([])   // people you already share groups with
   const [submitting, setSubmitting] = useState(false)
   const [error, setError]           = useState('')
@@ -129,7 +133,27 @@ export default function NewGroup() {
           </div>
         </div>
 
-        {/* Members */}
+        {/* Members. From a supergroup they are already settled, so the card
+            just states who is in and gets out of the way. */}
+        {fromSupergroup ? (
+          <div>
+            <label className="label">Members</label>
+            <div className="flex flex-wrap gap-2">
+              {members.map((m) => (
+                <span
+                  key={m}
+                  className="bg-brand-400/15 text-brand-700 border border-brand-400/30 rounded-md px-3 py-1.5 text-sm font-bold"
+                >
+                  {m}
+                </span>
+              ))}
+            </div>
+            <p className="text-[10px] text-gray-400 mt-1.5">
+              Carried over from the group you came from. Add or remove people
+              from the group once it exists.
+            </p>
+          </div>
+        ) : (
         <div>
           <label className="label">Add members *</label>
           <div className="flex gap-2">
@@ -185,6 +209,7 @@ export default function NewGroup() {
             </div>
           )}
         </div>
+        )}
 
         {!includesMe && (
           <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-4 py-3">

@@ -332,8 +332,14 @@ export default function Recommend() {
 
             {result.picks.map((p, i) => (
               <div key={`${p.brand}-${p.size_ml}-${i}`} className="card p-3.5">
-                <div className="flex items-baseline gap-2">
-                  <p className="text-sm font-black text-gray-900 flex-1 min-w-0">
+                {/* The brand gets the full width and is allowed to wrap. The
+                    official state lists print the whole registered label —
+                    "SEAGRAMS 100 PIPERS EXCEPTIONAL BLENDED SCOTCH WHISKY" —
+                    and squeezing that onto one line beside a badge and a
+                    price cut it off exactly where the brand stops being
+                    identifiable. */}
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-sm font-black text-gray-900 flex-1 min-w-0 break-words">
                     {p.brand}
                     {p.is_favourite && (
                       <span className="ml-1.5 text-[9px] font-bold text-brand-600 uppercase tracking-wider">
@@ -341,16 +347,13 @@ export default function Recommend() {
                       </span>
                     )}
                   </p>
-                  <span className="badge bg-amber-100 text-gray-600 border border-amber-200 flex-shrink-0">
-                    {pct(p.abv, p.abv_known)}
-                  </span>
                   <p className="text-sm font-black text-brand-600 flex-shrink-0">{INR(p.total)}</p>
                 </div>
                 {/* What you actually ask for at the counter */}
                 <p className="text-[11px] font-bold text-gray-700 mt-0.5">
                   1 {p.size_name} · {p.size_ml}ml
                   <span className="font-normal text-gray-400">
-                    {' '}· {p.kind}
+                    {' '}· {p.kind} · {pct(p.abv, p.abv_known)}
                     {p.unit_price_max && p.unit_price_max !== p.unit_price
                       ? ` · ${INR(p.unit_price)}–${INR(p.unit_price_max)}`
                       : ''}
@@ -376,20 +379,13 @@ export default function Recommend() {
                   </p>
                 )}
 
-                <div className="flex items-center gap-2 mt-1">
-                  {p.is_override && (
-                    <span className="badge bg-blue-50 text-blue-700 border border-blue-200">
-                      corrected by hand
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setEditing(editing === `p${i}` ? null : `p${i}`)}
-                    className="text-[10px] font-bold text-gray-400 hover:text-brand-600"
-                  >
-                    {editing === `p${i}` ? 'Close' : 'Wrong price? Fix it'}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditing(editing === `p${i}` ? null : `p${i}`)}
+                  className="text-[10px] font-bold text-gray-400 hover:text-brand-600 mt-1"
+                >
+                  {editing === `p${i}` ? 'Close' : 'Wrong price? Fix it'}
+                </button>
 
                 {editing === `p${i}` && (
                   <PriceEditForm
@@ -429,11 +425,6 @@ export default function Recommend() {
                           <p className={`text-[11px] font-black ${best ? 'text-green-700' : 'text-gray-500'}`}>
                             {c.total === null ? '—' : INR(c.total)}
                           </p>
-                          {/* So a corrected number is never mistaken for a
-                              published one sitting next to it. */}
-                          {c.manual && (
-                            <p className="text-[8px] font-bold text-blue-600 leading-none">by hand</p>
-                          )}
                         </div>
                       )
                     })}
@@ -449,8 +440,12 @@ export default function Recommend() {
                 </p>
                 {result.beers.map((b, i) => (
                   <div key={`${b.brand}-${b.size_ml}-${i}`} className="card p-3.5">
-                    <div className="flex items-baseline gap-2">
-                      <p className="text-sm font-black text-gray-900 flex-1 min-w-0 truncate">
+                    {/* The brand gets its own line and is allowed to wrap.
+                        Sharing a row with the price and the ABV badge meant
+                        the long names off the state lists were cut off mid
+                        word, which is no use for telling two apart. */}
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm font-black text-gray-900 flex-1 min-w-0 break-words">
                         {b.brand}
                         {b.is_favourite && (
                           <span className="ml-1.5 text-[9px] font-bold text-brand-600 uppercase tracking-wider">
@@ -458,26 +453,49 @@ export default function Recommend() {
                           </span>
                         )}
                       </p>
-                      <span className="badge bg-amber-100 text-gray-600 border border-amber-200 flex-shrink-0">
-                        {pct(b.abv, b.abv_known)}
-                      </span>
-                      <p className="text-sm font-black text-brand-600 flex-shrink-0">{INR(b.total)}</p>
+                      {/* One bottle. Leading with the price of a round was a
+                          number nobody recognises. */}
+                      <p className="text-sm font-black text-brand-600 flex-shrink-0">{INR(b.price)}</p>
                     </div>
+
                     <p className="text-[11px] font-bold text-gray-700 mt-0.5">
-                      {b.qty} × {b.size_ml}ml
+                      1 bottle · {b.size_ml}ml
                       <span className="font-normal text-gray-400">
-                        {' '}·{' '}
-                        {b.unit_price_max && b.unit_price_max !== b.unit_price
-                          ? `${INR(b.unit_price)}–${INR(b.unit_price_max)}`
-                          : INR(b.unit_price)} each
+                        {' '}· {pct(b.abv, b.abv_known)} · {b.alcohol_ml_per_bottle}ml pure alcohol
                       </span>
                     </p>
+
+                    {/* What the budget does with that — a consequence of the
+                        budget, not a property of the beer, so it sits apart. */}
                     <p className="text-[10px] text-gray-400 mt-0.5">
-                      {INR(b.per_head)} a head ·{' '}
-                      <span className="text-gray-500 font-semibold">
-                        {b.bottles_per_head} bottles each ({b.alcohol_ml_per_head}ml pure alcohol)
+                      {INR(result.budget_max)} buys{' '}
+                      <span className="font-bold text-gray-500">
+                        {b.budget_buys} {b.budget_buys === 1 ? 'bottle' : 'bottles'}
                       </span>
+                      {result.people > 1 && ` · ${b.bottles_per_head} each`}
+                      {' '}· one each is {INR(b.round_for_group)}
                     </p>
+
+                    <button
+                      type="button"
+                      onClick={() => setEditing(editing === `b${i}` ? null : `b${i}`)}
+                      className="text-[10px] font-bold text-gray-400 hover:text-brand-600 mt-1"
+                    >
+                      {editing === `b${i}` ? 'Close' : 'Wrong price? Fix it'}
+                    </button>
+
+                    {editing === `b${i}` && (
+                      <PriceEditForm
+                        state={result.state}
+                        states={meta?.states ?? []}
+                        initial={{
+                          brand: b.brand, kind: 'beer', state: result.state,
+                          size_ml: b.size_ml, price: b.price,
+                        }}
+                        onCancel={() => setEditing(null)}
+                        onDone={() => { setEditing(null); run() }}
+                      />
+                    )}
                   </div>
                 ))}
               </>

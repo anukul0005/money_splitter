@@ -335,8 +335,10 @@ export default function RecommendFood({ tab, setTab }) {
 
             {result.picks.map((p, i) => (
               <div key={`${p.name}-${p.area}-${i}`} className="card p-3.5">
-                <div className="flex items-baseline gap-2">
-                  <p className="text-sm font-black text-gray-900 flex-1 min-w-0">
+                {/* Full width and free to wrap: a name cut off halfway is no
+                    use for telling one place from another. */}
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-sm font-black text-gray-900 flex-1 min-w-0 break-words">
                     {p.name}
                     {p.been_before && (
                       <span className="ml-1.5 text-[9px] font-bold text-brand-600 uppercase tracking-wider">
@@ -382,7 +384,9 @@ export default function RecommendFood({ tab, setTab }) {
                   <div className="mt-2 pt-2 border-t border-amber-100 space-y-0.5">
                     {p.menu.map((d) => (
                       <div key={d.name} className="flex items-baseline gap-2">
-                        <span className="text-[10px] text-gray-500 flex-1 min-w-0 truncate">
+                        {/* Dish names wrap rather than clip — half a dish name
+                            doesn't tell you what you'd be ordering. */}
+                        <span className="text-[10px] text-gray-500 flex-1 min-w-0 break-words">
                           {d.name}
                         </span>
                         <span className="text-[10px] font-bold text-gray-600 flex-shrink-0">
@@ -396,20 +400,13 @@ export default function RecommendFood({ tab, setTab }) {
                   </div>
                 )}
 
-                <div className="flex items-center gap-2 mt-1">
-                  {p.added_by_hand && (
-                    <span className="badge bg-blue-50 text-blue-700 border border-blue-200">
-                      added by hand
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setEditing(editing === `p${i}` ? null : `p${i}`)}
-                    className="text-[10px] font-bold text-gray-400 hover:text-brand-600"
-                  >
-                    {editing === `p${i}` ? 'Close' : 'Prices changed? Fix it'}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditing(editing === `p${i}` ? null : `p${i}`)}
+                  className="text-[10px] font-bold text-gray-400 hover:text-brand-600 mt-1"
+                >
+                  {editing === `p${i}` ? 'Close' : 'Prices changed? Fix it'}
+                </button>
 
                 {editing === `p${i}` && (
                   <PlaceEditForm

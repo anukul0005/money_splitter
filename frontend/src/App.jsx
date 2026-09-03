@@ -63,7 +63,11 @@ export default function App() {
   return (
     <UserContext.Provider value={user}>
       <BrowserRouter>
-        <div className="flex min-h-screen bg-canvas">
+        {/* Keyed on who is signed in, so switching accounts throws the whole
+            tree away and rebuilds it. Belt and braces next to the server's
+            no-store headers: nothing rendered for the previous person can
+            survive into the next person's session. */}
+        <div key={user.name} className="flex min-h-screen bg-canvas">
           {/* Desktop sidebar */}
           <Sidebar user={user} onLogout={handleLogout} />
 
