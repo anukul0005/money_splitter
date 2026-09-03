@@ -25,7 +25,6 @@ const FALLBACK_STATES = ['Delhi', 'Maharashtra', 'Uttar Pradesh']
 // How much the group is drinking between them. 180ml across two people is
 // 90ml each, so the hint is computed from the head count rather than fixed.
 const BOTTLES = [
-  ['any',  'Any',     'any'],
   ['180',  'Quarter', 180],
   ['375',  'Half',    375],
   ['750',  'Full',    750],
@@ -74,9 +73,10 @@ export default function Recommend() {
   // clear-the-field problem the text inputs had doesn't arise.
   const [budgetMin, setBudgetMin] = useState(500)
   const [budgetMax, setBudgetMax] = useState(1000)
-  // Not a required choice: a budget on its own is enough to say what you can
-  // buy, so the page answers before asking you to narrow anything.
-  const [bottle, setBottle] = useState('any')
+  // Empty means no size chosen, which is the default and is sent as "any".
+  // There is no "Any" card: a filter that is simply off says the same thing
+  // with one less button, and tapping the chosen one again turns it back off.
+  const [bottle, setBottle] = useState('')
   const [showAllPicks, setShowAllPicks] = useState(false)
   const [showAllBeers, setShowAllBeers] = useState(false)
   const [withWho, setWithWho] = useState([])
@@ -152,7 +152,8 @@ export default function Recommend() {
     setShowAllPicks(false); setShowAllBeers(false)
     try {
       const r = await getRecommendation({
-        state, people: peopleN, budget_min: loN, budget_max: hiN, bottle,
+        state, people: peopleN, budget_min: loN, budget_max: hiN,
+        bottle: bottle || 'any',
         names: withWho.join(','),
       })
       setResult(r.data)
@@ -266,13 +267,13 @@ export default function Recommend() {
           </div>
 
           <div>
-            <label className="label">How much between you</label>
-            <div className="grid grid-cols-5 gap-1.5">
+            <label className="label">How much between you (optional)</label>
+            <div className="grid grid-cols-4 gap-2">
               {BOTTLES.map(([v, label, hint]) => (
                 <button
                   key={v}
                   type="button"
-                  onClick={() => setBottle(v)}
+                  onClick={() => setBottle((cur) => (cur === v ? '' : v))}
                   className={`rounded-md px-2 py-1.5 text-xs font-bold border transition-all ${
                     bottle === v
                       ? 'bg-brand-400 border-brand-400 text-white'
@@ -281,7 +282,7 @@ export default function Recommend() {
                 >
                   {label}
                   <span className="block text-[9px] font-normal opacity-70">
-                    {hint === 'any' ? 'on budget' : hint === null ? 'bottles' : `${hint}ml`}
+                    {hint === null ? 'bottles' : `${hint}ml`}
                   </span>
                 </button>
               ))}
@@ -289,8 +290,8 @@ export default function Recommend() {
             {/* The number people actually care about: what that works out to
                 each once it's shared out. */}
             <p className="text-[10px] text-gray-400 mt-1">
-              {bottle === 'any'
-                ? 'Every size and beer, whatever the budget covers. Narrow it only if you want to.'
+              {bottle === ''
+                ? 'Nothing picked — every size and beer, whatever the budget covers. Tap one to narrow it, tap again to clear.'
                 : bottle === 'beer'
                   ? 'Total for the group, split between you.'
                   : `${bottle}ml between ${peopleN} ${peopleN === 1 ? 'person' : 'people'} · ${Math.round(Number(bottle) / peopleN)}ml each.`}

@@ -20,6 +20,15 @@ const INR = (n) => {
 // is still the authority — a city with no real prices 404s on submit.
 const FALLBACK_CITIES = ['Delhi', 'Gurugram', 'Noida']
 
+// Long lists are shown seven deep and the rest folded away — same as drinks.
+const TOP_N = 7
+
+// dd-mm-yy. ISO on the wire because it sorts; this is how it is read here.
+const fmtDate = (iso) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '')
+  return m ? `${m[3]}-${m[2]}-${m[1].slice(2)}` : ''
+}
+
 // A restaurant bill moves in hundreds, so the drinks slider's ₹60 minimum span
 // would let through a range that matches nothing. Mirrors the server's rule.
 const MIN_SPAN   = 200
@@ -59,6 +68,8 @@ export default function RecommendFood({ tab, setTab }) {
   // Which card's form is open, keyed by the card. `'new'` opens the
   // standalone add form. Only one is ever open at a time.
   const [editing, setEditing] = useState(null)
+  const [showAllPicks, setShowAllPicks] = useState(false)
+  const [showAllStreet, setShowAllStreet] = useState(false)
 
   // Two independent calls, loaded independently, so a failure in either says
   // which one broke instead of leaving an empty form with a generic message.
@@ -133,6 +144,7 @@ export default function RecommendFood({ tab, setTab }) {
 
   const run = async () => {
     setError(''); setBusy(true)
+    setShowAllPicks(false); setShowAllStreet(false)
     try {
       const r = await getFoodRecommendation({
         city, people: peopleN, budget_min: loN, budget_max: hiN,
@@ -340,7 +352,7 @@ export default function RecommendFood({ tab, setTab }) {
               </div>
             )}
 
-            {result.picks.map((p, i) => (
+            {(showAllPicks ? result.picks : result.picks.slice(0, TOP_N)).map((p, i) => (
               <div key={`${p.name}-${p.area}-${i}`} className="card p-3.5">
                 {/* Full width and free to wrap: a name cut off halfway is no
                     use for telling one place from another. */}
@@ -383,6 +395,14 @@ export default function RecommendFood({ tab, setTab }) {
                   {p.matched_cuisines.length > 0 &&
                     ` · you eat ${p.matched_cuisines.join(' & ')}`}
                 </p>
+
+                {/* When you were last there. A place you went on Friday is
+                    not the same suggestion as one you haven't seen in a year. */}
+                {p.last_visited && (
+                  <p className="text-[10px] text-gray-400 mt-0.5">
+                    Been on <span className="font-bold text-gray-500">{fmtDate(p.last_visited)}</span>
+                  </p>
+                )}
 
                 {/* Real menu prices where we have them, so a pick is more than
                     a number. A sample, never a bill — we don't hold full
@@ -433,6 +453,54 @@ export default function RecommendFood({ tab, setTab }) {
               </div>
             ))}
 
+            {result.picks.length > TOP_N && (
+              <button
+                type="button"
+                onClick={() => setShowAllPicks((v) => !v)}
+                className="w-full card py-2 text-xs font-bold text-gray-500 hover:text-brand-600"
+              >
+                {showAllPicks
+                  ? 'Show fewer'
+                  : `Show ${result.picks.length - TOP_N} more in this range`}
+              </button>
+            )}
+
+            {/* Everything you added for this city, folded away. It exists so an
+                entry is never silently missing, not to sit between you and the
+                results on every search. */}
+            {result.your_places?.length > 0 && (
+              <details className="card">
+                <summary className="text-[10px] font-bold text-gray-400 uppercase tracking-widest cursor-pointer">
+                  Places you added · {result.city} ({result.your_places.length})
+                </summary>
+                <div className="mt-1.5 space-y-1">
+                  {result.your_places.map((e) => (
+                    <div key={e.id} className="flex items-baseline gap-2">
+                      <span className={`text-[11px] flex-1 min-w-0 break-words ${
+                        e.shown ? 'font-bold text-gray-700' : 'text-gray-500'
+                      }`}>
+                        {e.name}
+                        <span className="font-normal text-gray-400">
+                          {e.area ? ` · ${e.area}` : ''}
+                          {e.cuisines.length ? ` · ${e.cuisines.join(', ')}` : ''}
+                          {` · ${e.kind_name}`}
+                          {e.added_on ? ` · added ${fmtDate(e.added_on)}` : ''}
+                        </span>
+                        {!e.shown && (
+                          <span className="block text-[10px] text-amber-700">
+                            {e.reason}
+                          </span>
+                        )}
+                      </span>
+                      <span className="text-[11px] font-black text-brand-600 flex-shrink-0">
+                        ~{INR(e.total)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+
             {/* Somewhere no listing covers. Offered beside the results, since
                 noticing a gap is exactly when someone will fill it. */}
             <div className="card">
@@ -464,7 +532,7 @@ export default function RecommendFood({ tab, setTab }) {
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-widest pt-2">
                   Or eat on the street
                 </p>
-                {result.street.map((s) => (
+                {(showAllStreet ? result.street : result.street.slice(0, TOP_N)).map((s) => (
                   <div key={s.name} className="card p-3.5">
                     <div className="flex items-baseline gap-2">
                       <p className="text-sm font-black text-gray-900 flex-1 min-w-0">{s.name}</p>
@@ -485,6 +553,17 @@ export default function RecommendFood({ tab, setTab }) {
                     <p className="text-[10px] text-gray-400 mt-0.5">{INR(s.per_head)} a head</p>
                   </div>
                 ))}
+                {result.street.length > TOP_N && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllStreet((v) => !v)}
+                    className="w-full card py-2 text-xs font-bold text-gray-500 hover:text-brand-600"
+                  >
+                    {showAllStreet
+                      ? 'Show fewer'
+                      : `Show ${result.street.length - TOP_N} more`}
+                  </button>
+                )}
               </>
             )}
 

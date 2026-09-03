@@ -670,12 +670,13 @@ def meta(db: Session = Depends(get_db), _: User = Depends(current_user)):
         "row_count": len(BOTTLES),
         "kinds": list(KINDS),
         "min_budget_span": MIN_BUDGET_SPAN,
-        "bottle_choices": (
-            [{"value": "any", "name": "Any", "hint": "on budget"}]
-            + [{"value": str(ml), "name": SPIRIT_SIZES[ml].title(), "hint": f"{ml}ml"}
-               for ml in BOTTLE_SIZES]
-            + [{"value": "beer", "name": "Beer", "hint": "by the bottle"}]
-        ),
+        # No card for "any": the form says it by having none of these
+        # selected, which is one less thing on screen and reads the way a
+        # filter should - off until you turn it on.
+        "bottle_choices": [
+            {"value": str(ml), "name": SPIRIT_SIZES[ml].title(), "hint": f"{ml}ml"}
+            for ml in BOTTLE_SIZES
+        ] + [{"value": "beer", "name": "Beer", "hint": "by the bottle"}],
     }
 
 

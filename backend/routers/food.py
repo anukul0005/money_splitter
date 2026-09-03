@@ -149,6 +149,7 @@ def _history(db: Session, caller: User, names: list[str]) -> dict:
     biggest = 0.0
     cuisine_hits: dict[str, int] = defaultdict(int)
     place_hits: dict[str, int] = defaultdict(int)
+    place_last: dict[str, str] = {}
     known_places = {
         k: p.name for p in PLACES
         if (k := " ".join(p.name.lower().split())) not in AMBIGUOUS_PLACES
@@ -175,6 +176,10 @@ def _history(db: Session, caller: User, names: list[str]) -> dict:
             for key, display in known_places.items():
                 if key in low:
                     place_hits[display] += 1
+                    # Dates are stored ISO, so a string compare is a date
+                    # compare. The latest is the useful one.
+                    if e.date and e.date > place_last.get(display, ""):
+                        place_last[display] = e.date
 
     favourites = sorted(cuisine_hits, key=lambda c: (-cuisine_hits[c], c))
     places = sorted(place_hits, key=lambda p: (-place_hits[p], p))
@@ -188,6 +193,9 @@ def _history(db: Session, caller: User, names: list[str]) -> dict:
         "favourites": favourites[:5],
         "cuisine_counts": {c: cuisine_hits[c] for c in favourites[:5]},
         "places": places[:5],
+        # When you last ate there. A place you went to on Friday is not the
+        # same suggestion as one you have not seen in a year.
+        "place_last": {p: place_last[p] for p in places[:5] if p in place_last},
     }
 
 
@@ -212,7 +220,9 @@ def _menu(place: Place, limit: int = 4) -> list[dict]:
 
 def _pick(places: list[Place], lo: float, hi: float, people: int,
           cuisine: str, kind: str, veg_only: bool,
-          favourites: list[str], been_to: list[str]) -> list[dict]:
+          favourites: list[str], been_to: list[str],
+          place_last: dict[str, str] | None = None,
+          limit: int = 30) -> list[dict]:
     """Every place whose estimated bill for this many people lands in range.
 
     Ordered dearest-first inside the budget, for the same reason the drinks
@@ -222,6 +232,7 @@ def _pick(places: list[Place], lo: float, hi: float, people: int,
     """
     fav = {f.lower() for f in favourites}
     seen = {b.lower() for b in been_to}
+    last = {k.lower(): v for k, v in (place_last or {}).items()}
     out: list[dict] = []
 
     for p in places:
@@ -255,12 +266,18 @@ def _pick(places: list[Place], lo: float, hi: float, people: int,
             "matched_cuisines": matched,
             "is_favourite": bool(matched),
             "been_before": p.name.lower() in seen,
+            "last_visited": last.get(p.name.lower()),
             "menu": _menu(p),
             "sources": list(p.sources),
         })
 
-    out.sort(key=lambda r: (-r["total"], not r["is_favourite"]))
-    return out[:10]
+    # Places you added yourself first and never cut - the same rule the drinks
+    # side needed, and for the same reason: adding somewhere and then not
+    # finding it makes the whole feature feel broken.
+    out.sort(key=lambda r: (not r["added_by_hand"], not r["is_favourite"],
+                            -r["total"]))
+    mine = sum(1 for r in out if r["added_by_hand"])
+    return out[:max(limit, mine + 4)]
 
 
 def _street(city: str, lo: float, hi: float, people: int) -> list[dict]:
@@ -286,6 +303,51 @@ def _street(city: str, lo: float, hi: float, people: int) -> list[dict]:
             "sources": list(d.sources),
         })
     out.sort(key=lambda r: -r["total"])
+    return out
+
+
+def _your_places(rows: list[PlaceOverride], people: int, cuisine: str,
+                 kind: str, veg: bool, lo: float, hi: float) -> list[dict]:
+    """Places you added for this city, and why any of them isn't showing.
+
+    The same reasoning as the drinks side: adding somewhere and then not
+    finding it looks like the entry was lost, when usually it is a filter —
+    the cuisine is narrowed, pure-veg is ticked, or the bill for this many
+    people falls outside the budget. Each one says which.
+    """
+    out = []
+    for r in rows:
+        place = _as_place(r)
+        total = place.total_for(people)
+        reason = None
+        if veg and not r.veg_only:
+            reason = "hidden by the pure-veg filter"
+        elif cuisine != "any" and cuisine not in place.cuisines:
+            saved = ", ".join(place.cuisines) or "no cuisine"
+            reason = f"saved as {saved} — pick that or Anything"
+        elif kind != "any" and (r.kind or DINE_IN) != kind:
+            reason = (f"saved as {KINDS.get(r.kind, r.kind)} — "
+                      f"pick that or Anywhere")
+        elif not (lo <= total <= hi):
+            reason = (f"about Rs {round(total)} for {people} is outside "
+                      f"this budget")
+        stamp = r.updated_at or r.created_at
+        out.append({
+            "id": r.id,
+            "name": r.name,
+            "area": r.area,
+            "cuisines": list(place.cuisines),
+            "kind": r.kind,
+            "kind_name": KINDS.get(r.kind, r.kind),
+            "veg_only": bool(r.veg_only),
+            "for_two": r.for_two,
+            "total": round(total),
+            "set_by": r.set_by,
+            "added_on": stamp.date().isoformat() if stamp else None,
+            "shown": reason is None,
+            "reason": reason,
+        })
+    out.sort(key=lambda x: (x["shown"], x["name"].lower()))
     return out
 
 
@@ -473,6 +535,7 @@ def recommend_food(
     if kind != "any" and kind not in KINDS:
         raise HTTPException(400, f"Pick one of {['any', *KINDS]}")
 
+    your_rows = db.query(PlaceOverride).filter(PlaceOverride.city == city).all()
     places = _apply_place_overrides(for_city(city), db, city)
     if not places:
         raise HTTPException(
@@ -485,7 +548,7 @@ def recommend_food(
     people_names = [n for n in (names or "").split(",") if n.strip()]
     hist = _history(db, caller, people_names)
     picks = _pick(places, budget_min, budget_max, people, cuisine, kind,
-                  veg, hist["favourites"], hist["places"])
+                  veg, hist["favourites"], hist["places"], hist["place_last"])
 
     return {
         "city": city,
@@ -504,6 +567,11 @@ def recommend_food(
         "cuisine_available": cuisine == "any" or any(
             cuisine in p.cuisines for p in places),
         "price_band": _band(places, people),
+        # Your own entries for this city, each saying whether it is in the
+        # list above and, if not, why — so a place you added is never just
+        # silently absent.
+        "your_places": _your_places(your_rows, people, cuisine, kind, veg,
+                                    budget_min, budget_max),
         # Only worth showing when the budget is genuinely tight; at Rs 3000 a
         # head, suggesting momos is not advice.
         "street": _street(city, budget_min, budget_max, people),
