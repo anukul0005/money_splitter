@@ -7,7 +7,14 @@ import PlaceEditForm from '../components/PlaceEditForm'
 import RecommendTabs from '../components/RecommendTabs'
 import { useUser } from '../UserContext'
 
-const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+// A missing number renders as a dash, never as "₹NaN" — see the note in
+// Recommend.jsx. Number(undefined) is NaN and went straight onto the card.
+const INR = (n) => {
+  const v = Number(n)
+  return Number.isFinite(v)
+    ? `₹${v.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+    : '—'
+}
 
 // Shown if /food/meta can't be reached, so the form is never dead. The server
 // is still the authority — a city with no real prices 404s on submit.

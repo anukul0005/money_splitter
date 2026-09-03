@@ -8,7 +8,15 @@ import RecommendTabs from '../components/RecommendTabs'
 import RecommendFood from './RecommendFood'
 import { useUser } from '../UserContext'
 
-const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+// A missing number renders as a dash, never as "₹NaN". Number(undefined) is
+// NaN, so any field the server stops sending — or hasn't started sending yet,
+// mid-rollout — used to print "₹NaN" straight onto the card.
+const INR = (n) => {
+  const v = Number(n)
+  return Number.isFinite(v)
+    ? `₹${v.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+    : '—'
+}
 
 // Shown if /recommend/meta can't be reached, so the form is never dead. The
 // server is still the authority — a state missing real prices 404s on submit.
@@ -438,7 +446,20 @@ export default function Recommend() {
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">
                   Strongest first
                 </p>
-                {result.beers.map((b, i) => (
+                {result.beers.map((b, i) => {
+                  // The frontend and the API deploy separately, so there is
+                  // always a window where one is ahead of the other. Beer used
+                  // to be priced as a round (`total` for `qty` bottles) and is
+                  // now priced per bottle, so both shapes are read here — an
+                  // older API served a card full of "₹NaN" otherwise.
+                  const unit = b.price ?? b.unit_price ??
+                    (b.total != null && b.qty ? Math.round(b.total / b.qty) : null)
+                  const buys = b.budget_buys ?? b.qty ?? null
+                  const perHead = b.bottles_per_head ?? null
+                  const roundCost = b.round_for_group ??
+                    (unit != null ? Math.round(unit * (result.people || 1)) : null)
+                  const pureAlcohol = b.alcohol_ml_per_bottle ?? null
+                  return (
                   <div key={`${b.brand}-${b.size_ml}-${i}`} className="card p-3.5">
                     {/* The brand gets its own line and is allowed to wrap.
                         Sharing a row with the price and the ABV badge meant
@@ -455,26 +476,29 @@ export default function Recommend() {
                       </p>
                       {/* One bottle. Leading with the price of a round was a
                           number nobody recognises. */}
-                      <p className="text-sm font-black text-brand-600 flex-shrink-0">{INR(b.price)}</p>
+                      <p className="text-sm font-black text-brand-600 flex-shrink-0">{INR(unit)}</p>
                     </div>
 
                     <p className="text-[11px] font-bold text-gray-700 mt-0.5">
                       1 bottle · {b.size_ml}ml
                       <span className="font-normal text-gray-400">
-                        {' '}· {pct(b.abv, b.abv_known)} · {b.alcohol_ml_per_bottle}ml pure alcohol
+                        {' '}· {pct(b.abv, b.abv_known)}
+                        {pureAlcohol != null && ` · ${pureAlcohol}ml pure alcohol`}
                       </span>
                     </p>
 
                     {/* What the budget does with that — a consequence of the
                         budget, not a property of the beer, so it sits apart. */}
-                    <p className="text-[10px] text-gray-400 mt-0.5">
-                      {INR(result.budget_max)} buys{' '}
-                      <span className="font-bold text-gray-500">
-                        {b.budget_buys} {b.budget_buys === 1 ? 'bottle' : 'bottles'}
-                      </span>
-                      {result.people > 1 && ` · ${b.bottles_per_head} each`}
-                      {' '}· one each is {INR(b.round_for_group)}
-                    </p>
+                    {buys != null && (
+                      <p className="text-[10px] text-gray-400 mt-0.5">
+                        {INR(result.budget_max)} buys{' '}
+                        <span className="font-bold text-gray-500">
+                          {buys} {buys === 1 ? 'bottle' : 'bottles'}
+                        </span>
+                        {result.people > 1 && perHead != null && ` · ${perHead} each`}
+                        {roundCost != null && <> · one each is {INR(roundCost)}</>}
+                      </p>
+                    )}
 
                     <button
                       type="button"
@@ -490,14 +514,15 @@ export default function Recommend() {
                         states={meta?.states ?? []}
                         initial={{
                           brand: b.brand, kind: 'beer', state: result.state,
-                          size_ml: b.size_ml, price: b.price,
+                          size_ml: b.size_ml, price: unit,
                         }}
                         onCancel={() => setEditing(null)}
                         onDone={() => { setEditing(null); run() }}
                       />
                     )}
                   </div>
-                ))}
+                  )
+                })}
               </>
             )}
 

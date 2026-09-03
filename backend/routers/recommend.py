@@ -347,6 +347,28 @@ def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
     return out[:8]
 
 
+def _legacy_beer_fields(unit: float, size_ml: int, people: int, abv: float,
+                        buys: int) -> dict:
+    """The old round-priced beer shape, for a web build that hasn't updated.
+
+    Computed exactly as it used to be - as many bottles as the budget buys,
+    capped at six a head - so an older page shows the numbers it always did
+    instead of "Rs NaN". Nothing current reads any of these.
+    """
+    qty = max(1, min(buys, people * 6))
+    total = unit * qty
+    volume = size_ml * qty
+    heads = max(people, 1)
+    return {
+        "qty": qty,
+        "total": round(total),
+        "total_ml": volume,
+        "ml_per_head": round(volume / heads),
+        "per_head": round(total / heads),
+        "alcohol_ml_per_head": _units(volume / heads, abv),
+    }
+
+
 def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
            favourites: list[str] | None = None) -> list[dict]:
     """Beers you can buy, priced by the bottle.
@@ -393,6 +415,13 @@ def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
             "is_favourite": is_fav,
             "is_override": b.source == "manual-override",
             "source": b.source,
+            # Deprecated: the round-priced shape this card used to have. The
+            # web app and the API deploy separately, so there is always a
+            # window where one is older than the other, and a browser holding
+            # the previous build reads these. Without them it renders "Rs NaN"
+            # across every beer card. Safe to delete once a build that reads
+            # `price` has been live for a while.
+            **_legacy_beer_fields(unit, b.size_ml, people, abv, buys),
         })
 
     # Beers you actually buy first, then strongest among what fits, so the
