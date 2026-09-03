@@ -207,6 +207,12 @@ def _catalogue() -> tuple[list[tuple[str, str]], np.ndarray]:
     return names, matrix
 
 
+# How good a cross-category match has to be before it may overrule the
+# regexes. Well above the 0.25 needed merely to name a bottle: changing what
+# something *is* deserves a higher bar than labelling it.
+REFILE_FLOOR = 0.45
+
+
 def _best(t: str, kind: str) -> tuple[str | None, float]:
     """Nearest catalogue entry of one kind, with its cosine score."""
     names, matrix = _catalogue()
@@ -239,7 +245,14 @@ def link(t: str, kind: str, floor: float = 0.25) -> tuple[str | None, float, str
     other = FOOD if kind == DRINK else DRINK
     a_name, a_score = _best(t, kind)
     b_name, b_score = _best(t, other)
-    if b_score > a_score + 0.10:
+    # Refiling needs a match that is strong on its own, not merely stronger
+    # than a weak one. Two near-misses differing by a tenth is noise, and
+    # letting that flip a category put popcorn, samosas and a taxi to the
+    # office in the drinks list: "office" looks like "Officer's Choice" and
+    # "Bombay to barca" like "Bombay Special Whisky" at around 0.31, which
+    # was enough under the old rule. Beer Cafe matches its own name far above
+    # this, which is the case the rule exists for.
+    if b_score >= REFILE_FLOOR and b_score > a_score + 0.10:
         a_name, a_score, kind = b_name, b_score, other
     if a_score < floor:
         return None, a_score, kind
@@ -405,9 +418,15 @@ def learned(db: Session, kind: str, group_ids: list[int],
     if not group_ids:
         return []
 
+    # Only things that linked to the catalogue are offered as suggestions.
+    # An expense the vectors could not name still gets indexed and is still
+    # searchable - it just does not become advice. "Seth sethani petrol beer
+    # zomato kinara" is a real evening and a useless recommendation, and the
+    # bar for putting a name in front of somebody as a thing to go and buy is
+    # that we can actually name it.
     col = "per_head" if per_head else "amount"
     rows = db.execute(sql(f"""
-        SELECT label,
+        SELECT matched_brand                   AS label,
                MAX(matched_brand)              AS matched_brand,
                COUNT(*)                        AS times,
                AVG({col})                      AS avg_spend,
@@ -415,8 +434,9 @@ def learned(db: Session, kind: str, group_ids: list[int],
                MAX({col})                      AS max_spend,
                MAX(occurred_on)                AS last_had
         FROM knowledge_items
-        WHERE kind = :kind AND group_id = ANY(:gids) AND label IS NOT NULL
-        GROUP BY label
+        WHERE kind = :kind AND group_id = ANY(:gids)
+          AND matched_brand IS NOT NULL
+        GROUP BY matched_brand
         HAVING AVG({col}) BETWEEN :lo AND :hi
         ORDER BY COUNT(*) DESC, MAX(occurred_on) DESC NULLS LAST
         LIMIT :lim

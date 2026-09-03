@@ -288,6 +288,29 @@ export default function RecommendFood({ tab, setTab }) {
           <button onClick={run} className="btn-primary" disabled={busy || !canRun}>
             {busy ? 'Working it out…' : 'Recommend'}
           </button>
+
+          {/* Adding a place should not require running a search first. If you
+              already know the listings are missing somewhere, the moment to
+              say so is now. */}
+          {editing === 'new-pre' ? (
+            <PlaceEditForm
+              city={city}
+              cities={meta?.cities ?? []}
+              cuisines={cuisineList}
+              kinds={meta?.kinds ?? []}
+              initial={{ city, kind: 'dine-in' }}
+              onCancel={() => setEditing(null)}
+              onDone={() => { setEditing(null); if (result) run() }}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setEditing('new-pre')}
+              className="text-[11px] font-bold text-gray-400 hover:text-brand-600"
+            >
+              + Add a place we don&apos;t have
+            </button>
+          )}
         </div>
 
         {error && (

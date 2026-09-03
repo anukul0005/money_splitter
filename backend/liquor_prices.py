@@ -21,9 +21,10 @@ coverage so you can see what is missing.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
-import up_prices
+import state_prices
+from brand_names import canonicalise
 
 # Sources, cited per row below.
 SOURCES = {
@@ -37,9 +38,9 @@ SOURCES = {
         "as_of": "2026-09",
         "note": "Aggregator of the Delhi Excise Department price list",
     },
-    # UP's own PDFs, parsed in full. They replaced the aggregator rows that
-    # used to cover this state - see the note above _UP_ROWS.
-    **up_prices.SOURCES,
+    # The two states' own PDFs, parsed in full. They replaced the aggregator
+    # rows that used to cover UP - see the note above _STATE_ROWS.
+    **state_prices.SOURCES,
     "gyaanvibes-hr": {
         "url": "https://gyaanvibes.wordpress.com/2026/08/27/best-indian-whisky-in-gurugram/",
         "as_of": "2026-08",
@@ -132,10 +133,10 @@ def abv_for(brand: str, kind: str) -> tuple[float, bool]:
     key = _abv_key(brand)
     hit = _ABV_LOOKUP.get(key)
     if hit is None:
-        # UP prints the strength inside the brand name on many labels. That is
-        # a published figure off the state's own list, so it counts the same as
+        # These lists print the strength inside the brand name on many labels.
+        # That is a published figure off the state's own list, so it counts the same as
         # the hand-curated table above rather than as a guess.
-        hit = up_prices.ABV.get(key)
+        hit = state_prices.ABV.get(key)
     if hit is not None:
         return hit, True
     return ABV_TYPICAL.get(kind, 40.0), False
@@ -296,24 +297,36 @@ _HR_RANGES = [
 ]
 
 # ── Uttar Pradesh — published as ranges, kept as ranges ───────────────────────
-# ── Uttar Pradesh ─────────────────────────────────────────────────────────────
-# UP used to be a dozen rows copied off aggregator sites reporting bands. It is
-# now the state's own two published PDFs, parsed in full - see up_prices.py and
-# the parser that generates it. An MRP the excise department set beats an
-# aggregator's report of it, so the aggregator rows were dropped rather than
-# kept alongside: two answers to the same question, one of them second-hand.
-_UP_ROWS = up_prices.ROWS
+# ── Uttar Pradesh and Madhya Pradesh ──────────────────────────────────────────
+# Both states come from their own published PDFs, parsed in full - see
+# state_prices.py and the parser that generates it. An MRP an excise department
+# set beats an aggregator's report of it, so the aggregator rows that used to
+# cover UP were dropped rather than kept alongside.
+#
+# Worth knowing: the rate list in this table was filed under Uttar Pradesh for
+# one release and is actually Madhya Pradesh. It agrees with the MP source on
+# every shared registration and disagrees with the real UP list on every shared
+# brand. The parser docstring carries the full evidence.
+_STATE_ROWS = state_prices.ROWS
 
 BOTTLES: list[Bottle] = (
     [Bottle(b, k, s, "Maharashtra", p, "madirakprice-mh") for b, k, s, p in _MH]
     + [Bottle(b, k, s, "Delhi", p, "boldsky-dl") for b, k, s, p in _DL]
-    # UP prints the strength on many labels, so the per-row figure is used
-    # where the parser found one rather than falling back to a category typical.
-    + [Bottle(b, k, s, "Uttar Pradesh", lo, srcs[0], hi, abv)
-       for b, k, s, lo, hi, abv, srcs in _UP_ROWS]
+    # These lists print the strength on many labels, so the per-row figure is
+    # used where the parser found one rather than a category typical.
+    + [Bottle(b, k, sz, st, lo, srcs[0], hi, abv)
+       for b, k, sz, st, lo, hi, abv, srcs in _STATE_ROWS]
     + [Bottle(b, k, s, "Gurugram (Haryana)", lo, src, hi) for b, k, s, lo, hi, src in _HR_RANGES]
     + [Bottle(b, k, s, "Delhi", lo, src, hi) for b, k, s, lo, hi, src in _DL_RANGES]
 )
+
+# ── One spelling per bottle, everywhere ───────────────────────────────────────
+# The hand-written Delhi, Gurugram and Maharashtra tables say "Royal Stag";
+# the parsed state lists say "Seagrams Royal Stag Superior Whisky". Run over
+# every row at once, the shortest spelling wins and the same bottle carries one
+# name in every state - which is what lets the cross-state comparison find it.
+_CANON = canonicalise([(b.brand, b.kind) for b in BOTTLES])
+BOTTLES = [replace(b, brand=_CANON[(b.brand, b.kind)]) for b in BOTTLES]
 
 STATES = sorted({b.state for b in BOTTLES})
 

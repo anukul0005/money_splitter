@@ -301,6 +301,27 @@ export default function Recommend() {
           <button onClick={run} className="btn-primary" disabled={busy || !canRun}>
             {busy ? 'Working it out…' : 'Recommend'}
           </button>
+
+          {/* Adding a bottle should not require running a search first. If you
+              already know the price list is missing something, the moment to
+              say so is now, not after being shown eight things that are not it. */}
+          {editing === 'new-pre' ? (
+            <PriceEditForm
+              state={state}
+              states={meta?.states ?? []}
+              initial={{ state, size_ml: bottle && bottle !== 'beer' ? Number(bottle) : 750 }}
+              onCancel={() => setEditing(null)}
+              onDone={() => { setEditing(null); if (result) run() }}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setEditing('new-pre')}
+              className="text-[11px] font-bold text-gray-400 hover:text-brand-600"
+            >
+              + Add a bottle or price we don&apos;t have
+            </button>
+          )}
         </div>
 
         {error && (

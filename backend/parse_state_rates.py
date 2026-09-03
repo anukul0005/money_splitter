@@ -1,44 +1,43 @@
-"""Turn the two official UP price PDFs into a Python price table.
+"""Turn the official state price PDFs into one Python price table.
 
-Run it: `python parse_up_rates.py`, which rewrites up_prices.py.
+Run it: `python parse_state_rates.py`, which rewrites state_prices.py.
 
-WHY THIS EXISTS
-Uttar Pradesh publishes its rates as PDFs and nothing else, so the numbers the
-app was using for UP came from aggregator sites reporting bands. These two
-documents are the state's own lists, which makes them the better source by a
-wide margin — an exact MRP set by the excise department beats somebody's
-report of what a shop charged.
+WHAT THE SOURCES ACTUALLY ARE
+There are two, and which state each belongs to was got wrong once, so it is
+worth stating precisely.
 
-The two documents cover different ground and are both needed:
+  sources/mp/mp-rate-list-2026-27.pdf   -> Madhya Pradesh
+      A cleanly tabulated rate list for FY 2026-27, one row per line, 1337 of
+      them. Often prints ABV inside the brand name.
 
-  Rate List 26-27 (FY 2026-27, dated 04-04-2026)
-      Cleanly tabulated, one row per line. Carries the newer and regional
-      brands, and often prints ABV in the brand name itself.
+  sources/up/up-liquor-price-list.pdf   -> Uttar Pradesh
+      Ragged multi-line layout, per-brand MRP. Carries the national brands the
+      MP list has none of - Vat 69, Old Monk, Royal Stag, Imperial Blue,
+      100 Pipers, Officer's Choice, Absolut, Smirnoff, Tuborg, Black Dog.
 
-  UP Liquor Price List
-      Ragged multi-line layout. Carries the national brands the rate list has
-      none of — Vat 69, Old Monk, Royal Stag, Imperial Blue, 100 Pipers,
-      Officer's Choice, Absolut, Smirnoff, Tuborg, Black Dog.
+An earlier build filed the rate list under Uttar Pradesh because that is what
+the folder said. It is Madhya Pradesh. The evidence is unambiguous: it agrees
+with the MP list on 736 of 736 rows keyed by registration id and size, and it
+disagrees with the UP price list on every single brand the two share -
+Whistler 750ml is Rs 1,575 in one and Rs 910 in the other. Alcohol is a state
+subject; two states agreeing to the rupee on hundreds of registrations does
+not happen, and identical registration ids across a whole document mean one
+document. Neither PDF names its own state anywhere, which is how the mistake
+survived. Cross-checking two sources against each other is what caught it.
 
 WHAT IS DELIBERATELY THROWN AWAY
-  * Rows with an MRP of zero. The price list registers brands that are export
-    only, CSD (services canteen) only, or marked "For Sale in Delhi Only";
-    they carry no UP retail price and are not something you can buy here.
-  * Anything whose name says Overseas, Export, CSD or Delhi Only, for the same
-    reason.
-  * Rows with an ex-distillery price of zero. These are the same kind of
-    registration but they slip through the name check, and their last money
-    column is a nominal export figure rather than a retail price - which is
-    how Tuborg briefly appeared at Rs 10 and a Golden Eagle at Rs 1. A row
-    with no EDP was never priced for a UP shop, whatever the last column says.
-  * Sizes nobody buys for an evening are kept in the table but the app filters
-    them; nothing is dropped silently.
+  * Rows with an MRP of zero, or an ex-distillery price of zero. Both mark a
+    registration that is export-only, CSD-only or for sale in another state;
+    their last money column is a nominal figure rather than a retail price,
+    which is how Tuborg briefly appeared at Rs 10 and a beer at Rs 1.
+  * Anything whose name marks it as Overseas, Export-to, CSD or Delhi-only.
+    "Export" alone is not enough - Tuborg Mild Export Beer is a beer you can
+    buy, so the word only counts when punctuated as a channel marker.
 
 WHERE TWO ROWS DISAGREE
-The same brand and size can appear more than once — different registration
-years, different distilleries bottling it. Rather than picking one, the row
-becomes a range across every MRP found, which is the same rule the Haryana
-rows already follow. `sources` records which document each row came from.
+The same brand and size can be registered more than once in one state, at
+different MRPs. Rather than picking one, the row keeps the span. `sources`
+records which document each row came from.
 
 This parser refuses to write output if its own checks fail, so a bad extract
 is a loud failure rather than a table of plausible-looking wrong numbers.
@@ -57,10 +56,11 @@ except ImportError:  # pragma: no cover - tooling dependency, not a runtime one
     sys.exit("pypdf is needed to re-parse the PDFs: pip install pypdf")
 
 HERE = Path(__file__).parent
-SOURCE_DIR = HERE / "sources" / "up"
-RATE_PDF = SOURCE_DIR / "up-rate-list-2026-27.pdf"
-LIST_PDF = SOURCE_DIR / "up-liquor-price-list.pdf"
-OUT = HERE / "up_prices.py"
+MP_PDF = HERE / "sources" / "mp" / "mp-rate-list-2026-27.pdf"
+UP_PDF = HERE / "sources" / "up" / "up-liquor-price-list.pdf"
+OUT = HERE / "state_prices.py"
+
+MP, UP = "Madhya Pradesh", "Uttar Pradesh"
 
 WHISKY, RUM, VODKA, BEER, GIN, WINE, BRANDY = (
     "whisky", "rum", "vodka", "beer", "gin", "wine", "brandy")
@@ -157,10 +157,29 @@ def _fix_glyphs(name: str) -> str:
     appears here, so it is restored; any other stray one is dropped rather
     than guessed at.
     """
+    # Mojibake: parts of the MP list are UTF-8 read as Latin-1, so an
+    # apostrophe arrives as three characters. Re-encoding undoes it exactly,
+    # and is attempted only when the signature is present so a correctly
+    # decoded name is never mangled by the repair itself.
+    if "â" in name or "Ã" in name:
+        try:
+            name = name.encode("latin-1").decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            pass
+    # A lone "A-circumflex" is the same damage done to a non-breaking
+    # space, but its trailing byte is already gone so re-encoding cannot
+    # recover it. Here it only ever appears as that artefact, so it goes.
+    name = name.replace('Â', ' ').replace(' ', ' ')
+    name = name.replace(" ", " ")
     name = name.replace("’", "'").replace("‘", "'")
     name = name.replace("“", '"').replace("”", '"')
     name = re.sub(r"�(?=[Ss]\b)", "'", name)
-    return name.replace("�", "")
+    name = name.replace("�", "")
+    # Region tags appended to a registration - "{MH}", "- HR". They mark where
+    # a label is registered, not what is in the bottle.
+    name = re.sub(r"\s*[{\[(]\s*[A-Z]{2}\s*[}\])]\s*", " ", name)
+    name = re.sub(r"\s*-\s*(?:HR|MH|UP|MP|DL|PB|RJ|GA)\s*$", "", name, flags=re.I)
+    return " ".join(name.split())
 
 
 def _clean(name: str) -> tuple[str, float | None]:
@@ -190,15 +209,19 @@ def _clean(name: str) -> tuple[str, float | None]:
 
 
 # ── Document 1: the FY 2026-27 rate list ──────────────────────────────────────
+# The MP list carries a "Bio" column the other document has none of, so the
+# numeric tail is eleven wide: bottles-per-case, MSP, MRP, Bio, Duty, EDP,
+# 8% TF, Vat, TCS, purchase cost, total.
 RATE_ROW = re.compile(
-    r"^(?P<licence>[A-Z0-9\-]+(?:\s+OF\s+[A-Z0-9\-]+)?)\s+"
+    r"^(?P<licence>[A-Za-z0-9\- ]+?)\s+"
     r"(?P<cat>Whisky|Wine|Vodka|Rum|Beer|Gin|RTD|Brandy|Liqueur)\s+"
     r"(?P<name>.+?)\s+-\s*Id\s*-\s*(?P<id>\S+)\s+"
-    r"(?P<btype>Glass Bottle|Pet Bottle|Can|Tetra Pack)\s+"
+    r"(?P<btype>Glass Bottle|Pet Bottle|Glass|Can|Pet|Tetra Pack)\s+"
     r"(?P<size>[\d.]+)\s*ML\s+"
-    r"(?P<nums>[\d.]+(?:\s+[\d.]+){9})$"
+    r"(?P<nums>[\d.]+(?:\s+[\d.]+){10})$"
 )
-RATE_HEADER = re.compile(r"^(Type brand|Total|Without|Duty|Total With|Financial Year)")
+RATE_HEADER = re.compile(
+    r"^(Unit Type Brand|Type brand|Total|Without|Duty|Total With|Financial Year)")
 
 
 def parse_rate_list(path: Path) -> list[dict]:
@@ -220,19 +243,25 @@ def parse_rate_list(path: Path) -> list[dict]:
         buf = ""
 
         nums = m.group("nums").split()
-        # Columns: bottles-per-case, MSP, MRP, Duty, EDP, then the tax split.
-        mrp, edp = float(nums[2]), float(nums[4])
+        # bottles-per-case, MSP, MRP, Bio, Duty, EDP, then the tax split.
+        mrp, edp = float(nums[2]), float(nums[5])
         if edp <= 0:
             continue
         size = int(float(m.group("size")))
         name, abv = _clean(m.group("name"))
+        # "X Glass 90 ML 96 174 ... Spirit Whisky Y" is two rows the line
+        # buffer joined because the first did not match on its own. A brand
+        # name carrying its own size and price tail is always that, and is
+        # dropped rather than stored as a brand nobody could ever match.
+        if re.search(r"\d+\s*ML\b", name, re.I):
+            continue
         kind = _category(name, m.group("cat"))
         if kind is None or size not in KEEP_SIZES or mrp <= 0:
             continue
         if EXCLUDE_NAME.search(name):
             continue
         out.append({"brand": name, "kind": kind, "size": size,
-                    "mrp": mrp, "abv": abv, "source": "up-rate-list-2026-27"})
+                    "mrp": mrp, "abv": abv, "source": "mp-rate-list-2026-27", "state": MP})
     return out
 
 
@@ -300,7 +329,7 @@ def parse_price_list(path: Path) -> tuple[list[dict], int]:
         if kind is None or EXCLUDE_NAME.search(name):
             continue
         out.append({"brand": name, "kind": kind, "size": size,
-                    "mrp": mrp, "abv": abv, "source": "up-liquor-price-list"})
+                    "mrp": mrp, "abv": abv, "source": "up-liquor-price-list", "state": UP})
     return out, unsplit, nominal
 
 
@@ -308,80 +337,89 @@ def _key(name: str) -> str:
     return " ".join(name.lower().replace(".", "").replace("'", "").split())
 
 
-def merge(rows: list[dict]) -> list[dict]:
-    """Collapse duplicates of one brand and size into a single row.
+# Canonical naming lives in brand_names so the parser and the running app
+# cannot drift apart on what a bottle is called.
+from brand_names import canonicalise  # noqa: E402
 
-    A brand can be registered more than once - different years, different
-    bottlers - and the MRPs differ. Keeping the span is honest; averaging them
-    would invent a price the state never published.
+
+def merge(rows: list[dict]) -> tuple[list[dict], dict[str, str]]:
+    """One row per canonical brand, size and state.
+
+    Two collapses happen here. Within a state, a brand registered more than
+    once at different MRPs keeps the span rather than being averaged into a
+    price nobody published. Across states, names referring to the same bottle
+    are given one spelling - the prices stay separate, because the price is
+    the only thing that legitimately varies by state.
     """
-    grouped: dict[tuple[str, int], list[dict]] = defaultdict(list)
+    canonical = canonicalise([(r["brand"], r["kind"]) for r in rows])
+
+    grouped: dict[tuple, list[dict]] = defaultdict(list)
     for r in rows:
-        grouped[(_key(r["brand"]), r["size"])].append(r)
+        name = canonical[(r["brand"], r["kind"])]
+        grouped[(name, r["kind"], r["size"], r["state"])].append(r)
 
     merged: list[dict] = []
-    for (_, size), items in grouped.items():
+    for (name, kind, size, state), items in grouped.items():
         prices = sorted(r["mrp"] for r in items)
         abvs = {r["abv"] for r in items if r["abv"]}
-        srcs = sorted({r["source"] for r in items})
-        # Longest spelling wins: the fuller name is the more informative one.
-        display = max((r["brand"] for r in items), key=len)
         merged.append({
-            "brand": display,
-            "kind": items[0]["kind"],
+            "brand": name,
+            "kind": kind,
             "size": size,
+            "state": state,
             "price": int(round(prices[0])),
             "price_max": int(round(prices[-1])) if prices[-1] != prices[0] else None,
             "abv": min(abvs) if abvs else None,
-            "sources": srcs,
+            "sources": sorted({r["source"] for r in items}),
         })
-    merged.sort(key=lambda r: (r["kind"], r["brand"].lower(), -r["size"]))
-    return merged
+    merged.sort(key=lambda r: (r["state"], r["kind"], r["brand"].lower(), -r["size"]))
+    return merged, canonical
 
 
-HEADER = '''"""Uttar Pradesh liquor prices, parsed from the state's own PDFs.
+HEADER = '"""State liquor prices, parsed from the states\' own PDFs.\n\
+\n\
+GENERATED FILE - do not edit by hand. Rebuild with:\n\
+\n\
+    python parse_state_rates.py\n\
+\n\
+Source documents live in sources/ and are committed alongside this file, so\n\
+any number here can be traced back to the page it came from. See\n\
+parse_state_rates.py for which document belongs to which state, what is\n\
+deliberately excluded, and how brand names are made consistent across states.\n\
+\n\
+Prices are the MRP set by that state. Where a brand and size is registered\n\
+more than once in one state at different MRPs, `price_max` holds the top of\n\
+the span rather than the two being averaged into a number nobody published.\n\
+\n\
+Brand names are canonical: the same bottle carries the same spelling in every\n\
+state, so only the price varies.\n\
+"""\n\
+\n\
+from __future__ import annotations\n\
+\n\
+SOURCES = {\n\
+    "mp-rate-list-2026-27": {\n\
+        "url": "sources/mp/mp-rate-list-2026-27.pdf",\n\
+        "as_of": "2026-04-04",\n\
+        "note": "Madhya Pradesh rate list, financial year 2026-2027 (official PDF)",\n\
+    },\n\
+    "up-liquor-price-list": {\n\
+        "url": "sources/up/up-liquor-price-list.pdf",\n\
+        "as_of": "2026-09",\n\
+        "note": "Uttar Pradesh liquor price list, per-brand MRP (official PDF)",\n\
+    },\n\
+}\n\
+\n\
+# brand, kind, size_ml, state, mrp, mrp_max (None if a single published\n\
+# price), abv (None where the document did not print it), sources\n\
+ROWS: list[tuple] = [\n'
 
-GENERATED FILE - do not edit by hand. Rebuild with:
-
-    python parse_up_rates.py
-
-Source documents live in sources/up/ and are committed alongside this file, so
-any number here can be traced back to the page it came from. See
-parse_up_rates.py for what is deliberately excluded (export-only, CSD and
-Delhi-only registrations, all of which carry no UP retail price).
-
-Prices are the MRP set by the UP excise department. Where a brand and size is
-registered more than once at different MRPs, `price_max` holds the top of the
-span rather than the two being averaged into a number nobody published.
-"""
-
-from __future__ import annotations
-
-SOURCES = {
-    "up-rate-list-2026-27": {
-        "url": "sources/up/up-rate-list-2026-27.pdf",
-        "as_of": "2026-04-04",
-        "note": "UP excise rate list, financial year 2026-2027 (official PDF)",
-    },
-    "up-liquor-price-list": {
-        "url": "sources/up/up-liquor-price-list.pdf",
-        "as_of": "2026-09",
-        "note": "UP liquor price list, per-brand MRP (official PDF)",
-    },
-}
-
-# brand, kind, size_ml, mrp, mrp_max (None if a single published price),
-# abv (None where the document did not print it), sources
-ROWS: list[tuple] = [
-'''
-
-FOOTER = ''']
-
-# Strength published inside a brand name in the source documents. Exact, not a
-# category typical, so the app can label it without a "~".
-ABV: dict[str, float] = {
-%s}
-'''
+FOOTER = ']\n\
+\n\
+# Strength published inside a brand name in the source documents. Exact, not a\n\
+# category typical, so the app can label it without a "~".\n\
+ABV: dict[str, float] = {\n\
+%s}\n'
 
 
 def write(rows: list[dict], path: Path) -> None:
@@ -389,8 +427,8 @@ def write(rows: list[dict], path: Path) -> None:
     for r in rows:
         srcs = ", ".join(repr(s) for s in r["sources"])
         lines.append(
-            "    (%r, %r, %d, %d, %s, %s, (%s%s)),\n"
-            % (r["brand"], r["kind"], r["size"], r["price"],
+            "    (%r, %r, %d, %r, %d, %s, %s, (%s%s)),\n"
+            % (r["brand"], r["kind"], r["size"], r["state"], r["price"],
                r["price_max"] if r["price_max"] else "None",
                r["abv"] if r["abv"] else "None",
                srcs, "," if len(r["sources"]) == 1 else "")
@@ -402,54 +440,49 @@ def write(rows: list[dict], path: Path) -> None:
 
 
 def main() -> int:
-    for p in (RATE_PDF, LIST_PDF):
-        if not p.exists():
-            sys.exit(f"missing source PDF: {p}")
+    for f in (MP_PDF, UP_PDF):
+        if not f.exists():
+            sys.exit(f"missing source PDF: {f}")
 
-    rate = parse_rate_list(RATE_PDF)
-    price, unsplit, nominal = parse_price_list(LIST_PDF)
-    rows = merge(rate + price)
+    mp = parse_rate_list(MP_PDF)
+    up, unsplit, nominal = parse_price_list(UP_PDF)
+    rows, canonical = merge(mp + up)
 
-    print(f"rate list  : {len(rate):5} usable rows")
-    print(f"price list : {len(price):5} usable rows "
-          f"({unsplit} unsplit, {nominal} not priced for UP retail)")
-    print(f"merged     : {len(rows):5} brand/size rows")
+    print(f"MP rate list   : {len(mp):5} usable rows")
+    print(f"UP price list  : {len(up):5} usable rows "
+          f"({unsplit} unsplit, {nominal} not priced for retail)")
+    print(f"merged         : {len(rows):5} brand/size/state rows")
+    print(f"canonical names: {len(set(canonical.values())):5} distinct products")
 
-    # Checks. A silently wrong table is the failure mode worth guarding
-    # against, so refuse to write rather than emit something plausible.
     problems = []
-    if len(rows) < 400:
-        problems.append(f"only {len(rows)} rows; expected several hundred")
+    if len(rows) < 800:
+        problems.append(f"only {len(rows)} rows; expected well over a thousand")
     if any(r["price"] <= 0 for r in rows):
         problems.append("a row has a non-positive price")
     if any(r["price_max"] and r["price_max"] < r["price"] for r in rows):
         problems.append("a row's range is inverted")
+    states = {r["state"] for r in rows}
+    if states != {MP, UP}:
+        problems.append(f"expected both states, got {states}")
     kinds = {r["kind"] for r in rows}
     for need in (WHISKY, RUM, VODKA, BEER):
         if need not in kinds:
             problems.append(f"no {need} rows at all")
-    # The national brands are the whole reason the second PDF is here.
     for brand in ("vat 69", "old monk", "royal stag", "imperial blue"):
         if not any(brand in _key(r["brand"]) for r in rows):
             problems.append(f"expected to find {brand!r}")
-    # A 750ml costing less than a 180ml of the same brand means the columns
-    # were read in the wrong order somewhere.
-    by_brand: dict[str, dict[int, int]] = defaultdict(dict)
+    by_brand: dict[tuple, dict[int, int]] = defaultdict(dict)
     for r in rows:
-        by_brand[_key(r["brand"])][r["size"]] = r["price"]
-    inverted = [b for b, s in by_brand.items()
-                if 180 in s and 750 in s and s[750] <= s[180]]
+        by_brand[(r["state"], _key(r["brand"]))][r["size"]] = r["price"]
+    inverted = [b for b, sz in by_brand.items()
+                if 180 in sz and 750 in sz and sz[750] <= sz[180]]
     if inverted:
         problems.append(f"{len(inverted)} brands price 750ml at or below 180ml: "
                         f"{inverted[:3]}")
-    # Debris from splitting the manufacturer off the brand. A stray bracket or
-    # a name that starts mid-word means the split landed in the wrong place.
     debris = [r["brand"] for r in rows
               if re.match(r"^[^A-Za-z0-9]", r["brand"]) or ")" in r["brand"][:14]]
     if debris:
         problems.append(f"{len(debris)} names look mis-split: {debris[:3]}")
-    # A beer that costs more than a bottle of whisky, or a 750ml spirit under
-    # Rs 100, means a column was read wrong somewhere.
     odd = [r for r in rows if r["kind"] == BEER and r["price"] > 1200]
     odd += [r for r in rows if r["kind"] in (WHISKY, RUM, VODKA, GIN)
             and r["size"] == 750 and r["price"] < 100]
@@ -459,16 +492,19 @@ def main() -> int:
 
     if problems:
         print("\nREFUSING TO WRITE - checks failed:")
-        for p in problems:
-            print("  *", p)
+        for pr in problems:
+            print("  *", pr)
         return 1
 
     write(rows, OUT)
-    print(f"\nwrote {OUT.relative_to(HERE)}")
-    for kind in sorted(kinds):
-        k = [r for r in rows if r["kind"] == kind]
-        print(f"  {kind:8} {len(k):4} rows  "
-              f"Rs {min(r['price'] for r in k)}-{max(r['price'] for r in k)}")
+    print(f"\nwrote {OUT.name}")
+    for st in sorted(states):
+        sub = [r for r in rows if r["state"] == st]
+        print(f"  {st:16} {len(sub):5} rows  "
+              f"{len({r['brand'] for r in sub}):4} brands")
+    both = ({r["brand"] for r in rows if r["state"] == MP}
+            & {r["brand"] for r in rows if r["state"] == UP})
+    print(f"  brands priced in both states: {len(both)}")
     print(f"  with published ABV: {sum(1 for r in rows if r['abv'])}")
     return 0
 
