@@ -5,10 +5,16 @@ Madhya Pradesh's says "Seagrams Royal Stag Superior Whisky"; Uttar Pradesh's
 says something else again. Left alone that is three brands, they never compare
 across states, and the knowledge base fills up with duplicates of one bottle.
 
-The rule: reduce a name to its identifying core by dropping the words that
-describe rather than identify, and treat names sharing a core and a category
-as one product. Whichever spelling is shortest becomes the one shown, because
-the shortest is what people actually say.
+The rule is deliberately cautious: strip only the category noun, the
+manufacturing house and filler, then treat names sharing what is left as one
+product. That merges "SEAGRAM'S ROYAL STAG SUPERIOR WHISKY (NEW )" with
+"Seagrams Royal Stag Superior Whisky" - genuinely the same bottle written
+twice - while leaving Royal Stag Barrel Select as its own product.
+
+Merging harder was tried and was a mistake. Treating "premium", "ultra" and
+"strong" as noise collapsed twelve Kingfishers into one, which threw away the
+difference between a 4.8% lager and an 8% strong at two different prices. The
+detail in these names is the product information.
 
 Prices are untouched. The price is the one thing that legitimately varies from
 state to state, and merging names must never merge those.
@@ -23,46 +29,47 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 
-# Words that say what kind of drink it is, or how good it claims to be.
-# Neither identifies the product.
+# Only what never distinguishes one product from another: the category noun,
+# the manufacturing house, and grammatical filler.
+#
+# This list was once far longer and included "premium", "ultra", "strong",
+# "reserve", "select" and their like. That was wrong, and badly so. In Indian
+# liquor those words *are* the product: Kingfisher Ultra, Kingfisher Premium
+# and Kingfisher Strong are three beers at three prices and three strengths,
+# and dropping the adjective merged twelve published names into one. Royal
+# Stag Barrel Select is not Royal Stag. The words that look like marketing are
+# carrying the information.
+#
+# So the rule now is conservative: strip only what is provably not part of the
+# name, and let two spellings of the *same* product merge while two different
+# products stay apart. Matching a short name in one state against a long one
+# in another is a separate job, done at query time where a near-match can be
+# ranked instead of having to be decided once and for all.
 DESCRIPTORS = {
-    # category
+    # the category noun - "Beer" in "Kingfisher Ultra Lager Beer"
     "whisky", "whiskey", "rum", "vodka", "gin", "beer", "wine", "brandy",
-    "lager", "ale", "bier", "pilsner", "stout", "scotch", "malt", "blend",
-    "blended", "grain", "spirit", "spirits", "liqueur",
-    # marketing
-    "premium", "super", "extra", "strong", "superior", "deluxe", "delux",
-    "special", "exclusive", "original", "classic", "reserve", "select",
-    "fine", "rare", "aged", "smooth", "no", "no1", "the", "and", "of", "with",
-    "triple", "double", "distilled", "matured", "craft", "crafted",
-    "authentic", "pure", "xxx", "xo", "vsop", "edition", "collection",
-    "heritage", "legendary", "ultra", "max", "light", "dry", "new",
-    # manufacturer houses that sit in front of the brand
-    "seagrams", "seagram", "seagrams'", "usl", "diageo", "pernod", "ricard",
+    "lager", "bier", "pilsner", "pilsener", "ale", "stout",
+    # the house in front of the brand - "Seagram's 100 Pipers" is 100 Pipers
+    "seagrams", "seagram", "usl", "diageo", "pernod", "ricard",
+    # filler, and the "(NEW)" registrations carry
+    "the", "and", "of", "with", "new",
 }
-
-# Brands built entirely out of descriptor words. Without this they collapse
-# into each other or into nothing: "Black Dog" and "Black Label" both reduce
-# to an empty core once "black" is dropped. Longest first, so "black label"
-# is tested before any shorter phrase that is a prefix of it.
-PROTECTED = tuple(sorted((
-    "old monk", "black dog", "royal stag", "royal challenge", "blenders pride",
-    "white mischief", "black label", "red label", "green label", "blue label",
-    "royal salute", "old smuggler", "golden eagle", "red knight",
-    "black & white", "imperial blue", "royal green", "white walker",
-    "royal ranthambore", "old tavern", "director's special", "signature",
-), key=len, reverse=True))
 
 
 def key(name: str) -> str:
-    """Lowercase, no punctuation, digits split off letters, single spaces.
+    """Lowercase, punctuation gone, digits split off letters, single spaces.
 
     The digit split matters as much here as it does in the embeddings: people
     type "VAT69" and "8PM" while the lists print "VAT 69" and "8 PM". Without
     it those are different brands and a correction to one never reaches the
-    other.
+    other. Dropping punctuation outright is what lets "(NEW )" and "SEAGRAM'S"
+    fall into line with the same name written plainly.
     """
-    s = (name or "").lower().replace(".", "").replace("'", "")
+    # Apostrophes are deleted, not spaced. Turning them into spaces left a
+    # stray "s" token, so "Seagram's Royal Stag" and "Seagrams Royal Stag"
+    # stayed two brands at the same price. Everything else becomes a space.
+    s = (name or "").lower().replace("'", "").replace("’", "")
+    s = re.sub(r"[^a-z0-9]+", " ", s)
     s = re.sub(r"(?<=[a-z])(?=\d)|(?<=\d)(?=[a-z])", " ", s)
     return " ".join(s.split())
 
@@ -74,9 +81,6 @@ def core(name: str, kind: str) -> str:
     are different products that would otherwise merge into one.
     """
     k = key(name)
-    for keep in PROTECTED:
-        if key(keep) in k:
-            return f"{kind}|{key(keep)}"
     words = [w for w in k.split() if w not in DESCRIPTORS]
     # Everything was a descriptor - keep the whole name rather than merging
     # unrelated bottles under an empty core.
@@ -86,10 +90,13 @@ def core(name: str, kind: str) -> str:
 def display(names: list[str]) -> str:
     """The name to show for a cluster: the shortest, tidied for case.
 
-    Shortest because it is what gets said out loud - "Royal Stag", not
-    "Seagrams Royal Stag Superior Whisky". A name shouted in full capitals is
-    title-cased; anything already carrying mixed case is left as published,
-    since that is the brand's own styling.
+    A cluster now holds only spellings of one product, so the choice is
+    between "Kingfisher Ultra Lager Beer" and "KINGFISHER ULTRA LAGER BEER."
+    rather than between a product and a shorter, different one. Shortest picks
+    the cleanest of the equivalents and loses nothing.
+
+    A name shouted in full capitals is title-cased; anything already carrying
+    mixed case is left as published, since that is the brand's own styling.
     """
     best = min(names, key=lambda n: (len(n), n))
     if best.isupper():

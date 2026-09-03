@@ -89,7 +89,8 @@ EXCLUDE_NAME = re.compile(
 # They name the brewery, not the drink.
 LOCATION_PREFIX = re.compile(
     r"^(?:\([A-Za-z .&-]{2,20}\)|[A-Z][A-Za-z]{2,12}\s*\([A-Z]{2}\)|"
-    r"(?:GOA|MYSURU|KALYANI|RAISEN|ARAVALI|PALS)\b)\s*", re.I)
+    r"(?:GOA|MYSURU|KALYANI|RAISEN|ARAVALI|PALS|REWARI|HARYANA|RAJASTHAN|"
+    r"MAHARASHTRA|PUNJAB|MH|RJ|HR|PB|UP|MP|WB|TN|KA|AP)\b)\s*", re.I)
 
 # ABV is sometimes printed inside the brand name. When it is, it is published
 # and exact, which beats the category typical the app falls back to.
@@ -161,9 +162,15 @@ def _fix_glyphs(name: str) -> str:
     # apostrophe arrives as three characters. Re-encoding undoes it exactly,
     # and is attempted only when the signature is present so a correctly
     # decoded name is never mangled by the repair itself.
-    if "â" in name or "Ã" in name:
+    # Any non-ASCII is worth trying: matching on the damaged characters
+    # themselves needs those exact bytes in this source file, and a literal
+    # that was itself mangled once meant the repair never ran at all.
+    if any(ord(c) > 127 for c in name):
         try:
-            name = name.encode("latin-1").decode("utf-8")
+            # cp1252, not latin-1. The euro and trademark signs this damage
+            # produces are not in latin-1 at all, so encoding raised and the
+            # repair silently gave up on exactly the names that needed it.
+            name = name.encode("cp1252").decode("utf-8")
         except (UnicodeEncodeError, UnicodeDecodeError):
             pass
     # A lone "A-circumflex" is the same damage done to a non-breaking
@@ -197,7 +204,13 @@ def _clean(name: str) -> tuple[str, float | None]:
     # Debris left by splitting the manufacturer off the front: a stray closing
     # bracket, a full stop, a dangling dash. "). Kingfisher" is not a brand.
     name = re.sub(r"^[\s.,;:\-–—)\]}/&]+", "", name)
-    name = LOCATION_PREFIX.sub("", name).strip()
+    # Repeated: a plant is written "REWARI HARYANA KINGFISHER ..." and one
+    # pass removes only the town.
+    for _ in range(3):
+        shorter = LOCATION_PREFIX.sub("", name).strip()
+        if not shorter or shorter == name:
+            break
+        name = shorter
     # "BOTTLING AT M/S SATURN RING PREMIUM..." - the tail of a manufacturer
     # phrase that the split could not see the end of.
     name = re.sub(r"^(?:BOTTLING\s+)?(?:AT\s+)?M/?S\.?\s+", "", name, flags=re.I)

@@ -66,6 +66,18 @@ KINDS = ("whisky", "rum", "vodka", "gin", "beer", "wine", "brandy")
 SPIRIT_KINDS = ("whisky", "rum", "vodka", "gin")
 
 
+# Words that describe a bottle without naming one. A name made only of these
+# identifies nothing, so it is never allowed to match another brand.
+GENERIC_WORDS = {
+    "whisky", "whiskey", "rum", "vodka", "gin", "beer", "wine", "brandy",
+    "lager", "ale", "stout", "scotch", "malt", "blended", "grain", "spirit",
+    "premium", "super", "extra", "strong", "superior", "deluxe", "special",
+    "exclusive", "original", "classic", "reserve", "select", "fine", "rare",
+    "aged", "smooth", "pure", "triple", "distilled", "the", "and", "of",
+    "new", "no", "xxx",
+}
+
+
 def _brand_key(brand: str) -> str:
     """One spelling per brand, so corrections don't fork into near-duplicates."""
     return " ".join(brand.lower().replace(".", "").replace("'", "").split())
@@ -99,6 +111,12 @@ def _same_bottle(a: str, b: str) -> bool:
     if ka == kb:
         return True
     long, short = (ka, kb) if len(ka) >= len(kb) else (kb, ka)
+    # The shorter name has to actually name something. Without this, a row
+    # published as "Premium Whisky" matched Blenders Pride, Royal Stag and
+    # everything else with those two words in it, and quietly reported its
+    # price as theirs.
+    if not any(w not in GENERIC_WORDS for w in short.split()):
+        return False
     return (long.startswith(short + " ") or long.endswith(" " + short)
             or f" {short} " in long)
 
