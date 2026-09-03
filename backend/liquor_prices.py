@@ -150,6 +150,10 @@ class Bottle:
     price: int
     source: str
     price_max: int | None = None   # set only where the source gave a range
+    # Strength for this exact row, when the source printed it on the label or
+    # somebody entered it by hand. Beats the brand lookup in abv_for, which
+    # cannot tell a Bacardi Limon from a Bacardi Carta Blanca.
+    abv: float | None = None
 
     @property
     def is_range(self) -> bool:
@@ -303,8 +307,10 @@ _UP_ROWS = up_prices.ROWS
 BOTTLES: list[Bottle] = (
     [Bottle(b, k, s, "Maharashtra", p, "madirakprice-mh") for b, k, s, p in _MH]
     + [Bottle(b, k, s, "Delhi", p, "boldsky-dl") for b, k, s, p in _DL]
-    + [Bottle(b, k, s, "Uttar Pradesh", lo, srcs[0], hi)
-       for b, k, s, lo, hi, _abv, srcs in _UP_ROWS]
+    # UP prints the strength on many labels, so the per-row figure is used
+    # where the parser found one rather than falling back to a category typical.
+    + [Bottle(b, k, s, "Uttar Pradesh", lo, srcs[0], hi, abv)
+       for b, k, s, lo, hi, abv, srcs in _UP_ROWS]
     + [Bottle(b, k, s, "Gurugram (Haryana)", lo, src, hi) for b, k, s, lo, hi, src in _HR_RANGES]
     + [Bottle(b, k, s, "Delhi", lo, src, hi) for b, k, s, lo, hi, src in _DL_RANGES]
 )

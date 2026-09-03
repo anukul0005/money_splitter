@@ -153,6 +153,10 @@ class PriceOverride(Base):
     state = Column(String(100), nullable=False, index=True)
     size_ml = Column(Integer, nullable=False)
     price = Column(Float, nullable=False)
+    # Percent alcohol by volume, as printed on the bottle. Optional: plenty of
+    # people know the price without knowing the strength, and a made-up number
+    # here would be shown as fact next to published ones.
+    abv = Column(Float, nullable=True)
     note = Column(Text, nullable=True)
     set_by = Column(String(100), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

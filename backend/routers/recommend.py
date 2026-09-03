@@ -142,7 +142,7 @@ def _compare(tables: dict[str, list[Bottle]], regions: tuple[str, ...],
         out.append({
             "region": region,
             "total": round(hit.mid) if hit else None,
-            "manual": bool(hit and hit.source == "manual-override"),
+            "manual": bool(hit and hit.source in MANUAL_SOURCES),
         })
     return out
 
@@ -192,12 +192,27 @@ def _apply_overrides(bottles: list[Bottle], rows: list[PriceOverride],
             continue
         replaced.add((hit.brand_key, hit.size_ml))
         out.append(Bottle(hit.brand, hit.kind, hit.size_ml, state,
-                          int(round(hit.price)), "manual-override"))
+                          int(round(hit.price)), "manual-corrected",
+                          None, hit.abv))
     for (k, size), r in by_key.items():
         if (k, size) not in replaced:
+            # Nothing published matches this one: it exists only because
+            # somebody typed it. Tagged apart from a correction so the ranking
+            # can make sure it is actually seen — see _pick.
             out.append(Bottle(r.brand, r.kind, r.size_ml, state,
-                              int(round(r.price)), "manual-override"))
+                              int(round(r.price)), "manual-added",
+                              None, r.abv))
     return out
+
+
+MANUAL_SOURCES = ("manual-added", "manual-corrected")
+
+
+def _strength(b: Bottle) -> tuple[float, bool]:
+    """This row's own strength if it has one, else the brand lookup."""
+    if b.abv:
+        return b.abv, True
+    return abv_for(b.brand, b.kind)
 
 
 def _text(e) -> str:
@@ -310,7 +325,7 @@ def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
             continue
 
         hit = _fav_hit(b.brand)
-        abv, abv_known = abv_for(b.brand, b.kind)
+        abv, abv_known = _strength(b)
         compare = _compare(tables or {}, regions, b.brand, bottle_ml)
         priced = [c for c in compare if c["total"] is not None]
         cheapest = min(priced, key=lambda c: c["total"])["region"] if priced else None
@@ -336,15 +351,23 @@ def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
             # What this actually cost you the nights you bought it, which is
             # not the same as what the state says it costs.
             "your_avg": avg.get(hit) if hit else None,
-            "is_override": b.source == "manual-override",
+            "is_override": b.source in MANUAL_SOURCES,
+            "is_mine": b.source == "manual-added",
             "source": b.source,
             "compare": compare,
             "cheapest_region": cheapest,
         })
 
-    # What you drink first, then dearest inside the budget.
-    out.sort(key=lambda r: (not r["is_favourite"], -r["total"]))
-    return out[:8]
+    # Anything you typed in yourself comes first and is never cut.
+    #
+    # UP alone lists over nine hundred bottles, and with only the eight
+    # dearest-in-budget shown, a bottle somebody added was buried the moment
+    # the budget widened — there is always something pricier. Adding a bottle
+    # and then being unable to find it makes the whole feature feel broken,
+    # so the cap stretches rather than dropping one.
+    out.sort(key=lambda r: (not r["is_mine"], not r["is_favourite"], -r["total"]))
+    mine = sum(1 for r in out if r["is_mine"])
+    return out[:max(8, mine + 4)]
 
 
 def _legacy_beer_fields(unit: float, size_ml: int, people: int, abv: float,
@@ -395,7 +418,7 @@ def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
         if unit <= 0 or unit > hi:
             continue                      # the budget won't buy even one
         buys = int(hi // unit)
-        abv, abv_known = abv_for(b.brand, b.kind)
+        abv, abv_known = _strength(b)
         out.append({
             "brand": b.brand,
             "kind": b.kind,
@@ -413,7 +436,8 @@ def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
             "abv_known": abv_known,
             "alcohol_ml_per_bottle": _units(b.size_ml, abv),
             "is_favourite": is_fav,
-            "is_override": b.source == "manual-override",
+            "is_override": b.source in MANUAL_SOURCES,
+            "is_mine": b.source == "manual-added",
             "source": b.source,
             # Deprecated: the round-priced shape this card used to have. The
             # web app and the API deploy separately, so there is always a
@@ -426,8 +450,56 @@ def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
 
     # Beers you actually buy first, then strongest among what fits, so the
     # cards read as a real choice rather than an arbitrary list.
-    out.sort(key=lambda r: (not r["is_favourite"], -r["abv"], r["price"]))
-    return out[:8]
+    # Same rule as the spirits: your own entries first and never cut.
+    out.sort(key=lambda r: (not r["is_mine"], not r["is_favourite"],
+                            -r["abv"], r["price"]))
+    mine = sum(1 for r in out if r["is_mine"])
+    return out[:max(8, mine + 4)]
+
+
+def _your_entries(rows: list[PriceOverride], bottle_ml: int, is_beer: bool,
+                  lo: float, hi: float) -> list[dict]:
+    """Your own entries for this state, and why any of them isn't showing.
+
+    Entering a price and then not finding it is the fastest way to stop
+    trusting the feature, and there are several honest reasons it can happen:
+    a 220ml bottle is not one of the three spirit sizes, a 180ml entry only
+    appears when 180ml is selected, a Rs 1,880 bottle is outside a Rs 500
+    budget. Silence looks like the data was lost. So each one says where it
+    is instead.
+    """
+    out = []
+    for r in rows:
+        reason = None
+        if is_beer:
+            if r.kind != "beer":
+                reason = f"saved as {r.kind} — it shows under the bottle sizes"
+            elif r.price > hi:
+                reason = f"Rs {round(r.price)} is above this budget"
+        elif r.kind == "beer":
+            reason = "saved as beer — pick Beer to see it"
+        elif r.kind not in SPIRIT_KINDS:
+            reason = f"saved as {r.kind}, which isn't suggested for an evening"
+        elif r.size_ml not in SPIRIT_SIZES:
+            reason = (f"saved at {r.size_ml}ml, which isn't one of the three "
+                      f"bottle sizes — re-save it as 180, 375 or 750")
+        elif r.size_ml != bottle_ml:
+            reason = f"saved at {r.size_ml}ml — pick {r.size_ml}ml to see it"
+        elif not (lo <= r.price <= hi):
+            reason = f"Rs {round(r.price)} is outside this budget"
+        out.append({
+            "id": r.id,
+            "brand": r.brand,
+            "kind": r.kind,
+            "size_ml": r.size_ml,
+            "price": r.price,
+            "abv": r.abv,
+            "set_by": r.set_by,
+            "shown": reason is None,
+            "reason": reason,
+        })
+    out.sort(key=lambda x: (x["shown"], x["brand"].lower()))
+    return out
 
 
 def _band(bottles: list[Bottle], bottle_ml: int, is_beer: bool) -> dict | None:
@@ -452,6 +524,10 @@ class PriceIn(BaseModel):
     state: str
     size_ml: int
     price: float
+    # Optional on purpose: plenty of people know what they paid without
+    # knowing the strength, and an invented figure would sit on the card
+    # looking exactly like a published one.
+    abv: float | None = None
     note: str | None = Field(default=None, max_length=500)
 
     @field_validator("brand", "state")
@@ -483,11 +559,21 @@ class PriceIn(BaseModel):
             raise ValueError("price must be between Rs 1 and Rs 5,00,000")
         return round(v, 2)
 
+    @field_validator("abv")
+    @classmethod
+    def _sane_abv(cls, v: float | None) -> float | None:
+        if v is None:
+            return None
+        if not 0 < v <= 96:
+            # 96% is roughly neat rectified spirit; nothing drinkable is above.
+            raise ValueError("strength must be between 0 and 96 % v/v")
+        return round(v, 1)
+
 
 def _override_out(r: PriceOverride) -> dict:
     return {
         "id": r.id, "brand": r.brand, "kind": r.kind, "state": r.state,
-        "size_ml": r.size_ml, "price": r.price, "note": r.note,
+        "size_ml": r.size_ml, "price": r.price, "abv": r.abv, "note": r.note,
         "set_by": r.set_by,
         "updated_at": (r.updated_at or r.created_at).isoformat()
         if (r.updated_at or r.created_at) else None,
@@ -526,6 +612,7 @@ def set_price(body: PriceIn, db: Session = Depends(get_db),
     row.brand = body.brand
     row.kind = body.kind
     row.price = body.price
+    row.abv = body.abv
     row.note = (body.note or "").strip() or None
     row.set_by = caller.name
     db.commit()
@@ -643,6 +730,11 @@ def recommend(
         # What that size actually costs here, so an empty list can say "they
         # run Rs 95-250" instead of leaving you guessing at the range.
         "price_band": _band(bottles, bottle_ml, is_beer),
+        # Your own entries for this state, each saying whether it is in the
+        # list above and, if not, why — so a price you typed is never just
+        # silently absent.
+        "your_entries": _your_entries(by_state.get(state, []), bottle_ml,
+                                      is_beer, budget_min, budget_max),
         "size_available": any(
             b.kind == "beer" if is_beer else
             (b.size_ml == bottle_ml and b.kind in ("whisky", "rum", "vodka", "gin"))

@@ -402,6 +402,7 @@ export default function Recommend() {
                     initial={{
                       brand: p.brand, kind: p.kind, state: result.state,
                       size_ml: p.size_ml, price: p.total,
+                      abv: p.abv, abv_known: p.abv_known,
                     }}
                     onCancel={() => setEditing(null)}
                     onDone={() => { setEditing(null); run() }}
@@ -515,6 +516,7 @@ export default function Recommend() {
                         initial={{
                           brand: b.brand, kind: 'beer', state: result.state,
                           size_ml: b.size_ml, price: unit,
+                          abv: b.abv, abv_known: b.abv_known,
                         }}
                         onCancel={() => setEditing(null)}
                         onDone={() => { setEditing(null); run() }}
@@ -524,6 +526,42 @@ export default function Recommend() {
                   )
                 })}
               </>
+            )}
+
+            {/* Everything typed in for this state. A price you entered and
+                then couldn't find is the fastest way to stop trusting the
+                feature, and there are honest reasons it can be filtered out —
+                wrong size selected, outside the budget, saved as beer. Each
+                one says which, rather than just not being there. */}
+            {result.your_entries?.length > 0 && (
+              <div className="card">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                  Prices you added · {result.state}
+                </p>
+                <div className="mt-1.5 space-y-1">
+                  {result.your_entries.map((e) => (
+                    <div key={e.id} className="flex items-baseline gap-2">
+                      <span className={`text-[11px] flex-1 min-w-0 break-words ${
+                        e.shown ? 'font-bold text-gray-700' : 'text-gray-500'
+                      }`}>
+                        {e.brand}
+                        <span className="font-normal text-gray-400">
+                          {' '}· {e.size_ml}ml · {e.kind}
+                          {e.abv ? ` · ${e.abv}% ABV` : ''}
+                        </span>
+                        {!e.shown && (
+                          <span className="block text-[10px] text-amber-700">
+                            {e.reason}
+                          </span>
+                        )}
+                      </span>
+                      <span className="text-[11px] font-black text-brand-600 flex-shrink-0">
+                        {INR(e.price)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
 
             {/* A bottle we simply don't have. Offered next to the results

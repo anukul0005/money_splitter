@@ -20,20 +20,28 @@ export default function PriceEditForm({ state, states = [], initial = {}, onDone
   const [where, setWhere] = useState(initial.state || state || '')
   const [size, setSize]   = useState(String(initial.size_ml || 750))
   const [price, setPrice] = useState(initial.price != null ? String(initial.price) : '')
+  // Only prefilled when the figure is a published one. A category typical
+  // ("~42.8%") is a guess, and pushing it into the box would turn it into a
+  // stated fact the moment the form is saved.
+  const [abv, setAbv]     = useState(
+    initial.abv != null && initial.abv_known ? String(initial.abv) : ''
+  )
   const [note, setNote]   = useState('')
   const [busy, setBusy]   = useState(false)
   const [error, setError] = useState('')
 
   const priceN = parseFloat(price)
   const sizeN  = parseInt(size, 10)
-  const ok = brand.trim().length >= 2 && where && sizeN > 0 && priceN > 0
+  const abvN   = abv.trim() === '' ? null : parseFloat(abv)
+  const abvBad = abvN != null && (!Number.isFinite(abvN) || abvN <= 0 || abvN > 96)
+  const ok = brand.trim().length >= 2 && where && sizeN > 0 && priceN > 0 && !abvBad
 
   const submit = async () => {
     setError(''); setBusy(true)
     try {
       const r = await savePrice({
         brand: brand.trim(), kind, state: where, size_ml: sizeN,
-        price: priceN, note: note.trim() || null,
+        price: priceN, abv: abvN, note: note.trim() || null,
       })
       onDone?.(r.data)
     } catch (err) {
@@ -94,6 +102,27 @@ export default function PriceEditForm({ state, states = [], initial = {}, onDone
                  value={price} placeholder="e.g. 1250"
                  onChange={(e) => setPrice(e.target.value)} />
         </div>
+      </div>
+
+      {/* Strength, off the label. Optional: knowing what you paid without
+          knowing the strength is completely normal, and left blank the app
+          falls back to the category typical and marks it with a ~. */}
+      <div>
+        <label className="label">Strength (% v/v) — optional</label>
+        <input className="input text-xs" type="number" inputMode="decimal"
+               step="0.1" min="0" max="96"
+               value={abv} placeholder="e.g. 42.8"
+               onChange={(e) => setAbv(e.target.value)} />
+        {abvBad ? (
+          <p className="text-[10px] text-red-600 mt-1">
+            Strength has to be between 0 and 96 % v/v.
+          </p>
+        ) : (
+          <p className="text-[10px] text-gray-400 mt-1">
+            Off the bottle. Left blank, we show the usual figure for the type
+            with a ~ in front, rather than claiming to know.
+          </p>
+        )}
       </div>
 
       <div>

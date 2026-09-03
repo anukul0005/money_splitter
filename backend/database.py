@@ -92,6 +92,12 @@ def create_tables():
         conn.execute(text(
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS otc_expires_at TIMESTAMPTZ"
         ))
+        # Strength on a hand-entered price. create_all() only builds tables it
+        # has never seen, so an existing price_overrides table needs this added
+        # explicitly or every read of the column fails.
+        conn.execute(text(
+            "ALTER TABLE price_overrides ADD COLUMN IF NOT EXISTS abv DOUBLE PRECISION"
+        ))
         conn.commit()
 
     # `payments`, `activities` and `activity_seen` are created by create_all
