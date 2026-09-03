@@ -40,10 +40,10 @@ DRINK_RE = re.compile(
     re.I,
 )
 
-# How heavy a night, expressed as the bottle each person is drinking their way
-# through. Asking in millilitres was asking people to do a conversion they
-# never do out loud — nobody says "a 260ml night", they say "a quarter each".
-PER_HEAD_SIZES = (180, 375, 750)
+# The bottle you walk out with. Spirits are sold in exactly these three and
+# everyone names them this way, so the question is simply which one you want —
+# not how many millilitres each person is going to drink.
+BOTTLE_SIZES = (180, 375, 750)
 
 # Spirits are sold in exactly these three, and everyone names them this way.
 # Anything else in the price table (90ml nips, litres, 200ml travel bottles)
@@ -53,58 +53,8 @@ SPIRIT_SIZES = {180: "quarter", 375: "half", 750: "full"}
 SIZE_ORDER = (750, 375, 180)
 
 
-def _combo_label(combo: dict[int, int]) -> str:
-    """{750: 1, 180: 1} -> "1 full + 1 quarter"."""
-    parts = []
-    for size in SIZE_ORDER:
-        n = combo.get(size, 0)
-        if n:
-            name = SPIRIT_SIZES[size]
-            parts.append(f"{n} {name}" + ("s" if n > 1 else ""))
-    return " + ".join(parts)
 
 
-def _best_combo(by_size: dict[int, float], target_ml: int) -> tuple[dict[int, int], float] | None:
-    """Cheapest set of real bottles covering `target_ml`.
-
-    `by_size` maps an available size to its price. Only 180/375/750 are
-    offered, so this is a three-coin problem and brute force over a small grid
-    is both exact and instant.
-
-    Overshoot is allowed up to a half-bottle. A tighter cap looked principled
-    and was wrong in practice: for three people it rejected a single full,
-    which overshoots 540ml by 210ml and is obviously what you would buy. If
-    nothing lands inside the cap, the smallest basket that still covers the
-    target wins rather than nothing being suggested at all.
-    """
-    if not any(s in by_size for s in SIZE_ORDER):
-        return None
-
-    inside: tuple[dict[int, int], float] | None = None
-    outside: tuple[dict[int, int], float, int] | None = None
-
-    for f in range(0, target_ml // 750 + 3):
-        for h in range(0, target_ml // 375 + 3):
-            for q in range(0, target_ml // 180 + 3):
-                combo = {750: f, 375: h, 180: q}
-                if any(n and sz not in by_size for sz, n in combo.items()):
-                    continue
-                vol = f * 750 + h * 375 + q * 180
-                if vol < target_ml:
-                    continue
-                cost = sum(by_size[sz] * n for sz, n in combo.items() if n)
-                if cost <= 0:
-                    continue
-                trimmed = {k: v for k, v in combo.items() if v}
-                if vol <= target_ml + 375:
-                    if inside is None or cost < inside[1]:
-                        inside = (trimmed, cost)
-                elif outside is None or vol < outside[2]:
-                    outside = (trimmed, cost, vol)
-
-    if inside:
-        return inside
-    return (outside[0], outside[1]) if outside else None
 
 
 def _text(e) -> str:
@@ -170,74 +120,57 @@ def _units(volume_ml: float, abv: float) -> float:
     return round(volume_ml * abv / 100, 1)
 
 
-def _pick(bottles: list[Bottle], budget: float, people: int, target_ml: int,
+def _pick(bottles: list[Bottle], budget: float, people: int, bottle_ml: int,
           favourites: list[str]) -> list[dict]:
-    """Suggest what to actually buy: whole bottles, in real shop sizes.
+    """The best bottles of the chosen size that the budget covers.
 
-    Ranked by: something they already drink, then how close the volume is to
-    what this many people would get through, then price.
+    "Best" is approximated by price: within a state and a size, a dearer
+    bottle is the better one often enough for this to be useful, and it is the
+    only quality signal in the data. So the list is the most you can afford
+    first, working down — not the cheapest that technically fits.
     """
     fav = {f.lower() for f in favourites}
+    out: list[dict] = []
 
-    # brand -> {size: price} for the three sizes spirits are actually sold in
-    by_brand: dict[str, dict[int, float]] = defaultdict(dict)
-    meta: dict[str, Bottle] = {}
     for b in bottles:
         if b.kind not in ("whisky", "rum", "vodka", "gin"):
             continue
-        if b.size_ml not in SPIRIT_SIZES:
+        if b.size_ml != bottle_ml:
             continue
-        by_brand[b.brand][b.size_ml] = b.mid
-        meta.setdefault(b.brand, b)
-
-    out: list[dict] = []
-    for brand, sizes in by_brand.items():
-        picked = _best_combo(sizes, target_ml)
-        if not picked:
+        price = b.mid
+        if price > budget:
             continue
-        combo, cost = picked
-        if cost > budget:
-            # Fall back to the largest single bottle that still fits
-            affordable = {sz: pr for sz, pr in sizes.items() if pr <= budget}
-            if not affordable:
-                continue
-            sz = max(affordable, key=lambda z: z)
-            combo, cost = {sz: 1}, affordable[sz]
 
-        volume = sum(sz * n for sz, n in combo.items())
-        ref = meta[brand]
-        abv, abv_known = abv_for(brand, ref.kind)
-
-        compare = across_sizes(brand, combo)
+        abv, abv_known = abv_for(b.brand, b.kind)
+        compare = across_sizes(b.brand, {bottle_ml: 1})
         priced = [c for c in compare if c["total"] is not None]
         cheapest = min(priced, key=lambda c: c["total"])["region"] if priced else None
 
         out.append({
-            "brand": brand,
-            "kind": ref.kind,
-            "combo": [{"size_ml": sz, "label": SPIRIT_SIZES[sz], "qty": n}
-                      for sz in SIZE_ORDER if combo.get(sz)
-                      for n in [combo[sz]]],
-            "combo_label": _combo_label(combo),
-            "total": round(cost),
-            "total_ml": volume,
-            "ml_per_head": round(volume / max(people, 1)),
+            "brand": b.brand,
+            "kind": b.kind,
+            "size_ml": bottle_ml,
+            "size_name": SPIRIT_SIZES[bottle_ml],
+            "unit_price": b.price,
+            "unit_price_max": b.price_max,
+            "total": round(price),
+            # What the budget would actually stretch to, said plainly rather
+            # than silently picking a quantity on the user's behalf.
+            "budget_buys": int(budget // price) if price > 0 else 0,
+            "per_head": round(price / max(people, 1)),
+            "ml_per_head": round(bottle_ml / max(people, 1)),
             "abv": abv,
             "abv_known": abv_known,
-            "alcohol_ml_per_head": _units(volume / max(people, 1), abv),
-            "is_favourite": brand.lower() in fav,
-            "per_head": round(cost / max(people, 1)),
-            "source": ref.source,
+            "alcohol_ml_per_head": _units(bottle_ml / max(people, 1), abv),
+            "is_favourite": b.brand.lower() in fav,
+            "source": b.source,
             "compare": compare,
             "cheapest_region": cheapest,
         })
 
-    out.sort(key=lambda r: (
-        not r["is_favourite"],
-        abs(r["total_ml"] - target_ml),
-        r["total"],
-    ))
-    return out[:6]
+    # Best affordable first; a brand they already drink wins a tie.
+    out.sort(key=lambda r: (-r["total"], not r["is_favourite"]))
+    return out[:8]
 
 
 def _beers(bottles: list[Bottle], budget: float, people: int) -> list[dict]:
@@ -292,7 +225,7 @@ def meta(_: User = Depends(current_user)):
         "sources": SOURCES,
         "abv_sources": ABV_SOURCES,
         "row_count": len(BOTTLES),
-        "per_head_sizes": list(PER_HEAD_SIZES),
+        "bottle_sizes": [{"ml": ml, "name": SPIRIT_SIZES[ml]} for ml in BOTTLE_SIZES],
     }
 
 
@@ -301,7 +234,7 @@ def recommend(
     state: str,
     people: int = 2,
     budget: float = 2000,
-    per_head_ml: int = 180,
+    bottle_ml: int = 750,
     names: str = "",
     db: Session = Depends(get_db),
     caller: User = Depends(current_user),
@@ -310,8 +243,8 @@ def recommend(
         raise HTTPException(400, "There has to be at least one of you")
     if budget <= 0:
         raise HTTPException(400, "Set a budget above zero")
-    if per_head_ml not in PER_HEAD_SIZES:
-        raise HTTPException(400, f"Pick one of {PER_HEAD_SIZES} ml per person")
+    if bottle_ml not in BOTTLE_SIZES:
+        raise HTTPException(400, f"Pick a bottle size from {BOTTLE_SIZES} ml")
 
     bottles = for_state(state)
     if not bottles:
@@ -324,8 +257,7 @@ def recommend(
 
     people_names = [n for n in (names or "").split(",") if n.strip()]
     hist = _history(db, caller, people_names)
-    target_ml = per_head_ml * people
-    picks = _pick(bottles, budget, people, target_ml, hist["favourites"])
+    picks = _pick(bottles, budget, people, bottle_ml, hist["favourites"])
     beers = _beers(bottles, budget, people)
 
     return {
@@ -334,10 +266,16 @@ def recommend(
         "people": people,
         "budget": budget,
         "budget_per_head": round(budget / people),
-        "per_head_ml": per_head_ml,
-        "target_ml": target_ml,
+        "bottle_ml": bottle_ml,
+        "bottle_name": SPIRIT_SIZES[bottle_ml],
         "history": hist,
         "picks": picks,
+        # Says why a list is empty: no rows at all for this size in this state
+        # is a different problem from everything being over budget.
+        "size_available": any(
+            b.size_ml == bottle_ml and b.kind in ("whisky", "rum", "vodka", "gin")
+            for b in bottles
+        ),
         "beers": beers,
         "sources": SOURCES,
         "abv_sources": ABV_SOURCES,

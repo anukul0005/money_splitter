@@ -11,12 +11,11 @@ const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigi
 // server is still the authority — a state missing real prices 404s on submit.
 const FALLBACK_STATES = ['Delhi', 'Maharashtra', 'Uttar Pradesh']
 
-// How heavy a night, asked in the sizes bottles actually come in. Nobody
-// says "a 260ml night"; they say "a quarter each".
-const PER_HEAD = [
-  [180, 'Quarter', '180ml each'],
-  [375, 'Half',    '375ml each'],
-  [750, 'Full',    '750ml each'],
+// The bottle you intend to buy — not a per-person amount.
+const BOTTLES = [
+  [180, 'Quarter', '180ml'],
+  [375, 'Half',    '375ml'],
+  [750, 'Full',    '750ml'],
 ]
 
 const pct = (v, known) => `${known ? '' : '~'}${v}% ABV`
@@ -40,7 +39,7 @@ export default function Recommend() {
   // delete before every edit, and a budget of 0 got sent to the server.
   const [people, setPeople]   = useState('2')
   const [budget, setBudget]   = useState('2000')
-  const [perHead, setPerHead] = useState(180)
+  const [bottle, setBottle] = useState(750)
   const [withWho, setWithWho] = useState([])
   const [result, setResult]   = useState(null)
   const [error, setError]     = useState('')
@@ -95,7 +94,7 @@ export default function Recommend() {
     setError(''); setBusy(true)
     try {
       const r = await getRecommendation({
-        state, people: peopleN, budget: budgetN, per_head_ml: perHead,
+        state, people: peopleN, budget: budgetN, bottle_ml: bottle,
         names: withWho.join(','),
       })
       setResult(r.data)
@@ -183,15 +182,15 @@ export default function Recommend() {
           </div>
 
           <div>
-            <label className="label">How heavy a night</label>
+            <label className="label">Bottle size</label>
             <div className="flex gap-2">
-              {PER_HEAD.map(([v, label, hint]) => (
+              {BOTTLES.map(([v, label, hint]) => (
                 <button
                   key={v}
                   type="button"
-                  onClick={() => setPerHead(v)}
+                  onClick={() => setBottle(v)}
                   className={`flex-1 rounded-md px-2 py-1.5 text-xs font-bold border transition-all ${
-                    perHead === v
+                    bottle === v
                       ? 'bg-brand-400 border-brand-400 text-white'
                       : 'bg-cream border-amber-200 text-gray-500 hover:bg-amber-50'
                   }`}
@@ -202,7 +201,7 @@ export default function Recommend() {
               ))}
             </div>
             <p className="text-[10px] text-gray-400 mt-1">
-              A bottle each — the total gets rounded to whole bottles you can buy.
+              The size you want to buy. Best bottles within budget come first.
             </p>
           </div>
 
@@ -243,17 +242,21 @@ export default function Recommend() {
         {result && (
           <div className="space-y-2">
             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">
-              {result.people} people · {INR(result.budget)} · {INR(result.budget_per_head)} a head
+              {result.bottle_name} bottles · {result.people} people · {INR(result.budget)}
             </p>
 
             {result.picks.length === 0 && (
               <div className="card text-center py-6">
-                <p className="text-sm text-gray-400">Nothing in {result.state} fits that budget.</p>
+                <p className="text-sm text-gray-400">
+                  {result.size_available
+                    ? `No ${result.bottle_ml}ml bottle in ${result.state} comes in under ${INR(result.budget)}.`
+                    : `No ${result.bottle_ml}ml prices published for ${result.state} yet.`}
+                </p>
               </div>
             )}
 
             {result.picks.map((p, i) => (
-              <div key={`${p.brand}-${p.combo_label}-${i}`} className="card p-3.5">
+              <div key={`${p.brand}-${p.size_ml}-${i}`} className="card p-3.5">
                 <div className="flex items-baseline gap-2">
                   <p className="text-sm font-black text-gray-900 flex-1 min-w-0">
                     {p.brand}
@@ -270,18 +273,21 @@ export default function Recommend() {
                 </div>
                 {/* What you actually ask for at the counter */}
                 <p className="text-[11px] font-bold text-gray-700 mt-0.5">
-                  {p.combo_label}
+                  1 {p.size_name} · {p.size_ml}ml
                   <span className="font-normal text-gray-400">
-                    {' '}· {p.combo.map((c) => `${c.size_ml}ml`).join(' + ')} · {p.kind}
+                    {' '}· {p.kind}
+                    {p.unit_price_max && p.unit_price_max !== p.unit_price
+                      ? ` · ${INR(p.unit_price)}–${INR(p.unit_price_max)}`
+                      : ''}
                   </span>
                 </p>
-                {/* How much that actually is per person, which is the thing
-                    the bottle count hides once the group gets bigger */}
+                {/* Split across the group, and what the budget would stretch to */}
                 <p className="text-[10px] text-gray-400 mt-0.5">
-                  {INR(p.per_head)} a head · {p.total_ml}ml total ·{' '}
+                  {INR(p.per_head)} a head ·{' '}
                   <span className="text-gray-500 font-semibold">
                     {p.ml_per_head}ml each ({p.alcohol_ml_per_head}ml pure alcohol)
                   </span>
+                  {p.budget_buys > 1 && ` · budget buys ${p.budget_buys}`}
                 </p>
 
                 {/* Same bottle across the NCR — these are a drive apart, and

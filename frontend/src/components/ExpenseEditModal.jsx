@@ -81,6 +81,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
   const [category,    setCategory]    = useState(expense.category || '')
   const [paidBy,      setPaidBy]      = useState(expense.paid_by)
   const [paymentMode, setPaymentMode] = useState(expense.payment_mode || 'cash')
+  const [notes,       setNotes]       = useState(expense.notes || '')
   const [splitMode,   setSplitMode]   = useState(parsedSplit ? 'custom' : 'equal')
   const [customPcts,  setCustomPcts]  = useState(initPcts)
   const [customAmts,  setCustomAmts]  = useState(() => {
@@ -202,7 +203,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
         individual_amount: r2(amtNum / members.length),
         split_json:        null,
         participants:      expense.participants,
-        notes:             expense.notes,
+        notes:             notes.trim() || null,
       }
     } else {
       if (!pctBalanced) {
@@ -225,7 +226,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
           )
         ),
         participants:      expense.participants,
-        notes:             expense.notes,
+        notes:             notes.trim() || null,
       }
     }
 
@@ -351,6 +352,19 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Optional, and the only place an existing note can be read: the
+              add form has always had one, but edit passed it through unseen. */}
+          <div>
+            <label className="label">Description (optional)</label>
+            <textarea
+              className="input resize-none"
+              rows={2}
+              placeholder="Any extra notes…"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
           </div>
 
           {/* Split type toggle — hidden for solo groups */}

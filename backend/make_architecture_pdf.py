@@ -208,25 +208,28 @@ def build() -> Path:
         ("750 ml", "full"),
     ], w1=26)
     body(p,
-         "How heavy a night is asked in those same three sizes: you pick the bottle each person is "
-         "drinking their way through. Asking it in millilitres was asking for a conversion nobody "
-         "does out loud - people say 'a quarter each', not 'a 260 ml night'. The target is simply "
-         "people x that size, and it gets converted into whole bottles.")
+         "You pick the size you intend to buy - not a per-person allowance. Given that size and a "
+         "budget, the recommender lists the bottles of that size the budget covers, best first.")
     body(p,
-         "_best_combo() then solves a tiny three-coin problem: which combination of quarters, halves "
-         "and fulls covers the target most cheaply. With three denominations and small counts, brute "
-         "force over the grid is exact and instant - no need for anything cleverer.")
+         "'Best' is approximated by price. Within one state and one size, a dearer bottle is the "
+         "better one often enough to be useful, and price is the only quality signal in the data. "
+         "So the list starts with the most you can afford and works down, rather than the cheapest "
+         "thing that technically fits. A brand you already drink wins a tie.")
+    body(p,
+         "Each card also says what the budget would stretch to - 'budget buys 3' - rather than "
+         "silently choosing a quantity on your behalf.")
+
     mono(p, [
-        "  3 people, normal  ->  target 540 ml",
+        "  Gurugram, full (750 ml), budget Rs 900, 4 people",
         "",
-        "     1 full   750 ml   Rs 520     <- chosen: cheapest cover",
-        "     1 half + 1 qtr    555 ml     Rs 555",
-        "     3 qtr    540 ml   Rs 570",
+        "     Antiquity Blue           Rs 895    Rs 224 / head   buys 1",
+        "     McDowell's Single Malt   Rs 850    Rs 212 / head   buys 1",
+        "     Blenders Pride           Rs 730    Rs 182 / head   buys 1",
     ])
     body(p,
-         "Overshoot is allowed up to a half-bottle. A tighter cap looked more principled and was "
-         "wrong in practice: it rejected a single full for three people, which overshoots by 210 ml "
-         "and is obviously what anyone would buy.")
+         "An empty list distinguishes its two causes. Nothing published at that size in that state "
+         "reads differently from everything at that size being over budget, because they need "
+         "different things from you.")
 
     h2(p, "Strength, and what each person actually gets")
     body(p,
@@ -235,9 +238,8 @@ def build() -> Path:
          "last figure is the only fair way to compare a strong beer against a mild one, or beer "
          "against spirits.")
     body(p,
-         "It also exposes when the budget cannot buy the night you asked for. Ask for a full each "
-         "for four people on a small budget and the card will still say what it can afford, with "
-         "'188 ml each' underneath - which is the honest answer rather than a silent downgrade.")
+         "Splitting the bottle across the group is shown too - 750 ml between four is 188 ml each - "
+         "so the per-head cost and the per-head measure sit next to each other.")
     body(p,
          "ABV is a property of the brand rather than the state, so unlike price it is a single "
          "table. Brands whose strength was actually published carry that figure; everything else "
@@ -328,8 +330,8 @@ def build() -> Path:
               "indicative, which is what the source dates are for.")
     bullet(p, "Brand matching across regions is on name and size. A brand written differently by "
               "two sources will not match, and shows as a dash rather than a wrong price.")
-    bullet(p, "The demand model - about a quarter-bottle a head - is a starting point, not "
-              "science. The budget is the real control.")
+    bullet(p, "Smaller bottles are thin outside Haryana: quarts are what most sources publish. "
+              "Picking quarter or half in a state without them says so plainly.")
 
     h2(p, "What it would take to add a state")
     body(p,
