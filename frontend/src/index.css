@@ -85,3 +85,62 @@
     @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium;
   }
 }
+
+/* ── Dual-thumb range slider ───────────────────────────────────────────────
+   Two range inputs stacked on one track. The inputs themselves ignore
+   pointer events so the lower one can't swallow clicks meant for the upper;
+   only the thumbs accept them, which is what makes both ends draggable. */
+.rangepair {
+  position: relative;
+  height: 28px;
+}
+.rangepair .track,
+.rangepair .fill {
+  position: absolute;
+  top: 12px;
+  height: 4px;
+  border-radius: 9999px;
+}
+.rangepair .track { left: 0; right: 0; background: #fde8d7; }
+.rangepair .fill  { background: #f97316; }
+
+.rangepair input[type="range"] {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 28px;
+  margin: 0;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  pointer-events: none;
+}
+.rangepair input[type="range"]:focus { outline: none; }
+
+.rangepair input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  pointer-events: auto;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: #f97316;
+  border: 2px solid #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  cursor: grab;
+}
+.rangepair input[type="range"]::-webkit-slider-thumb:active { cursor: grabbing; }
+
+.rangepair input[type="range"]::-moz-range-thumb {
+  pointer-events: auto;
+  width: 18px;
+  height: 18px;
+  border: 2px solid #ffffff;
+  border-radius: 9999px;
+  background: #f97316;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  cursor: grab;
+}
+.rangepair input[type="range"]::-moz-range-track { background: transparent; }
+

@@ -20,7 +20,9 @@ const BOTTLES = [
   ['beer', 'Beer',    null],
 ]
 
-const MIN_SPAN = 60
+const MIN_SPAN  = 60      // narrower than this matches nothing on a real price list
+const BUDGET_MAX = 6000
+const BUDGET_STEP = 10
 
 const pct = (v, known) => `${known ? '' : '~'}${v}% ABV`
 
@@ -42,8 +44,10 @@ export default function Recommend() {
   // parseFloat('') -> 0, so the box refilled itself with a "0" you had to
   // delete before every edit, and a budget of 0 got sent to the server.
   const [people, setPeople]   = useState('2')
-  const [budgetMin, setBudgetMin] = useState('500')
-  const [budgetMax, setBudgetMax] = useState('1000')
+  // Numbers, not strings: the slider can't be left empty, so the
+  // clear-the-field problem the text inputs had doesn't arise.
+  const [budgetMin, setBudgetMin] = useState(500)
+  const [budgetMax, setBudgetMax] = useState(1000)
   const [bottle, setBottle] = useState('750')
   const [withWho, setWithWho] = useState([])
   const [result, setResult]   = useState(null)
@@ -85,10 +89,23 @@ export default function Recommend() {
   }, [user?.name])
 
   const peopleN = Math.max(1, parseInt(people, 10) || 0)
-  const loN = Math.max(0, parseFloat(budgetMin) || 0)
-  const hiN = Math.max(0, parseFloat(budgetMax) || 0)
-  const spanOk = hiN - loN >= MIN_SPAN
-  const canRun = state && peopleN >= 1 && hiN > 0 && spanOk
+  const loN = budgetMin
+  const hiN = budgetMax
+  const canRun = state && peopleN >= 1 && hiN - loN >= MIN_SPAN
+
+  // Dragging either thumb pushes the other rather than crossing it, so the
+  // minimum span holds without ever refusing the drag.
+  const dragLo = (v) => {
+    const lo = Math.min(v, BUDGET_MAX - MIN_SPAN)
+    setBudgetMin(lo)
+    setBudgetMax((hi) => Math.max(hi, lo + MIN_SPAN))
+  }
+  const dragHi = (v) => {
+    const hi = Math.max(v, MIN_SPAN)
+    setBudgetMax(hi)
+    setBudgetMin((lo) => Math.min(lo, hi - MIN_SPAN))
+  }
+  const asPct = (v) => (v / BUDGET_MAX) * 100
 
   // People in the room = you + everyone picked, unless you override the count
   const toggle = (n) => setWithWho((w) => {
@@ -165,48 +182,47 @@ export default function Recommend() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="label">People</label>
-              <input
-                className="input font-bold" type="number" min="1" max="30"
-                inputMode="numeric"
-                value={people}
-                onChange={(e) => setPeople(e.target.value)}
-                onBlur={() => setPeople((v) => (parseInt(v, 10) > 0 ? String(parseInt(v, 10)) : '1'))}
-              />
-            </div>
-            <div>
-              <label className="label">Budget from (₹)</label>
-              <input
-                className="input font-bold" type="number" min="0" step="50"
-                inputMode="numeric"
-                value={budgetMin}
-                onChange={(e) => setBudgetMin(e.target.value)}
-              />
-            </div>
+          <div>
+            <label className="label">People</label>
+            <input
+              className="input font-bold" type="number" min="1" max="30"
+              inputMode="numeric"
+              value={people}
+              onChange={(e) => setPeople(e.target.value)}
+              onBlur={() => setPeople((v) => (parseInt(v, 10) > 0 ? String(parseInt(v, 10)) : '1'))}
+            />
           </div>
 
-          {/* A range, not a ceiling — "around 500" is what people mean. It has
-              to be wide enough to catch something on a list that moves in
-              fifties, so the far end is nudged up rather than rejected. */}
+          {/* A range, not a ceiling — "around 500" is what people mean. */}
           <div>
-            <label className="label">Budget to (₹)</label>
-            <input
-              className="input font-bold" type="number" min="0" step="50"
-              inputMode="numeric"
-              value={budgetMax}
-              onChange={(e) => setBudgetMax(e.target.value)}
-              onBlur={() => setBudgetMax((v) => {
-                const hi = parseFloat(v) || 0
-                return String(hi - loN >= MIN_SPAN ? hi : loN + MIN_SPAN)
-              })}
-            />
-            <p className={`text-[10px] mt-1 ${spanOk ? 'text-gray-400' : 'text-red-500'}`}>
-              {spanOk
-                ? `₹${loN.toLocaleString('en-IN')} – ₹${hiN.toLocaleString('en-IN')}`
-                : `The range has to be at least ₹${MIN_SPAN} wide — ₹500–₹560, not ₹500–₹530.`}
-            </p>
+            <label className="label">Budget</label>
+            <div className="rangepair">
+              <span className="track" />
+              <span
+                className="fill"
+                style={{ left: `${asPct(loN)}%`, right: `${100 - asPct(hiN)}%` }}
+              />
+              <input
+                type="range" min={0} max={BUDGET_MAX} step={BUDGET_STEP}
+                value={loN}
+                aria-label="Minimum budget"
+                onChange={(e) => dragLo(Number(e.target.value))}
+              />
+              <input
+                type="range" min={0} max={BUDGET_MAX} step={BUDGET_STEP}
+                value={hiN}
+                aria-label="Maximum budget"
+                onChange={(e) => dragHi(Number(e.target.value))}
+              />
+            </div>
+            <div className="flex items-baseline justify-between mt-1">
+              <p className="text-sm font-black text-gray-900">
+                {INR(loN)} – {INR(hiN)}
+              </p>
+              <p className="text-[10px] text-gray-400">
+                {INR(Math.round(loN / peopleN))}–{INR(Math.round(hiN / peopleN))} a head
+              </p>
+            </div>
           </div>
 
           <div>
