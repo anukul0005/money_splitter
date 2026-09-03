@@ -11,11 +11,13 @@ const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigi
 // server is still the authority — a state missing real prices 404s on submit.
 const FALLBACK_STATES = ['Delhi', 'Maharashtra', 'Uttar Pradesh']
 
-// The bottle you intend to buy — not a per-person amount.
+// What you intend to buy — not a per-person amount. Beer is the fourth
+// answer to the same question, so it belongs in the same control.
 const BOTTLES = [
-  [180, 'Quarter', '180ml'],
-  [375, 'Half',    '375ml'],
-  [750, 'Full',    '750ml'],
+  ['180',  'Quarter', '180ml'],
+  ['375',  'Half',    '375ml'],
+  ['750',  'Full',    '750ml'],
+  ['beer', 'Beer',    'by the bottle'],
 ]
 
 const pct = (v, known) => `${known ? '' : '~'}${v}% ABV`
@@ -39,7 +41,7 @@ export default function Recommend() {
   // delete before every edit, and a budget of 0 got sent to the server.
   const [people, setPeople]   = useState('2')
   const [budget, setBudget]   = useState('2000')
-  const [bottle, setBottle] = useState(750)
+  const [bottle, setBottle] = useState('750')
   const [withWho, setWithWho] = useState([])
   const [result, setResult]   = useState(null)
   const [error, setError]     = useState('')
@@ -94,7 +96,7 @@ export default function Recommend() {
     setError(''); setBusy(true)
     try {
       const r = await getRecommendation({
-        state, people: peopleN, budget: budgetN, bottle_ml: bottle,
+        state, people: peopleN, budget: budgetN, bottle,
         names: withWho.join(','),
       })
       setResult(r.data)
@@ -183,13 +185,13 @@ export default function Recommend() {
 
           <div>
             <label className="label">Bottle size</label>
-            <div className="flex gap-2">
+            <div className="grid grid-cols-4 gap-2">
               {BOTTLES.map(([v, label, hint]) => (
                 <button
                   key={v}
                   type="button"
                   onClick={() => setBottle(v)}
-                  className={`flex-1 rounded-md px-2 py-1.5 text-xs font-bold border transition-all ${
+                  className={`rounded-md px-2 py-1.5 text-xs font-bold border transition-all ${
                     bottle === v
                       ? 'bg-brand-400 border-brand-400 text-white'
                       : 'bg-cream border-amber-200 text-gray-500 hover:bg-amber-50'
@@ -201,7 +203,7 @@ export default function Recommend() {
               ))}
             </div>
             <p className="text-[10px] text-gray-400 mt-1">
-              The size you want to buy. Best bottles within budget come first.
+              What you want to buy. Best within budget comes first.
             </p>
           </div>
 
@@ -242,15 +244,16 @@ export default function Recommend() {
         {result && (
           <div className="space-y-2">
             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">
-              {result.bottle_name} bottles · {result.people} people · {INR(result.budget)}
+              {result.is_beer ? 'Beer' : `${result.bottle_name} bottles`} ·{' '}
+              {result.people} people · {INR(result.budget)}
             </p>
 
-            {result.picks.length === 0 && (
+            {result.picks.length === 0 && result.beers.length === 0 && (
               <div className="card text-center py-6">
                 <p className="text-sm text-gray-400">
                   {result.size_available
-                    ? `No ${result.bottle_ml}ml bottle in ${result.state} comes in under ${INR(result.budget)}.`
-                    : `No ${result.bottle_ml}ml prices published for ${result.state} yet.`}
+                    ? `Nothing ${result.is_beer ? 'in beer' : `at ${result.bottle_ml}ml`} in ${result.state} comes in under ${INR(result.budget)}.`
+                    : `No ${result.is_beer ? 'beer' : `${result.bottle_ml}ml`} prices published for ${result.state} yet.`}
                 </p>
               </div>
             )}
@@ -319,14 +322,19 @@ export default function Recommend() {
 
             {result.beers?.length > 0 && (
               <>
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest pt-3">
-                  Beer · strongest first
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">
+                  Strongest first
                 </p>
                 {result.beers.map((b, i) => (
                   <div key={`${b.brand}-${b.size_ml}-${i}`} className="card p-3.5">
                     <div className="flex items-baseline gap-2">
                       <p className="text-sm font-black text-gray-900 flex-1 min-w-0 truncate">
                         {b.brand}
+                        {b.is_favourite && (
+                          <span className="ml-1.5 text-[9px] font-bold text-brand-600 uppercase tracking-wider">
+                            you buy this
+                          </span>
+                        )}
                       </p>
                       <span className="badge bg-amber-100 text-gray-600 border border-amber-200 flex-shrink-0">
                         {pct(b.abv, b.abv_known)}

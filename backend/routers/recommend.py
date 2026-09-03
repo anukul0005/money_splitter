@@ -40,10 +40,11 @@ DRINK_RE = re.compile(
     re.I,
 )
 
-# The bottle you walk out with. Spirits are sold in exactly these three and
-# everyone names them this way, so the question is simply which one you want —
-# not how many millilitres each person is going to drink.
+# What you walk out with. Spirits come in exactly three sizes and everyone
+# names them this way; beer is the fourth answer to the same question, so it
+# sits in the same control rather than being a permanent extra list below.
 BOTTLE_SIZES = (180, 375, 750)
+BOTTLE_CHOICES = ("180", "375", "750", "beer")
 
 # Spirits are sold in exactly these three, and everyone names them this way.
 # Anything else in the price table (90ml nips, litres, 200ml travel bottles)
@@ -173,13 +174,15 @@ def _pick(bottles: list[Bottle], budget: float, people: int, bottle_ml: int,
     return out[:8]
 
 
-def _beers(bottles: list[Bottle], budget: float, people: int) -> list[dict]:
+def _beers(bottles: list[Bottle], budget: float, people: int,
+           favourites: list[str] | None = None) -> list[dict]:
     """Beer options as their own cards, sized to the budget.
 
     Two each is the default round. If that overruns the budget the count comes
     down rather than the beer being dropped, so a tight budget still gets an
     answer instead of an empty list.
     """
+    fav = {f.lower() for f in (favourites or [])}
     out: list[dict] = []
     for b in bottles:
         if b.kind != "beer":
@@ -207,6 +210,7 @@ def _beers(bottles: list[Bottle], budget: float, people: int) -> list[dict]:
             "abv_known": abv_known,
             "alcohol_ml_per_head": _units(volume / max(people, 1), abv),
             "per_head": round(cost / max(people, 1)),
+            "is_favourite": b.brand.lower() in fav,
             "source": b.source,
         })
 
@@ -225,7 +229,10 @@ def meta(_: User = Depends(current_user)):
         "sources": SOURCES,
         "abv_sources": ABV_SOURCES,
         "row_count": len(BOTTLES),
-        "bottle_sizes": [{"ml": ml, "name": SPIRIT_SIZES[ml]} for ml in BOTTLE_SIZES],
+        "bottle_choices": [
+            {"value": str(ml), "name": SPIRIT_SIZES[ml].title(), "hint": f"{ml}ml"}
+            for ml in BOTTLE_SIZES
+        ] + [{"value": "beer", "name": "Beer", "hint": "by the bottle"}],
     }
 
 
@@ -234,7 +241,7 @@ def recommend(
     state: str,
     people: int = 2,
     budget: float = 2000,
-    bottle_ml: int = 750,
+    bottle: str = "750",
     names: str = "",
     db: Session = Depends(get_db),
     caller: User = Depends(current_user),
@@ -243,8 +250,10 @@ def recommend(
         raise HTTPException(400, "There has to be at least one of you")
     if budget <= 0:
         raise HTTPException(400, "Set a budget above zero")
-    if bottle_ml not in BOTTLE_SIZES:
-        raise HTTPException(400, f"Pick a bottle size from {BOTTLE_SIZES} ml")
+    if bottle not in BOTTLE_CHOICES:
+        raise HTTPException(400, f"Pick one of {BOTTLE_CHOICES}")
+    is_beer = bottle == "beer"
+    bottle_ml = 0 if is_beer else int(bottle)
 
     bottles = for_state(state)
     if not bottles:
@@ -257,8 +266,10 @@ def recommend(
 
     people_names = [n for n in (names or "").split(",") if n.strip()]
     hist = _history(db, caller, people_names)
-    picks = _pick(bottles, budget, people, bottle_ml, hist["favourites"])
-    beers = _beers(bottles, budget, people)
+    # The selector decides what you are buying. Beer alongside every spirit
+    # answer would make choosing "beer" mean nothing.
+    picks = [] if is_beer else _pick(bottles, budget, people, bottle_ml, hist["favourites"])
+    beers = _beers(bottles, budget, people, hist["favourites"]) if is_beer else []
 
     return {
         "state": state,
@@ -266,14 +277,17 @@ def recommend(
         "people": people,
         "budget": budget,
         "budget_per_head": round(budget / people),
+        "bottle": bottle,
         "bottle_ml": bottle_ml,
-        "bottle_name": SPIRIT_SIZES[bottle_ml],
+        "is_beer": is_beer,
+        "bottle_name": "beer" if is_beer else SPIRIT_SIZES[bottle_ml],
         "history": hist,
         "picks": picks,
         # Says why a list is empty: no rows at all for this size in this state
         # is a different problem from everything being over budget.
         "size_available": any(
-            b.size_ml == bottle_ml and b.kind in ("whisky", "rum", "vodka", "gin")
+            b.kind == "beer" if is_beer else
+            (b.size_ml == bottle_ml and b.kind in ("whisky", "rum", "vodka", "gin"))
             for b in bottles
         ),
         "beers": beers,

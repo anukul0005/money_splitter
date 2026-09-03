@@ -249,10 +249,14 @@ def build() -> Path:
 
     h2(p, "Beer")
     body(p,
-         "Beer gets its own cards rather than a single afterthought line, sized to the budget: two "
-         "each is the default round, and if that overruns the budget the count comes down rather "
-         "than the beer disappearing. They are ordered strongest first, so the list reads as a real "
-         "choice between a session beer and a strong one.")
+         "Beer is the fourth option in the same control as the three bottle sizes, because it is a "
+         "fourth answer to the same question. Choosing it returns beer instead of spirits - showing "
+         "beer alongside every spirit answer would have made choosing it mean nothing.")
+    body(p,
+         "Beer cards are sized to the budget: two each is the default round, and if that overruns "
+         "the budget the count comes down rather than the beer disappearing. They are ordered "
+         "strongest first, so the list reads as a real choice between a session beer and a strong "
+         "one.")
 
     # ── Page 3 ───────────────────────────────────────────────────────────────
     p.add_page()
