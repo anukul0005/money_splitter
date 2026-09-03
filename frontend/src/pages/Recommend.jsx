@@ -292,7 +292,9 @@ export default function Recommend() {
         {result && (
           <div className="space-y-2">
             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">
-              {result.is_beer ? 'Beer' : `${result.bottle_name} bottles`} ·{' '}
+              {/* Not "{name} bottles": "Half bottles" reads as half of the
+                  bottles, when it means one 375ml bottle. */}
+              {result.is_beer ? 'Beer' : `${result.bottle_ml}ml (${result.bottle_name})`} ·{' '}
               {result.people} people · {INR(result.budget_min)}–{INR(result.budget_max)}
             </p>
 
