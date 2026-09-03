@@ -11,10 +11,11 @@ const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigi
 // server is still the authority — a state missing real prices 404s on submit.
 const FALLBACK_STATES = ['Delhi', 'Maharashtra', 'Uttar Pradesh']
 
+// Described in bottles, because that's what you buy. A quarter is 180ml.
 const STRENGTHS = [
-  ['light',  'Light',  '~120ml each'],
-  ['normal', 'Normal', '~180ml each'],
-  ['heavy',  'Heavy',  '~260ml each'],
+  ['light',  'Light',  '⅔ qtr each'],
+  ['normal', 'Normal', '1 qtr each'],
+  ['heavy',  'Heavy',  '1½ qtr each'],
 ]
 
 /**
@@ -208,12 +209,18 @@ export default function Recommend() {
           <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{error}</p>
         )}
 
-        {/* What you've actually done before — the part no generic app can do */}
-        {hist?.occasions > 0 && (
+        {/* Only shown once somebody is named. Without that it was the
+            caller's own drinking across every group, presented as "sessions
+            together" with nobody to have had them with. */}
+        {hist?.scoped && (
           <div className="card">
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Your history</p>
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+              With {hist.with_names.join(', ')}
+            </p>
             <p className="text-sm font-bold text-gray-900 mt-1">
-              {hist.occasions} sessions together · {INR(hist.avg_per_occasion)} average
+              {hist.occasions === 0
+                ? 'No drinks recorded together yet'
+                : `${hist.occasions} sessions together · ${INR(hist.avg_per_occasion)} average`}
             </p>
             {hist.favourites.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-2">
@@ -240,7 +247,7 @@ export default function Recommend() {
             )}
 
             {result.picks.map((p, i) => (
-              <div key={`${p.brand}-${p.size_ml}-${i}`} className="card p-3.5">
+              <div key={`${p.brand}-${p.combo_label}-${i}`} className="card p-3.5">
                 <div className="flex items-baseline gap-2">
                   <p className="text-sm font-black text-gray-900 flex-1 min-w-0">
                     {p.brand}
@@ -252,11 +259,12 @@ export default function Recommend() {
                   </p>
                   <p className="text-sm font-black text-brand-600 flex-shrink-0">{INR(p.total)}</p>
                 </div>
-                <p className="text-[11px] text-gray-500 mt-0.5">
-                  {p.qty} × {p.size_ml}ml {p.kind} ·{' '}
-                  {p.unit_price_max && p.unit_price_max !== p.unit_price
-                    ? `${INR(p.unit_price)}–${INR(p.unit_price_max)}`
-                    : INR(p.unit_price)} each
+                {/* What you actually ask for at the counter */}
+                <p className="text-[11px] font-bold text-gray-700 mt-0.5">
+                  {p.combo_label}
+                  <span className="font-normal text-gray-400">
+                    {' '}· {p.combo.map((c) => `${c.size_ml}ml`).join(' + ')} · {p.kind}
+                  </span>
                 </p>
                 <p className="text-[10px] text-gray-400 mt-0.5">
                   {INR(p.per_head)} a head · {p.total_ml}ml total

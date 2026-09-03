@@ -251,6 +251,34 @@ def _key(brand: str) -> str:
     return " ".join(brand.lower().replace(".", "").split())
 
 
+def across_sizes(brand: str, combo: dict[int, int], regions=NCR) -> list[dict]:
+    """Price a whole basket of one brand in each region.
+
+    A region is only priced when it publishes every size in the basket. Part
+    of a basket priced and the rest guessed would read as a real total and be
+    wrong, so a missing size makes the whole region a dash.
+    """
+    out = []
+    for region in regions:
+        total = 0.0
+        complete = True
+        for size, qty in combo.items():
+            hit = next(
+                (b for b in BOTTLES
+                 if b.state == region and b.size_ml == size and _key(b.brand) == _key(brand)),
+                None,
+            )
+            if hit is None:
+                complete = False
+                break
+            total += hit.mid * qty
+        out.append({
+            "region": region,
+            "total": round(total) if complete else None,
+        })
+    return out
+
+
 def across(brand: str, size_ml: int, regions=NCR) -> list[dict]:
     """The same bottle's price in each region, for a side-by-side.
 

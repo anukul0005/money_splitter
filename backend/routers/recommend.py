@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from auth import current_user, is_member
 from database import get_db
-from liquor_prices import BOTTLES, NCR, SOURCES, STATES, Bottle, across, for_state
+from liquor_prices import BOTTLES, NCR, SOURCES, STATES, Bottle, across_sizes, for_state
 from models import Group, User
 
 router = APIRouter(prefix="/recommend", tags=["recommend"])
@@ -37,9 +37,71 @@ DRINK_RE = re.compile(
     re.I,
 )
 
-# Roughly what one person drinks in an evening, in ml of spirit. Used only to
-# size the suggestion; the user can always override by changing the budget.
+# Roughly what one person drinks in an evening, in ml of spirit. This is only
+# the demand estimate — nobody buys 540ml, so it is never shown. It is turned
+# into whole bottles below.
 ML_PER_HEAD = {"light": 120, "normal": 180, "heavy": 260}
+
+# Spirits are sold in exactly these three, and everyone names them this way.
+# Anything else in the price table (90ml nips, litres, 200ml travel bottles)
+# is not something you would walk out of a shop with for an evening, so
+# spirits are restricted to these when building a suggestion.
+SPIRIT_SIZES = {180: "quarter", 375: "half", 750: "full"}
+SIZE_ORDER = (750, 375, 180)
+
+
+def _combo_label(combo: dict[int, int]) -> str:
+    """{750: 1, 180: 1} -> "1 full + 1 quarter"."""
+    parts = []
+    for size in SIZE_ORDER:
+        n = combo.get(size, 0)
+        if n:
+            name = SPIRIT_SIZES[size]
+            parts.append(f"{n} {name}" + ("s" if n > 1 else ""))
+    return " + ".join(parts)
+
+
+def _best_combo(by_size: dict[int, float], target_ml: int) -> tuple[dict[int, int], float] | None:
+    """Cheapest set of real bottles covering `target_ml`.
+
+    `by_size` maps an available size to its price. Only 180/375/750 are
+    offered, so this is a three-coin problem and brute force over a small grid
+    is both exact and instant.
+
+    Overshoot is allowed up to a half-bottle. A tighter cap looked principled
+    and was wrong in practice: for three people it rejected a single full,
+    which overshoots 540ml by 210ml and is obviously what you would buy. If
+    nothing lands inside the cap, the smallest basket that still covers the
+    target wins rather than nothing being suggested at all.
+    """
+    if not any(s in by_size for s in SIZE_ORDER):
+        return None
+
+    inside: tuple[dict[int, int], float] | None = None
+    outside: tuple[dict[int, int], float, int] | None = None
+
+    for f in range(0, target_ml // 750 + 3):
+        for h in range(0, target_ml // 375 + 3):
+            for q in range(0, target_ml // 180 + 3):
+                combo = {750: f, 375: h, 180: q}
+                if any(n and sz not in by_size for sz, n in combo.items()):
+                    continue
+                vol = f * 750 + h * 375 + q * 180
+                if vol < target_ml:
+                    continue
+                cost = sum(by_size[sz] * n for sz, n in combo.items() if n)
+                if cost <= 0:
+                    continue
+                trimmed = {k: v for k, v in combo.items() if v}
+                if vol <= target_ml + 375:
+                    if inside is None or cost < inside[1]:
+                        inside = (trimmed, cost)
+                elif outside is None or vol < outside[2]:
+                    outside = (trimmed, cost, vol)
+
+    if inside:
+        return inside
+    return (outside[0], outside[1]) if outside else None
 
 
 def _text(e) -> str:
@@ -51,8 +113,15 @@ def _history(db: Session, caller: User, names: list[str]) -> dict:
 
     Only groups the caller belongs to are considered, so this can't be used to
     read someone else's habits.
+
+    `scoped` says whether this is history *with someone*. With nobody named it
+    is just the caller's own drinking across every group, which was being
+    shown as though it were shared history — "12 sessions together" with no
+    one named. The numbers still rank the suggestions, but the page only
+    presents them once there is somebody to have had them with.
     """
-    wanted = {n.strip().lower() for n in names if n.strip()}
+    picked = [n.strip() for n in names if n.strip()]
+    wanted = {n.lower() for n in picked}
     wanted.add(caller.name.lower())
 
     total = 0.0
@@ -82,6 +151,8 @@ def _history(db: Session, caller: User, names: list[str]) -> dict:
 
     favourites = sorted(brand_hits, key=lambda b: (-brand_hits[b], b))
     return {
+        "scoped": bool(picked),
+        "with_names": picked,
         "occasions": occasions,
         "total_spend": round(total, 2),
         "avg_per_occasion": round(total / occasions, 2) if occasions else 0.0,
@@ -92,50 +163,66 @@ def _history(db: Session, caller: User, names: list[str]) -> dict:
 
 def _pick(bottles: list[Bottle], budget: float, people: int, strength: str,
           favourites: list[str]) -> list[dict]:
-    """Suggest bottle + quantity combinations that fit the budget.
+    """Suggest what to actually buy: whole bottles, in real shop sizes.
 
-    Ranked by: something they already drink, then closeness to the volume this
-    many people would get through, then how much of the budget it uses without
-    exceeding it.
+    Ranked by: something they already drink, then how close the volume is to
+    what this many people would get through, then price.
     """
     target_ml = ML_PER_HEAD.get(strength, 180) * max(people, 1)
     fav = {f.lower() for f in favourites}
-    out: list[dict] = []
 
-    spirits = [b for b in bottles if b.kind in ("whisky", "rum", "vodka", "gin")]
-    for b in spirits:
-        qty = max(1, round(target_ml / b.size_ml))
-        cost = b.mid * qty
+    # brand -> {size: price} for the three sizes spirits are actually sold in
+    by_brand: dict[str, dict[int, float]] = defaultdict(dict)
+    meta: dict[str, Bottle] = {}
+    for b in bottles:
+        if b.kind not in ("whisky", "rum", "vodka", "gin"):
+            continue
+        if b.size_ml not in SPIRIT_SIZES:
+            continue
+        by_brand[b.brand][b.size_ml] = b.mid
+        meta.setdefault(b.brand, b)
+
+    out: list[dict] = []
+    for brand, sizes in by_brand.items():
+        picked = _best_combo(sizes, target_ml)
+        if not picked:
+            continue
+        combo, cost = picked
         if cost > budget:
-            # A single bottle that still fits is a better answer than nothing
-            if b.mid > budget:
+            # Fall back to the largest single bottle that still fits
+            affordable = {sz: pr for sz, pr in sizes.items() if pr <= budget}
+            if not affordable:
                 continue
-            qty, cost = 1, b.mid
-        # The NCR trio is close enough to drive between, and the same bottle
-        # can differ by hundreds of rupees across it, so show all three.
-        compare = [
-            {**r, "total": None if r["mid"] is None else round(r["mid"] * qty)}
-            for r in across(b.brand, b.size_ml)
-        ]
+            sz = max(affordable, key=lambda z: z)
+            combo, cost = {sz: 1}, affordable[sz]
+
+        volume = sum(sz * n for sz, n in combo.items())
+        ref = meta[brand]
+
+        compare = across_sizes(brand, combo)
         priced = [c for c in compare if c["total"] is not None]
         cheapest = min(priced, key=lambda c: c["total"])["region"] if priced else None
 
         out.append({
-            "brand": b.brand, "kind": b.kind, "size_ml": b.size_ml,
-            "qty": qty, "unit_price": b.price, "unit_price_max": b.price_max,
+            "brand": brand,
+            "kind": ref.kind,
+            "combo": [{"size_ml": sz, "label": SPIRIT_SIZES[sz], "qty": n}
+                      for sz in SIZE_ORDER if combo.get(sz)
+                      for n in [combo[sz]]],
+            "combo_label": _combo_label(combo),
             "total": round(cost),
-            "total_ml": b.size_ml * qty,
-            "is_favourite": b.brand.lower() in fav,
-            "source": b.source,
+            "total_ml": volume,
+            "is_favourite": brand.lower() in fav,
             "per_head": round(cost / max(people, 1)),
+            "source": ref.source,
             "compare": compare,
             "cheapest_region": cheapest,
         })
 
     out.sort(key=lambda r: (
-        not r["is_favourite"],                 # things you drink, first
-        abs(r["total_ml"] - target_ml),        # right amount for the room
-        -r["total"],                           # then use the budget
+        not r["is_favourite"],
+        abs(r["total_ml"] - target_ml),
+        r["total"],
     ))
     return out[:6]
 
