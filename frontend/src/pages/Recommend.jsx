@@ -25,11 +25,23 @@ const FALLBACK_STATES = ['Delhi', 'Maharashtra', 'Uttar Pradesh']
 // How much the group is drinking between them. 180ml across two people is
 // 90ml each, so the hint is computed from the head count rather than fixed.
 const BOTTLES = [
+  ['any',  'Any',     'any'],
   ['180',  'Quarter', 180],
   ['375',  'Half',    375],
   ['750',  'Full',    750],
   ['beer', 'Beer',    null],
 ]
+
+// Long lists are shown seven deep and the rest folded away, so the page opens
+// on a real shortlist instead of a wall of bottles.
+const TOP_N = 7
+
+// dd-mm-yy. Dates arrive ISO from the server, which sorts correctly but is not
+// how anybody here reads a date.
+const fmtDate = (iso) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '')
+  return m ? `${m[3]}-${m[2]}-${m[1].slice(2)}` : ''
+}
 
 const MIN_SPAN  = 60      // narrower than this matches nothing on a real price list
 const BUDGET_MAX = 6000
@@ -62,7 +74,11 @@ export default function Recommend() {
   // clear-the-field problem the text inputs had doesn't arise.
   const [budgetMin, setBudgetMin] = useState(500)
   const [budgetMax, setBudgetMax] = useState(1000)
-  const [bottle, setBottle] = useState('750')
+  // Not a required choice: a budget on its own is enough to say what you can
+  // buy, so the page answers before asking you to narrow anything.
+  const [bottle, setBottle] = useState('any')
+  const [showAllPicks, setShowAllPicks] = useState(false)
+  const [showAllBeers, setShowAllBeers] = useState(false)
   const [withWho, setWithWho] = useState([])
   const [result, setResult]   = useState(null)
   const [error, setError]     = useState('')
@@ -133,6 +149,7 @@ export default function Recommend() {
 
   const run = async () => {
     setError(''); setBusy(true)
+    setShowAllPicks(false); setShowAllBeers(false)
     try {
       const r = await getRecommendation({
         state, people: peopleN, budget_min: loN, budget_max: hiN, bottle,
@@ -250,7 +267,7 @@ export default function Recommend() {
 
           <div>
             <label className="label">How much between you</label>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-5 gap-1.5">
               {BOTTLES.map(([v, label, hint]) => (
                 <button
                   key={v}
@@ -264,7 +281,7 @@ export default function Recommend() {
                 >
                   {label}
                   <span className="block text-[9px] font-normal opacity-70">
-                    {hint === null ? 'bottles' : `${hint}ml`}
+                    {hint === 'any' ? 'on budget' : hint === null ? 'bottles' : `${hint}ml`}
                   </span>
                 </button>
               ))}
@@ -272,9 +289,11 @@ export default function Recommend() {
             {/* The number people actually care about: what that works out to
                 each once it's shared out. */}
             <p className="text-[10px] text-gray-400 mt-1">
-              {bottle === 'beer'
-                ? 'Total for the group, split between you.'
-                : `${bottle}ml between ${peopleN} ${peopleN === 1 ? 'person' : 'people'} · ${Math.round(Number(bottle) / peopleN)}ml each.`}
+              {bottle === 'any'
+                ? 'Every size and beer, whatever the budget covers. Narrow it only if you want to.'
+                : bottle === 'beer'
+                  ? 'Total for the group, split between you.'
+                  : `${bottle}ml between ${peopleN} ${peopleN === 1 ? 'person' : 'people'} · ${Math.round(Number(bottle) / peopleN)}ml each.`}
             </p>
           </div>
 
@@ -338,7 +357,7 @@ export default function Recommend() {
               </div>
             )}
 
-            {result.picks.map((p, i) => (
+            {(showAllPicks ? result.picks : result.picks.slice(0, TOP_N)).map((p, i) => (
               <div key={`${p.brand}-${p.size_ml}-${i}`} className="card p-3.5">
                 {/* The brand gets the full width and is allowed to wrap. The
                     official state lists print the whole registered label —
@@ -380,10 +399,20 @@ export default function Recommend() {
                     spend rather than as this bottle's price, because an
                     expense can be a round of Breezers or a split bill — it is
                     not the same number as the shelf price above. */}
-                {p.your_avg != null && (
+                {(p.your_avg != null || p.last_had) && (
                   <p className="text-[10px] text-gray-400 mt-0.5">
-                    Your {p.matched_favourite} nights average{' '}
-                    <span className="font-bold text-gray-500">{INR(p.your_avg)}</span> an expense
+                    {p.last_had && (
+                      <>
+                        Had on <span className="font-bold text-gray-500">{fmtDate(p.last_had)}</span>
+                      </>
+                    )}
+                    {p.last_had && p.your_avg != null && ' · '}
+                    {p.your_avg != null && (
+                      <>
+                        your {p.matched_favourite} nights average{' '}
+                        <span className="font-bold text-gray-500">{INR(p.your_avg)}</span>
+                      </>
+                    )}
                   </p>
                 )}
 
@@ -442,12 +471,24 @@ export default function Recommend() {
               </div>
             ))}
 
+            {result.picks.length > TOP_N && (
+              <button
+                type="button"
+                onClick={() => setShowAllPicks((v) => !v)}
+                className="w-full card py-2 text-xs font-bold text-gray-500 hover:text-brand-600"
+              >
+                {showAllPicks
+                  ? 'Show fewer'
+                  : `Show ${result.picks.length - TOP_N} more in this range`}
+              </button>
+            )}
+
             {result.beers?.length > 0 && (
               <>
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">
                   Strongest first
                 </p>
-                {result.beers.map((b, i) => {
+                {(showAllBeers ? result.beers : result.beers.slice(0, TOP_N)).map((b, i) => {
                   // The frontend and the API deploy separately, so there is
                   // always a window where one is ahead of the other. Beer used
                   // to be priced as a round (`total` for `qty` bottles) and is
@@ -525,6 +566,18 @@ export default function Recommend() {
                   </div>
                   )
                 })}
+
+                {result.beers.length > TOP_N && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllBeers((v) => !v)}
+                    className="w-full card py-2 text-xs font-bold text-gray-500 hover:text-brand-600"
+                  >
+                    {showAllBeers
+                      ? 'Show fewer'
+                      : `Show ${result.beers.length - TOP_N} more beers`}
+                  </button>
+                )}
               </>
             )}
 
@@ -534,10 +587,13 @@ export default function Recommend() {
                 wrong size selected, outside the budget, saved as beer. Each
                 one says which, rather than just not being there. */}
             {result.your_entries?.length > 0 && (
-              <div className="card">
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                  Prices you added · {result.state}
-                </p>
+              <details className="card">
+                {/* Folded away by default. It exists so a price you entered is
+                    never silently missing, not to sit between you and the
+                    recommendations on every search. */}
+                <summary className="text-[10px] font-bold text-gray-400 uppercase tracking-widest cursor-pointer">
+                  Prices you added · {result.state} ({result.your_entries.length})
+                </summary>
                 <div className="mt-1.5 space-y-1">
                   {result.your_entries.map((e) => (
                     <div key={e.id} className="flex items-baseline gap-2">
@@ -548,6 +604,7 @@ export default function Recommend() {
                         <span className="font-normal text-gray-400">
                           {' '}· {e.size_ml}ml · {e.kind}
                           {e.abv ? ` · ${e.abv}% ABV` : ''}
+                          {e.added_on ? ` · added ${fmtDate(e.added_on)}` : ''}
                         </span>
                         {!e.shown && (
                           <span className="block text-[10px] text-amber-700">
@@ -561,7 +618,7 @@ export default function Recommend() {
                     </div>
                   ))}
                 </div>
-              </div>
+              </details>
             )}
 
             {/* A bottle we simply don't have. Offered next to the results
