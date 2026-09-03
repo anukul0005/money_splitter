@@ -49,6 +49,47 @@ const BUDGET_STEP = 10
 const pct = (v, known) => `${known ? '' : '~'}${v}% ABV`
 
 /**
+ * The same bottle priced across every state we have a list for.
+ *
+ * Alcohol is taxed per state, so the same bottle genuinely differs by hundreds
+ * of rupees across a border people cross anyway. A state that has never heard
+ * of the bottle shows a dash — never a price carried over from somewhere else.
+ *
+ * Shared by the spirit and beer cards. Beer went without one for no better
+ * reason than that it was added later, which is where the gap is most worth
+ * seeing: a crate is worth a drive in a way one bottle of whisky is not.
+ */
+function PriceStrip({ compare, cheapest }) {
+  if (!compare?.some((c) => c.total !== null)) return null
+  return (
+    <div
+      className="grid gap-1 mt-2 pt-2 border-t border-amber-100"
+      style={{ gridTemplateColumns: `repeat(${compare.length}, minmax(0, 1fr))` }}
+    >
+      {compare.map((c) => {
+        const best = c.region === cheapest && c.total !== null
+        return (
+          <div
+            key={c.region}
+            title={c.region}
+            className={`rounded px-1 py-1 text-center ${
+              best ? 'bg-green-50 border border-green-200' : 'bg-amber-50/60'
+            }`}
+          >
+            <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide truncate">
+              {c.label || c.region.replace(' (Haryana)', '')}
+            </p>
+            <p className={`text-[11px] font-black ${best ? 'text-green-700' : 'text-gray-500'}`}>
+              {c.total === null ? '—' : INR(c.total)}
+            </p>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
  * What to drink, for this many people, on this budget.
  *
  * Grounded in two real things: published state price lists (alcohol is a state
@@ -73,10 +114,13 @@ export default function Recommend() {
   // clear-the-field problem the text inputs had doesn't arise.
   const [budgetMin, setBudgetMin] = useState(500)
   const [budgetMax, setBudgetMax] = useState(1000)
-  // Empty means no size chosen, which is the default and is sent as "any".
-  // There is no "Any" card: a filter that is simply off says the same thing
-  // with one less button, and tapping the chosen one again turns it back off.
-  const [bottle, setBottle] = useState('')
+  // Any combination of the four cards. An empty list is the default and is
+  // sent as "any": a filter that is simply off says "everything" with one less
+  // button than an Any card would. Tapping a chosen card turns it back off.
+  //
+  // This was a single value, which made "a couple of quarters or some beer" —
+  // an ordinary way to plan an evening — impossible to ask for.
+  const [bottles, setBottles] = useState([])
   const [showAllPicks, setShowAllPicks] = useState(false)
   const [showAllBeers, setShowAllBeers] = useState(false)
   const [withWho, setWithWho] = useState([])
@@ -127,6 +171,9 @@ export default function Recommend() {
   }, [user?.name])
 
   const peopleN = Math.max(1, parseInt(people, 10) || 0)
+  // The bottle sizes among the picked cards, beer excluded — beer has no one
+  // size to divide between people.
+  const sizesPicked = bottles.filter((b) => b !== 'beer').map(Number)
   const loN = budgetMin
   const hiN = budgetMax
   const canRun = state && peopleN >= 1 && hiN - loN >= MIN_SPAN
@@ -159,7 +206,7 @@ export default function Recommend() {
       const r = await getRecommendation({
         state: over.state || state,
         people: peopleN, budget_min: loN, budget_max: hiN,
-        bottle: bottle || 'any',
+        bottle: bottles.length ? bottles.join(',') : 'any',
         names: withWho.join(','),
       })
       setResult(r.data)
@@ -205,7 +252,8 @@ export default function Recommend() {
             </select>
             <p className="text-[10px] text-gray-400 mt-1">
               Only states with published prices we could source are listed.
-              Picks also show what the same bottle costs across the NCR.
+              Every pick also shows what the same bottle costs in the other
+              states we have lists for.
             </p>
           </div>
 
@@ -279,9 +327,12 @@ export default function Recommend() {
                 <button
                   key={v}
                   type="button"
-                  onClick={() => setBottle((cur) => (cur === v ? '' : v))}
+                  aria-pressed={bottles.includes(v)}
+                  onClick={() => setBottles((cur) => (
+                    cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]
+                  ))}
                   className={`rounded-md px-2 py-1.5 text-xs font-bold border transition-all ${
-                    bottle === v
+                    bottles.includes(v)
                       ? 'bg-brand-400 border-brand-400 text-white'
                       : 'bg-cream border-amber-200 text-gray-500 hover:bg-amber-50'
                   }`}
@@ -294,13 +345,14 @@ export default function Recommend() {
               ))}
             </div>
             {/* The number people actually care about: what that works out to
-                each once it's shared out. */}
+                each once it's shared out. Only said for a single size, since
+                two sizes at once have no one answer. */}
             <p className="text-[10px] text-gray-400 mt-1">
-              {bottle === ''
-                ? 'Nothing picked — every size and beer, whatever the budget covers. Tap one to narrow it, tap again to clear.'
-                : bottle === 'beer'
-                  ? 'Total for the group, split between you.'
-                  : `${bottle}ml between ${peopleN} ${peopleN === 1 ? 'person' : 'people'} · ${Math.round(Number(bottle) / peopleN)}ml each.`}
+              {bottles.length === 0
+                ? 'Nothing picked — every size and beer, whatever the budget covers. Tap any you fancy, tap again to clear.'
+                : sizesPicked.length === 1 && bottles.length === 1
+                  ? `${sizesPicked[0]}ml between ${peopleN} ${peopleN === 1 ? 'person' : 'people'} · ${Math.round(sizesPicked[0] / peopleN)}ml each.`
+                  : `Showing ${bottles.length} at once — ${bottles.length} of the four, whatever the budget covers.`}
             </p>
           </div>
 
@@ -315,7 +367,7 @@ export default function Recommend() {
             <PriceEditForm
               state={state}
               states={meta?.states ?? []}
-              initial={{ state, size_ml: bottle && bottle !== 'beer' ? Number(bottle) : 750 }}
+              initial={{ state, size_ml: sizesPicked[0] || 750 }}
               onCancel={() => setEditing(null)}
               onDone={(saved) => {
                 setEditing(null)
@@ -368,17 +420,19 @@ export default function Recommend() {
           <div className="space-y-2">
             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">
               {/* Not "{name} bottles": "Half bottles" reads as half of the
-                  bottles, when it means one 375ml bottle. */}
-              {result.is_beer ? 'Beer' : `${result.bottle_ml}ml (${result.bottle_name})`} ·{' '}
-              {result.people} people · {INR(result.budget_min)}–{INR(result.budget_max)}
+                  bottles, when it means one 375ml bottle. The server names
+                  what was asked for, which with several cards picked is more
+                  than one thing. */}
+              {result.bottle_name || 'any size'} · {result.people} people ·{' '}
+              {INR(result.budget_min)}–{INR(result.budget_max)}
             </p>
 
             {result.picks.length === 0 && result.beers.length === 0 && (
               <div className="card text-center py-6">
                 <p className="text-sm text-gray-400">
                   {!result.size_available
-                    ? `No ${result.is_beer ? 'beer' : `${result.bottle_ml}ml`} prices published for ${result.state} yet.`
-                    : `Nothing ${result.is_beer ? 'in beer' : `at ${result.bottle_ml}ml`} in ${result.state} falls between ${INR(result.budget_min)} and ${INR(result.budget_max)}.`}
+                    ? `No ${result.bottle_name} prices published for ${result.state} yet.`
+                    : `Nothing in ${result.bottle_name} in ${result.state} falls between ${INR(result.budget_min)} and ${INR(result.budget_max)}.`}
                 </p>
                 {/* Dead ends are the common case with a narrow range, so say
                     what the size actually costs instead of leaving them to guess */}
@@ -476,36 +530,7 @@ export default function Recommend() {
                   />
                 )}
 
-                {/* Same bottle across the NCR — these are a drive apart, and
-                    the gap is often worth more than the drive. A hand-entered
-                    price sits here like any other, and a region that has never
-                    heard of the bottle shows a dash rather than the whole
-                    strip vanishing. */}
-                {p.compare?.some((c) => c.total !== null) && (
-                  <div
-                    className="grid gap-1 mt-2 pt-2 border-t border-amber-100"
-                    style={{ gridTemplateColumns: `repeat(${p.compare.length}, minmax(0, 1fr))` }}
-                  >
-                    {p.compare.map((c) => {
-                      const best = c.region === p.cheapest_region && c.total !== null
-                      return (
-                        <div
-                          key={c.region}
-                          className={`rounded px-1.5 py-1 text-center ${
-                            best ? 'bg-green-50 border border-green-200' : 'bg-amber-50/60'
-                          }`}
-                        >
-                          <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide truncate">
-                            {c.region.replace(' (Haryana)', '')}
-                          </p>
-                          <p className={`text-[11px] font-black ${best ? 'text-green-700' : 'text-gray-500'}`}>
-                            {c.total === null ? '—' : INR(c.total)}
-                          </p>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
+                <PriceStrip compare={p.compare} cheapest={p.cheapest_region} />
               </div>
             ))}
 
@@ -606,6 +631,9 @@ export default function Recommend() {
                       }}
                       />
                     )}
+
+                    {/* Beer now gets the same side-by-side the spirits have. */}
+                    <PriceStrip compare={b.compare} cheapest={b.cheapest_region} />
                   </div>
                   )
                 })}

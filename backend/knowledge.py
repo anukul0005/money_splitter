@@ -74,7 +74,12 @@ DRINK_RE = re.compile(
     r"jack\s*daniel|black\s*label|red\s*label|royal\s*stag|imperial\s*blue|"
     r"8\s*pm|mcdowell|antiquity|glenlivet|jameson|smirnoff|liquor|alcohol|"
     r"booze|daru|thek|absolut|j&b|chivas|100\s*pipers|officer'?s\s*choice|"
-    r"bagpiper|captain\s*morgan|grey\s*goose|glenfiddich|black\s*dog)\b",
+    r"bagpiper|captain\s*morgan|grey\s*goose|glenfiddich|black\s*dog|"
+    # Categories the price tables now carry and this pattern never did, so an
+    # expense saying "tequila" or "prosecco" was not read as a drink at all.
+    r"tequila|mezcal|brandy|cognac|liqueur|scotch|bourbon|"
+    r"prosecco|champagne|sangria|patron|jagermeister|kahlua|malibu|"
+    r"baileys|cointreau|macallan|aberlour|beefeater|johnnie\s*walker)\b",
     re.I,
 )
 

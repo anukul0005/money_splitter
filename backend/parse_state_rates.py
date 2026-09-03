@@ -62,13 +62,18 @@ OUT = HERE / "state_prices.py"
 
 MP, UP = "Madhya Pradesh", "Uttar Pradesh"
 
-WHISKY, RUM, VODKA, BEER, GIN, WINE, BRANDY = (
-    "whisky", "rum", "vodka", "beer", "gin", "wine", "brandy")
+WHISKY, RUM, VODKA, BEER, GIN, WINE, BRANDY, TEQUILA, LIQUEUR = (
+    "whisky", "rum", "vodka", "beer", "gin", "wine", "brandy", "tequila",
+    "liqueur")
 
 # Sizes worth keeping. Not a filter on what the app shows - it keeps its own
 # rules - just a way of leaving out the 60ml nips and 3-litre cases that would
 # treble the table for no gain.
-KEEP_SIZES = {180, 330, 375, 500, 650, 750, 1000}
+#
+# 700ml earns its place despite looking like an odd size: it is the standard
+# import bottle, so leaving it out silently dropped 87 rows across the two
+# documents - most of the tequila and a good deal of the imported scotch.
+KEEP_SIZES = {180, 330, 375, 500, 650, 700, 750, 1000}
 
 # Not on sale to a person walking into a UP shop.
 #
@@ -96,6 +101,28 @@ LOCATION_PREFIX = re.compile(
 # and exact, which beats the category typical the app falls back to.
 ABV_IN_NAME = re.compile(r"\(?\s*(\d{1,2}(?:\.\d)?)\s*%\s*v\s*/\s*v\s*\)?", re.I)
 
+# The cheapest a bottle can plausibly be, in rupees per litre, by category.
+#
+# This replaces a rule that rejected any row whose excise-duty column printed
+# as 0.000. That rule was aimed at the right target - the UP list carries rows
+# priced at Rs 1 and Rs 10 that are clearly registrations rather than prices -
+# but it hit the wrong one. 258 real rows went with them: every wine in the UP
+# document and the entire imported single malt section, Macallan and Glenlivet
+# and Hibiki included, because those genuinely carry a zero in that column.
+#
+# So the test is now on the price itself, which is the thing actually in
+# doubt. A 500ml beer at Rs 10 is not a price; a 750ml wine at Rs 790 is.
+MIN_PER_LITRE = {BEER: 60.0}
+MIN_PER_LITRE_DEFAULT = 200.0
+
+
+def _plausible(mrp: float, size_ml: int, kind: str) -> bool:
+    """Is this a price somebody could actually pay?"""
+    if mrp <= 0 or size_ml <= 0:
+        return False
+    return mrp / (size_ml / 1000.0) >= MIN_PER_LITRE.get(kind,
+                                                         MIN_PER_LITRE_DEFAULT)
+
 # Trailing noise in brand names: registration numbers, "NEW", stray brackets.
 NAME_NOISE = re.compile(
     r"\s*[\(\[]?\s*(?:regn?\.?\s*no\.?\s*-?\s*\d+|reg\s*no\s*-?\s*\d+|"
@@ -105,6 +132,9 @@ CATEGORY_WORDS = [
     (BEER, r"\bbeer\b"),
     (WINE, r"\bwine\b|\bsangria\b"),
     (BRANDY, r"\bbrandy\b"),
+    # Before gin, and deliberately: "Bombay Sapphire Gin" is a gin, but a row
+    # reading "Tequila Gold" is not, and tequila is the more specific word.
+    (TEQUILA, r"\btequila\b|\bmezcal\b|\bmescal\b"),
     (GIN, r"\bgin\b"),
     (VODKA, r"\bvodka\b"),
     (RUM, r"\brum\b"),
@@ -117,8 +147,21 @@ CATEGORY_WORDS = [
 # that only belong to one category.
 CATEGORY_STYLES = [
     (WHISKY, r"\b(scotch|single\s*malt|blended\s*malt|blended\s*grain|bourbon)\b"),
-    (BEER, r"\b(lager|bier|pilsner|pilsener|stout|ale|witbier|blanche)\b"),
-    (WINE, r"\b(shiraz|merlot|chardonnay|sauvignon|cabernet|zinfandel|rose\s*wine)\b"),
+    (BEER, r"\b(lager|bier|pilsner|pilsener|stout|ale|witbier|blanche|"
+           r"king\s*of\s*beers)\b"),
+    # Wine says what it is by grape and by style far more often than it uses
+    # the word "wine". Without these the whole imported wine section of the UP
+    # list was read as uncategorised and thrown away - Chenin Blanc, Spumante,
+    # Brut and the rest - which is why no wine could ever be recommended.
+    (WINE, r"\b(shiraz|merlot|chardonnay|sauvignon|cabernet|zinfandel|"
+           r"chenin|riesling|pinot|malbec|tempranillo|sangiovese|viognier|"
+           r"grenache|syrah|barbera|nebbiolo|moscato|muscat|"
+           r"spumante|prosecco|brut|sparkling|champagne|"
+           r"rose\s*wine|red\s*wine|white\s*wine|vino|bodega)\b"),
+    # Cognac and armagnac are brandy under a regional name.
+    (BRANDY, r"\b(cognac|armagnac|calvados|v\.?s\.?o\.?p\.?)\b"),
+    (LIQUEUR, r"\b(liqueur|liquer|schnapps|triple\s*sec|amaretto|curacao|"
+              r"jagermeister|kahlua|baileys|cointreau|sambuca|absinthe)\b"),
 ]
 
 # Last resort: brand families well known enough to be worth naming, whose
@@ -138,10 +181,16 @@ def _category(name: str, declared: str = "") -> str | None:
         d = declared.strip().lower()
         if d.startswith("whisk"):
             return WHISKY
-        if d in {"rum", "vodka", "gin", "beer", "wine", "brandy"}:
+        if d in {"rum", "vodka", "gin", "beer", "wine", "brandy", "tequila",
+                 "liqueur"}:
             return d
-        if d in {"rtd", "liqueur"}:
-            return None            # not something the recommender suggests
+        if d == "cognac":
+            return BRANDY          # brandy under its regional name
+        if d == "rtd":
+            # A Breezer is not a bottle you buy for an evening, and the sizes
+            # it comes in are excluded anyway. Named here so the coverage
+            # audit reports it as a decision rather than a hole.
+            return None
     for table in (CATEGORY_WORDS, CATEGORY_STYLES, CATEGORY_BY_BRAND):
         for kind, pattern in table:
             if re.search(pattern, name, re.I):
@@ -227,8 +276,14 @@ def _clean(name: str) -> tuple[str, float | None]:
 # 8% TF, Vat, TCS, purchase cost, total.
 RATE_ROW = re.compile(
     r"^(?P<licence>[A-Za-z0-9\- ]+?)\s+"
-    r"(?P<cat>Whisky|Wine|Vodka|Rum|Beer|Gin|RTD|Brandy|Liqueur)\s+"
-    r"(?P<name>.+?)\s+-\s*Id\s*-\s*(?P<id>\S+)\s+"
+    r"(?P<cat>Whisky|Wine|Vodka|Rum|Beer|Gin|RTD|Brandy|Liqueur|Tequila|"
+    r"Cognac)\s+"
+    # The registration id is optional. Requiring it looked harmless - most
+    # rows carry one - but 112 of them do not, and they were not a random
+    # 112: the imported section prints without an id, so Chivas Regal,
+    # Aberlour, Glenlivet, Malibu and Johnnie Walker Black Label were absent
+    # from Madhya Pradesh entirely, with nothing to say they had been dropped.
+    r"(?P<name>.+?)(?:\s+-\s*Id\s*-\s*(?P<id>\S+))?\s+"
     r"(?P<btype>Glass Bottle|Pet Bottle|Glass|Can|Pet|Tetra Pack)\s+"
     r"(?P<size>[\d.]+)\s*ML\s+"
     r"(?P<nums>[\d.]+(?:\s+[\d.]+){10})$"
@@ -249,6 +304,17 @@ def parse_rate_list(path: Path) -> list[dict]:
             continue
         buf = f"{buf} {ln}".strip() if buf else ln
         m = RATE_ROW.match(buf)
+        if m is None and buf != ln:
+            # The buffer is holding something that never completed - a page
+            # header, a wrapped name whose row was already emitted - and it is
+            # now poisoning every line after it, because the pattern is
+            # anchored and any junk in front of the licence column breaks it.
+            # A line that is a complete row on its own is one, whatever is
+            # stuck to the front of it. Johnnie Walker Blonde was lost this
+            # way, and nothing said so.
+            m = RATE_ROW.match(ln)
+            if m is not None:
+                buf = ln
         if not m:
             if len(buf.split()) > 60:
                 buf = ""            # runaway; drop rather than mis-join
@@ -272,6 +338,11 @@ def parse_rate_list(path: Path) -> list[dict]:
         if kind is None or size not in KEEP_SIZES or mrp <= 0:
             continue
         if EXCLUDE_NAME.search(name):
+            continue
+        # Same plausibility test the other document gets. It rejects nothing
+        # here today; it is the guard that stops a future edition of this list
+        # quietly introducing the Rs 10 beers the UP one carries.
+        if not _plausible(mrp, size, kind):
             continue
         out.append({"brand": name, "kind": kind, "size": size,
                     "mrp": mrp, "abv": abv, "source": "mp-rate-list-2026-27", "state": MP})
@@ -314,12 +385,10 @@ def parse_price_list(path: Path) -> tuple[list[dict], int]:
         head = " ".join(buf + [m.group("pre")])
         buf = []
         nums = m.group("nums").split()
-        # MRP is the last money column; EDP the first. Both must be real - see
-        # the module docstring on why a zero EDP disqualifies the row.
-        mrp, edp = float(nums[-1]), float(nums[0])
-        if mrp <= 0 or edp <= 0:
-            nominal += 1
-            continue
+        # MRP is the last money column. Whether it is a real price is decided
+        # below, once the size and category are known - a rupee figure means
+        # nothing until you know what it is a price for.
+        mrp = float(nums[-1])
 
         size_hit = SIZE_RE.search(head)
         if not size_hit:
@@ -340,6 +409,9 @@ def parse_price_list(path: Path) -> tuple[list[dict], int]:
             continue
         kind = _category(name)
         if kind is None or EXCLUDE_NAME.search(name):
+            continue
+        if not _plausible(mrp, size, kind):
+            nominal += 1
             continue
         out.append({"brand": name, "kind": kind, "size": size,
                     "mrp": mrp, "abv": abv, "source": "up-liquor-price-list", "state": UP})
@@ -497,7 +569,7 @@ def main() -> int:
     if debris:
         problems.append(f"{len(debris)} names look mis-split: {debris[:3]}")
     odd = [r for r in rows if r["kind"] == BEER and r["price"] > 1200]
-    odd += [r for r in rows if r["kind"] in (WHISKY, RUM, VODKA, GIN)
+    odd += [r for r in rows if r["kind"] in (WHISKY, RUM, VODKA, GIN, TEQUILA)
             and r["size"] == 750 and r["price"] < 100]
     if odd:
         problems.append(f"{len(odd)} implausible prices, e.g. "

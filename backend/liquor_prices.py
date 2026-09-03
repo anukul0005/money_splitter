@@ -116,7 +116,9 @@ ABV_BY_BRAND = {
 # Indian-made spirits are bottled at 42.8% by long-standing excise convention;
 # imported and international brands sit at 40%. Used only when the brand isn't
 # in the table above, and always flagged as a typical rather than a reading.
-ABV_TYPICAL = {WHISKY: 42.8, RUM: 42.8, VODKA: 40.0, GIN: 40.0, BEER: 5.0, WINE: 12.5}
+ABV_TYPICAL = {WHISKY: 42.8, RUM: 42.8, VODKA: 40.0, GIN: 40.0, BEER: 5.0,
+               WINE: 12.5, "tequila": 40.0, "brandy": 42.8,
+               "liqueur": 20.0}
 
 
 def _abv_key(brand: str) -> str:

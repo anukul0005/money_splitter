@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { listBrands, savePrice } from '../api'
 
-const KINDS = ['whisky', 'rum', 'vodka', 'gin', 'beer', 'wine', 'brandy']
-const SIZES = [180, 375, 750, 330, 500, 650, 1000]
+const KINDS = ['whisky', 'rum', 'vodka', 'gin', 'tequila', 'beer', 'wine',
+               'brandy', 'liqueur']
+const SIZES = [180, 375, 700, 750, 330, 500, 650, 1000]
 
 /**
  * Correct a bottle's price, or add one the state lists never carried.
@@ -27,6 +28,11 @@ export default function PriceEditForm({ state, states = [], initial = {}, onDone
     initial.abv != null && initial.abv_known ? String(initial.abv) : ''
   )
   const [note, setNote]   = useState('')
+  // Offered only once the name is recognised as one already in the list.
+  // Renaming is allowed — it is your list — but it has to be asked for, since
+  // the published labels carry detail ("Barrel Select", "12 Y") that is worth
+  // more than a tidier name, and losing it silently would be the worse bug.
+  const [rename, setRename] = useState(false)
   const [busy, setBusy]   = useState(false)
   const [error, setError] = useState('')
   // Bottles this state already holds, so the form can say "that one exists"
@@ -61,6 +67,8 @@ export default function PriceEditForm({ state, states = [], initial = {}, onDone
       const r = await savePrice({
         brand: brand.trim(), kind, state: where, size_ml: sizeN,
         price: priceN, abv: abvN, note: note.trim() || null,
+        // Only meaningful when the name already exists; harmless otherwise.
+        rename: rename && !!existing,
       })
       onDone?.(r.data)
     } catch (err) {
@@ -93,11 +101,29 @@ export default function PriceEditForm({ state, states = [], initial = {}, onDone
             for the save to do silently, so the name in the box is not a
             surprise afterwards. */}
         {existing && (
-          <p className="text-[10px] text-brand-600 mt-1">
-            Already in the list as <span className="font-bold">{existing.brand}</span>
-            {existing.yours ? ' (yours)' : ''} — saving changes its price, and
-            keeps that name.
-          </p>
+          <>
+            <p className="text-[10px] text-brand-600 mt-1">
+              Already in the list as <span className="font-bold">{existing.brand}</span>
+              {existing.yours ? ' (yours)' : ''} — saving changes its price
+              {rename ? ' and its name' : ', and keeps that name'}.
+            </p>
+            {/* Renaming is allowed, adding a second spelling is not. Either
+                way there is one bottle afterwards. */}
+            {boil(existing.brand) !== boil(brand) || existing.brand !== brand.trim() ? (
+              <label className="flex items-start gap-1.5 mt-1 cursor-pointer">
+                <input
+                  type="checkbox" className="mt-0.5"
+                  checked={rename}
+                  onChange={(e) => setRename(e.target.checked)}
+                />
+                <span className="text-[10px] text-gray-500">
+                  Rename it to <span className="font-bold">{brand.trim()}</span> instead.
+                  It stays one bottle either way — the published name often
+                  carries detail worth keeping.
+                </span>
+              </label>
+            ) : null}
+          </>
         )}
       </div>
 

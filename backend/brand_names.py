@@ -48,12 +48,38 @@ from collections import defaultdict
 DESCRIPTORS = {
     # the category noun - "Beer" in "Kingfisher Ultra Lager Beer"
     "whisky", "whiskey", "rum", "vodka", "gin", "beer", "wine", "brandy",
+    "tequila", "mezcal", "mescal",
     "lager", "bier", "pilsner", "pilsener", "ale", "stout",
     # the house in front of the brand - "Seagram's 100 Pipers" is 100 Pipers
     "seagrams", "seagram", "usl", "diageo", "pernod", "ricard",
+    # how it was made, which every bottle of a range shares. "Smirnoff Triple
+    # Distilled Vodka" is Smirnoff; the flavour that follows is the product.
+    # These stay out of the "premium/strong" trap above because they describe
+    # the process, not the grade - nobody sells a Smirnoff that is *not*
+    # triple distilled at a different price.
+    "triple", "distilled", "flavoured", "flavored",
     # filler, and the "(NEW)" registrations carry
     "the", "and", "of", "with", "new",
 }
+
+# The same ingredient under two names. Kept deliberately tiny: a synonym list
+# is a licence to merge things that only look alike, so a word earns its place
+# here by having actually caused a duplicate. Madhya Pradesh prints "Smirnoff
+# Mirchi Mango" for the bottle everyone calls Smirnoff Mango Chilli.
+SYNONYMS = {
+    "mirchi": "chilli",
+    "chili": "chilli",
+    "chilly": "chilli",
+}
+
+# "(35%Alc/Vol)", "5%", "42.8 % v/v" - strength printed into the name. It is a
+# fact about the bottle with a column of its own, so leaving it in the name
+# forks the brand: "Bacardi Orange Rum (5%)" and "Bacardi Orange Rum" were two
+# rows at one price. Stripped before anything else looks at the string.
+_ABV_IN_NAME = re.compile(
+    r"\(?\s*\d+(?:\.\d+)?\s*%\s*(?:alc\.?\s*/?\s*vol\.?|v\s*/\s*v|abv)?\s*\)?",
+    re.IGNORECASE,
+)
 
 
 def key(name: str) -> str:
@@ -65,10 +91,14 @@ def key(name: str) -> str:
     other. Dropping punctuation outright is what lets "(NEW )" and "SEAGRAM'S"
     fall into line with the same name written plainly.
     """
+    # Strength printed into the name goes first, while the "%" is still there
+    # to recognise it by. After punctuation is flattened "(35%Alc/Vol)" is just
+    # the words "35 alc vol" and there is no telling it from a brand.
+    s = _ABV_IN_NAME.sub(" ", name or "")
     # Apostrophes are deleted, not spaced. Turning them into spaces left a
     # stray "s" token, so "Seagram's Royal Stag" and "Seagrams Royal Stag"
     # stayed two brands at the same price. Everything else becomes a space.
-    s = (name or "").lower().replace("'", "").replace("’", "")
+    s = s.lower().replace("'", "").replace("’", "")
     s = re.sub(r"[^a-z0-9]+", " ", s)
     s = re.sub(r"(?<=[a-z])(?=\d)|(?<=\d)(?=[a-z])", " ", s)
     return " ".join(s.split())
@@ -79,12 +109,23 @@ def core(name: str, kind: str) -> str:
 
     Category is part of the key deliberately: Old Monk rum and Old Monk beer
     are different products that would otherwise merge into one.
+
+    The words are sorted and de-duplicated, so the core is a *set* of words
+    rather than a phrase. Word order carries no information in these lists and
+    pretending it does splits bottles: Madhya Pradesh prints "STERLING RESERVE
+    B7 Rare Blended Whisky" where Uttar Pradesh prints "Sterling Reserve Rare
+    Blended Whisky B7", and Dewar's White Label is written both ways round.
+    De-duplication does the same job within one name - "Bacardi Mango Chilli
+    Original Mango chilli Rum" says its flavour twice.
+
+    Size is deliberately absent. A brand sold in 180ml and 750ml is one brand
+    at two prices, and the size travels separately on every row.
     """
     k = key(name)
-    words = [w for w in k.split() if w not in DESCRIPTORS]
+    words = {SYNONYMS.get(w, w) for w in k.split() if w not in DESCRIPTORS}
     # Everything was a descriptor - keep the whole name rather than merging
     # unrelated bottles under an empty core.
-    return f"{kind}|{' '.join(words) if words else k}"
+    return f"{kind}|{' '.join(sorted(words)) if words else k}"
 
 
 def display(names: list[str]) -> str:

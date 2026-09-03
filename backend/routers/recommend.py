@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field, field_validator
 from auth import current_user, is_member
 from database import get_db
 from knowledge import DRINK, DRINK_RE, learned
-from brand_names import core as bn_core
+from brand_names import core as bn_core, key as bn_key
 from liquor_prices import (
     ABV_SOURCES, BOTTLES, NCR, SOURCES, STATES, Bottle, abv_for, for_state,
 )
@@ -44,6 +44,7 @@ BOTTLE_SIZES = (180, 375, 750)
 # the app had told you anything.
 BOTTLE_CHOICES = ("any", "180", "375", "750", "beer")
 
+
 # Budget is a range rather than a ceiling, because "around 500" is what people
 # actually mean. Too narrow a range matches nothing on a price list that moves
 # in fifties, so a span this small is rejected rather than quietly returning
@@ -54,16 +55,57 @@ MIN_BUDGET_SPAN = 60
 # Anything else in the price table (90ml nips, litres, 200ml travel bottles)
 # is not something you would walk out of a shop with for an evening, so
 # spirits are restricted to these when building a suggestion.
-SPIRIT_SIZES = {180: "quarter", 375: "half", 750: "full"}
-SIZE_ORDER = (750, 375, 180)
+SPIRIT_SIZES = {180: "quarter", 375: "half", 700: "full", 750: "full"}
+SIZE_ORDER = (750, 700, 375, 180)
+
+# What each card on the picker actually asks for. 700ml is the standard import
+# bottle - most of the tequila and a lot of the imported scotch is sold in it -
+# and it is a full bottle by any sane reading, so "Full" covers both rather
+# than making people learn that their bottle is 50ml short of a card.
+SIZE_GROUP = {180: (180,), 375: (375,), 750: (700, 750)}
+ALL_SIZES = (180, 375, 700, 750)
+
+
+def _parse_bottle(bottle: str) -> tuple[tuple[int, ...], bool, bool]:
+    """Read the size picker, which takes any combination of its four cards.
+
+    One card was the old rule and it made "a couple of quarters or a few
+    beers" - an ordinary way to plan an evening - unaskable. So the parameter
+    is a comma-separated list now: "375,beer" means half bottles and beer, and
+    nothing at all still means everything.
+
+    Returns (spirit sizes, show beer, show spirits). "any" and the empty
+    string both mean no filter, and are kept apart from an explicit choice so
+    the page can say which it is.
+    """
+    parts = [p.strip() for p in (bottle or "").split(",") if p.strip()]
+    parts = [p for p in parts if p != "any"]
+    for p in parts:
+        if p not in BOTTLE_CHOICES:
+            raise HTTPException(
+                400, f"Pick any of {', '.join(BOTTLE_CHOICES[1:])} - got '{p}'")
+    if not parts:
+        return ALL_SIZES, True, True
+    sizes = tuple(sorted({ml for p in parts if p != "beer"
+                          for ml in SIZE_GROUP[int(p)]}))
+    want_beer = "beer" in parts
+    # A picker showing only beer asks only about beer; one showing only sizes
+    # asks only about spirits. Both together asks for both.
+    return (sizes or ALL_SIZES), want_beer, bool(sizes)
 
 
 
 
 
 
-KINDS = ("whisky", "rum", "vodka", "gin", "beer", "wine", "brandy")
-SPIRIT_KINDS = ("whisky", "rum", "vodka", "gin")
+KINDS = ("whisky", "rum", "vodka", "gin", "tequila", "beer", "wine",
+         "brandy", "liqueur")
+# Everything sold by the bottle, which is everything except beer. This was
+# once the four base spirits, which quietly threw away every wine, brandy and
+# tequila row in the tables - 145 of them - so a wine you had bought and
+# entered could never be suggested back to you.
+BOTTLE_KINDS = ("whisky", "rum", "vodka", "gin", "tequila", "wine",
+                "brandy", "liqueur")
 
 
 # Words that describe a bottle without naming one. A name made only of these
@@ -79,8 +121,19 @@ GENERIC_WORDS = {
 
 
 def _brand_key(brand: str) -> str:
-    """One spelling per brand, so corrections don't fork into near-duplicates."""
-    return " ".join(brand.lower().replace(".", "").replace("'", "").split())
+    """One spelling per brand, so corrections don't fork into near-duplicates.
+
+    This is the stored identity of a correction, and it delegates to the same
+    normaliser the cross-state name matching uses. It used to have its own,
+    looser rule that only dropped full stops and apostrophes, which meant a
+    strength typed into the name forked the row: "Bacardi Orange Rum (5%)" and
+    "Bacardi Orange Rum" were two corrections at one price for one bottle.
+
+    Size is not part of it, on purpose. The same brand in 180ml and 750ml is
+    one brand at two prices, and every lookup here carries the size alongside
+    the key rather than baked into it.
+    """
+    return bn_key(brand)
 
 
 def _overrides_by_state(db: Session) -> dict[str, list[PriceOverride]]:
@@ -141,6 +194,37 @@ def _find_in(rows: list[Bottle], brand: str, size_ml: int) -> Bottle | None:
                                     len(b.brand)))
 
 
+# Full state names don't fit a column an inch wide. Shortened here rather than
+# in the page, because the server is the half that knows what the states are.
+SHORT_STATE = {
+    "Uttar Pradesh": "UP",
+    "Madhya Pradesh": "MP",
+    "Gurugram (Haryana)": "Gurugram",
+    "Maharashtra": "M'rashtra",
+}
+
+
+def _regions_for(state: str) -> tuple[str, ...]:
+    """Which states a bottle's price is shown against.
+
+    Every state we have a published list for, with the one being asked about
+    first. This used to be the three NCR states only, which answered "is it
+    cheaper across the border" for somebody in Delhi and nothing at all for
+    anybody else - a Madhya Pradesh price sat next to three NCR columns and
+    an Uttar Pradesh price never saw Madhya Pradesh, though that is exactly
+    the comparison worth making.
+
+    Capped, because the state list grows every time somebody types a price for
+    a new one, and a strip of ten columns is unreadable on a phone.
+    """
+    rest = [s for s in STATES if s != state]
+    return (state, *rest)[:MAX_COMPARE_REGIONS]
+
+
+# Five published states fit across a phone; more would be a scrollbar.
+MAX_COMPARE_REGIONS = 5
+
+
 def _compare(tables: dict[str, list[Bottle]], regions: tuple[str, ...],
              brand: str, size_ml: int) -> list[dict]:
     """What this bottle costs in each region, corrections included.
@@ -156,6 +240,7 @@ def _compare(tables: dict[str, list[Bottle]], regions: tuple[str, ...],
         hit = _find_in(tables.get(region, []), brand, size_ml)
         out.append({
             "region": region,
+            "label": SHORT_STATE.get(region, region),
             "total": round(hit.mid) if hit else None,
             "manual": bool(hit and hit.source in MANUAL_SOURCES),
         })
@@ -195,6 +280,16 @@ def _apply_overrides(bottles: list[Bottle], rows: list[PriceOverride],
             continue
         cands = [b for b in bottles
                  if b.size_ml == size and _brand_key(b.brand).startswith(k)]
+        # Failing that, the same product under a different arrangement of the
+        # same words. "Smirnoff Mango Chilli" typed by hand against a list
+        # printing "Smirnoff Mirchi Mango Triple Distilled Flavoured Vodka" is
+        # one bottle, and leaving them apart put it on the page twice. The
+        # category is ignored here on purpose - somebody quoting a price
+        # should not also have to get the drop-down right.
+        if not cands:
+            want = bn_core(by_key[(k, size)].brand, "").split("|", 1)[1]
+            cands = [b for b in bottles if b.size_ml == size
+                     and bn_core(b.brand, "").split("|", 1)[1] == want]
         if len(cands) == 1:
             claimed[(_brand_key(cands[0].brand), size)] = (k, size)
 
@@ -343,7 +438,7 @@ def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
     out: list[dict] = []
 
     for b in bottles:
-        if b.kind not in ("whisky", "rum", "vodka", "gin"):
+        if b.kind not in BOTTLE_KINDS:
             continue
         if b.size_ml not in sizes:
             continue
@@ -423,7 +518,10 @@ def _legacy_beer_fields(unit: float, size_ml: int, people: int, abv: float,
 
 
 def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
-           favourites: list[str] | None = None, limit: int = 30) -> list[dict]:
+           favourites: list[str] | None = None,
+           tables: dict[str, list[Bottle]] | None = None,
+           regions: tuple[str, ...] = NCR,
+           limit: int = 30) -> list[dict]:
     """Beers you can buy, priced by the bottle.
 
     This used to price a whole round and lead with that — "Rs 960" for six
@@ -449,6 +547,13 @@ def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
             continue                      # the budget won't buy even one
         buys = int(hi // unit)
         abv, abv_known = _strength(b)
+        # The same side-by-side the spirits get. Beer was the one card without
+        # it, for no better reason than that it was added later - and beer is
+        # where the state gap is most obvious, because a crate is worth
+        # driving for in a way a single bottle of whisky is not.
+        compare = _compare(tables or {}, regions, b.brand, b.size_ml)
+        priced = [c for c in compare if c["total"] is not None]
+        cheapest = min(priced, key=lambda c: c["total"])["region"] if priced else None
         out.append({
             "brand": b.brand,
             "kind": b.kind,
@@ -469,6 +574,8 @@ def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
             "is_override": b.source in MANUAL_SOURCES,
             "is_mine": b.source == "manual-added",
             "source": b.source,
+            "compare": compare,
+            "cheapest_region": cheapest,
             # Deprecated: the round-priced shape this card used to have. The
             # web app and the API deploy separately, so there is always a
             # window where one is older than the other, and a browser holding
@@ -488,7 +595,8 @@ def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
 
 
 def _your_entries(rows: list[PriceOverride], sizes: tuple[int, ...],
-                  is_beer: bool, is_any: bool, lo: float, hi: float) -> list[dict]:
+                  want_beer: bool, want_spirits: bool,
+                  lo: float, hi: float) -> list[dict]:
     """Your own entries for this state, and why any of them isn't showing.
 
     Entering a price and then not finding it is the fastest way to stop
@@ -501,20 +609,20 @@ def _your_entries(rows: list[PriceOverride], sizes: tuple[int, ...],
     out = []
     for r in rows:
         reason = None
-        if is_beer:
-            if r.kind != "beer":
-                reason = f"saved as {r.kind} — it shows under the bottle sizes"
+        if r.kind == "beer":
+            if not want_beer:
+                reason = "saved as beer — tap Beer as well to see it"
             elif r.price > hi:
                 reason = f"Rs {round(r.price)} is above this budget"
-        elif r.kind == "beer" and not is_any:
-            reason = "saved as beer — pick Beer to see it"
-        elif r.kind not in SPIRIT_KINDS and r.kind != "beer":
+        elif not want_spirits:
+            reason = f"saved as {r.kind} — tap a bottle size to see it"
+        elif r.kind not in BOTTLE_KINDS:
             reason = f"saved as {r.kind}, which isn't suggested for an evening"
-        elif r.kind != "beer" and r.size_ml not in SPIRIT_SIZES:
+        elif r.size_ml not in SPIRIT_SIZES:
             reason = (f"saved at {r.size_ml}ml, which isn't one of the three "
                       f"bottle sizes — re-save it as 180, 375 or 750")
-        elif r.kind != "beer" and r.size_ml not in sizes:
-            reason = f"saved at {r.size_ml}ml — pick {r.size_ml}ml or Any to see it"
+        elif r.size_ml not in sizes:
+            reason = f"saved at {r.size_ml}ml — tap {r.size_ml}ml to see it"
         elif not (lo <= r.price <= hi):
             reason = f"Rs {round(r.price)} is outside this budget"
         stamp = r.updated_at or r.created_at
@@ -536,15 +644,19 @@ def _your_entries(rows: list[PriceOverride], sizes: tuple[int, ...],
 
 
 def _band(bottles: list[Bottle], sizes: tuple[int, ...],
-          is_beer: bool) -> dict | None:
-    """Cheapest and dearest of what was asked for in this state."""
-    if is_beer:
-        rows = [b for b in bottles if b.kind == "beer"]
-    else:
-        rows = [
-            b for b in bottles
-            if b.size_ml in sizes and b.kind in SPIRIT_KINDS
-        ]
+          want_beer: bool, want_spirits: bool) -> dict | None:
+    """Cheapest and dearest of what was asked for in this state.
+
+    Spans everything the picker asked for, so a search for halves *and* beer
+    reports one range covering both rather than the range of whichever half
+    happened to be checked.
+    """
+    rows = []
+    if want_beer:
+        rows += [b for b in bottles if b.kind == "beer"]
+    if want_spirits:
+        rows += [b for b in bottles
+                 if b.size_ml in sizes and b.kind in BOTTLE_KINDS]
     if not rows:
         return None
     return {"min": round(min(r.mid for r in rows)), "max": round(max(r.mid for r in rows))}
@@ -563,6 +675,13 @@ class PriceIn(BaseModel):
     # looking exactly like a published one.
     abv: float | None = None
     note: str | None = Field(default=None, max_length=500)
+    # Keep my spelling of the name, rather than snapping to the one already in
+    # the table. Off by default and asked for explicitly, because the two ways
+    # of getting this wrong are both bad: silently renaming loses the detailed
+    # published label, and silently keeping both spellings creates the
+    # duplicate row this whole mechanism exists to prevent. Either way it is
+    # one bottle afterwards - the name changes, a second row is never made.
+    rename: bool = False
 
     @field_validator("brand", "state")
     @classmethod
@@ -724,7 +843,13 @@ def set_price(body: PriceIn, db: Session = Depends(get_db),
     # on the existing row rather than creating a near-duplicate beside it.
     brand, kind, known = _resolve_brand(db, body.brand, body.kind)
 
+    # The key is always the resolved one, so the correction still claims the
+    # published row it belongs to. Only the displayed name changes, and only
+    # when asked - which is what makes renaming safe: there is no spelling of
+    # the name that can turn one bottle into two.
     key = _brand_key(brand)
+    if body.rename and body.brand.strip():
+        brand = body.brand.strip()
     row = (db.query(PriceOverride)
              .filter(PriceOverride.brand_key == key,
                      PriceOverride.state == state,
@@ -805,22 +930,29 @@ def recommend(
             f"Widen the budget - the range needs to be at least "
             f"Rs {MIN_BUDGET_SPAN} (e.g. 500-560, not 500-530).",
         )
-    if bottle not in BOTTLE_CHOICES:
-        raise HTTPException(400, f"Pick one of {BOTTLE_CHOICES}")
-    is_beer = bottle == "beer"
-    is_any = bottle == "any"
-    bottle_ml = 0 if (is_beer or is_any) else int(bottle)
-    # "any" means all three spirit sizes, and beer alongside them - if you
-    # have not said what you want, the budget alone should answer.
-    sizes = BOTTLE_SIZES if (is_any or is_beer) else (bottle_ml,)
+    # Any combination of the four cards, so "a couple of quarters or some
+    # beer" is askable. Nothing picked still means everything.
+    sizes, want_beer, want_spirits = _parse_bottle(bottle)
+    picked = [p.strip() for p in (bottle or "").split(",")
+              if p.strip() and p.strip() != "any"]
+    is_any = not picked
+    # Kept for the page's headline and for older builds: true only when beer
+    # is the whole of the question, which is what it always meant.
+    is_beer = want_beer and not want_spirits and not is_any
+    # The card that was tapped, not the sizes it expands to: tapping "Full"
+    # asks for 700ml and 750ml, and reporting 700 back would be a number
+    # nobody chose.
+    cards = [int(p) for p in picked if p != "beer"]
+    bottle_ml = cards[0] if len(cards) == 1 else 0
 
     by_state = _overrides_by_state(db)
     bottles = _apply_overrides(for_state(state), by_state.get(state, []), state)
 
-    # The side-by-side always includes the state you asked for. Picking
-    # Maharashtra and being shown three NCR prices and none of your own would
-    # be a comparison with the thing you are comparing against missing.
-    regions = tuple(NCR) if state in NCR else (state, *NCR)
+    # Every state we have prices for, the one you asked about first. Three NCR
+    # columns answered "is it cheaper over the border" for somebody in Delhi
+    # and nothing for anybody else - a UP price never saw MP, though that is
+    # the comparison worth making.
+    regions = _regions_for(state)
     tables = {
         r: _apply_overrides(for_state(r), by_state.get(r, []), r) for r in regions
     }
@@ -835,16 +967,14 @@ def recommend(
 
     people_names = [n for n in (names or "").split(",") if n.strip()]
     hist = _history(db, caller, people_names)
-    # The selector decides what you are buying. Beer alongside every spirit
-    # answer would make choosing "beer" mean nothing.
-    picks = ([] if is_beer else
-             _pick(bottles, budget_min, budget_max, people, sizes,
+    # The picker decides what you are buying, and it can now ask for both.
+    picks = (_pick(bottles, budget_min, budget_max, people, sizes,
                    hist["favourites"], hist["brand_avg"], tables, regions,
-                   hist["brand_last"]))
-    # Beer shows for an explicit "Beer" and also under "any", where leaving it
-    # out would mean the answer to "what can I buy" silently excluded beer.
-    beers = (_beers(bottles, budget_min, budget_max, people, hist["favourites"])
-             if (is_beer or is_any) else [])
+                   hist["brand_last"])
+             if want_spirits else [])
+    beers = (_beers(bottles, budget_min, budget_max, people, hist["favourites"],
+                    tables, regions)
+             if want_beer else [])
 
     return {
         "state": state,
@@ -859,20 +989,33 @@ def recommend(
         "bottle": bottle,
         "bottle_ml": bottle_ml,
         "is_beer": is_beer,
-        "bottle_name": ("beer" if is_beer else
-                        "any size" if is_any else SPIRIT_SIZES[bottle_ml]),
+        # What the picker actually asked for, so the page can label the
+        # results without having to re-derive it from the raw parameter.
+        "picked": picked,
+        "want_beer": want_beer,
+        "want_spirits": want_spirits,
+        "sizes": list(sizes) if want_spirits else [],
+        # The cards the page should show as selected, echoed back so it can
+        # trust the server's reading of the parameter rather than its own.
+        "cards": cards,
+        "bottle_name": (
+            "any size" if is_any
+            else " · ".join([SPIRIT_SIZES[c] for c in cards]
+                            + (["beer"] if want_beer else []))
+        ),
         "history": hist,
         "picks": picks,
         # Says why a list is empty: no rows at all for this size in this state
         # is a different problem from everything being over budget.
         # What that size actually costs here, so an empty list can say "they
         # run Rs 95-250" instead of leaving you guessing at the range.
-        "price_band": _band(bottles, sizes, is_beer),
+        "price_band": _band(bottles, sizes, want_beer, want_spirits),
         # Your own entries for this state, each saying whether it is in the
         # list above and, if not, why — so a price you typed is never just
         # silently absent.
         "your_entries": _your_entries(by_state.get(state, []), sizes,
-                                      is_beer, is_any, budget_min, budget_max),
+                                      want_beer, want_spirits,
+                                      budget_min, budget_max),
         # Straight from the knowledge base: drinks you have actually bought
         # whose typical spend lands in this budget. Priced from what you paid,
         # not from a list, so it is called spend rather than a price.
@@ -880,8 +1023,8 @@ def recommend(
                            [g.id for g in db.query(Group).all() if is_member(g, caller)],
                            budget_min, budget_max),
         "size_available": any(
-            b.kind == "beer" if is_beer else
-            (b.size_ml in sizes and b.kind in SPIRIT_KINDS)
+            (want_beer and b.kind == "beer")
+            or (want_spirits and b.size_ml in sizes and b.kind in BOTTLE_KINDS)
             for b in bottles
         ),
         "is_any": is_any,
