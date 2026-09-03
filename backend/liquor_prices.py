@@ -50,7 +50,41 @@ SOURCES = {
         "as_of": "2026-09",
         "note": "UP city ranges (Lucknow/Noida/Ghaziabad) reported as bands",
     },
+    "gyaanvibes-hr": {
+        "url": "https://gyaanvibes.wordpress.com/2026/08/27/best-indian-whisky-in-gurugram/",
+        "as_of": "2026-08",
+        "note": "Haryana Excise Policy 2026-27 minimum selling prices",
+    },
+    "sarkarilist-hr": {
+        "url": "https://sarkarilist.in/haryana-whisky-price/",
+        "as_of": "2026-09",
+        "note": "Haryana retail quart rates; older policy, often below the 26-27 MSP",
+    },
+    "mostnext-hr": {
+        "url": "https://mostnext.com/beer-price-in-haryana/",
+        "as_of": "2026-09",
+        "note": "Haryana beer retail bands",
+    },
+    "madiradeals-dl": {
+        "url": "https://madiradeals.com/kingfisher-beer-price-in-delhi/",
+        "as_of": "2026-09",
+        "note": "Delhi Kingfisher retail bands",
+    },
+    "search-dl-2026": {
+        "url": "https://liquorsprices.com/",
+        "as_of": "2026-09",
+        "note": "Delhi retail bands for common whisky/rum, reported as ranges",
+    },
 }
+
+# Haryana sets a Minimum Selling Price rather than a fixed MRP, so shops
+# legally differ and two honest sources disagree. Where they do, the row spans
+# both as a range instead of picking one and calling it the price.
+#
+# These three are one weekend's driving apart, which is the whole point of
+# comparing them: the same bottle can differ by hundreds of rupees across the
+# NCR, and people genuinely shop across the border for it.
+NCR = ("Uttar Pradesh", "Delhi", "Gurugram (Haryana)")
 
 WHISKY, RUM, VODKA, BEER, GIN, WINE = "whisky", "rum", "vodka", "beer", "gin", "wine"
 
@@ -117,6 +151,70 @@ _DL = [
     ("Alamos Malbec", WINE, 750, 2190), ("Alamos Chardonnay", WINE, 750, 2140),
 ]
 
+# ── Delhi, common brands published as retail bands ───────────────────────────
+# The fixed-MRP list above came out alphabetical and stopped in the Bs, so the
+# brands people actually compare across the NCR were missing from it.
+_DL_RANGES = [
+    ("Royal Stag", WHISKY, 750, 550, 800, "search-dl-2026"),
+    ("Blenders Pride", WHISKY, 750, 550, 800, "search-dl-2026"),
+    ("Old Monk", RUM, 750, 350, 420, "search-dl-2026"),
+    ("Kingfisher", BEER, 650, 160, 220, "madiradeals-dl"),
+    ("Kingfisher", BEER, 500, 140, 170, "madiradeals-dl"),
+    ("Kingfisher", BEER, 330, 100, 130, "madiradeals-dl"),
+    ("Kingfisher Premium", BEER, 650, 150, 180, "madiradeals-dl"),
+    ("Kingfisher Strong", BEER, 650, 160, 200, "madiradeals-dl"),
+    ("Kingfisher Ultra", BEER, 650, 180, 220, "madiradeals-dl"),
+]
+
+# ── Gurugram (Haryana) — MSP regime, so most rows are ranges ─────────────────
+# Where the 2026-27 MSP floor and the retail list disagree, the row spans both.
+_HR_RANGES = [
+    ("McDowell's No.1", WHISKY, 750, 400, 460, "sarkarilist-hr"),
+    ("Royal Stag", WHISKY, 750, 480, 550, "sarkarilist-hr"),
+    ("Royal Challenge", WHISKY, 750, 480, 550, "sarkarilist-hr"),
+    ("Antiquity Blue", WHISKY, 750, 850, 940, "sarkarilist-hr"),
+    ("Blenders Pride", WHISKY, 750, 730, 730, "gyaanvibes-hr"),
+    ("Blenders Pride Reserve", WHISKY, 750, 940, 940, "gyaanvibes-hr"),
+    ("Rockford Classic", WHISKY, 750, 730, 730, "gyaanvibes-hr"),
+    ("Rockford Reserve", WHISKY, 750, 940, 940, "gyaanvibes-hr"),
+    ("Royal Stag Barrel Select", WHISKY, 750, 650, 650, "gyaanvibes-hr"),
+    ("Signature", WHISKY, 750, 700, 700, "sarkarilist-hr"),
+    ("Antiquity Rare", WHISKY, 750, 700, 700, "sarkarilist-hr"),
+    ("McDowell's Single Malt", WHISKY, 750, 850, 850, "sarkarilist-hr"),
+    ("AC Black", WHISKY, 750, 400, 400, "sarkarilist-hr"),
+    ("Mughal Monarch", WHISKY, 750, 310, 310, "sarkarilist-hr"),
+    ("Smirnoff", VODKA, 750, 650, 650, "sarkarilist-hr"),
+    ("Bacardi", RUM, 750, 650, 650, "sarkarilist-hr"),
+    ("Kingfisher Premium", BEER, 650, 135, 165, "mostnext-hr"),
+    ("Kingfisher Premium", BEER, 500, 102, 125, "mostnext-hr"),
+    ("Kingfisher Premium", BEER, 330, 78, 100, "mostnext-hr"),
+    ("Kingfisher Strong", BEER, 650, 138, 168, "mostnext-hr"),
+    ("Kingfisher Ultra", BEER, 330, 112, 140, "mostnext-hr"),
+    ("Tuborg Green", BEER, 650, 135, 162, "mostnext-hr"),
+    ("Tuborg Green", BEER, 500, 98, 120, "mostnext-hr"),
+    ("Tuborg Strong", BEER, 650, 138, 168, "mostnext-hr"),
+    ("Carlsberg", BEER, 650, 152, 182, "mostnext-hr"),
+    ("Carlsberg Elephant Strong", BEER, 500, 122, 150, "mostnext-hr"),
+    ("Bira 91 White", BEER, 330, 120, 150, "mostnext-hr"),
+    ("Bira 91 Blonde", BEER, 330, 118, 148, "mostnext-hr"),
+    ("Haywards 5000", BEER, 650, 128, 158, "mostnext-hr"),
+    ("Royal Challenge", BEER, 650, 130, 160, "mostnext-hr"),
+    ("Godfather Strong", BEER, 650, 130, 160, "mostnext-hr"),
+    ("Bro Code", BEER, 330, 110, 140, "mostnext-hr"),
+    ("Foster's Lager", BEER, 500, 118, 145, "mostnext-hr"),
+    ("Budweiser", BEER, 650, 198, 238, "mostnext-hr"),
+    ("Budweiser", BEER, 330, 120, 150, "mostnext-hr"),
+    ("Budweiser Magnum", BEER, 750, 228, 268, "mostnext-hr"),
+    ("Heineken", BEER, 650, 290, 350, "mostnext-hr"),
+    ("Heineken", BEER, 330, 162, 198, "mostnext-hr"),
+    ("Corona Extra", BEER, 330, 212, 258, "mostnext-hr"),
+    ("Hoegaarden", BEER, 330, 258, 308, "mostnext-hr"),
+    ("Stella Artois", BEER, 330, 218, 262, "mostnext-hr"),
+    ("Asahi Super Dry", BEER, 330, 218, 260, "mostnext-hr"),
+    ("Erdinger Wheat", BEER, 500, 358, 430, "mostnext-hr"),
+    ("Kronenbourg 1664 Blanc", BEER, 330, 252, 305, "mostnext-hr"),
+]
+
 # ── Uttar Pradesh — published as ranges, kept as ranges ───────────────────────
 _UP_RANGES = [
     ("Royal Stag", WHISKY, 90, 85, 100, "madiradeals-up"),
@@ -138,6 +236,8 @@ BOTTLES: list[Bottle] = (
     [Bottle(b, k, s, "Maharashtra", p, "madirakprice-mh") for b, k, s, p in _MH]
     + [Bottle(b, k, s, "Delhi", p, "boldsky-dl") for b, k, s, p in _DL]
     + [Bottle(b, k, s, "Uttar Pradesh", lo, src, hi) for b, k, s, lo, hi, src in _UP_RANGES]
+    + [Bottle(b, k, s, "Gurugram (Haryana)", lo, src, hi) for b, k, s, lo, hi, src in _HR_RANGES]
+    + [Bottle(b, k, s, "Delhi", lo, src, hi) for b, k, s, lo, hi, src in _DL_RANGES]
 )
 
 STATES = sorted({b.state for b in BOTTLES})
@@ -145,6 +245,33 @@ STATES = sorted({b.state for b in BOTTLES})
 
 def for_state(state: str) -> list[Bottle]:
     return [b for b in BOTTLES if b.state.lower() == (state or "").lower()]
+
+
+def _key(brand: str) -> str:
+    return " ".join(brand.lower().replace(".", "").split())
+
+
+def across(brand: str, size_ml: int, regions=NCR) -> list[dict]:
+    """The same bottle's price in each region, for a side-by-side.
+
+    Matches on brand and size only — never converts between sizes or states,
+    so a region with no row for this exact bottle simply reports none.
+    """
+    out = []
+    for region in regions:
+        hit = next(
+            (b for b in BOTTLES
+             if b.state == region and b.size_ml == size_ml and _key(b.brand) == _key(brand)),
+            None,
+        )
+        out.append({
+            "region": region,
+            "price": None if not hit else hit.price,
+            "price_max": None if not hit else hit.price_max,
+            "mid": None if not hit else hit.mid,
+            "source": None if not hit else hit.source,
+        })
+    return out
 
 
 def coverage() -> dict[str, dict]:

@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from auth import current_user, is_member
 from database import get_db
-from liquor_prices import BOTTLES, SOURCES, STATES, Bottle, for_state
+from liquor_prices import BOTTLES, NCR, SOURCES, STATES, Bottle, across, for_state
 from models import Group, User
 
 router = APIRouter(prefix="/recommend", tags=["recommend"])
@@ -111,6 +111,15 @@ def _pick(bottles: list[Bottle], budget: float, people: int, strength: str,
             if b.mid > budget:
                 continue
             qty, cost = 1, b.mid
+        # The NCR trio is close enough to drive between, and the same bottle
+        # can differ by hundreds of rupees across it, so show all three.
+        compare = [
+            {**r, "total": None if r["mid"] is None else round(r["mid"] * qty)}
+            for r in across(b.brand, b.size_ml)
+        ]
+        priced = [c for c in compare if c["total"] is not None]
+        cheapest = min(priced, key=lambda c: c["total"])["region"] if priced else None
+
         out.append({
             "brand": b.brand, "kind": b.kind, "size_ml": b.size_ml,
             "qty": qty, "unit_price": b.price, "unit_price_max": b.price_max,
@@ -119,6 +128,8 @@ def _pick(bottles: list[Bottle], budget: float, people: int, strength: str,
             "is_favourite": b.brand.lower() in fav,
             "source": b.source,
             "per_head": round(cost / max(people, 1)),
+            "compare": compare,
+            "cheapest_region": cheapest,
         })
 
     out.sort(key=lambda r: (
@@ -134,6 +145,7 @@ def meta(_: User = Depends(current_user)):
     """States we have real prices for, and where those prices came from."""
     return {
         "states": STATES,
+        "ncr": list(NCR),
         "sources": SOURCES,
         "row_count": len(BOTTLES),
         "strengths": list(ML_PER_HEAD),
@@ -175,6 +187,7 @@ def recommend(
 
     return {
         "state": state,
+        "ncr": list(NCR),
         "people": people,
         "budget": budget,
         "budget_per_head": round(budget / people),

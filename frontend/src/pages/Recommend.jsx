@@ -31,8 +31,11 @@ export default function Recommend() {
   const [meta, setMeta]       = useState(null)
   const [friends, setFriends] = useState([])
   const [state, setState]     = useState('')
-  const [people, setPeople]   = useState(2)
-  const [budget, setBudget]   = useState(2000)
+  // Held as strings while typing. As numbers, clearing the field produced
+  // parseFloat('') -> 0, so the box refilled itself with a "0" you had to
+  // delete before every edit, and a budget of 0 got sent to the server.
+  const [people, setPeople]   = useState('2')
+  const [budget, setBudget]   = useState('2000')
   const [strength, setStrength] = useState('normal')
   const [withWho, setWithWho] = useState([])
   const [result, setResult]   = useState(null)
@@ -73,10 +76,14 @@ export default function Recommend() {
       .catch(() => setFriends([]))
   }, [user?.name])
 
+  const peopleN = Math.max(1, parseInt(people, 10) || 0)
+  const budgetN = Math.max(0, parseFloat(budget) || 0)
+  const canRun = state && peopleN >= 1 && budgetN > 0
+
   // People in the room = you + everyone picked, unless you override the count
   const toggle = (n) => setWithWho((w) => {
     const next = w.includes(n) ? w.filter((x) => x !== n) : [...w, n]
-    setPeople(next.length + 1)
+    setPeople(String(next.length + 1))
     return next
   })
 
@@ -84,7 +91,8 @@ export default function Recommend() {
     setError(''); setBusy(true)
     try {
       const r = await getRecommendation({
-        state, people, budget, strength, names: withWho.join(','),
+        state, people: peopleN, budget: budgetN, strength,
+        names: withWho.join(','),
       })
       setResult(r.data)
     } catch (err) {
@@ -123,6 +131,7 @@ export default function Recommend() {
             </select>
             <p className="text-[10px] text-gray-400 mt-1">
               Only states with published prices we could source are listed.
+              Picks also show what the same bottle costs across the NCR.
             </p>
           </div>
 
@@ -151,16 +160,20 @@ export default function Recommend() {
               <label className="label">People</label>
               <input
                 className="input font-bold" type="number" min="1" max="30"
+                inputMode="numeric"
                 value={people}
-                onChange={(e) => setPeople(parseInt(e.target.value || '1', 10))}
+                onChange={(e) => setPeople(e.target.value)}
+                onBlur={() => setPeople((v) => (parseInt(v, 10) > 0 ? String(parseInt(v, 10)) : '1'))}
               />
             </div>
             <div>
               <label className="label">Budget (₹)</label>
               <input
-                className="input font-bold" type="number" min="100" step="100"
+                className="input font-bold" type="number" min="0" step="100"
+                inputMode="numeric"
                 value={budget}
-                onChange={(e) => setBudget(parseFloat(e.target.value || '0'))}
+                onChange={(e) => setBudget(e.target.value)}
+                onBlur={() => setBudget((v) => (parseFloat(v) > 0 ? String(parseFloat(v)) : ''))}
               />
             </div>
           </div>
@@ -186,7 +199,7 @@ export default function Recommend() {
             </div>
           </div>
 
-          <button onClick={run} className="btn-primary" disabled={busy || !state}>
+          <button onClick={run} className="btn-primary" disabled={busy || !canRun}>
             {busy ? 'Working it out…' : 'Recommend'}
           </button>
         </div>
@@ -248,6 +261,31 @@ export default function Recommend() {
                 <p className="text-[10px] text-gray-400 mt-0.5">
                   {INR(p.per_head)} a head · {p.total_ml}ml total
                 </p>
+
+                {/* Same bottle across the NCR — these are a drive apart, and
+                    the gap is often worth more than the drive. */}
+                {p.compare?.some((c) => c.total !== null) && (
+                  <div className="grid grid-cols-3 gap-1 mt-2 pt-2 border-t border-amber-100">
+                    {p.compare.map((c) => {
+                      const best = c.region === p.cheapest_region && c.total !== null
+                      return (
+                        <div
+                          key={c.region}
+                          className={`rounded px-1.5 py-1 text-center ${
+                            best ? 'bg-green-50 border border-green-200' : 'bg-amber-50/60'
+                          }`}
+                        >
+                          <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide truncate">
+                            {c.region.replace(' (Haryana)', '')}
+                          </p>
+                          <p className={`text-[11px] font-black ${best ? 'text-green-700' : 'text-gray-500'}`}>
+                            {c.total === null ? '—' : INR(c.total)}
+                          </p>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
             ))}
 
@@ -271,7 +309,11 @@ export default function Recommend() {
               <p className="text-[10px] text-gray-500 leading-relaxed mt-2">
                 Alcohol is a state subject in India, so every state sets its own MRP.
                 These are scraped from public listings of state price lists and are
-                indicative — shops vary and excise years change them.
+                indicative — shops vary and excise years change them. Haryana sets a
+                minimum selling price rather than a fixed MRP, so its rows are ranges
+                and shops can legally charge above them. A dash means that region has
+                no published price for that exact bottle and size — never a guess
+                carried over from another state.
               </p>
               <ul className="mt-2 space-y-1">
                 {Object.entries(result.sources).map(([k, v]) => (
