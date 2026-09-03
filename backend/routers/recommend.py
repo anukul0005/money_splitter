@@ -550,6 +550,19 @@ class PriceIn(BaseModel):
     def _tidy(cls, v: str) -> str:
         return " ".join(v.split())
 
+    @field_validator("state")
+    @classmethod
+    def _sane_state(cls, v: str) -> str:
+        # The state box is free text so a price can be entered for somewhere
+        # we have no list for at all. That is the point of it - but a state
+        # becomes a permanent entry in everyone's dropdown, so it has to look
+        # like a place name rather than a slip of the keyboard.
+        if not 2 <= len(v) <= 60:
+            raise ValueError("state must be between 2 and 60 characters")
+        if not re.fullmatch(r"[A-Za-z][A-Za-z .,()&'\-]*", v):
+            raise ValueError("state should be a place name, letters and spaces")
+        return v
+
     @field_validator("kind")
     @classmethod
     def _known_kind(cls, v: str) -> str:
@@ -615,14 +628,21 @@ def set_price(body: PriceIn, db: Session = Depends(get_db),
     correction instead of stacking a second one, so the table can't end up
     with two answers to the same question.
     """
+    # Snap to a state we already know, whatever the typing. Without this
+    # "uttar pradesh" and "Uttar Pradesh" become two states in the dropdown,
+    # each holding half the corrections - the same duplicate-naming problem
+    # the brand tables have, arriving through the one free-text box.
+    known = set(STATES) | {s for (s,) in db.query(PriceOverride.state).distinct()}
+    state = next((k for k in known if k.lower() == body.state.lower()), body.state)
+
     key = _brand_key(body.brand)
     row = (db.query(PriceOverride)
              .filter(PriceOverride.brand_key == key,
-                     PriceOverride.state == body.state,
+                     PriceOverride.state == state,
                      PriceOverride.size_ml == body.size_ml)
              .first())
     if row is None:
-        row = PriceOverride(brand_key=key, state=body.state, size_ml=body.size_ml)
+        row = PriceOverride(brand_key=key, state=state, size_ml=body.size_ml)
         db.add(row)
     row.brand = body.brand
     row.kind = body.kind

@@ -76,11 +76,16 @@ export default function PriceEditForm({ state, states = [], initial = {}, onDone
         </div>
         <div>
           <label className="label">State</label>
-          <select className="input text-xs" value={where} onChange={(e) => setWhere(e.target.value)}>
-            {(states.length ? states : [where]).filter(Boolean).map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
+          {/* Free text, not a dropdown. A locked list meant a price could only
+              be entered for a state we already had — which is exactly the
+              state you would never need to correct. Type a new one and it
+              becomes selectable everywhere. */}
+          <input className="input text-xs" value={where} list="known-states"
+                 placeholder="e.g. Punjab"
+                 onChange={(e) => setWhere(e.target.value)} />
+          <datalist id="known-states">
+            {states.map((s) => <option key={s} value={s} />)}
+          </datalist>
         </div>
       </div>
 
@@ -145,7 +150,8 @@ export default function PriceEditForm({ state, states = [], initial = {}, onDone
       </div>
       <p className="text-[9px] text-gray-400">
         Everyone sees this, and it replaces the published price for this brand,
-        state and size until someone removes it.
+        state and size until someone removes it. A state we have no price list
+        for is fine — your entry becomes the price there.
       </p>
     </div>
   )

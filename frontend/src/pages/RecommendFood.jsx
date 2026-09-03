@@ -73,7 +73,9 @@ export default function RecommendFood({ tab, setTab }) {
 
   // Two independent calls, loaded independently, so a failure in either says
   // which one broke instead of leaving an empty form with a generic message.
-  useEffect(() => {
+  // Pulled out of the effect so it can be called again after somebody adds a
+  // place: a brand-new city has to appear in the selector straight away.
+  const loadMeta = () =>
     getFoodMeta()
       .then((m) => {
         // A misrouted /api can return the SPA's index.html with a 200, which
@@ -99,6 +101,8 @@ export default function RecommendFood({ tab, setTab }) {
         )
       })
 
+  useEffect(() => {
+    loadMeta()
     getFriends(user?.name)
       .then((f) => setFriends(f.data.map((x) => x.name)))
       .catch(() => setFriends([]))
@@ -142,12 +146,13 @@ export default function RecommendFood({ tab, setTab }) {
     }
   }, [city, cuisine, cuisineList])
 
-  const run = async () => {
+  const run = async (over = {}) => {
     setError(''); setBusy(true)
     setShowAllPicks(false); setShowAllStreet(false)
     try {
       const r = await getFoodRecommendation({
-        city, people: peopleN, budget_min: loN, budget_max: hiN,
+        city: over.city || city,
+        people: peopleN, budget_min: loN, budget_max: hiN,
         cuisine, kind, veg, names: withWho.join(','),
       })
       setResult(r.data)
@@ -300,7 +305,12 @@ export default function RecommendFood({ tab, setTab }) {
               kinds={meta?.kinds ?? []}
               initial={{ city, kind: 'dine-in' }}
               onCancel={() => setEditing(null)}
-              onDone={() => { setEditing(null); if (result) run() }}
+              onDone={(saved) => {
+                setEditing(null)
+                loadMeta()
+                if (saved?.city && saved.city !== city) setCity(saved.city)
+                if (result) run({ city: saved?.city })
+              }}
             />
           ) : (
             <button
@@ -470,7 +480,12 @@ export default function RecommendFood({ tab, setTab }) {
                       veg_only: p.veg_only, for_two: p.for_two,
                     }}
                     onCancel={() => setEditing(null)}
-                    onDone={() => { setEditing(null); run() }}
+                    onDone={(saved) => {
+                      setEditing(null)
+                      loadMeta()
+                      if (saved?.city && saved.city !== city) setCity(saved.city)
+                      run({ city: saved?.city })
+                    }}
                   />
                 )}
               </div>
@@ -580,7 +595,12 @@ export default function RecommendFood({ tab, setTab }) {
                   kinds={meta?.kinds ?? []}
                   initial={{ city: result.city, kind: 'dine-in' }}
                   onCancel={() => setEditing(null)}
-                  onDone={() => { setEditing(null); run() }}
+                  onDone={(saved) => {
+                      setEditing(null)
+                      loadMeta()
+                      if (saved?.city && saved.city !== city) setCity(saved.city)
+                      run({ city: saved?.city })
+                    }}
                 />
               ) : (
                 <button

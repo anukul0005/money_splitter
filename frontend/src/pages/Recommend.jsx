@@ -90,7 +90,10 @@ export default function Recommend() {
   // Two independent calls, loaded independently. They used to share a
   // Promise.all, so a failure in either left the state dropdown empty with a
   // generic message and no way to tell which one broke.
-  useEffect(() => {
+  // Pulled out of the effect so it can be called again after somebody adds a
+  // price: a brand-new state has to appear in the selector straight away, not
+  // after a reload.
+  const loadMeta = () =>
     getRecommendMeta()
       .then((m) => {
         // A misrouted /api can return the SPA's index.html with a 200, which
@@ -116,6 +119,8 @@ export default function Recommend() {
         )
       })
 
+  useEffect(() => {
+    loadMeta()
     getFriends(user?.name)
       .then((f) => setFriends(f.data.map((x) => x.name)))
       .catch(() => setFriends([]))
@@ -147,12 +152,13 @@ export default function Recommend() {
     return next
   })
 
-  const run = async () => {
+  const run = async (over = {}) => {
     setError(''); setBusy(true)
     setShowAllPicks(false); setShowAllBeers(false)
     try {
       const r = await getRecommendation({
-        state, people: peopleN, budget_min: loN, budget_max: hiN,
+        state: over.state || state,
+        people: peopleN, budget_min: loN, budget_max: hiN,
         bottle: bottle || 'any',
         names: withWho.join(','),
       })
@@ -311,7 +317,12 @@ export default function Recommend() {
               states={meta?.states ?? []}
               initial={{ state, size_ml: bottle && bottle !== 'beer' ? Number(bottle) : 750 }}
               onCancel={() => setEditing(null)}
-              onDone={() => { setEditing(null); if (result) run() }}
+              onDone={(saved) => {
+                setEditing(null)
+                loadMeta()
+                if (saved?.state && saved.state !== state) setState(saved.state)
+                if (result) run({ state: saved?.state })
+              }}
             />
           ) : (
             <button
@@ -456,7 +467,12 @@ export default function Recommend() {
                       abv: p.abv, abv_known: p.abv_known,
                     }}
                     onCancel={() => setEditing(null)}
-                    onDone={() => { setEditing(null); run() }}
+                    onDone={(saved) => {
+                        setEditing(null)
+                        loadMeta()
+                        if (saved?.state && saved.state !== state) setState(saved.state)
+                        run({ state: saved?.state })
+                      }}
                   />
                 )}
 
@@ -582,7 +598,12 @@ export default function Recommend() {
                           abv: b.abv, abv_known: b.abv_known,
                         }}
                         onCancel={() => setEditing(null)}
-                        onDone={() => { setEditing(null); run() }}
+                        onDone={(saved) => {
+                        setEditing(null)
+                        loadMeta()
+                        if (saved?.state && saved.state !== state) setState(saved.state)
+                        run({ state: saved?.state })
+                      }}
                       />
                     )}
                   </div>
@@ -698,7 +719,12 @@ export default function Recommend() {
                   states={meta?.states ?? []}
                   initial={{ state: result.state, size_ml: result.bottle_ml || 750 }}
                   onCancel={() => setEditing(null)}
-                  onDone={() => { setEditing(null); run() }}
+                  onDone={(saved) => {
+                        setEditing(null)
+                        loadMeta()
+                        if (saved?.state && saved.state !== state) setState(saved.state)
+                        run({ state: saved?.state })
+                      }}
                 />
               ) : (
                 <button
