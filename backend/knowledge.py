@@ -180,12 +180,79 @@ def classify(t: str) -> str | None:
 
 
 # ── Linking an expense to the published catalogue ─────────────────────────────
+# Words that describe a bottle without naming one. A catalogue entry made only
+# of these identifies nothing, and an expense sharing only these with a brand
+# has not actually matched it.
+# One set, used for two jobs that turn out to be the same question: which
+# words in a name identify something, and which merely describe it. There were
+# briefly two definitions of this, the second silently shadowing the first,
+# which is why "vodka" happily matched a row published as "Vodka Premium".
+GENERIC = {
+    # what is in the bottle, and how good it says it is
+    "whisky", "whiskey", "rum", "vodka", "gin", "beer", "wine", "brandy",
+    "lager", "ale", "stout", "scotch", "malt", "blended", "grain", "spirit",
+    "premium", "super", "extra", "strong", "superior", "deluxe", "special",
+    "exclusive", "original", "classic", "reserve", "select", "fine", "rare",
+    "aged", "smooth", "pure", "triple", "distilled", "new", "no", "xxx",
+    # how much of it
+    "bottle", "bottles", "half", "full", "qtr", "quarter", "peg", "pint",
+    # the occasion, from the expense side
+    "food", "foods", "drink", "drinks", "snack", "snacks", "meal", "meals",
+    "lunch", "dinner", "breakfast", "brunch", "eat", "eating", "order",
+    "bill", "party", "outing", "trip", "day", "night", "evening", "morning",
+    "other", "others", "item", "items", "stuff", "thing", "things",
+    # what a place is, rather than which place it is. Restaurant names are
+    # full of these, and matching on them linked "hotel-food airbnb" to Kake
+    # Da Hotel, "Postman kitchen" to Asia Kitchen, and "Lunch at barbeque
+    # company" to The Wine Company.
+    "hotel", "kitchen", "house", "company", "route", "corner", "point",
+    "junction", "garden", "palace", "express", "cafe", "coffee", "bar",
+    "restaurant", "dine", "dining", "place", "club", "lounge", "grill",
+    "kitchens", "rooms", "room",
+    # a dish or a cuisine, which is not a venue either
+    "chicken", "chinese", "mughlai", "punjabi", "italian", "continental",
+    "biryani", "kebab", "pizza", "dhaba", "thali", "tandoor", "tandoori",
+    "barbeque", "barbecue", "bbq", "grills", "sizzler", "sizzlers",
+    # filler
+    "the", "and", "of", "at", "in", "on", "for", "with", "from", "to",
+}
+
+
+def _distinctive(s: str) -> set[str]:
+    """The words in a name that actually identify something.
+
+    Single letters are dropped, but only when something longer survives them.
+    "J&B" is nothing but single letters and is still a brand, and discarding
+    them left it unable to match itself.
+    """
+    words = {w for w in _norm(s).split() if w not in GENERIC}
+    return {w for w in words if len(w) > 1} or words
+
+
+def _squash(s: str) -> str:
+    """A name with its spaces closed up, for people who type it that way.
+
+    A leading "the" goes with them: nobody writes "The Beer Cafe" in an
+    expense, they write "Beer Cafe", and that is the same place.
+    """
+    n = _norm(s)
+    if n.startswith("the "):
+        n = n[4:]
+    return n.replace(" ", "")
+
+
 @lru_cache(maxsize=1)
 def _catalogue() -> tuple[list[tuple[str, str]], np.ndarray]:
     """Every brand and restaurant we hold, embedded once.
 
     Built lazily so importing this module stays cheap, and cached because the
-    catalogue is static for the life of the process.
+    published catalogue is static for the life of the process. Names people
+    have entered themselves are added per call - see `_extra`.
+
+    Entries that name nothing are left out entirely. Two rows are published
+    as "Premium Whisky" and "Vodka Premium", and an expense reading just
+    "vodka" was linking to the latter and then being offered back as a
+    suggestion to go and buy it.
     """
     from food_prices import PLACES
     from liquor_prices import BOTTLES
@@ -194,17 +261,37 @@ def _catalogue() -> tuple[list[tuple[str, str]], np.ndarray]:
     seen: set[tuple[str, str]] = set()
     for b in BOTTLES:
         key = (DRINK, b.brand.lower())
-        if key not in seen:
-            seen.add(key)
-            names.append((DRINK, b.brand))
+        if key in seen:
+            continue
+        seen.add(key)
+        names.append((DRINK, b.brand))
     for p in PLACES:
         key = (FOOD, p.name.lower())
-        if key not in seen:
-            seen.add(key)
-            names.append((FOOD, p.name))
+        if key in seen:
+            continue
+        seen.add(key)
+        names.append((FOOD, p.name))
 
     matrix = np.array([embed(n) for _, n in names], dtype=np.float32)
     return names, matrix
+
+
+def _extra(db: Session | None) -> list[tuple[str, str]]:
+    """Brands and places people added themselves.
+
+    Without these, somebody's own entry can never be recognised in their own
+    expenses: "J&B Drinks" matched nothing because J&B exists only because
+    they typed it in. The whole point of the corrections is that they become
+    part of what the app knows.
+    """
+    if db is None:
+        return []
+    from models import PlaceOverride, PriceOverride
+    out = [(DRINK, b) for (b,) in db.query(PriceOverride.brand).distinct()
+           if _distinctive(b)]
+    out += [(FOOD, n) for (n,) in db.query(PlaceOverride.name).distinct()
+            if _distinctive(n)]
+    return out
 
 
 # How good a cross-category match has to be before it may overrule the
@@ -213,19 +300,85 @@ def _catalogue() -> tuple[list[tuple[str, str]], np.ndarray]:
 REFILE_FLOOR = 0.45
 
 
-def _best(t: str, kind: str) -> tuple[str | None, float]:
-    """Nearest catalogue entry of one kind, with its cosine score."""
+def _best(t: str, kind: str,
+          db: Session | None = None) -> tuple[str | None, float, bool]:
+    """Nearest catalogue entry of one kind, with its cosine score.
+
+    Two rules beyond nearest-neighbour, both learned from what the real data
+    did:
+
+    A match must share a word that identifies something. "Beer at sanawad"
+    and "Stok Lager Beer" have only the word beer in common, which is not a
+    match - it was linking every unbranded beer to whichever brand happened
+    to sit nearest, and offering that brand back as something you buy.
+
+    And where several entries score within a hair of each other, the shortest
+    wins. "Absolut vodka passion fruit" scored fractionally higher against
+    "Absolut GRAPE FRUIT VODKA" than against plain "Absolut", because it
+    shares two more words - but grape fruit is the wrong bottle and Absolut
+    is the right family.
+    """
     names, matrix = _catalogue()
-    mask = np.array([k == kind for k, _ in names])
+    pool = list(names)
+    mat = matrix
+    for k, n in _extra(db):
+        pool.append((k, n))
+    if len(pool) > len(names):
+        mat = np.vstack([matrix, np.array(
+            [embed(n) for _, n in pool[len(names):]], dtype=np.float32)])
+
+    mask = np.array([k == kind for k, _ in pool])
     if not mask.any():
-        return None, 0.0
+        return None, 0.0, False
     q = np.array(embed(t), dtype=np.float32)
-    sims = matrix[mask] @ q                     # both sides are unit length
-    idx = int(np.argmax(sims))
-    return [n for (k, n), m in zip(names, mask) if m][idx], float(sims[idx])
+    sims = mat[mask] @ q                        # both sides are unit length
+    cands = [n for (k, n), m in zip(pool, mask) if m]
+
+    want = _distinctive(t)
+    top = float(sims.max())
+
+    # The whole brand name appearing in the expense is not a similarity
+    # question, it is a fact. "J&B Drinks" contains "J&B", and its cosine of
+    # 0.19 - two single letters against a longer phrase - would have thrown it
+    # away. The longest such name wins, being the most specific.
+    padded = f" {_norm(t)} "
+    # Spaces closed up too: "oldmonk(half) train" is Old Monk written the way
+    # people type it, and matching only on whole words lost it. Long enough to
+    # be meaningful - a three-letter run inside a sentence is a coincidence.
+    squashed = _squash(t)
+    phrase = [i for i in range(len(cands))
+              if (_norm(cands[i]) and f" {_norm(cands[i])} " in padded)
+              or (len(_squash(cands[i])) >= 6 and _squash(cands[i]) in squashed)]
+    if phrase:
+        i = max(phrase, key=lambda i: (len(_norm(cands[i])), float(sims[i])))
+        return cands[i], float(sims[i]), True
+
+    # A match has to share a word that identifies something. "Beer at sanawad"
+    # and "Stok Lager Beer" have only the word beer in common, which linked
+    # every unbranded beer to whichever brand sat nearest and then offered it
+    # back as something you buy.
+    shared = [i for i in range(len(cands))
+              if _distinctive(cands[i]) and want & _distinctive(cands[i])]
+    if not shared:
+        return None, top, False
+
+    # Prefer a name the expense fully accounts for. "Absolut vodka passion
+    # fruit" scored higher against "Absolut GRAPE FRUIT VODKA" than against
+    # plain "Absolut", because it shares two more words - but grape fruit is
+    # a different bottle, and the expense never says grape. A candidate whose
+    # every word appears in the expense has not invented anything; among
+    # those, the most specific wins.
+    inside = [i for i in shared if _distinctive(cands[i]) <= want]
+    if inside:
+        i = max(inside, key=lambda i: (len(_distinctive(cands[i])), float(sims[i])))
+        return cands[i], float(sims[i]), False
+
+    i = max(shared, key=lambda i: float(sims[i]))
+    return cands[i], float(sims[i]), False
 
 
-def link(t: str, kind: str, floor: float = 0.25) -> tuple[str | None, float, str]:
+def link(t: str, kind: str, floor: float = 0.25,
+         db: Session | None = None) -> tuple[str | None, float, str]:
     """The catalogue entry this expense is most likely talking about.
 
     Returns (name, score, kind) - the kind because retrieval is allowed to
@@ -243,8 +396,8 @@ def link(t: str, kind: str, floor: float = 0.25) -> tuple[str | None, float, str
     something you buy.
     """
     other = FOOD if kind == DRINK else DRINK
-    a_name, a_score = _best(t, kind)
-    b_name, b_score = _best(t, other)
+    a_name, a_score, a_exact = _best(t, kind, db)
+    b_name, b_score, b_exact = _best(t, other, db)
     # Refiling needs a match that is strong on its own, not merely stronger
     # than a weak one. Two near-misses differing by a tenth is noise, and
     # letting that flip a category put popcorn, samosas and a taxi to the
@@ -252,23 +405,12 @@ def link(t: str, kind: str, floor: float = 0.25) -> tuple[str | None, float, str
     # "Bombay to barca" like "Bombay Special Whisky" at around 0.31, which
     # was enough under the old rule. Beer Cafe matches its own name far above
     # this, which is the case the rule exists for.
-    if b_score >= REFILE_FLOOR and b_score > a_score + 0.10:
-        a_name, a_score, kind = b_name, b_score, other
-    if a_score < floor:
+    if b_name and b_score >= REFILE_FLOOR and b_score > a_score + 0.10:
+        a_name, a_score, a_exact, kind = b_name, b_score, b_exact, other
+    # An exact phrase match skips the floor: the name is literally there.
+    if a_name is None or (a_score < floor and not a_exact):
         return None, a_score, kind
     return a_name, a_score, kind
-
-
-# Words that describe the category, not the thing. A suggestion reading "food
-# expense food" or "snacks" is not a suggestion, so these are stripped out of
-# a fallback label and an entry left with nothing gets no label at all - which
-# keeps it out of `learned` entirely.
-GENERIC = {
-    "food", "foods", "drink", "drinks", "snack", "snacks", "meal", "meals",
-    "lunch", "dinner", "breakfast", "brunch", "eat", "eating", "order",
-    "bill", "party", "outing", "trip", "day", "night", "evening", "morning",
-    "extra", "other", "others", "item", "items", "stuff", "thing", "things",
-}
 
 
 def _label(t: str) -> str | None:
@@ -320,7 +462,7 @@ def index_expense(db: Session, expense, group_id: int | None = None) -> str | No
 
     # Retrieval may refile this: see link(). "Beer Cafe" arrives here as a
     # drink and leaves as food.
-    brand, score, kind = link(t, kind)
+    brand, score, kind = link(t, kind, db=db)
     heads = max(int(expense.divider or 1), 1)
     if row is None:
         row = KnowledgeItem(expense_id=expense.id)
