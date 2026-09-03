@@ -582,6 +582,51 @@ export default function Recommend() {
               </>
             )}
 
+            {result.learned?.length > 0 && (
+              <>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest pt-2">
+                  From what you actually buy
+                </p>
+                {/* Straight out of the knowledge base: every food and drink
+                    expense is embedded, and these are the ones whose typical
+                    spend lands in this budget. The figure is spend, not a
+                    shelf price — one expense can be a round for six or a
+                    single bottle, and nothing here can tell which. */}
+                {result.learned.map((x) => (
+                  <div key={x.label} className="card p-3.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm font-black text-gray-900 flex-1 min-w-0 break-words">
+                        {x.label}
+                        {x.matched_brand && (
+                          <span className="ml-1.5 text-[9px] font-bold text-brand-600 uppercase tracking-wider">
+                            in the price list
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-sm font-black text-brand-600 flex-shrink-0">
+                        {INR(x.avg_spend)}
+                      </p>
+                    </div>
+                    <p className="text-[11px] font-bold text-gray-700 mt-0.5">
+                      bought {x.times}{x.times === 1 ? ' time' : ' times'}
+                      <span className="font-normal text-gray-400">
+                        {' '}· you spent {INR(x.min_spend)}–{INR(x.max_spend)}
+                      </span>
+                    </p>
+                    {x.last_had && (
+                      <p className="text-[10px] text-gray-400 mt-0.5">
+                        Last on <span className="font-bold text-gray-500">{fmtDate(x.last_had)}</span>
+                      </p>
+                    )}
+                  </div>
+                ))}
+                <p className="text-[10px] text-gray-400 px-1">
+                  Average spend on the occasions this came up — not a bottle
+                  price, since an expense can cover a round.
+                </p>
+              </>
+            )}
+
             {/* Everything typed in for this state. A price you entered and
                 then couldn't find is the fastest way to stop trusting the
                 feature, and there are honest reasons it can be filtered out —

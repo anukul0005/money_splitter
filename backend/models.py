@@ -199,3 +199,42 @@ class PlaceOverride(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(),
                         onupdate=func.now())
+
+
+class KnowledgeItem(Base):
+    """One food or drink expense, embedded and searchable.
+
+    The recommender's price tables are static and public; this is the half
+    that is yours. Every expense mentioning food or drink lands here as a
+    vector, so "what do we actually drink" is answered by retrieval rather
+    than by a regex somebody has to keep patching.
+
+    `embedding` is a pgvector column and is deliberately absent from this
+    class: SQLAlchemy has no native type for it and the pgvector package is
+    one dependency more than this needs. It is added by create_tables() and
+    written with a cast in knowledge.py, which is the whole of the raw SQL in
+    this codebase.
+
+    `matched_brand` is the catalogue entry the text was linked to, if any, and
+    `match_score` is how confident that link is - kept so a bad link can be
+    found and the threshold argued about with evidence.
+    """
+
+    __tablename__ = "knowledge_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # One row per expense: re-indexing updates rather than piling up.
+    expense_id = Column(Integer, ForeignKey("expenses.id", ondelete="CASCADE"),
+                        nullable=False, unique=True, index=True)
+    # Denormalised so search can be scoped to the caller's groups without a
+    # join, which is what keeps one person's spending out of another's results.
+    group_id = Column(Integer, nullable=False, index=True)
+    kind = Column(String(10), nullable=False, index=True)   # drink | food
+    title = Column(Text, nullable=True)          # the text that was embedded
+    label = Column(String(200), nullable=True)   # canonical name, or the phrase
+    matched_brand = Column(String(200), nullable=True)
+    match_score = Column(Float, nullable=True)
+    amount = Column(Float, nullable=True)
+    per_head = Column(Float, nullable=True)
+    occurred_on = Column(String(20), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

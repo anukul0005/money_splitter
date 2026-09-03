@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from auth import current_user, is_member
 from database import get_db
+from knowledge import DRINK, DRINK_RE, learned
 from liquor_prices import (
     ABV_SOURCES, BOTTLES, NCR, SOURCES, STATES, Bottle, abv_for, for_state,
 )
@@ -31,15 +32,6 @@ router = APIRouter(prefix="/recommend", tags=["recommend"])
 
 # Words that mark an expense as a drinks run. Deliberately \b-bounded: an
 # unbounded "gin" matched "Monginis", a bakery, and put cake in the liquor data.
-DRINK_RE = re.compile(
-    r"\b(vat\s*69|bacardi|whisky|whiskey|rum|beer|vodka|gin|wine|old\s*monk|"
-    r"blenders?|magic\s*moments?|breezer|tuborg|kingfisher|budweiser|corona|"
-    r"jack\s*daniel|black\s*label|red\s*label|royal\s*stag|imperial\s*blue|"
-    r"8\s*pm|mcdowell|antiquity|glenlivet|jameson|smirnoff|liquor|alcohol|"
-    r"booze|daru|thek|absolut|j&b|chivas|100\s*pipers|officer'?s\s*choice|"
-    r"bagpiper|captain\s*morgan|grey\s*goose|glenfiddich|black\s*dog)\b",
-    re.I,
-)
 
 # How much the group is drinking between them, in the sizes spirits are sold
 # in. 180ml across two people is 90ml each — it is a total for the room, not
@@ -769,6 +761,12 @@ def recommend(
         # silently absent.
         "your_entries": _your_entries(by_state.get(state, []), sizes,
                                       is_beer, is_any, budget_min, budget_max),
+        # Straight from the knowledge base: drinks you have actually bought
+        # whose typical spend lands in this budget. Priced from what you paid,
+        # not from a list, so it is called spend rather than a price.
+        "learned": learned(db, DRINK,
+                           [g.id for g in db.query(Group).all() if is_member(g, caller)],
+                           budget_min, budget_max),
         "size_available": any(
             b.kind == "beer" if is_beer else
             (b.size_ml in sizes and b.kind in SPIRIT_KINDS)

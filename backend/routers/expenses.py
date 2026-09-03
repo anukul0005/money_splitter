@@ -11,6 +11,21 @@ from activity import record_activity
 router = APIRouter(prefix="/expenses", tags=["expenses"])
 
 
+def _index(db, expense) -> None:
+    """Put this expense into the knowledge base, or take it out.
+
+    Wrapped because indexing is a side effect of saving an expense and must
+    never be the reason somebody cannot record what they spent. A failure here
+    costs one row in a retrieval index that a reindex will repair; a failure
+    raised costs the user their expense.
+    """
+    try:
+        from knowledge import index_expense
+        index_expense(db, expense)
+    except Exception as e:  # pragma: no cover - never worth failing a save
+        print(f"[knowledge] indexing expense {expense.id} failed: {e}")
+
+
 def _compute_individual(amount: float, divider: int) -> float:
     return round(amount / divider, 2) if divider > 0 else amount
 
@@ -48,6 +63,10 @@ def create_expense(payload: ExpenseCreate, db: Session = Depends(get_db),
     # Who did it comes from the token; the summary says who paid
     record_activity(db, group, caller.name, "added an expense", summary)
 
+    # Tonight's drinks are searchable before the next recommendation is asked
+    # for. In the same transaction as the expense, so the two cannot disagree.
+    _index(db, expense)
+
     db.commit()
     db.refresh(expense)
 
@@ -83,6 +102,10 @@ def update_expense(expense_id: int, payload: ExpenseCreate, db: Session = Depend
 
     summary = f"{expense.title or expense.category or 'Expense'}: ₹{expense.amount:,.0f} paid by {expense.paid_by}"
     record_activity(db, group, caller.name, "edited an expense", summary)
+
+    # Re-index: an edit can change the amount, the date, or whether this is
+    # food at all, and a stale vector would keep answering the old question.
+    _index(db, expense)
 
     db.commit()
     db.refresh(expense)

@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from auth import current_user, is_member
 from database import get_db
+from knowledge import FOOD, FOOD_RE, GROCERY_RE, learned
 from food_prices import (
     CITIES, CUISINES, DINE_IN, DISHES, KINDS, NCR_CITIES, PLACES, SOURCES,
     Place, cuisines_in, dishes_at, for_city, street_food,
@@ -33,29 +34,12 @@ router = APIRouter(prefix="/food", tags=["food"])
 # drinks regex is: an unbounded "roll" matches "trolley", and an unbounded
 # "tea" matches "steam". Deliberately excludes bare "bar" and "pub", which are
 # drinks runs and already counted by the drink recommender.
-FOOD_RE = re.compile(
-    r"\b(food|lunch|dinner|breakfast|brunch|meal|restaurant|resto|dhaba|"
-    r"cafe|café|eat|eating|swiggy|zomato|order(?:ed|ing)?\s*in|takeaway|"
-    r"pizza|burger|biryani|biriyani|momo|momos|roll|rolls|thali|buffet|"
-    r"chinese|paneer|chicken|kebab|kabab|tikka|butter\s*chicken|chole|"
-    r"bhature|paratha|parantha|dosa|idli|sandwich|pasta|noodles|ramen|sushi|"
-    r"barbeque|barbecue|bbq|dessert|ice\s*cream|cake|bakery|snacks?|"
-    r"domino'?s|mcdonald'?s|kfc|subway|burger\s*king|haldiram'?s|bikaner|"
-    r"barbeque\s*nation|social|starbucks|chaayos|keventers)\b",
-    re.I,
-)
 
 # Bought to cook, not to eat out. Half the "snacks" in the data are a Zepto or
 # Blinkit run and raw chicken, which say nothing about which restaurant to
 # pick. An expense mentioning any of these is dropped even if it also names a
 # restaurant - one line covering both a grocery run and dinner is rare, and
 # under-counting is the safer error when the count is presented as a fact.
-GROCERY_RE = re.compile(
-    r"\b(grocery|groceries|bigbasket|big\s*basket|blinkit|zepto|instamart|"
-    r"dmart|d.?mart|kirana|supermarket|sabzi|vegetables?|ration|atta|"
-    r"raw|milk|eggs)\b",
-    re.I,
-)
 
 # Restaurant names that are also ordinary English words. Matching these as
 # substrings put "SOCIAL" in the favourites off the word "social" in an
@@ -572,6 +556,11 @@ def recommend_food(
         # silently absent.
         "your_places": _your_places(your_rows, people, cuisine, kind, veg,
                                     budget_min, budget_max),
+        # From the knowledge base: places and meals you have actually paid for
+        # whose typical spend lands in this budget.
+        "learned": learned(db, FOOD,
+                           [g.id for g in db.query(Group).all() if is_member(g, caller)],
+                           budget_min, budget_max),
         # Only worth showing when the budget is genuinely tight; at Rs 3000 a
         # head, suggesting momos is not advice.
         "street": _street(city, budget_min, budget_max, people),

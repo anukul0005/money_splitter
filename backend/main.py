@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from database import create_tables, get_settings
 from routers import (
     groups, expenses, settlements, stats, users, payments, activity, recommend,
-    food,
+    food, knowledge_api,
 )
 
 
@@ -77,6 +77,7 @@ app.include_router(payments.router)
 app.include_router(activity.router)
 app.include_router(recommend.router)
 app.include_router(food.router)
+app.include_router(knowledge_api.router)
 
 
 @app.get("/health")

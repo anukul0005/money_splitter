@@ -98,6 +98,19 @@ def create_tables():
         conn.execute(text(
             "ALTER TABLE price_overrides ADD COLUMN IF NOT EXISTS abv DOUBLE PRECISION"
         ))
+        # The knowledge base's vector column. pgvector has no SQLAlchemy type
+        # here, so the column is added by hand after create_all() has built
+        # the rest of the table. Wrapped because a database without the
+        # extension should still start - the app degrades to no retrieval
+        # rather than refusing to boot.
+        try:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            conn.execute(text(
+                "ALTER TABLE knowledge_items "
+                "ADD COLUMN IF NOT EXISTS embedding vector(2048)"
+            ))
+        except Exception as e:  # pragma: no cover - depends on the server
+            print(f"[warn] pgvector unavailable, retrieval disabled: {e}")
         conn.commit()
 
     # `payments`, `activities` and `activity_seen` are created by create_all
