@@ -184,7 +184,7 @@ def build() -> Path:
     mono(p, [
         "  497   expenses scanned          2048   dimensions per vector",
         "  180   indexed as vectors           1   new dependency (numpy)",
-        "   36   drink / 144 food          0.8.0  pgvector, on Neon",
+        "   27   drink / 153 food          0.8.0  pgvector, on Neon",
     ])
     p.ln(2)
     p.set_font("Helvetica", "", 8.6)
@@ -198,10 +198,10 @@ def build() -> Path:
     p.add_page()
     h2(p, "WHY", "The tables know prices. They don't know you.")
     body(p,
-         "The recommender already stood on two solid tables: 961 Uttar Pradesh "
-         "liquor prices parsed from the state's own PDFs, and 66 Delhi NCR "
-         "restaurants with cited costs for two. Both are public, static and "
-         "correct.")
+         "The recommender already stood on two solid tables: 1,254 liquor prices "
+         "across five states, most of them parsed from the states' own PDFs, "
+         "and 66 Delhi NCR restaurants with cited costs for two. Both are "
+         "public, static and correct.")
     body(p,
          "Neither knows that you and Anubhav drank Old Monk in March and paid "
          "Rs 675. That second thing is the half a generic recommender can never "
@@ -252,8 +252,8 @@ def build() -> Path:
          "Zepto run or raw chicken, which say a great deal about your kitchen and "
          "nothing about which restaurant to pick.")
     table(p, ["Bucket", "Rows", "What it is"],
-          [["drink", "36", "Bottles, rounds, bar tabs"],
-           ["food", "144", "Meals out, deliveries, snacks"],
+          [["drink", "27", "Bottles, rounds, bar tabs"],
+           ["food", "153", "Meals out, deliveries, snacks"],
            ["skipped", "317", "Fuel, rent, cabs, groceries"]],
           [42, 24, 100])
     body(p,
@@ -372,7 +372,7 @@ def build() -> Path:
     # ── 06 ───────────────────────────────────────────────────────────────
     h2(p, "06", "Linking, and letting retrieval overrule the rules")
     body(p,
-         "Every catalogue entry - 961 bottles and 66 restaurants - is embedded "
+         "Every catalogue entry - 1,254 bottles and 66 restaurants - is embedded "
          "once and cached. A new expense is compared against all of them, and the "
          "nearest entry above 0.25 becomes its canonical label. That is what "
          "collapses 'old monk', 'Old monk Drinks' and 'oldmonk 750' into a single "
