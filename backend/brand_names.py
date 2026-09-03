@@ -20,6 +20,7 @@ bottle is called. It deliberately depends on nothing.
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 
 # Words that say what kind of drink it is, or how good it claims to be.
@@ -54,8 +55,16 @@ PROTECTED = tuple(sorted((
 
 
 def key(name: str) -> str:
-    """Lowercase, no punctuation, single spaces - for comparing names."""
-    return " ".join((name or "").lower().replace(".", "").replace("'", "").split())
+    """Lowercase, no punctuation, digits split off letters, single spaces.
+
+    The digit split matters as much here as it does in the embeddings: people
+    type "VAT69" and "8PM" while the lists print "VAT 69" and "8 PM". Without
+    it those are different brands and a correction to one never reaches the
+    other.
+    """
+    s = (name or "").lower().replace(".", "").replace("'", "")
+    s = re.sub(r"(?<=[a-z])(?=\d)|(?<=\d)(?=[a-z])", " ", s)
+    return " ".join(s.split())
 
 
 def core(name: str, kind: str) -> str:

@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { savePrice } from '../api'
+import { useEffect, useState } from 'react'
+import { listBrands, savePrice } from '../api'
 
 const KINDS = ['whisky', 'rum', 'vodka', 'gin', 'beer', 'wine', 'brandy']
 const SIZES = [180, 375, 750, 330, 500, 650, 1000]
@@ -29,6 +29,25 @@ export default function PriceEditForm({ state, states = [], initial = {}, onDone
   const [note, setNote]   = useState('')
   const [busy, setBusy]   = useState(false)
   const [error, setError] = useState('')
+  // Bottles this state already holds, so the form can say "that one exists"
+  // instead of quietly creating a second spelling of it.
+  const [known, setKnown] = useState([])
+
+  useEffect(() => {
+    if (!where) return setKnown([])
+    listBrands(where).then((r) => setKnown(r.data)).catch(() => setKnown([]))
+  }, [where])
+
+  // Same rule the server uses, close enough for a live hint: strip the words
+  // that describe rather than identify and compare what is left. The server
+  // is still the authority and will snap the name on save.
+  const boil = (s) => (s || '').toLowerCase().split('.').join('').split("'").join('')
+    .replace(/(?<=[a-z])(?=\d)|(?<=\d)(?=[a-z])/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w && !/^(whisky|whiskey|rum|vodka|gin|beer|wine|brandy|lager|scotch|malt|blended|grain|premium|super|extra|strong|superior|deluxe|special|exclusive|original|classic|reserve|select|fine|rare|aged|smooth|no|the|and|of|with|triple|distilled|pure|xxx|new|seagrams?)$/.test(w))
+    .join(' ')
+
+  const existing = known.find((k) => boil(k.brand) && boil(k.brand) === boil(brand))
 
   const priceN = parseFloat(price)
   const sizeN  = parseInt(size, 10)
@@ -64,15 +83,35 @@ export default function PriceEditForm({ state, states = [], initial = {}, onDone
       <div>
         <label className="label">Brand</label>
         <input className="input text-xs" value={brand} placeholder="e.g. Vat 69"
+               list="known-brands"
                onChange={(e) => setBrand(e.target.value)} />
+        <datalist id="known-brands">
+          {known.map((k) => <option key={k.brand} value={k.brand} />)}
+        </datalist>
+        {/* A bottle already in the list cannot be added a second time under a
+            new spelling - only its price changes. Said here rather than left
+            for the save to do silently, so the name in the box is not a
+            surprise afterwards. */}
+        {existing && (
+          <p className="text-[10px] text-brand-600 mt-1">
+            Already in the list as <span className="font-bold">{existing.brand}</span>
+            {existing.yours ? ' (yours)' : ''} — saving changes its price, and
+            keeps that name.
+          </p>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-2">
         <div>
           <label className="label">Type</label>
-          <select className="input text-xs" value={kind} onChange={(e) => setKind(e.target.value)}>
+          <select className="input text-xs" value={existing ? existing.kind : kind}
+                  disabled={!!existing}
+                  onChange={(e) => setKind(e.target.value)}>
             {KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
           </select>
+          {existing && (
+            <p className="text-[9px] text-gray-400 mt-1">Set by the existing entry</p>
+          )}
         </div>
         <div>
           <label className="label">State</label>

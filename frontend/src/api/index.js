@@ -124,6 +124,7 @@ export const getFoodRecommendation = (p) => api.get('/food/', { params: p })
 // the state minimum, a restaurant raises its prices, a place is in no listing at
 // all. These layer over the tables so the app improves as it gets used.
 export const listPrices   = (state) => api.get('/recommend/prices', { params: { state } })
+export const listBrands   = (state) => api.get('/recommend/brands', { params: { state } })
 export const savePrice    = (body)  => api.post('/recommend/prices', body)
 export const deletePrice  = (id)    => api.delete(`/recommend/prices/${id}`)
 

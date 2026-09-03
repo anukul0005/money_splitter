@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field, field_validator
 from auth import current_user, is_member
 from database import get_db
 from knowledge import DRINK, DRINK_RE, learned
+from brand_names import core as bn_core
 from liquor_prices import (
     ABV_SOURCES, BOTTLES, NCR, SOURCES, STATES, Bottle, abv_for, for_state,
 )
@@ -598,6 +599,64 @@ class PriceIn(BaseModel):
         return round(v, 1)
 
 
+def _known_brands(db: Session, state: str = "") -> list[dict]:
+    """Every bottle we already hold, published or entered by hand.
+
+    Scoped to a state when one is given, because "do we have this already" is
+    a different question in Delhi than in Punjab.
+    """
+    out: dict[str, dict] = {}
+    for b in BOTTLES:
+        if state and b.state != state:
+            continue
+        e = out.setdefault(b.brand, {"brand": b.brand, "kind": b.kind,
+                                     "sizes": set(), "yours": False})
+        e["sizes"].add(b.size_ml)
+    q = db.query(PriceOverride)
+    if state:
+        q = q.filter(PriceOverride.state == state)
+    for r in q.all():
+        e = out.setdefault(r.brand, {"brand": r.brand, "kind": r.kind,
+                                     "sizes": set(), "yours": False})
+        e["sizes"].add(r.size_ml)
+        e["yours"] = True
+    return [{**e, "sizes": sorted(e["sizes"])}
+            for e in sorted(out.values(), key=lambda x: x["brand"].lower())]
+
+
+def _resolve_brand(db: Session, brand: str, kind: str) -> tuple[str, str, bool]:
+    """Snap a typed brand onto one we already have.
+
+    A bottle already in the table must not be addable a second time under a
+    slightly different spelling - "Vat 69 Blended" alongside "Vat 69" is two
+    bottles as far as everything downstream is concerned, and only one of them
+    has the published price. So the name is resolved before anything is
+    written, and what comes back is the existing spelling.
+
+    Matching is by the same core used to unify names across states: strip the
+    words that describe rather than identify, and compare what is left. The
+    category is tried first and then ignored, because somebody correcting a
+    price should not have to also get the drop-down right.
+
+    Returns (name, kind, already_known).
+    """
+    by_core: dict[str, tuple[str, str]] = {}
+    loose: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for e in _known_brands(db):
+        c = bn_core(e["brand"], e["kind"])
+        by_core.setdefault(c, (e["brand"], e["kind"]))
+        loose[c.split("|", 1)[1]].append((e["brand"], e["kind"]))
+
+    hit = by_core.get(bn_core(brand, kind))
+    if hit:
+        return hit[0], hit[1], True
+    # Same words, different category: trust the table's category over the form.
+    same = loose.get(bn_core(brand, kind).split("|", 1)[1], [])
+    if len(same) == 1:
+        return same[0][0], same[0][1], True
+    return brand, kind, False
+
+
 def _override_out(r: PriceOverride) -> dict:
     return {
         "id": r.id, "brand": r.brand, "kind": r.kind, "state": r.state,
@@ -619,6 +678,13 @@ def list_prices(state: str = "", db: Session = Depends(get_db),
     return [_override_out(r) for r in rows]
 
 
+@router.get("/brands", response_model=list[dict])
+def list_brands(state: str = "", db: Session = Depends(get_db),
+                _: User = Depends(current_user)):
+    """Bottles we already hold, so the form can suggest rather than duplicate."""
+    return _known_brands(db, state)
+
+
 @router.post("/prices", response_model=dict)
 def set_price(body: PriceIn, db: Session = Depends(get_db),
               caller: User = Depends(current_user)):
@@ -635,7 +701,12 @@ def set_price(body: PriceIn, db: Session = Depends(get_db),
     known = set(STATES) | {s for (s,) in db.query(PriceOverride.state).distinct()}
     state = next((k for k in known if k.lower() == body.state.lower()), body.state)
 
-    key = _brand_key(body.brand)
+    # A bottle already in the table cannot be added again under a new name -
+    # only its price changes. Resolved before the lookup so the upsert lands
+    # on the existing row rather than creating a near-duplicate beside it.
+    brand, kind, known = _resolve_brand(db, body.brand, body.kind)
+
+    key = _brand_key(brand)
     row = (db.query(PriceOverride)
              .filter(PriceOverride.brand_key == key,
                      PriceOverride.state == state,
@@ -644,15 +715,18 @@ def set_price(body: PriceIn, db: Session = Depends(get_db),
     if row is None:
         row = PriceOverride(brand_key=key, state=state, size_ml=body.size_ml)
         db.add(row)
-    row.brand = body.brand
-    row.kind = body.kind
+    row.brand = brand
+    row.kind = kind
     row.price = body.price
     row.abv = body.abv
     row.note = (body.note or "").strip() or None
     row.set_by = caller.name
     db.commit()
     db.refresh(row)
-    return _override_out(row)
+    # `known` tells the form whether it corrected the name, so the page can
+    # say "that was already in the list" rather than silently renaming it.
+    return {**_override_out(row), "matched_existing": known,
+            "submitted_brand": body.brand}
 
 
 @router.delete("/prices/{price_id}", response_model=dict)
