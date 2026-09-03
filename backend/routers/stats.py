@@ -185,7 +185,8 @@ def get_friends(db: Session = Depends(get_db), caller: User = Depends(current_us
 
     for g in groups:
         member_names = [m.name for m in g.members]
-        if name_l not in [n.lower() for n in member_names]:
+        members_l = {n.lower() for n in member_names}
+        if name_l not in members_l:
             continue
 
         group_names[g.id] = g.name
@@ -197,6 +198,14 @@ def get_friends(db: Session = Depends(get_db), caller: User = Depends(current_us
 
         for (debtor, creditor), amt in _pairwise_group_debts(g).items():
             dl, cl = debtor.lower(), creditor.lower()
+            # Membership is what makes someone a friend, so a debt naming
+            # anyone else is not allowed to introduce them. An expense can
+            # still reference a person who was later removed from the group,
+            # and that must not put their name in front of someone who has
+            # never shared a group with them - this list is offered as
+            # "people you know" in the recommender, not just as a balance.
+            if dl not in members_l or cl not in members_l:
+                continue
             if dl == name_l and cl != name_l:
                 net[cl] = net.get(cl, 0.0) - amt
                 display.setdefault(cl, creditor)

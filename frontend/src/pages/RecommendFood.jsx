@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { getFoodMeta, getFoodRecommendation, getFriends } from '../api'
 
 import LoadingSpinner from '../components/LoadingSpinner'
+import PlaceEditForm from '../components/PlaceEditForm'
 import RecommendTabs from '../components/RecommendTabs'
 import { useUser } from '../UserContext'
 
@@ -48,6 +49,9 @@ export default function RecommendFood({ tab, setTab }) {
   const [result, setResult]   = useState(null)
   const [error, setError]     = useState('')
   const [busy, setBusy]       = useState(false)
+  // Which card's form is open, keyed by the card. `'new'` opens the
+  // standalone add form. Only one is ever open at a time.
+  const [editing, setEditing] = useState(null)
 
   // Two independent calls, loaded independently, so a failure in either says
   // which one broke instead of leaving an empty form with a generic message.
@@ -391,8 +395,63 @@ export default function RecommendFood({ tab, setTab }) {
                     </p>
                   </div>
                 )}
+
+                <div className="flex items-center gap-2 mt-1">
+                  {p.added_by_hand && (
+                    <span className="badge bg-blue-50 text-blue-700 border border-blue-200">
+                      added by hand
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setEditing(editing === `p${i}` ? null : `p${i}`)}
+                    className="text-[10px] font-bold text-gray-400 hover:text-brand-600"
+                  >
+                    {editing === `p${i}` ? 'Close' : 'Prices changed? Fix it'}
+                  </button>
+                </div>
+
+                {editing === `p${i}` && (
+                  <PlaceEditForm
+                    city={result.city}
+                    cities={meta?.cities ?? []}
+                    cuisines={cuisineList}
+                    kinds={meta?.kinds ?? []}
+                    initial={{
+                      name: p.name, city: result.city, area: p.area,
+                      cuisines: p.cuisines, kind: p.kind,
+                      veg_only: p.veg_only, for_two: p.for_two,
+                    }}
+                    onCancel={() => setEditing(null)}
+                    onDone={() => { setEditing(null); run() }}
+                  />
+                )}
               </div>
             ))}
+
+            {/* Somewhere no listing covers. Offered beside the results, since
+                noticing a gap is exactly when someone will fill it. */}
+            <div className="card">
+              {editing === 'new' ? (
+                <PlaceEditForm
+                  city={result.city}
+                  cities={meta?.cities ?? []}
+                  cuisines={meta?.cuisines ?? []}
+                  kinds={meta?.kinds ?? []}
+                  initial={{ city: result.city, kind: 'dine-in' }}
+                  onCancel={() => setEditing(null)}
+                  onDone={() => { setEditing(null); run() }}
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setEditing('new')}
+                  className="text-xs font-bold text-gray-500 hover:text-brand-600"
+                >
+                  + Add a place we don&apos;t have
+                </button>
+              )}
+            </div>
 
             {/* The small-budget answer. Street staples genuinely have no one
                 address, so they are priced by the plate rather than by place. */}

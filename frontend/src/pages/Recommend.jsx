@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { getRecommendMeta, getRecommendation, getFriends } from '../api'
 
 import LoadingSpinner from '../components/LoadingSpinner'
+import PriceEditForm from '../components/PriceEditForm'
 import RecommendTabs from '../components/RecommendTabs'
 import RecommendFood from './RecommendFood'
 import { useUser } from '../UserContext'
@@ -58,6 +59,9 @@ export default function Recommend() {
   const [result, setResult]   = useState(null)
   const [error, setError]     = useState('')
   const [busy, setBusy]       = useState(false)
+  // Which card's price form is open, keyed by the card's own key. `'new'`
+  // opens the standalone add form. Only one is ever open at a time.
+  const [editing, setEditing] = useState(null)
 
   // Two independent calls, loaded independently. They used to share a
   // Promise.all, so a failure in either left the state dropdown empty with a
@@ -361,6 +365,45 @@ export default function Recommend() {
                   {p.budget_buys > 1 && ` · budget buys ${p.budget_buys}`}
                 </p>
 
+                {/* What was actually spent on nights this came up. Worded as
+                    spend rather than as this bottle's price, because an
+                    expense can be a round of Breezers or a split bill — it is
+                    not the same number as the shelf price above. */}
+                {p.your_avg != null && (
+                  <p className="text-[10px] text-gray-400 mt-0.5">
+                    Your {p.matched_favourite} nights average{' '}
+                    <span className="font-bold text-gray-500">{INR(p.your_avg)}</span> an expense
+                  </p>
+                )}
+
+                <div className="flex items-center gap-2 mt-1">
+                  {p.is_override && (
+                    <span className="badge bg-blue-50 text-blue-700 border border-blue-200">
+                      corrected by hand
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setEditing(editing === `p${i}` ? null : `p${i}`)}
+                    className="text-[10px] font-bold text-gray-400 hover:text-brand-600"
+                  >
+                    {editing === `p${i}` ? 'Close' : 'Wrong price? Fix it'}
+                  </button>
+                </div>
+
+                {editing === `p${i}` && (
+                  <PriceEditForm
+                    state={result.state}
+                    states={meta?.states ?? []}
+                    initial={{
+                      brand: p.brand, kind: p.kind, state: result.state,
+                      size_ml: p.size_ml, price: p.total,
+                    }}
+                    onCancel={() => setEditing(null)}
+                    onDone={() => { setEditing(null); run() }}
+                  />
+                )}
+
                 {/* Same bottle across the NCR — these are a drive apart, and
                     the gap is often worth more than the drive. */}
                 {p.compare?.some((c) => c.total !== null) && (
@@ -428,6 +471,29 @@ export default function Recommend() {
                 ))}
               </>
             )}
+
+            {/* A bottle we simply don't have. Offered next to the results
+                rather than buried, because the moment you notice something is
+                missing is the moment you're willing to type it in. */}
+            <div className="card">
+              {editing === 'new' ? (
+                <PriceEditForm
+                  state={result.state}
+                  states={meta?.states ?? []}
+                  initial={{ state: result.state, size_ml: result.bottle_ml || 750 }}
+                  onCancel={() => setEditing(null)}
+                  onDone={() => { setEditing(null); run() }}
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setEditing('new')}
+                  className="text-xs font-bold text-gray-500 hover:text-brand-600"
+                >
+                  + Add a bottle or price we don&apos;t have
+                </button>
+              )}
+            </div>
 
             {/* Say plainly where the numbers came from and how stale they are */}
             <details className="card">

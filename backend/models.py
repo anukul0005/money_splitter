@@ -126,3 +126,72 @@ class ActivitySeen(Base):
 
     user_name = Column(String(100), primary_key=True)
     last_seen_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PriceOverride(Base):
+    """A price somebody corrected by hand, layered over the published tables.
+
+    The state lists are exact but they are also a snapshot: an excise year
+    turns over, a shop charges above the minimum, a brand is renamed. Somebody
+    standing in the shop knows better than a PDF from April, so they can say
+    so, and the correction wins from then on.
+
+    Corrections are shared rather than private. In a group that drinks
+    together the useful thing is that everyone sees the real price, and
+    `set_by` keeps it attributable so a wrong one can be traced and undone.
+
+    One row per brand, state and size - `_key` in the router normalises the
+    brand so "Vat 69" and "VAT 69 " do not become two different corrections.
+    """
+
+    __tablename__ = "price_overrides"
+
+    id = Column(Integer, primary_key=True, index=True)
+    brand = Column(String(200), nullable=False)
+    brand_key = Column(String(200), nullable=False, index=True)  # normalised
+    kind = Column(String(20), nullable=False)      # whisky, rum, beer, …
+    state = Column(String(100), nullable=False, index=True)
+    size_ml = Column(Integer, nullable=False)
+    price = Column(Float, nullable=False)
+    note = Column(Text, nullable=True)
+    set_by = Column(String(100), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(),
+                        onupdate=func.now())
+
+
+class PlaceOverride(Base):
+    """A restaurant somebody added or corrected by hand.
+
+    The food table is a snapshot of published listings, and restaurants move
+    faster than anything else in this app: a place raises its prices, opens a
+    second branch, or simply is not in any listing we could source. Somebody
+    who ate there last week knows better than a blog post, so they can add it
+    and it is recommended from then on.
+
+    The point of this is that the app gets better the more it is used. A
+    correction here is worth more than the published row it replaces, because
+    it came from someone who actually paid the bill.
+
+    Shared, like the drink corrections, and attributed by `set_by` so a wrong
+    one can be traced. `cuisines` is a comma-separated list against the
+    controlled vocabulary in food_prices, so a hand-added place is filterable
+    exactly like a published one.
+    """
+
+    __tablename__ = "place_overrides"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(200), nullable=False)
+    name_key = Column(String(200), nullable=False, index=True)   # normalised
+    area = Column(String(200), nullable=True)
+    city = Column(String(100), nullable=False, index=True)
+    cuisines = Column(String(300), nullable=True)   # comma-separated
+    for_two = Column(Float, nullable=False)
+    kind = Column(String(30), nullable=False, default="dine-in")
+    veg_only = Column(Boolean, default=False)
+    note = Column(Text, nullable=True)
+    set_by = Column(String(100), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(),
+                        onupdate=func.now())

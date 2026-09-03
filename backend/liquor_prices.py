@@ -23,6 +23,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import up_prices
+
 # Sources, cited per row below.
 SOURCES = {
     "madirakprice-mh": {
@@ -35,21 +37,9 @@ SOURCES = {
         "as_of": "2026-09",
         "note": "Aggregator of the Delhi Excise Department price list",
     },
-    "madiradeals-up": {
-        "url": "https://madiradeals.com/royal-stag-whisky-price-in-up/",
-        "as_of": "2026-09",
-        "note": "UP retail ranges; published as ranges, not fixed MRP",
-    },
-    "oldmonkprice-up": {
-        "url": "https://oldmonkprice.com/up",
-        "as_of": "2026-09",
-        "note": "Old Monk UP rates",
-    },
-    "search-up-2026": {
-        "url": "https://liquorsprices.com/",
-        "as_of": "2026-09",
-        "note": "UP city ranges (Lucknow/Noida/Ghaziabad) reported as bands",
-    },
+    # UP's own PDFs, parsed in full. They replaced the aggregator rows that
+    # used to cover this state - see the note above _UP_ROWS.
+    **up_prices.SOURCES,
     "gyaanvibes-hr": {
         "url": "https://gyaanvibes.wordpress.com/2026/08/27/best-indian-whisky-in-gurugram/",
         "as_of": "2026-08",
@@ -128,9 +118,24 @@ ABV_BY_BRAND = {
 ABV_TYPICAL = {WHISKY: 42.8, RUM: 42.8, VODKA: 40.0, GIN: 40.0, BEER: 5.0, WINE: 12.5}
 
 
+def _abv_key(brand: str) -> str:
+    return " ".join(brand.lower().replace(".", "").replace("'", "").split())
+
+
+# Both tables are keyed the same way, so "Officer's Choice" and "Officers
+# Choice" are the same brand. Built once rather than normalised per lookup.
+_ABV_LOOKUP = {_abv_key(k): v for k, v in ABV_BY_BRAND.items()}
+
+
 def abv_for(brand: str, kind: str) -> tuple[float, bool]:
     """(strength, is_published). False means it's the category typical."""
-    hit = ABV_BY_BRAND.get(" ".join(brand.lower().replace(".", "").split()))
+    key = _abv_key(brand)
+    hit = _ABV_LOOKUP.get(key)
+    if hit is None:
+        # UP prints the strength inside the brand name on many labels. That is
+        # a published figure off the state's own list, so it counts the same as
+        # the hand-curated table above rather than as a guess.
+        hit = up_prices.ABV.get(key)
     if hit is not None:
         return hit, True
     return ABV_TYPICAL.get(kind, 40.0), False
@@ -287,26 +292,19 @@ _HR_RANGES = [
 ]
 
 # ── Uttar Pradesh — published as ranges, kept as ranges ───────────────────────
-_UP_RANGES = [
-    ("Royal Stag", WHISKY, 90, 85, 100, "madiradeals-up"),
-    ("Royal Stag", WHISKY, 180, 170, 210, "madiradeals-up"),
-    ("Royal Stag", WHISKY, 375, 340, 390, "madiradeals-up"),
-    ("Royal Stag", WHISKY, 750, 650, 720, "madiradeals-up"),
-    ("Royal Stag", WHISKY, 1000, 850, 950, "madiradeals-up"),
-    ("Royal Stag Deluxe", WHISKY, 750, 620, 750, "madiradeals-up"),
-    ("Royal Stag Barrel Select", WHISKY, 750, 700, 780, "madiradeals-up"),
-    ("Royal Stag Barrel Select", WHISKY, 1000, 900, 1000, "madiradeals-up"),
-    ("Old Monk", RUM, 750, 520, 520, "oldmonkprice-up"),
-    ("Officer's Choice", WHISKY, 750, 330, 380, "search-up-2026"),
-    ("Blenders Pride", WHISKY, 750, 680, 780, "search-up-2026"),
-    ("Johnnie Walker Black Label", WHISKY, 750, 2600, 3000, "search-up-2026"),
-    ("Kingfisher", BEER, 500, 100, 120, "search-up-2026"),
-]
+# ── Uttar Pradesh ─────────────────────────────────────────────────────────────
+# UP used to be a dozen rows copied off aggregator sites reporting bands. It is
+# now the state's own two published PDFs, parsed in full - see up_prices.py and
+# the parser that generates it. An MRP the excise department set beats an
+# aggregator's report of it, so the aggregator rows were dropped rather than
+# kept alongside: two answers to the same question, one of them second-hand.
+_UP_ROWS = up_prices.ROWS
 
 BOTTLES: list[Bottle] = (
     [Bottle(b, k, s, "Maharashtra", p, "madirakprice-mh") for b, k, s, p in _MH]
     + [Bottle(b, k, s, "Delhi", p, "boldsky-dl") for b, k, s, p in _DL]
-    + [Bottle(b, k, s, "Uttar Pradesh", lo, src, hi) for b, k, s, lo, hi, src in _UP_RANGES]
+    + [Bottle(b, k, s, "Uttar Pradesh", lo, srcs[0], hi)
+       for b, k, s, lo, hi, _abv, srcs in _UP_ROWS]
     + [Bottle(b, k, s, "Gurugram (Haryana)", lo, src, hi) for b, k, s, lo, hi, src in _HR_RANGES]
     + [Bottle(b, k, s, "Delhi", lo, src, hi) for b, k, s, lo, hi, src in _DL_RANGES]
 )

@@ -118,3 +118,15 @@ export const getRecommendation = (p)    => api.get('/recommend/', { params: p })
 // way listings price them (cost for two), plus your own eating-out history.
 export const getFoodMeta       = ()     => api.get('/food/meta')
 export const getFoodRecommendation = (p) => api.get('/food/', { params: p })
+
+// ── Corrections people enter by hand ──────────────────────────────────────────
+// Published lists are a starting point, not the last word: a shop charges above
+// the state minimum, a restaurant raises its prices, a place is in no listing at
+// all. These layer over the tables so the app improves as it gets used.
+export const listPrices   = (state) => api.get('/recommend/prices', { params: { state } })
+export const savePrice    = (body)  => api.post('/recommend/prices', body)
+export const deletePrice  = (id)    => api.delete(`/recommend/prices/${id}`)
+
+export const listPlaces   = (city)  => api.get('/food/places', { params: { city } })
+export const savePlace    = (body)  => api.post('/food/places', body)
+export const deletePlace  = (id)    => api.delete(`/food/places/${id}`)

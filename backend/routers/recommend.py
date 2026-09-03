@@ -18,13 +18,15 @@ from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from pydantic import BaseModel, Field, field_validator
+
 from auth import current_user, is_member
 from database import get_db
 from liquor_prices import (
     ABV_SOURCES, BOTTLES, NCR, SOURCES, STATES, Bottle, abv_for, across_sizes,
     for_state,
 )
-from models import Group, User
+from models import Group, PriceOverride, User
 
 router = APIRouter(prefix="/recommend", tags=["recommend"])
 
@@ -62,6 +64,68 @@ SIZE_ORDER = (750, 375, 180)
 
 
 
+
+
+KINDS = ("whisky", "rum", "vodka", "gin", "beer", "wine", "brandy")
+SPIRIT_KINDS = ("whisky", "rum", "vodka", "gin")
+
+
+def _brand_key(brand: str) -> str:
+    """One spelling per brand, so corrections don't fork into near-duplicates."""
+    return " ".join(brand.lower().replace(".", "").replace("'", "").split())
+
+
+def _apply_overrides(bottles: list[Bottle], db: Session, state: str) -> list[Bottle]:
+    """Layer hand-entered corrections over the published table.
+
+    A correction replaces the published row for that brand, state and size,
+    and adds a row outright when the state list never had one - somebody who
+    knows a price we are missing should be able to just say so.
+
+    Corrected rows lose their range: a person quotes one price, not a band,
+    and pretending otherwise would put a span on the page nobody gave us.
+    """
+    rows = db.query(PriceOverride).filter(PriceOverride.state == state).all()
+    if not rows:
+        return bottles
+
+    by_key = {(r.brand_key, r.size_ml): r for r in rows}
+
+    # A correction entered off a card carries the published name verbatim and
+    # matches exactly. One typed by hand is usually the short name people
+    # actually say - "Vat 69" against a listing that reads "VAT 69 BLENDED
+    # SCOTCH WHISKY" - and matching only exactly left the published row in
+    # place, so the same bottle appeared twice at two prices.
+    #
+    # So a typed name also claims a published row when it is a prefix of
+    # exactly one of them at that size. Exactly one: if it would match two,
+    # picking either is a guess, and the correction is added as its own row
+    # instead of silently rewriting the wrong bottle.
+    claimed: dict[tuple[str, int], tuple[str, int]] = {}
+    for (k, size) in by_key:
+        if any(bk == k for bk, s in
+               ((_brand_key(b.brand), b.size_ml) for b in bottles) if s == size):
+            continue
+        cands = [b for b in bottles
+                 if b.size_ml == size and _brand_key(b.brand).startswith(k)]
+        if len(cands) == 1:
+            claimed[(_brand_key(cands[0].brand), size)] = (k, size)
+
+    out, replaced = [], set()
+    for b in bottles:
+        bk = (_brand_key(b.brand), b.size_ml)
+        hit = by_key.get(bk) or by_key.get(claimed.get(bk, ("", 0)))
+        if hit is None:
+            out.append(b)
+            continue
+        replaced.add((hit.brand_key, hit.size_ml))
+        out.append(Bottle(hit.brand, hit.kind, hit.size_ml, state,
+                          int(round(hit.price)), "manual-override"))
+    for (k, size), r in by_key.items():
+        if (k, size) not in replaced:
+            out.append(Bottle(r.brand, r.kind, r.size_ml, state,
+                              int(round(r.price)), "manual-override"))
+    return out
 
 
 def _text(e) -> str:
@@ -118,6 +182,13 @@ def _history(db: Session, caller: User, names: list[str]) -> dict:
         "avg_per_occasion": round(total / occasions, 2) if occasions else 0.0,
         "favourites": favourites[:6],
         "brand_counts": {b: brand_hits[b] for b in favourites[:6]},
+        # What was actually paid on the nights this brand came up. The list
+        # price says what a shop charges; this says what you spend, which is
+        # the number worth putting next to a suggestion.
+        "brand_avg": {
+            b: round(brand_spend[b] / brand_hits[b])
+            for b in favourites[:6] if brand_hits[b]
+        },
     }
 
 
@@ -128,14 +199,31 @@ def _units(volume_ml: float, abv: float) -> float:
 
 
 def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
-          bottle_ml: int, favourites: list[str]) -> list[dict]:
+          bottle_ml: int, favourites: list[str],
+          brand_avg: dict[str, int] | None = None) -> list[dict]:
     """Every bottle of the chosen size priced inside the budget range.
 
-    Ordered dearest first: within one state and one size, price is the only
-    quality signal in the data, and a dearer bottle is the better one often
-    enough for that to be useful.
+    Brands you actually drink come first. UP alone now lists over nine hundred
+    bottles off the state's own price list, most of them regional labels
+    nobody asked about, so ranking on price alone buried Royal Stag under a
+    dozen brands you have never heard of. What you have bought before is the
+    strongest signal in the data and it goes first.
+
+    After that, dearest inside the budget: within one state and one size price
+    is the only quality signal there is, and the top of a stated range is what
+    someone was willing to spend.
     """
-    fav = {f.lower() for f in favourites}
+    # Favourites are short names off the expense text ("Bacardi"); the state
+    # lists are verbose ("Bacardi Limon Original Citrus Rum"). Matching those
+    # exactly never fired, so the whole ranking silently fell back to price.
+    # A favourite counts when the published name contains it.
+    fav = [f.lower() for f in favourites]
+    avg = {k.lower(): v for k, v in (brand_avg or {}).items()}
+
+    def _fav_hit(brand: str) -> str | None:
+        low = brand.lower()
+        return next((f for f in fav if f in low), None)
+
     out: list[dict] = []
 
     for b in bottles:
@@ -147,6 +235,7 @@ def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
         if price < lo or price > hi:
             continue
 
+        hit = _fav_hit(b.brand)
         abv, abv_known = abv_for(b.brand, b.kind)
         compare = across_sizes(b.brand, {bottle_ml: 1})
         priced = [c for c in compare if c["total"] is not None]
@@ -168,14 +257,19 @@ def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
             "abv": abv,
             "abv_known": abv_known,
             "alcohol_ml_per_head": _units(bottle_ml / max(people, 1), abv),
-            "is_favourite": b.brand.lower() in fav,
+            "is_favourite": bool(hit),
+            "matched_favourite": hit,
+            # What this actually cost you the nights you bought it, which is
+            # not the same as what the state says it costs.
+            "your_avg": avg.get(hit) if hit else None,
+            "is_override": b.source == "manual-override",
             "source": b.source,
             "compare": compare,
             "cheapest_region": cheapest,
         })
 
-    # Best affordable first; a brand they already drink wins a tie.
-    out.sort(key=lambda r: (-r["total"], not r["is_favourite"]))
+    # What you drink first, then dearest inside the budget.
+    out.sort(key=lambda r: (not r["is_favourite"], -r["total"]))
     return out[:8]
 
 
@@ -187,11 +281,14 @@ def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
     what gets priced, not the bottle: as many as the top of the range buys,
     capped at six each so a large budget doesn't suggest something absurd.
     """
-    fav = {f.lower() for f in (favourites or [])}
+    fav = [f.lower() for f in (favourites or [])]
     out: list[dict] = []
     for b in bottles:
         if b.kind != "beer":
             continue
+        # Same containment rule as the spirits: "Budweiser" has to match
+        # "Budweiser Magnum Beer" or the ranking never sees a favourite.
+        is_fav = any(f in b.brand.lower() for f in fav)
         qty = min(int(hi // b.mid), people * 6)
         if qty < 1:
             continue
@@ -214,13 +311,14 @@ def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
             "abv_known": abv_known,
             "alcohol_ml_per_head": _units(volume / max(people, 1), abv),
             "per_head": round(cost / max(people, 1)),
-            "is_favourite": b.brand.lower() in fav,
+            "is_favourite": is_fav,
+            "is_override": b.source == "manual-override",
             "source": b.source,
         })
 
-    # Strongest first among what fits, so the cards read as a real choice
-    # between a session beer and a strong one rather than an arbitrary list.
-    out.sort(key=lambda r: (-r["abv"], r["total"]))
+    # Beers you actually buy first, then strongest among what fits, so the
+    # cards read as a real choice rather than an arbitrary list.
+    out.sort(key=lambda r: (not r["is_favourite"], -r["abv"], r["total"]))
     return out[:6]
 
 
@@ -238,15 +336,121 @@ def _band(bottles: list[Bottle], bottle_ml: int, is_beer: bool) -> dict | None:
     return {"min": round(min(r.mid for r in rows)), "max": round(max(r.mid for r in rows))}
 
 
-@router.get("/meta", response_model=dict)
-def meta(_: User = Depends(current_user)):
-    """States we have real prices for, and where those prices came from."""
+class PriceIn(BaseModel):
+    """A price somebody is correcting by hand."""
+
+    brand: str = Field(min_length=2, max_length=200)
+    kind: str
+    state: str
+    size_ml: int
+    price: float
+    note: str | None = Field(default=None, max_length=500)
+
+    @field_validator("brand", "state")
+    @classmethod
+    def _tidy(cls, v: str) -> str:
+        return " ".join(v.split())
+
+    @field_validator("kind")
+    @classmethod
+    def _known_kind(cls, v: str) -> str:
+        v = v.strip().lower()
+        if v not in KINDS:
+            raise ValueError(f"kind must be one of {', '.join(KINDS)}")
+        return v
+
+    @field_validator("size_ml")
+    @classmethod
+    def _sane_size(cls, v: int) -> int:
+        # Wide enough for a 90ml nip and a 2-litre, narrow enough that a
+        # mistyped price in the size box is caught here rather than shown.
+        if not 30 <= v <= 5000:
+            raise ValueError("size must be between 30ml and 5000ml")
+        return v
+
+    @field_validator("price")
+    @classmethod
+    def _sane_price(cls, v: float) -> float:
+        if not 1 <= v <= 500000:
+            raise ValueError("price must be between Rs 1 and Rs 5,00,000")
+        return round(v, 2)
+
+
+def _override_out(r: PriceOverride) -> dict:
     return {
-        "states": STATES,
+        "id": r.id, "brand": r.brand, "kind": r.kind, "state": r.state,
+        "size_ml": r.size_ml, "price": r.price, "note": r.note,
+        "set_by": r.set_by,
+        "updated_at": (r.updated_at or r.created_at).isoformat()
+        if (r.updated_at or r.created_at) else None,
+    }
+
+
+@router.get("/prices", response_model=list[dict])
+def list_prices(state: str = "", db: Session = Depends(get_db),
+                _: User = Depends(current_user)):
+    """Corrections people have entered, newest first."""
+    q = db.query(PriceOverride)
+    if state:
+        q = q.filter(PriceOverride.state == state)
+    rows = q.order_by(PriceOverride.id.desc()).all()
+    return [_override_out(r) for r in rows]
+
+
+@router.post("/prices", response_model=dict)
+def set_price(body: PriceIn, db: Session = Depends(get_db),
+              caller: User = Depends(current_user)):
+    """Correct a price, or add one the published lists never carried.
+
+    Writing the same brand, state and size again updates the existing
+    correction instead of stacking a second one, so the table can't end up
+    with two answers to the same question.
+    """
+    key = _brand_key(body.brand)
+    row = (db.query(PriceOverride)
+             .filter(PriceOverride.brand_key == key,
+                     PriceOverride.state == body.state,
+                     PriceOverride.size_ml == body.size_ml)
+             .first())
+    if row is None:
+        row = PriceOverride(brand_key=key, state=body.state, size_ml=body.size_ml)
+        db.add(row)
+    row.brand = body.brand
+    row.kind = body.kind
+    row.price = body.price
+    row.note = (body.note or "").strip() or None
+    row.set_by = caller.name
+    db.commit()
+    db.refresh(row)
+    return _override_out(row)
+
+
+@router.delete("/prices/{price_id}", response_model=dict)
+def delete_price(price_id: int, db: Session = Depends(get_db),
+                 _: User = Depends(current_user)):
+    """Drop a correction, putting the published price back in charge."""
+    row = db.query(PriceOverride).filter(PriceOverride.id == price_id).first()
+    if row is None:
+        raise HTTPException(404, "That correction is already gone")
+    db.delete(row)
+    db.commit()
+    return {"ok": True, "id": price_id}
+
+
+@router.get("/meta", response_model=dict)
+def meta(db: Session = Depends(get_db), _: User = Depends(current_user)):
+    """States we have real prices for, and where those prices came from."""
+    # A state nobody published but somebody entered a price for is a real
+    # state. Without this the correction would be saved and then unreachable,
+    # because the dropdown only offers what the static table knows.
+    added = {s for (s,) in db.query(PriceOverride.state).distinct()}
+    return {
+        "states": sorted(set(STATES) | added),
         "ncr": list(NCR),
         "sources": SOURCES,
         "abv_sources": ABV_SOURCES,
         "row_count": len(BOTTLES),
+        "kinds": list(KINDS),
         "min_budget_span": MIN_BUDGET_SPAN,
         "bottle_choices": [
             {"value": str(ml), "name": SPIRIT_SIZES[ml].title(), "hint": f"{ml}ml"}
@@ -281,7 +485,7 @@ def recommend(
     is_beer = bottle == "beer"
     bottle_ml = 0 if is_beer else int(bottle)
 
-    bottles = for_state(state)
+    bottles = _apply_overrides(for_state(state), db, state)
     if not bottles:
         raise HTTPException(
             404,
@@ -295,7 +499,8 @@ def recommend(
     # The selector decides what you are buying. Beer alongside every spirit
     # answer would make choosing "beer" mean nothing.
     picks = ([] if is_beer else
-             _pick(bottles, budget_min, budget_max, people, bottle_ml, hist["favourites"]))
+             _pick(bottles, budget_min, budget_max, people, bottle_ml,
+                   hist["favourites"], hist["brand_avg"]))
     beers = (_beers(bottles, budget_min, budget_max, people, hist["favourites"])
              if is_beer else [])
 

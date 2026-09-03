@@ -16,15 +16,16 @@ import re
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from auth import current_user, is_member
 from database import get_db
 from food_prices import (
-    CITIES, CUISINES, DISHES, KINDS, NCR_CITIES, PLACES, SOURCES, Place,
-    cuisines_in, dishes_at, for_city, street_food,
+    CITIES, CUISINES, DINE_IN, DISHES, KINDS, NCR_CITIES, PLACES, SOURCES,
+    Place, cuisines_in, dishes_at, for_city, street_food,
 )
-from models import Group, User
+from models import Group, PlaceOverride, User
 
 router = APIRouter(prefix="/food", tags=["food"])
 
@@ -85,6 +86,46 @@ CUISINE_RE = {k: re.compile(v, re.I) for k, v in CUISINE_HINTS.items()}
 # minimum span would let through a range that matches nothing. Rs 200 is about
 # one person's worth of slack, which is the smallest range that is still a range.
 MIN_BUDGET_SPAN = 200
+
+
+def _place_key(name: str) -> str:
+    """One spelling per restaurant, so corrections don't fork."""
+    return " ".join(name.lower().replace(".", "").replace("'", "").split())
+
+
+def _as_place(r: PlaceOverride) -> Place:
+    cuisines = tuple(c.strip() for c in (r.cuisines or "").split(",") if c.strip())
+    return Place(
+        name=r.name, area=r.area or "", city=r.city,
+        cuisines=cuisines or ("Anything",), for_two=int(round(r.for_two)),
+        sources=("added-by-hand",), kind=r.kind or DINE_IN,
+        veg_only=bool(r.veg_only),
+    )
+
+
+def _apply_place_overrides(places: list[Place], db: Session, city: str) -> list[Place]:
+    """Layer hand-added and hand-corrected restaurants over the published list.
+
+    A correction replaces the published row for that restaurant in that city,
+    and a name we have never heard of is simply added. This is the part that
+    makes the table get better with use: the published listings are a starting
+    point, and the people actually eating out are the better source.
+    """
+    rows = db.query(PlaceOverride).filter(PlaceOverride.city == city).all()
+    if not rows:
+        return places
+
+    by_key = {r.name_key: r for r in rows}
+    out, replaced = [], set()
+    for p in places:
+        hit = by_key.get(_place_key(p.name))
+        if hit is None:
+            out.append(p)
+            continue
+        replaced.add(hit.name_key)
+        out.append(_as_place(hit))
+    out.extend(_as_place(r) for k, r in by_key.items() if k not in replaced)
+    return out
 
 
 def _text(e) -> str:
@@ -210,6 +251,7 @@ def _pick(places: list[Place], lo: float, hi: float, people: int,
             # Sources disagree on restaurants far more than on bottles. Saying
             # which numbers are a span stops a range being read as a quote.
             "is_estimate_range": p.is_range,
+            "added_by_hand": "added-by-hand" in p.sources,
             "matched_cuisines": matched,
             "is_favourite": bool(matched),
             "been_before": p.name.lower() in seen,
@@ -259,14 +301,141 @@ def _band(places: list[Place], people: int) -> dict | None:
     return {"min": round(min(totals)), "max": round(max(totals))}
 
 
-@router.get("/meta", response_model=dict)
-def meta(_: User = Depends(current_user)):
-    """Cities we have real prices for, and where those prices came from."""
+class PlaceIn(BaseModel):
+    """A restaurant somebody is adding or correcting by hand."""
+
+    name: str = Field(min_length=2, max_length=200)
+    city: str
+    for_two: float
+    area: str | None = Field(default=None, max_length=200)
+    cuisines: list[str] = Field(default_factory=list)
+    kind: str = DINE_IN
+    veg_only: bool = False
+    note: str | None = Field(default=None, max_length=500)
+
+    @field_validator("name", "city", "area")
+    @classmethod
+    def _tidy(cls, v):
+        return " ".join(v.split()) if isinstance(v, str) else v
+
+    @field_validator("kind")
+    @classmethod
+    def _known_kind(cls, v: str) -> str:
+        v = (v or DINE_IN).strip().lower()
+        if v not in KINDS:
+            raise ValueError(f"kind must be one of {', '.join(KINDS)}")
+        return v
+
+    @field_validator("cuisines")
+    @classmethod
+    def _known_cuisines(cls, v: list[str]) -> list[str]:
+        # Against the controlled list, so a hand-added place filters exactly
+        # like a published one. Free text here would be invisible to the
+        # cuisine dropdown and the place would never come back.
+        out = []
+        for c in v:
+            c = " ".join(str(c).split())
+            match = next((k for k in CUISINES if k.lower() == c.lower()), None)
+            if match is None:
+                raise ValueError(f"unknown cuisine {c!r}; pick from the list")
+            if match not in out:
+                out.append(match)
+        if len(out) > 6:
+            raise ValueError("six cuisines is plenty")
+        return out
+
+    @field_validator("for_two")
+    @classmethod
+    def _sane_cost(cls, v: float) -> float:
+        if not 50 <= v <= 100000:
+            raise ValueError("cost for two must be between Rs 50 and Rs 1,00,000")
+        return round(v, 2)
+
+
+def _place_out(r: PlaceOverride) -> dict:
     return {
-        "cities": CITIES,
+        "id": r.id, "name": r.name, "area": r.area, "city": r.city,
+        "cuisines": [c.strip() for c in (r.cuisines or "").split(",") if c.strip()],
+        "for_two": r.for_two, "kind": r.kind,
+        "kind_name": KINDS.get(r.kind, r.kind),
+        "veg_only": bool(r.veg_only), "note": r.note, "set_by": r.set_by,
+        "updated_at": (r.updated_at or r.created_at).isoformat()
+        if (r.updated_at or r.created_at) else None,
+    }
+
+
+@router.get("/places", response_model=list[dict])
+def list_places(city: str = "", db: Session = Depends(get_db),
+                _: User = Depends(current_user)):
+    """Restaurants people have added or corrected, newest first."""
+    q = db.query(PlaceOverride)
+    if city:
+        q = q.filter(PlaceOverride.city == city)
+    return [_place_out(r) for r in q.order_by(PlaceOverride.id.desc()).all()]
+
+
+@router.post("/places", response_model=dict)
+def set_place(body: PlaceIn, db: Session = Depends(get_db),
+              caller: User = Depends(current_user)):
+    """Add a restaurant, or correct one the published listings got wrong.
+
+    Saving the same name in the same city again updates the existing entry
+    rather than stacking a second one, so the list can't end up recommending
+    the same place twice at two different prices.
+    """
+    key = _place_key(body.name)
+    row = (db.query(PlaceOverride)
+             .filter(PlaceOverride.name_key == key,
+                     PlaceOverride.city == body.city)
+             .first())
+    if row is None:
+        row = PlaceOverride(name_key=key, city=body.city)
+        db.add(row)
+    row.name = body.name
+    row.area = (body.area or "").strip() or None
+    row.cuisines = ", ".join(body.cuisines) or None
+    row.for_two = body.for_two
+    row.kind = body.kind
+    row.veg_only = body.veg_only
+    row.note = (body.note or "").strip() or None
+    row.set_by = caller.name
+    db.commit()
+    db.refresh(row)
+    return _place_out(row)
+
+
+@router.delete("/places/{place_id}", response_model=dict)
+def delete_place(place_id: int, db: Session = Depends(get_db),
+                 _: User = Depends(current_user)):
+    """Drop an entry. A place that only existed here disappears with it."""
+    row = db.query(PlaceOverride).filter(PlaceOverride.id == place_id).first()
+    if row is None:
+        raise HTTPException(404, "That entry is already gone")
+    db.delete(row)
+    db.commit()
+    return {"ok": True, "id": place_id}
+
+
+@router.get("/meta", response_model=dict)
+def meta(db: Session = Depends(get_db), _: User = Depends(current_user)):
+    """Cities we have real prices for, and where those prices came from."""
+    # A city nobody published but somebody added a place in is a real city.
+    # Without this the entry would be saved and then be unreachable, because
+    # the dropdown only offers cities the static table knows about.
+    added = {c for (c,) in db.query(PlaceOverride.city).distinct()}
+    return {
+        "cities": sorted(set(CITIES) | added),
         "ncr": list(NCR_CITIES),
         "cuisines": CUISINES,
-        "cuisines_by_city": {c: cuisines_in(c) for c in CITIES},
+        "cuisines_by_city": {
+            c: sorted(set(cuisines_in(c)) | {
+                x.strip()
+                for (cs,) in db.query(PlaceOverride.cuisines)
+                              .filter(PlaceOverride.city == c).all()
+                for x in (cs or "").split(",") if x.strip()
+            })
+            for c in sorted(set(CITIES) | added)
+        },
         "kinds": [{"value": k, "name": n} for k, n in KINDS.items()],
         "sources": SOURCES,
         "place_count": len(PLACES),
@@ -304,7 +473,7 @@ def recommend_food(
     if kind != "any" and kind not in KINDS:
         raise HTTPException(400, f"Pick one of {['any', *KINDS]}")
 
-    places = for_city(city)
+    places = _apply_place_overrides(for_city(city), db, city)
     if not places:
         raise HTTPException(
             404,
