@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException  # noqa: I001
 from sqlalchemy.orm import Session
 
 from pydantic import BaseModel, Field, field_validator
@@ -23,8 +23,7 @@ from pydantic import BaseModel, Field, field_validator
 from auth import current_user, is_member
 from database import get_db
 from liquor_prices import (
-    ABV_SOURCES, BOTTLES, NCR, SOURCES, STATES, Bottle, abv_for, across_sizes,
-    for_state,
+    ABV_SOURCES, BOTTLES, NCR, SOURCES, STATES, Bottle, abv_for, for_state,
 )
 from models import Group, PriceOverride, User
 
@@ -75,7 +74,81 @@ def _brand_key(brand: str) -> str:
     return " ".join(brand.lower().replace(".", "").replace("'", "").split())
 
 
-def _apply_overrides(bottles: list[Bottle], db: Session, state: str) -> list[Bottle]:
+def _overrides_by_state(db: Session) -> dict[str, list[PriceOverride]]:
+    """Every correction, grouped by state, in one query.
+
+    Fetched once per request rather than per region: the NCR comparison needs
+    three states' worth and each card would otherwise go back to the database.
+    """
+    out: dict[str, list[PriceOverride]] = defaultdict(list)
+    for r in db.query(PriceOverride).all():
+        out[r.state].append(r)
+    return out
+
+
+def _same_bottle(a: str, b: str) -> bool:
+    """Is this the same drink under two states' spellings?
+
+    It has to be asked, because the states do not agree on names. UP prints
+    the full registered label - "Seagrams Royal Stag Superior Whisky" - where
+    Delhi's list just says "Royal Stag". Matching those exactly meant a bottle
+    all three states stock showed a price in one and a dash in the other two.
+
+    So one name matching the other on whole words counts. Whole words matter:
+    without the boundary "Bacardi" would match "Bacardi Apple", and they are
+    different bottles at different prices.
+    """
+    ka, kb = _brand_key(a), _brand_key(b)
+    if ka == kb:
+        return True
+    long, short = (ka, kb) if len(ka) >= len(kb) else (kb, ka)
+    return (long.startswith(short + " ") or long.endswith(" " + short)
+            or f" {short} " in long)
+
+
+def _find_in(rows: list[Bottle], brand: str, size_ml: int) -> Bottle | None:
+    """The row in one region that is this bottle, or nothing.
+
+    An exact name wins outright. Otherwise the closest variant wins - fewest
+    extra words - so "Bacardi Apple Platinum Original Apple Rum" pairs with
+    Delhi's "Bacardi Apple" rather than its plain "Bacardi".
+    """
+    key = _brand_key(brand)
+    same = [b for b in rows if b.size_ml == size_ml]
+    exact = [b for b in same if _brand_key(b.brand) == key]
+    if exact:
+        return exact[0]
+    near = [b for b in same if _same_bottle(b.brand, brand)]
+    if not near:
+        return None
+    words = len(key.split())
+    return min(near, key=lambda b: (abs(len(_brand_key(b.brand).split()) - words),
+                                    len(b.brand)))
+
+
+def _compare(tables: dict[str, list[Bottle]], regions: tuple[str, ...],
+             brand: str, size_ml: int) -> list[dict]:
+    """What this bottle costs in each region, corrections included.
+
+    Built from the same tables the picks come from, so a price somebody
+    entered by hand shows up here exactly like a published one - and a bottle
+    that only exists because somebody added it still gets a row, with the
+    regions that have never heard of it showing a dash rather than the whole
+    strip disappearing.
+    """
+    out = []
+    for region in regions:
+        hit = _find_in(tables.get(region, []), brand, size_ml)
+        out.append({
+            "region": region,
+            "total": round(hit.mid) if hit else None,
+            "manual": bool(hit and hit.source == "manual-override"),
+        })
+    return out
+
+
+def _apply_overrides(bottles: list[Bottle], rows: list[PriceOverride],
+                     state: str) -> list[Bottle]:
     """Layer hand-entered corrections over the published table.
 
     A correction replaces the published row for that brand, state and size,
@@ -85,7 +158,6 @@ def _apply_overrides(bottles: list[Bottle], db: Session, state: str) -> list[Bot
     Corrected rows lose their range: a person quotes one price, not a band,
     and pretending otherwise would put a span on the page nobody gave us.
     """
-    rows = db.query(PriceOverride).filter(PriceOverride.state == state).all()
     if not rows:
         return bottles
 
@@ -200,7 +272,9 @@ def _units(volume_ml: float, abv: float) -> float:
 
 def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
           bottle_ml: int, favourites: list[str],
-          brand_avg: dict[str, int] | None = None) -> list[dict]:
+          brand_avg: dict[str, int] | None = None,
+          tables: dict[str, list[Bottle]] | None = None,
+          regions: tuple[str, ...] = NCR) -> list[dict]:
     """Every bottle of the chosen size priced inside the budget range.
 
     Brands you actually drink come first. UP alone now lists over nine hundred
@@ -237,7 +311,7 @@ def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
 
         hit = _fav_hit(b.brand)
         abv, abv_known = abv_for(b.brand, b.kind)
-        compare = across_sizes(b.brand, {bottle_ml: 1})
+        compare = _compare(tables or {}, regions, b.brand, bottle_ml)
         priced = [c for c in compare if c["total"] is not None]
         cheapest = min(priced, key=lambda c: c["total"])["region"] if priced else None
 
@@ -485,7 +559,17 @@ def recommend(
     is_beer = bottle == "beer"
     bottle_ml = 0 if is_beer else int(bottle)
 
-    bottles = _apply_overrides(for_state(state), db, state)
+    by_state = _overrides_by_state(db)
+    bottles = _apply_overrides(for_state(state), by_state.get(state, []), state)
+
+    # The side-by-side always includes the state you asked for. Picking
+    # Maharashtra and being shown three NCR prices and none of your own would
+    # be a comparison with the thing you are comparing against missing.
+    regions = tuple(NCR) if state in NCR else (state, *NCR)
+    tables = {
+        r: _apply_overrides(for_state(r), by_state.get(r, []), r) for r in regions
+    }
+
     if not bottles:
         raise HTTPException(
             404,
@@ -500,13 +584,16 @@ def recommend(
     # answer would make choosing "beer" mean nothing.
     picks = ([] if is_beer else
              _pick(bottles, budget_min, budget_max, people, bottle_ml,
-                   hist["favourites"], hist["brand_avg"]))
+                   hist["favourites"], hist["brand_avg"], tables, regions))
     beers = (_beers(bottles, budget_min, budget_max, people, hist["favourites"])
              if is_beer else [])
 
     return {
         "state": state,
         "ncr": list(NCR),
+        # The columns of the side-by-side, in order. Not always three: a state
+        # outside the NCR is prepended so you can see your own price too.
+        "regions": list(regions),
         "people": people,
         "budget_min": budget_min,
         "budget_max": budget_max,

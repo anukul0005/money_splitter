@@ -405,9 +405,15 @@ export default function Recommend() {
                 )}
 
                 {/* Same bottle across the NCR — these are a drive apart, and
-                    the gap is often worth more than the drive. */}
+                    the gap is often worth more than the drive. A hand-entered
+                    price sits here like any other, and a region that has never
+                    heard of the bottle shows a dash rather than the whole
+                    strip vanishing. */}
                 {p.compare?.some((c) => c.total !== null) && (
-                  <div className="grid grid-cols-3 gap-1 mt-2 pt-2 border-t border-amber-100">
+                  <div
+                    className="grid gap-1 mt-2 pt-2 border-t border-amber-100"
+                    style={{ gridTemplateColumns: `repeat(${p.compare.length}, minmax(0, 1fr))` }}
+                  >
                     {p.compare.map((c) => {
                       const best = c.region === p.cheapest_region && c.total !== null
                       return (
@@ -423,6 +429,11 @@ export default function Recommend() {
                           <p className={`text-[11px] font-black ${best ? 'text-green-700' : 'text-gray-500'}`}>
                             {c.total === null ? '—' : INR(c.total)}
                           </p>
+                          {/* So a corrected number is never mistaken for a
+                              published one sitting next to it. */}
+                          {c.manual && (
+                            <p className="text-[8px] font-bold text-blue-600 leading-none">by hand</p>
+                          )}
                         </div>
                       )
                     })}

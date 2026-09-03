@@ -148,8 +148,24 @@ def _category(name: str, declared: str = "") -> str | None:
     return None
 
 
+def _fix_glyphs(name: str) -> str:
+    """Repair the typography the PDFs encode badly.
+
+    Both documents set possessives with a curly apostrophe that does not
+    survive extraction, leaving "SEAGRAM<?>S" and "WILLIAM LAWSON<?>S". A
+    replacement character followed by an S is that apostrophe every time it
+    appears here, so it is restored; any other stray one is dropped rather
+    than guessed at.
+    """
+    name = name.replace("’", "'").replace("‘", "'")
+    name = name.replace("“", '"').replace("”", '"')
+    name = re.sub(r"�(?=[Ss]\b)", "'", name)
+    return name.replace("�", "")
+
+
 def _clean(name: str) -> tuple[str, float | None]:
     """Tidy a brand name and lift any published ABV out of it."""
+    name = _fix_glyphs(name)
     abv = None
     m = ABV_IN_NAME.search(name)
     if m:
