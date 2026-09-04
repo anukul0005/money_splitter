@@ -147,6 +147,9 @@ export default function Recommend() {
   // Johnnie Walker before you finish the word rather than after you search
   // for it and get nothing back.
   const [brandOptions, setBrandOptions] = useState([])
+  // Whether the suggestion dropdown is open. Closed on blur and on picking
+  // one; reopened by typing, so it doesn't linger over the results below it.
+  const [showSuggestions, setShowSuggestions] = useState(false)
   // Which card's price form is open, keyed by the card's own key. `'new'`
   // opens the standalone add form. Only one is ever open at a time.
   const [editing, setEditing] = useState(null)
@@ -208,6 +211,25 @@ export default function Recommend() {
   const canRun = state && peopleN >= 1 && hiN - loN >= MIN_SPAN
   const canSearch = query.trim().length >= 2
 
+  // Suggestions as you type, from the same brand list the price-edit form
+  // already fetches per state - filtered here, in the app, rather than left
+  // to a browser's native <datalist>. That looked right on a desktop
+  // browser and was actually the phone's own keyboard predictive-text bar on
+  // iOS, not a dropdown - "S" produced three keyboard-bar guesses and no way
+  // to tap one into the box. A name starting with what was typed comes
+  // first, then anywhere it appears, both case-insensitive; capped at eight
+  // so the list never grows past a thumb's reach.
+  const qLower = query.trim().toLowerCase()
+  const suggestions = qLower.length === 0 ? [] : brandOptions
+    .filter((b) => b.brand.toLowerCase().includes(qLower))
+    .sort((a, b) => {
+      const aStarts = a.brand.toLowerCase().startsWith(qLower)
+      const bStarts = b.brand.toLowerCase().startsWith(qLower)
+      if (aStarts !== bStarts) return aStarts ? -1 : 1
+      return a.brand.length - b.brand.length
+    })
+    .slice(0, 8)
+
   // Dragging either thumb pushes the other rather than crossing it, so the
   // minimum span holds without ever refusing the drag.
   const dragLo = (v) => {
@@ -258,11 +280,15 @@ export default function Recommend() {
   // Budget is left out on purpose: "what does Vat 69 cost" has no budget
   // attached to it, unlike "what should I buy".
   const runSearch = async (over = {}) => {
-    if (!canSearch) { setSearchError('Type at least 2 letters to search'); return }
+    // Picking a suggestion passes the brand straight through rather than
+    // relying on the query box's state, which setQuery() just started
+    // updating but hasn't actually applied yet in this same tick.
+    const q = (over.q ?? query).trim()
+    if (q.length < 2) { setSearchError('Type at least 2 letters to search'); return }
     setSearchError(''); setSearchBusy(true)
     try {
       const r = await searchRecommend({
-        state: over.state || state, q: query.trim(),
+        state: over.state || state, q,
         bottle: bottles.length ? bottles.join(',') : 'any',
         kind: kinds.join(','),
       })
@@ -492,18 +518,44 @@ export default function Recommend() {
             <input
               className="input text-base pl-10 py-3" value={query}
               placeholder="Search a bottle — e.g. Vat 69, Old Monk, Kingfisher"
-              list="drink-brand-suggestions"
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') runSearch() }}
+              onChange={(e) => { setQuery(e.target.value); setShowSuggestions(true) }}
+              onFocus={() => setShowSuggestions(true)}
+              // A plain onBlur would fire before a click on a suggestion
+              // registers, closing the list out from under the tap. Delayed
+              // just long enough for that click to land first.
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { setShowSuggestions(false); runSearch() } }}
             />
-            {/* The browser's own autocomplete, filled from every brand this
-                state's price list already knows. Typing "j" offers every
-                Johnnie Walker and Jim Beam in the list without waiting for a
-                round trip - the datalist is filtered locally, in the browser,
-                not searched on the server. */}
-            <datalist id="drink-brand-suggestions">
-              {brandOptions.map((b) => <option key={b.brand} value={b.brand} />)}
-            </datalist>
+
+            {/* An in-app dropdown, not the browser's own <datalist> - that
+                rendered as the phone's keyboard predictive-text bar on iOS
+                instead of a list under the field, with no way to tap an
+                option into the box. This is styled and positioned like the
+                rest of the page, and sits right under the field the way a
+                search suggestion list does on any site with a lot of things
+                to search through. */}
+            {showSuggestions && suggestions.length > 0 && (
+              <ul className="absolute left-0 right-0 top-full mt-1 z-20 bg-white border border-amber-200 rounded-md shadow-lg overflow-hidden">
+                {suggestions.map((b) => (
+                  <li key={b.brand}>
+                    <button
+                      type="button"
+                      // Fires before the input's onBlur, so the tap lands
+                      // before the dropdown has a chance to close itself.
+                      onMouseDown={() => {
+                        setQuery(b.brand)
+                        setShowSuggestions(false)
+                        runSearch({ q: b.brand })
+                      }}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-amber-50 border-b border-amber-50 last:border-0"
+                    >
+                      {b.brand}
+                      <span className="text-gray-400 font-normal"> · {b.kind}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
           <p className="text-[10px] text-gray-400 pl-1">
             Searches {state || 'the selected state'} with whatever size and kind cards are ticked above — budget is not applied here.
