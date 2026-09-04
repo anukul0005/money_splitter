@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 
+import delhi_prices
 import state_prices
 from brand_names import canonicalise
 
@@ -33,13 +34,9 @@ SOURCES = {
         "as_of": "2026-09",
         "note": "Aggregator of the Maharashtra State Excise price list",
     },
-    "boldsky-dl": {
-        "url": "https://www.boldsky.com/liquor-price/delhi.html",
-        "as_of": "2026-09",
-        "note": "Aggregator of the Delhi Excise Department price list",
-    },
-    # The two states' own PDFs, parsed in full. They replaced the aggregator
-    # rows that used to cover UP - see the note above _STATE_ROWS.
+    # Delhi's own live feed, and the two states' own PDFs, parsed in full.
+    # These replaced every aggregator row that used to stand in for them.
+    **delhi_prices.SOURCES,
     **state_prices.SOURCES,
     "gyaanvibes-hr": {
         "url": "https://gyaanvibes.wordpress.com/2026/08/27/best-indian-whisky-in-gurugram/",
@@ -55,16 +52,6 @@ SOURCES = {
         "url": "https://mostnext.com/beer-price-in-haryana/",
         "as_of": "2026-09",
         "note": "Haryana beer retail bands",
-    },
-    "madiradeals-dl": {
-        "url": "https://madiradeals.com/kingfisher-beer-price-in-delhi/",
-        "as_of": "2026-09",
-        "note": "Delhi Kingfisher retail bands",
-    },
-    "search-dl-2026": {
-        "url": "https://liquorsprices.com/",
-        "as_of": "2026-09",
-        "note": "Delhi retail bands for common whisky/rum, reported as ranges",
     },
 }
 
@@ -188,42 +175,12 @@ _MH = [
 ]
 
 # ── Delhi ─────────────────────────────────────────────────────────────────────
-_DL = [
-    ("100 Pipers", WHISKY, 750, 1400), ("100 Pipers", WHISKY, 375, 700),
-    ("100 Pipers", WHISKY, 180, 350), ("100 Pipers 12 YO", WHISKY, 750, 2000),
-    ("8 PM Premium Black", WHISKY, 750, 500),
-    ("Bacardi Black", RUM, 750, 420), ("Bacardi Black", RUM, 375, 210),
-    ("Bacardi Black", RUM, 180, 105),
-    ("Bacardi Apple", RUM, 750, 700), ("Bacardi Apple", RUM, 375, 350),
-    ("Absolut", VODKA, 750, 1400), ("Absolut", VODKA, 200, 465),
-    ("Absolut Lime", VODKA, 750, 1400), ("Absolut Mandrin", VODKA, 750, 1400),
-    ("Absolut Raspberi", VODKA, 750, 1400),
-    ("Beefeater London Dry", GIN, 750, 1450),
-    ("Blue Moon Extra Dry", GIN, 750, 1000), ("Blue Moon Extra Dry", GIN, 375, 500),
-    ("Morpheus XO Brandy", WHISKY, 750, 760),
-    ("Bad Monkey Super Strong", BEER, 650, 130), ("Bad Monkey Super Strong", BEER, 500, 100),
-    ("Bee Young Crafted Strong", BEER, 650, 130), ("Bee Young Crafted Strong", BEER, 500, 100),
-    ("Amstel Light", BEER, 355, 260), ("Alhambra Reserva Roja", BEER, 330, 250),
-    ("Breezer", BEER, 275, 100),
-    ("All Rounder Sauvignon Chenin", WINE, 750, 570),
-    ("All Rounder Shiraz Cabernet", WINE, 750, 570),
-    ("Alamos Malbec", WINE, 750, 2190), ("Alamos Chardonnay", WINE, 750, 2140),
-]
-
-# ── Delhi, common brands published as retail bands ───────────────────────────
-# The fixed-MRP list above came out alphabetical and stopped in the Bs, so the
-# brands people actually compare across the NCR were missing from it.
-_DL_RANGES = [
-    ("Royal Stag", WHISKY, 750, 550, 800, "search-dl-2026"),
-    ("Blenders Pride", WHISKY, 750, 550, 800, "search-dl-2026"),
-    ("Old Monk", RUM, 750, 350, 420, "search-dl-2026"),
-    ("Kingfisher", BEER, 650, 160, 220, "madiradeals-dl"),
-    ("Kingfisher", BEER, 500, 140, 170, "madiradeals-dl"),
-    ("Kingfisher", BEER, 330, 100, 130, "madiradeals-dl"),
-    ("Kingfisher Premium", BEER, 650, 150, 180, "madiradeals-dl"),
-    ("Kingfisher Strong", BEER, 650, 160, 200, "madiradeals-dl"),
-    ("Kingfisher Ultra", BEER, 650, 180, 220, "madiradeals-dl"),
-]
+# Delhi's excise department runs its own dashboard at eabkari.delhi.gov.in,
+# and the dashboard's only real content is one API call returning every
+# currently registered brand and its MRP - see parse_delhi.py. That replaced
+# ~35 rows hand-copied from two blog aggregators with 3,200+ rows sourced
+# straight from the department, current as of the date in delhi_prices.SOURCES.
+_DL_ROWS = delhi_prices.ROWS
 
 # ── Gurugram (Haryana) — MSP regime, so most rows are ranges ─────────────────
 # Where the 2026-27 MSP floor and the retail list disagree, the row spans both.
@@ -313,13 +270,13 @@ _STATE_ROWS = state_prices.ROWS
 
 BOTTLES: list[Bottle] = (
     [Bottle(b, k, s, "Maharashtra", p, "madirakprice-mh") for b, k, s, p in _MH]
-    + [Bottle(b, k, s, "Delhi", p, "boldsky-dl") for b, k, s, p in _DL]
     # These lists print the strength on many labels, so the per-row figure is
     # used where the parser found one rather than a category typical.
     + [Bottle(b, k, sz, st, lo, srcs[0], hi, abv)
        for b, k, sz, st, lo, hi, abv, srcs in _STATE_ROWS]
     + [Bottle(b, k, s, "Gurugram (Haryana)", lo, src, hi) for b, k, s, lo, hi, src in _HR_RANGES]
-    + [Bottle(b, k, s, "Delhi", lo, src, hi) for b, k, s, lo, hi, src in _DL_RANGES]
+    + [Bottle(b, k, s, "Delhi", lo, "delhi-eabkari", hi, abv)
+       for b, k, s, lo, hi, abv in _DL_ROWS]
 )
 
 # ── One spelling per bottle, everywhere ───────────────────────────────────────

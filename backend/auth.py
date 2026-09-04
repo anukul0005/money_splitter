@@ -58,15 +58,27 @@ def _secret() -> bytes:
     """
     env = os.getenv("SECRET_KEY", "").strip()
     if env:
-        return env.encode()
+        key = env.encode()
+        source = "SECRET_KEY env var"
+    else:
+        from database import get_settings
 
-    from database import get_settings
+        key = hmac.new(
+            b"money-splitter/session-key/v1",
+            get_settings().database_url.encode(),
+            sha256,
+        ).digest()
+        source = "derived from DATABASE_URL (SECRET_KEY is not set)"
 
-    return hmac.new(
-        b"money-splitter/session-key/v1",
-        get_settings().database_url.encode(),
-        sha256,
-    ).digest()
+    # Printed once per process start, not per request — lru_cache guarantees
+    # that. A fingerprint, not the key itself: this exists so a report of
+    # "everyone got logged out" can be answered from the log, not guessed at.
+    # Compare the fingerprint printed just after one restart against the one
+    # printed just after the next — if it changed, this is where to look;
+    # if it didn't, sessions were not the cause of whatever broke.
+    fingerprint = hmac.new(key, b"fingerprint", sha256).hexdigest()[:12]
+    print(f"[auth] session-signing key: {source}, fingerprint {fingerprint}")
+    return key
 
 
 def _b64(raw: bytes) -> str:
