@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getRecommendMeta, getRecommendation, getFriends, searchRecommend } from '../api'
+import { getRecommendMeta, getRecommendation, getFriends, searchRecommend, listBrands } from '../api'
 
 import LoadingSpinner from '../components/LoadingSpinner'
 import PriceEditForm from '../components/PriceEditForm'
@@ -143,6 +143,10 @@ export default function Recommend() {
   const [searchBusy, setSearchBusy] = useState(false)
   const [searchError, setSearchError] = useState('')
   const [searchResult, setSearchResult] = useState(null)
+  // Every brand this state's price list already knows, so typing "j" offers
+  // Johnnie Walker before you finish the word rather than after you search
+  // for it and get nothing back.
+  const [brandOptions, setBrandOptions] = useState([])
   // Which card's price form is open, keyed by the card's own key. `'new'`
   // opens the standalone add form. Only one is ever open at a time.
   const [editing, setEditing] = useState(null)
@@ -186,6 +190,15 @@ export default function Recommend() {
       .catch(() => setFriends([]))
   }, [user?.name])
 
+  // Re-fetched whenever the state changes, since Delhi's list and Gurugram's
+  // are entirely different catalogues. A failed fetch just leaves search
+  // without suggestions rather than breaking it - typing and pressing Search
+  // still works either way.
+  useEffect(() => {
+    if (!state) return
+    listBrands(state).then((r) => setBrandOptions(r.data)).catch(() => setBrandOptions([]))
+  }, [state])
+
   const peopleN = Math.max(1, parseInt(people, 10) || 0)
   // The bottle sizes among the picked cards, beer excluded — beer has no one
   // size to divide between people.
@@ -193,6 +206,7 @@ export default function Recommend() {
   const loN = budgetMin
   const hiN = budgetMax
   const canRun = state && peopleN >= 1 && hiN - loN >= MIN_SPAN
+  const canSearch = query.trim().length >= 2
 
   // Dragging either thumb pushes the other rather than crossing it, so the
   // minimum span holds without ever refusing the drag.
@@ -243,13 +257,12 @@ export default function Recommend() {
   // over, so a search made inside a narrowed set of results stays narrowed.
   // Budget is left out on purpose: "what does Vat 69 cost" has no budget
   // attached to it, unlike "what should I buy".
-  const runSearch = async () => {
-    const q = query.trim()
-    if (q.length < 2) { setSearchError('Type at least 2 letters to search'); return }
+  const runSearch = async (over = {}) => {
+    if (!canSearch) { setSearchError('Type at least 2 letters to search'); return }
     setSearchError(''); setSearchBusy(true)
     try {
       const r = await searchRecommend({
-        state, q,
+        state: over.state || state, q: query.trim(),
         bottle: bottles.length ? bottles.join(',') : 'any',
         kind: kinds.join(','),
       })
@@ -459,23 +472,40 @@ export default function Recommend() {
             different question from the budget-ranked picks below, so it gets
             its own box and its own results rather than being folded in. */}
         <div className="card space-y-2">
-          <label className="label">Search a bottle</label>
-          <div className="flex gap-2">
+          {/* A magnifying glass inside the field rather than a label above it
+              plus a button beside it - one large, obvious box to type into,
+              the same shape a phone's own search fields use. The icon is
+              also the submit button, so there's nothing else to tap. */}
+          <div className="relative">
+            <button
+              type="button" onClick={runSearch}
+              disabled={searchBusy || !canSearch}
+              aria-label="Search"
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 disabled:opacity-40"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <circle cx="11" cy="11" r="7" />
+                <line x1="21" y1="21" x2="16.2" y2="16.2" />
+              </svg>
+            </button>
             <input
-              className="input text-sm flex-1" value={query}
-              placeholder="e.g. Vat 69, Old Monk, Kingfisher"
+              className="input text-base pl-10 py-3" value={query}
+              placeholder="Search a bottle — e.g. Vat 69, Old Monk, Kingfisher"
+              list="drink-brand-suggestions"
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') runSearch() }}
             />
-            <button
-              type="button" onClick={runSearch}
-              disabled={searchBusy || query.trim().length < 2}
-              className="btn-primary px-4 text-sm"
-            >
-              {searchBusy ? '…' : 'Search'}
-            </button>
+            {/* The browser's own autocomplete, filled from every brand this
+                state's price list already knows. Typing "j" offers every
+                Johnnie Walker and Jim Beam in the list without waiting for a
+                round trip - the datalist is filtered locally, in the browser,
+                not searched on the server. */}
+            <datalist id="drink-brand-suggestions">
+              {brandOptions.map((b) => <option key={b.brand} value={b.brand} />)}
+            </datalist>
           </div>
-          <p className="text-[10px] text-gray-400">
+          <p className="text-[10px] text-gray-400 pl-1">
             Searches {state || 'the selected state'} with whatever size and kind cards are ticked above — budget is not applied here.
           </p>
 
@@ -502,6 +532,33 @@ export default function Recommend() {
                         <span className="font-normal text-gray-400"> · {r.kind} · {pct(r.abv, r.abv_known)}</span>
                       </p>
                       <PriceStrip compare={r.compare} cheapest={r.cheapest_region} />
+
+                      <button
+                        type="button"
+                        onClick={() => setEditing(editing === `s${i}` ? null : `s${i}`)}
+                        className="text-[10px] font-bold text-gray-400 hover:text-brand-600 mt-1"
+                      >
+                        {editing === `s${i}` ? 'Close' : 'Wrong price? Fix it'}
+                      </button>
+
+                      {editing === `s${i}` && (
+                        <PriceEditForm
+                          state={searchResult.state}
+                          states={meta?.states ?? []}
+                          initial={{
+                            brand: r.brand, kind: r.kind, state: searchResult.state,
+                            size_ml: r.size_ml, price: r.price,
+                            abv: r.abv, abv_known: r.abv_known,
+                          }}
+                          onCancel={() => setEditing(null)}
+                          onDone={(saved) => {
+                            setEditing(null)
+                            loadMeta()
+                            if (saved?.state && saved.state !== state) setState(saved.state)
+                            runSearch({ state: saved?.state })
+                          }}
+                        />
+                      )}
                     </div>
                   ))}
                   {searchResult.truncated && (
