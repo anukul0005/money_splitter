@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getRecommendMeta, getRecommendation, getFriends } from '../api'
+import { getRecommendMeta, getRecommendation, getFriends, searchRecommend } from '../api'
 
 import LoadingSpinner from '../components/LoadingSpinner'
 import PriceEditForm from '../components/PriceEditForm'
@@ -30,6 +30,12 @@ const BOTTLES = [
   ['750',  'Full',    750],
   ['beer', 'Beer',    null],
 ]
+
+// The four base spirits. Wine, brandy, tequila and liqueur are real
+// categories in the data but not ones most evenings are planned around, so
+// they have no card here - leaving all four off still shows everything,
+// same rule as the size picker.
+const KINDS = ['whisky', 'rum', 'vodka', 'gin']
 
 // Long lists are shown seven deep and the rest folded away, so the page opens
 // on a real shortlist instead of a wall of bottles.
@@ -121,12 +127,22 @@ export default function Recommend() {
   // This was a single value, which made "a couple of quarters or some beer" —
   // an ordinary way to plan an evening — impossible to ask for.
   const [bottles, setBottles] = useState([])
+  // Same "off means everything" rule as bottles: any of whisky/rum/vodka/gin,
+  // none picked shows every kind the state has.
+  const [kinds, setKinds] = useState([])
   const [showAllPicks, setShowAllPicks] = useState(false)
   const [showAllBeers, setShowAllBeers] = useState(false)
   const [withWho, setWithWho] = useState([])
   const [result, setResult]   = useState(null)
   const [error, setError]     = useState('')
   const [busy, setBusy]       = useState(false)
+  // Finding a specific bottle is a different question from being recommended
+  // one, so it has its own box and its own result list rather than trying to
+  // fold "search" into the budget-ranked picks above.
+  const [query, setQuery]         = useState('')
+  const [searchBusy, setSearchBusy] = useState(false)
+  const [searchError, setSearchError] = useState('')
+  const [searchResult, setSearchResult] = useState(null)
   // Which card's price form is open, keyed by the card's own key. `'new'`
   // opens the standalone add form. Only one is ever open at a time.
   const [editing, setEditing] = useState(null)
@@ -207,6 +223,7 @@ export default function Recommend() {
         state: over.state || state,
         people: peopleN, budget_min: loN, budget_max: hiN,
         bottle: bottles.length ? bottles.join(',') : 'any',
+        kind: kinds.join(','),
         names: withWho.join(','),
       })
       setResult(r.data)
@@ -220,6 +237,29 @@ export default function Recommend() {
       )
       setResult(null)
     } finally { setBusy(false) }
+  }
+
+  // Same filters as the recommender - state, size, kind - carried straight
+  // over, so a search made inside a narrowed set of results stays narrowed.
+  // Budget is left out on purpose: "what does Vat 69 cost" has no budget
+  // attached to it, unlike "what should I buy".
+  const runSearch = async () => {
+    const q = query.trim()
+    if (q.length < 2) { setSearchError('Type at least 2 letters to search'); return }
+    setSearchError(''); setSearchBusy(true)
+    try {
+      const r = await searchRecommend({
+        state, q,
+        bottle: bottles.length ? bottles.join(',') : 'any',
+        kind: kinds.join(','),
+      })
+      setSearchResult(r.data)
+    } catch (err) {
+      setSearchError(
+        err.response?.data?.detail || `Could not search (${err.response?.status || 'network error'}).`
+      )
+      setSearchResult(null)
+    } finally { setSearchBusy(false) }
   }
 
   // Below every hook, so switching tabs never changes the hook order. Food
@@ -356,6 +396,34 @@ export default function Recommend() {
             </p>
           </div>
 
+          <div>
+            <label className="label">What kind (optional)</label>
+            <div className="grid grid-cols-4 gap-2">
+              {KINDS.map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  aria-pressed={kinds.includes(k)}
+                  onClick={() => setKinds((cur) => (
+                    cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k]
+                  ))}
+                  className={`rounded-md px-2 py-1.5 text-xs font-bold border capitalize transition-all ${
+                    kinds.includes(k)
+                      ? 'bg-brand-400 border-brand-400 text-white'
+                      : 'bg-cream border-amber-200 text-gray-500 hover:bg-amber-50'
+                  }`}
+                >
+                  {k}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-gray-400 mt-1">
+              {kinds.length === 0
+                ? 'Nothing picked — whisky, rum, vodka and gin all show. Tap any you fancy, tap again to clear.'
+                : `Only ${kinds.join(', ')} — beer is unaffected by this.`}
+            </p>
+          </div>
+
           <button onClick={run} className="btn-primary" disabled={busy || !canRun}>
             {busy ? 'Working it out…' : 'Recommend'}
           </button>
@@ -384,6 +452,66 @@ export default function Recommend() {
             >
               + Add a bottle or price we don&apos;t have
             </button>
+          )}
+        </div>
+
+        {/* Checking a specific brand rather than browsing for one - a
+            different question from the budget-ranked picks below, so it gets
+            its own box and its own results rather than being folded in. */}
+        <div className="card space-y-2">
+          <label className="label">Search a bottle</label>
+          <div className="flex gap-2">
+            <input
+              className="input text-sm flex-1" value={query}
+              placeholder="e.g. Vat 69, Old Monk, Kingfisher"
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') runSearch() }}
+            />
+            <button
+              type="button" onClick={runSearch}
+              disabled={searchBusy || query.trim().length < 2}
+              className="btn-primary px-4 text-sm"
+            >
+              {searchBusy ? '…' : 'Search'}
+            </button>
+          </div>
+          <p className="text-[10px] text-gray-400">
+            Searches {state || 'the selected state'} with whatever size and kind cards are ticked above — budget is not applied here.
+          </p>
+
+          {searchError && (
+            <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{searchError}</p>
+          )}
+
+          {searchResult && (
+            <div className="space-y-2 pt-1">
+              {searchResult.results.length === 0 ? (
+                <p className="text-xs text-gray-400 text-center py-3">
+                  Nothing called &quot;{searchResult.q}&quot; found in {searchResult.state} with these filters.
+                </p>
+              ) : (
+                <>
+                  {searchResult.results.map((r, i) => (
+                    <div key={`${r.brand}-${r.size_ml}-${i}`} className="rounded-md border border-amber-100 p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-black text-gray-900 flex-1 min-w-0 break-words">{r.brand}</p>
+                        <p className="text-sm font-black text-brand-600 flex-shrink-0">{INR(r.price)}</p>
+                      </div>
+                      <p className="text-[11px] font-bold text-gray-700 mt-0.5">
+                        {r.size_name ? `1 ${r.size_name} · ` : ''}{r.size_ml}ml
+                        <span className="font-normal text-gray-400"> · {r.kind} · {pct(r.abv, r.abv_known)}</span>
+                      </p>
+                      <PriceStrip compare={r.compare} cheapest={r.cheapest_region} />
+                    </div>
+                  ))}
+                  {searchResult.truncated && (
+                    <p className="text-[10px] text-gray-400 text-center">
+                      Showing the closest {searchResult.results.length} matches — narrow the search to see more precisely.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
           )}
         </div>
 

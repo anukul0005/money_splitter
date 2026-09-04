@@ -112,6 +112,7 @@ export const getFriends             = (name) => api.get('/stats/friends')
 // Prices come from scraped state excise listings; history from your own spend.
 export const getRecommendMeta = ()      => api.get('/recommend/meta')
 export const getRecommendation = (p)    => api.get('/recommend/', { params: p })
+export const searchRecommend   = (p)    => api.get('/recommend/search', { params: p })
 
 // ── Food recommender ──────────────────────────────────────────────────────────
 // Same idea, different table: cited Delhi NCR restaurant listings priced the
