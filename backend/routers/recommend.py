@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from functools import lru_cache
 
 from fastapi import APIRouter, Depends, HTTPException  # noqa: I001
 from sqlalchemy.orm import Session
@@ -120,6 +121,7 @@ GENERIC_WORDS = {
 }
 
 
+@lru_cache(maxsize=16384)
 def _brand_key(brand: str) -> str:
     """One spelling per brand, so corrections don't fork into near-duplicates.
 
@@ -132,6 +134,15 @@ def _brand_key(brand: str) -> str:
     Size is not part of it, on purpose. The same brand in 180ml and 750ml is
     one brand at two prices, and every lookup here carries the size alongside
     the key rather than baked into it.
+
+    Cached: Delhi alone is 3,257 rows, and the comparison strip calls this on
+    every candidate for every pick in every region on every request. Before
+    Delhi's real feed replaced the ~35-row aggregator list this was cheap
+    enough not to matter; at this size it was 3.6 million regex calls and
+    over thirty seconds per request - the "Recommend" button that looked
+    broken was really just never coming back before the browser gave up.
+    Brand strings are a small, fixed set (the published tables), so caching
+    every one of them costs a few hundred KB, not an unbounded amount.
     """
     return bn_key(brand)
 
@@ -174,15 +185,35 @@ def _same_bottle(a: str, b: str) -> bool:
             or f" {short} " in long)
 
 
-def _find_in(rows: list[Bottle], brand: str, size_ml: int) -> Bottle | None:
-    """The row in one region that is this bottle, or nothing.
+def _by_size(bottles: list[Bottle]) -> dict[int, list[Bottle]]:
+    """One region's table, bucketed by size so a lookup never rescans it.
+
+    _find_in used to filter a region's whole list by size on every single
+    call - `[b for b in rows if b.size_ml == size_ml]` - and the comparison
+    strip calls it for every pick, in every region, on every request. Against
+    Delhi's 3,257 rows that was several million comparisons for one page
+    load: the "Recommend" button that looked broken was really just taking
+    over twenty seconds to answer. Bucketing once per region per request
+    turns "scan everything" into "look up the bucket".
+    """
+    out: dict[int, list[Bottle]] = defaultdict(list)
+    for b in bottles:
+        out[b.size_ml].append(b)
+    return out
+
+
+def _find_in(same: list[Bottle], brand: str) -> Bottle | None:
+    """The row in one region's size bucket that is this bottle, or nothing.
 
     An exact name wins outright. Otherwise the closest variant wins - fewest
     extra words - so "Bacardi Apple Platinum Original Apple Rum" pairs with
     Delhi's "Bacardi Apple" rather than its plain "Bacardi".
+
+    Takes the bucket already narrowed to this size - see _by_size - rather
+    than a whole region's table, so the size filter is paid for once per
+    region instead of once per lookup.
     """
     key = _brand_key(brand)
-    same = [b for b in rows if b.size_ml == size_ml]
     exact = [b for b in same if _brand_key(b.brand) == key]
     if exact:
         return exact[0]
@@ -225,8 +256,8 @@ def _regions_for(state: str) -> tuple[str, ...]:
 MAX_COMPARE_REGIONS = 5
 
 
-def _compare(tables: dict[str, list[Bottle]], regions: tuple[str, ...],
-             brand: str, size_ml: int) -> list[dict]:
+def _compare(tables_by_size: dict[str, dict[int, list[Bottle]]],
+             regions: tuple[str, ...], brand: str, size_ml: int) -> list[dict]:
     """What this bottle costs in each region, corrections included.
 
     Built from the same tables the picks come from, so a price somebody
@@ -237,7 +268,7 @@ def _compare(tables: dict[str, list[Bottle]], regions: tuple[str, ...],
     """
     out = []
     for region in regions:
-        hit = _find_in(tables.get(region, []), brand, size_ml)
+        hit = _find_in(tables_by_size.get(region, {}).get(size_ml, []), brand)
         out.append({
             "region": region,
             "label": SHORT_STATE.get(region, region),
@@ -407,7 +438,7 @@ def _units(volume_ml: float, abv: float) -> float:
 def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
           sizes: tuple[int, ...], favourites: list[str],
           brand_avg: dict[str, int] | None = None,
-          tables: dict[str, list[Bottle]] | None = None,
+          tables_by_size: dict[str, dict[int, list[Bottle]]] | None = None,
           regions: tuple[str, ...] = NCR,
           brand_last: dict[str, str] | None = None,
           limit: int = 30) -> list[dict]:
@@ -448,7 +479,7 @@ def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
 
         hit = _fav_hit(b.brand)
         abv, abv_known = _strength(b)
-        compare = _compare(tables or {}, regions, b.brand, b.size_ml)
+        compare = _compare(tables_by_size or {}, regions, b.brand, b.size_ml)
         priced = [c for c in compare if c["total"] is not None]
         cheapest = min(priced, key=lambda c: c["total"])["region"] if priced else None
 
@@ -519,7 +550,7 @@ def _legacy_beer_fields(unit: float, size_ml: int, people: int, abv: float,
 
 def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
            favourites: list[str] | None = None,
-           tables: dict[str, list[Bottle]] | None = None,
+           tables_by_size: dict[str, dict[int, list[Bottle]]] | None = None,
            regions: tuple[str, ...] = NCR,
            limit: int = 30) -> list[dict]:
     """Beers you can buy, priced by the bottle.
@@ -551,7 +582,7 @@ def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
         # it, for no better reason than that it was added later - and beer is
         # where the state gap is most obvious, because a crate is worth
         # driving for in a way a single bottle of whisky is not.
-        compare = _compare(tables or {}, regions, b.brand, b.size_ml)
+        compare = _compare(tables_by_size or {}, regions, b.brand, b.size_ml)
         priced = [c for c in compare if c["total"] is not None]
         cheapest = min(priced, key=lambda c: c["total"])["region"] if priced else None
         out.append({
@@ -956,6 +987,10 @@ def recommend(
     tables = {
         r: _apply_overrides(for_state(r), by_state.get(r, []), r) for r in regions
     }
+    # Bucketed by size once per region per request, so the comparison strip's
+    # per-pick, per-region lookups never rescan a whole region's table - see
+    # _by_size.
+    tables_by_size = {r: _by_size(rows) for r, rows in tables.items()}
 
     if not bottles:
         raise HTTPException(
@@ -969,11 +1004,11 @@ def recommend(
     hist = _history(db, caller, people_names)
     # The picker decides what you are buying, and it can now ask for both.
     picks = (_pick(bottles, budget_min, budget_max, people, sizes,
-                   hist["favourites"], hist["brand_avg"], tables, regions,
+                   hist["favourites"], hist["brand_avg"], tables_by_size, regions,
                    hist["brand_last"])
              if want_spirits else [])
     beers = (_beers(bottles, budget_min, budget_max, people, hist["favourites"],
-                    tables, regions)
+                    tables_by_size, regions)
              if want_beer else [])
 
     return {
