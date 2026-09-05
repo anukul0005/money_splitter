@@ -57,6 +57,17 @@ const MIN_SPAN  = 60      // narrower than this matches nothing on a real price 
 // always reachable through the search box, which has no budget cap at all.
 const BUDGET_MAX = 15000
 const BUDGET_STEP = 10
+// Dragging the top thumb all the way to BUDGET_MAX means "and up," not "and
+// stop at 15000" - a real bottle can run into the lakhs (the priciest on
+// record is well past ₹12 lakh), and the slider has no way to dial in an
+// exact ceiling that high. Sent to the server as this stand-in for
+// "no ceiling" rather than actually being unbounded, so it stays a plain
+// number the API and the budget-buys math both already know how to use.
+const BUDGET_UNCAPPED = 100_000_000
+// How a budget_max is actually shown - "₹15,000+" once it's pinned at the
+// slider's top (locally) or come back as the uncapped stand-in (from the
+// server), instead of a number nobody dragged to on purpose.
+const fmtBudgetMax = (v) => (v >= BUDGET_MAX ? `${INR(BUDGET_MAX)}+` : INR(v))
 
 const pct = (v, known) => `${known ? '' : '~'}${v}% ABV`
 
@@ -271,7 +282,8 @@ export default function Recommend() {
     try {
       const r = await getRecommendation({
         state: over.state || state,
-        people: peopleN, budget_min: loN, budget_max: hiN,
+        people: peopleN, budget_min: loN,
+        budget_max: hiN >= BUDGET_MAX ? BUDGET_UNCAPPED : hiN,
         bottle: bottles.length ? bottles.join(',') : 'any',
         kind: kinds.join(','),
         names: withWho.join(','),
@@ -406,10 +418,10 @@ export default function Recommend() {
             </div>
             <div className="flex items-baseline justify-between mt-1">
               <p className="text-sm font-black text-gray-900">
-                {INR(loN)} – {INR(hiN)}
+                {INR(loN)} – {fmtBudgetMax(hiN)}
               </p>
               <p className="text-[10px] text-gray-400">
-                {INR(Math.round(loN / peopleN))}–{INR(Math.round(hiN / peopleN))} a head
+                {INR(Math.round(loN / peopleN))}–{INR(Math.round(hiN / peopleN))}{hiN >= BUDGET_MAX && '+'} a head
               </p>
             </div>
           </div>
@@ -706,7 +718,7 @@ export default function Recommend() {
                   what was asked for, which with several cards picked is more
                   than one thing. */}
               {result.bottle_name || 'any size'} · {result.people} people ·{' '}
-              {INR(result.budget_min)}–{INR(result.budget_max)}
+              {INR(result.budget_min)}–{fmtBudgetMax(result.budget_max)}
             </p>
 
             {result.picks.length === 0 && result.beers.length === 0 && (
@@ -714,7 +726,7 @@ export default function Recommend() {
                 <p className="text-sm text-gray-400">
                   {!result.size_available
                     ? `No ${result.bottle_name} prices published for ${result.state} yet.`
-                    : `Nothing in ${result.bottle_name} in ${result.state} falls between ${INR(result.budget_min)} and ${INR(result.budget_max)}.`}
+                    : `Nothing in ${result.bottle_name} in ${result.state} falls between ${INR(result.budget_min)} and ${fmtBudgetMax(result.budget_max)}.`}
                 </p>
                 {/* Dead ends are the common case with a narrow range, so say
                     what the size actually costs instead of leaving them to guess */}
@@ -878,7 +890,7 @@ export default function Recommend() {
                         budget, not a property of the beer, so it sits apart. */}
                     {buys != null && (
                       <p className="text-[10px] text-gray-400 mt-0.5">
-                        {INR(result.budget_max)} buys{' '}
+                        {fmtBudgetMax(result.budget_max)} buys{' '}
                         <span className="font-bold text-gray-500">
                           {buys} {buys === 1 ? 'bottle' : 'bottles'}
                         </span>
