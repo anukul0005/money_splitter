@@ -152,7 +152,11 @@ export default function Home() {
   const unsettledGroupIds = new Set(balances.map((b) => b.group_id))
   // group_id -> unsettled amount, used to rank what the user sees first
   const netByGroup = Object.fromEntries(balances.map((b) => [b.group_id, Math.abs(b.net)]))
-  const { masters: allMasters, solo: soloGroups } = buildMasterGroups(myGroups.filter((g) => !g.is_historical), 1)
+  // Historical groups are included here (unlike activeOverview above) so they
+  // still show up inside their super group on Home, each carrying its own
+  // "Historical" badge via GroupCard — they're just always settled, so they
+  // land behind "Show settled" rather than among the top unsettled cards.
+  const { masters: allMasters, solo: soloGroups } = buildMasterGroups(myGroups, 1)
   const unsettledMasters = allMasters.filter((m) => m.groups.some((g) => unsettledGroupIds.has(g.id)))
   const settledMasters   = allMasters.filter((m) => !m.groups.some((g) => unsettledGroupIds.has(g.id)))
   const unsettledSolo    = soloGroups.filter((g) => unsettledGroupIds.has(g.id))
