@@ -24,6 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 
 import delhi_prices
+import haryana_prices
 import state_prices
 from brand_names import canonicalise
 
@@ -53,6 +54,7 @@ SOURCES = {
         "as_of": "2026-09",
         "note": "Haryana beer retail bands",
     },
+    **haryana_prices.SOURCES,
 }
 
 # Haryana sets a Minimum Selling Price rather than a fixed MRP, so shops
@@ -275,6 +277,13 @@ BOTTLES: list[Bottle] = (
     + [Bottle(b, k, sz, st, lo, srcs[0], hi, abv)
        for b, k, sz, st, lo, hi, abv, srcs in _STATE_ROWS]
     + [Bottle(b, k, s, "Gurugram (Haryana)", lo, src, hi) for b, k, s, lo, hi, src in _HR_RANGES]
+    # A real retail catalogue (Discovery Wines, a named Gurugram chain), not
+    # the state MSP - see haryana_prices.py and parse_haryana.py for what it
+    # is, what it skips, and why. Extends Gurugram far past the ~30 brands the
+    # three aggregator sources above covered: single malts, gin, tequila,
+    # cognac, liqueurs and wine had no Gurugram row at all before this.
+    + [Bottle(b, k, s, "Gurugram (Haryana)", p, "discovery-wines-hr")
+       for b, k, s, p in haryana_prices.ROWS]
     + [Bottle(b, k, s, "Delhi", lo, "delhi-eabkari", hi, abv)
        for b, k, s, lo, hi, abv in _DL_ROWS]
 )
