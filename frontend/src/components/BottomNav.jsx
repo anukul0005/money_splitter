@@ -6,15 +6,15 @@ import { isAdmin } from '../UserContext'
 // tap from Home's quick actions and from "+ Add" inside any group.
 const items = [
   { to: '/',          label: 'Home',      icon: HomeIcon },
-  { to: '/recommend', label: 'Recommend', icon: SparkIcon, highlight: true },
+  { to: '/recommend', label: 'Recommend', icon: CompassIcon, highlight: true },
   { to: '/friends',   label: 'Friends',   icon: FriendsIcon },
   { to: '/history',   label: 'History',   icon: HistoryIcon },
 ]
 
 function HomeIcon()    { return <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0h6" /></svg> }
-// A cocktail glass said "drinks", and the key now opens food as well. Sparkles
-// read as "suggestions" without picking a side between the two tabs.
-function SparkIcon()   { return <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M13 3l2.1 6.3L21 11.4l-5.9 2.1L13 19.8l-2.1-6.3L5 11.4l5.9-2.1L13 3zM5.5 3v3M4 4.5h3M6 17.5v3M4.5 19h3" /></svg> }
+// A cocktail glass said "drinks", and the key now opens food as well. A
+// compass reads as "find something" without picking a side between the two.
+function CompassIcon() { return <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 9l-2 6-6 2 2-6 6-2z" /></svg> }
 function FriendsIcon() { return <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14c-4.418 0-8 2.239-8 5v1h16v-1c0-2.761-3.582-5-8-5z" /></svg> }
 function HistoryIcon() { return <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> }
 
