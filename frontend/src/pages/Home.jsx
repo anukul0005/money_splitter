@@ -259,9 +259,17 @@ export default function Home() {
         {/* Groups (every group linked to a master group by members; unsettled first, settled behind a toggle) */}
         {(allMasters.length > 0 || soloGroups.length > 0) && (
           <div>
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">
-              {topUnsettled.length > 0 ? 'Top unsettled groups' : 'Groups'}
-            </p>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">
+                {topUnsettled.length > 0 ? 'Top unsettled groups' : 'Groups'}
+              </p>
+              <button
+                className="text-xs font-bold text-brand-500"
+                onClick={() => nav('/groups')}
+              >
+                See all &rsaquo;
+              </button>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {topUnsettled.map((e) => e.node)}
             </div>

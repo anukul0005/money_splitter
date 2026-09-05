@@ -66,6 +66,17 @@ export default function Friends() {
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
           <button
+            onClick={() => nav('/groups')}
+            title="All groups"
+            aria-label="All groups"
+            className="flex items-center gap-1.5 bg-cream border border-amber-200 text-gray-500 hover:bg-amber-50 rounded-md px-3 py-2 text-xs font-bold active:scale-95 transition-all shadow-sm"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+            Groups
+          </button>
+          <button
             onClick={() => nav('/groups/new')}
             title="New group"
             aria-label="New group"
