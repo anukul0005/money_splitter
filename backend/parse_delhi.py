@@ -45,6 +45,8 @@ import urllib.request
 from collections import defaultdict
 from pathlib import Path
 
+import brand_names
+
 HERE = Path(__file__).parent
 FEED_URL = "https://eabkari.delhi.gov.in/WEbservice.asmx/GetBrandPriceList"
 SAVED = HERE / "sources" / "delhi" / "delhi-brand-price-list.json"
@@ -98,7 +100,11 @@ def _clean(name: str) -> str:
     name = _EMAIL.sub(" ", name)
     name = _CODE_SUFFIX.sub("", name)
     name = " ".join(name.split())
-    return name.title() if name.isupper() else name
+    # Not str.title(): it capitalises the letter after an apostrophe too,
+    # so "FOSTER'S" came out "Foster'S" and "...1ST FILL..." came out
+    # "...1St Fill...". brand_names.titlecase splits on whitespace first and
+    # capitalises each word, so an apostrophe mid-word is left alone.
+    return brand_names.titlecase(name) if name.isupper() else name
 
 
 def _size_ml(measure: str) -> int | None:

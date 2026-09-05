@@ -119,6 +119,8 @@ export const searchRecommend   = (p)    => api.get('/recommend/search', { params
 // way listings price them (cost for two), plus your own eating-out history.
 export const getFoodMeta       = ()     => api.get('/food/meta')
 export const getFoodRecommendation = (p) => api.get('/food/', { params: p })
+export const searchFood        = (p)    => api.get('/food/search', { params: p })
+export const listPlaceNames    = (city) => api.get('/food/names', { params: { city } })
 
 // ── Corrections people enter by hand ──────────────────────────────────────────
 // Published lists are a starting point, not the last word: a shop charges above

@@ -49,7 +49,13 @@ const fmtDate = (iso) => {
 }
 
 const MIN_SPAN  = 60      // narrower than this matches nothing on a real price list
-const BUDGET_MAX = 6000
+// Was 6000, picked with no reference to the actual data - 463 real bottles
+// across the five states price above that, up to premium single malts and
+// cognacs several states publish (a few rare ones run into lakhs). 15000
+// covers the 97th percentile of every published price; dragging the slider
+// still can't reach the very top of the market, but a bottle priced there is
+// always reachable through the search box, which has no budget cap at all.
+const BUDGET_MAX = 15000
 const BUDGET_STEP = 10
 
 const pct = (v, known) => `${known ? '' : '~'}${v}% ABV`
@@ -143,7 +149,14 @@ export default function Recommend() {
   const [searchBusy, setSearchBusy] = useState(false)
   const [searchError, setSearchError] = useState('')
   const [searchResult, setSearchResult] = useState(null)
-  // Every brand this state's price list already knows, so typing "j" offers
+  // Independent of the main State field above. That one has to be one
+  // specific state, because alcohol pricing genuinely is state-specific and
+  // "what should I buy" has no sane answer without knowing where. "Does
+  // anyone sell this at all" has no such natural default, so this starts on
+  // every state at once - '' means all, matching what the server does with
+  // an empty state.
+  const [searchState, setSearchState] = useState('')
+  // Every brand the searched state(s) already know, so typing "j" offers
   // Johnnie Walker before you finish the word rather than after you search
   // for it and get nothing back.
   const [brandOptions, setBrandOptions] = useState([])
@@ -193,14 +206,15 @@ export default function Recommend() {
       .catch(() => setFriends([]))
   }, [user?.name])
 
-  // Re-fetched whenever the state changes, since Delhi's list and Gurugram's
-  // are entirely different catalogues. A failed fetch just leaves search
-  // without suggestions rather than breaking it - typing and pressing Search
-  // still works either way.
+  // Re-fetched whenever the searched state changes, since Delhi's list and
+  // Gurugram's are entirely different catalogues - and the server already
+  // treats an empty state as "every brand, every state", so this needs no
+  // special case for the default "All states" setting. A failed fetch just
+  // leaves search without suggestions rather than breaking it - typing and
+  // pressing Search still works either way.
   useEffect(() => {
-    if (!state) return
-    listBrands(state).then((r) => setBrandOptions(r.data)).catch(() => setBrandOptions([]))
-  }, [state])
+    listBrands(searchState).then((r) => setBrandOptions(r.data)).catch(() => setBrandOptions([]))
+  }, [searchState])
 
   const peopleN = Math.max(1, parseInt(people, 10) || 0)
   // The bottle sizes among the picked cards, beer excluded — beer has no one
@@ -275,8 +289,9 @@ export default function Recommend() {
     } finally { setBusy(false) }
   }
 
-  // Same filters as the recommender - state, size, kind - carried straight
-  // over, so a search made inside a narrowed set of results stays narrowed.
+  // The size and kind cards are shared with the recommender, but the state
+  // is search's own - see searchState above - and defaults to every state
+  // rather than whatever the recommender's dropdown happens to show.
   // Budget is left out on purpose: "what does Vat 69 cost" has no budget
   // attached to it, unlike "what should I buy".
   const runSearch = async (over = {}) => {
@@ -288,7 +303,7 @@ export default function Recommend() {
     setSearchError(''); setSearchBusy(true)
     try {
       const r = await searchRecommend({
-        state: over.state || state, q,
+        state: over.state ?? searchState, q,
         bottle: bottles.length ? bottles.join(',') : 'any',
         kind: kinds.join(','),
       })
@@ -498,6 +513,21 @@ export default function Recommend() {
             different question from the budget-ranked picks below, so it gets
             its own box and its own results rather than being folded in. */}
         <div className="card space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <label className="label mb-0">Search a bottle</label>
+            {/* Its own state, defaulting to every state at once - see
+                searchState. Independent of the State field above, which has
+                to pick one specific state for the recommender to make sense
+                at all. */}
+            <select
+              className="input text-xs py-1 w-auto max-w-[45%]"
+              value={searchState}
+              onChange={(e) => setSearchState(e.target.value)}
+            >
+              <option value="">All states</option>
+              {(meta?.states ?? []).map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
           {/* A magnifying glass inside the field rather than a label above it
               plus a button beside it - one large, obvious box to type into,
               the same shape a phone's own search fields use. The icon is
@@ -516,7 +546,11 @@ export default function Recommend() {
               </svg>
             </button>
             <input
-              className="input text-base pl-10 py-3" value={query}
+              // Text stays small, matching the suggestion rows below it - a
+              // large placeholder read as a heading, not a field to type
+              // into. The box itself stays large and tappable (padding, not
+              // font size, is what makes a search field feel roomy).
+              className="input text-sm pl-10 py-3" value={query}
               placeholder="Search a bottle — e.g. Vat 69, Old Monk, Kingfisher"
               onChange={(e) => { setQuery(e.target.value); setShowSuggestions(true) }}
               onFocus={() => setShowSuggestions(true)}
@@ -558,7 +592,7 @@ export default function Recommend() {
             )}
           </div>
           <p className="text-[10px] text-gray-400 pl-1">
-            Searches {state || 'the selected state'} with whatever size and kind cards are ticked above — budget is not applied here.
+            {searchState ? `Searches ${searchState}` : 'Searches every state'} with whatever kind cards are ticked above, any size — budget is not applied here.
           </p>
 
           {searchError && (
@@ -569,19 +603,27 @@ export default function Recommend() {
             <div className="space-y-2 pt-1">
               {searchResult.results.length === 0 ? (
                 <p className="text-xs text-gray-400 text-center py-3">
-                  Nothing called &quot;{searchResult.q}&quot; found in {searchResult.state} with these filters.
+                  Nothing called &quot;{searchResult.q}&quot; found{' '}
+                  {searchResult.is_all ? 'in any state' : `in ${searchResult.state}`} with these filters.
                 </p>
               ) : (
                 <>
                   {searchResult.results.map((r, i) => (
-                    <div key={`${r.brand}-${r.size_ml}-${i}`} className="rounded-md border border-amber-100 p-3">
+                    <div key={`${r.brand}-${r.size_ml}-${r.state}-${i}`} className="rounded-md border border-amber-100 p-3">
                       <div className="flex items-start justify-between gap-2">
                         <p className="text-sm font-black text-gray-900 flex-1 min-w-0 break-words">{r.brand}</p>
                         <p className="text-sm font-black text-brand-600 flex-shrink-0">{INR(r.price)}</p>
                       </div>
                       <p className="text-[11px] font-bold text-gray-700 mt-0.5">
                         {r.size_name ? `1 ${r.size_name} · ` : ''}{r.size_ml}ml
-                        <span className="font-normal text-gray-400"> · {r.kind} · {pct(r.abv, r.abv_known)}</span>
+                        <span className="font-normal text-gray-400">
+                          {' '}· {r.kind} · {pct(r.abv, r.abv_known)}
+                          {/* Only worth saying in "All states" mode, where the
+                              same search can turn up several states at once
+                              and the price on the card is otherwise ambiguous
+                              about where it applies. */}
+                          {searchResult.is_all && <> · <span className="font-bold">{r.state}</span></>}
+                        </span>
                       </p>
                       <PriceStrip compare={r.compare} cheapest={r.cheapest_region} />
 
@@ -595,19 +637,22 @@ export default function Recommend() {
 
                       {editing === `s${i}` && (
                         <PriceEditForm
-                          state={searchResult.state}
+                          state={r.state}
                           states={meta?.states ?? []}
                           initial={{
-                            brand: r.brand, kind: r.kind, state: searchResult.state,
+                            brand: r.brand, kind: r.kind, state: r.state,
                             size_ml: r.size_ml, price: r.price,
                             abv: r.abv, abv_known: r.abv_known,
                           }}
                           onCancel={() => setEditing(null)}
-                          onDone={(saved) => {
+                          onDone={() => {
                             setEditing(null)
                             loadMeta()
-                            if (saved?.state && saved.state !== state) setState(saved.state)
-                            runSearch({ state: saved?.state })
+                            // Re-run with whatever searchState already is,
+                            // "All states" included - narrowing to just the
+                            // edited row's state would silently drop out of
+                            // All mode every time a price got fixed.
+                            runSearch()
                           }}
                         />
                       )}

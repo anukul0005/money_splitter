@@ -554,16 +554,46 @@ def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
     return out[:max(limit, mine + 4)]
 
 
-def _search(bottles: list[Bottle], q: str, sizes: tuple[int, ...],
+def _parse_search_sizes(bottle: str) -> tuple[tuple[int, ...] | None, bool, bool]:
+    """Same four size cards as the recommender, read differently for search.
+
+    The recommender's "nothing ticked" means the three common spirit sizes -
+    a sensible default for "what should I buy this evening". Search inherited
+    that default and it was a real bug: Kingsmill Pink Raspberry Distilled
+    Gin is sold only in 1000ml, so it was suggested by the autocomplete (which
+    has no size filter at all) and then reported as not found by search
+    (which silently excluded every 1000ml, 500ml, 330ml and other real,
+    published size). A bottle search has no business assuming what size
+    somebody meant - "nothing ticked" means every size here, full stop, and
+    only ticking a card narrows it.
+
+    Returns (sizes or None for unrestricted, show beer, show spirits).
+    """
+    parts = [p.strip() for p in (bottle or "").split(",")
+             if p.strip() and p.strip() != "any"]
+    for p in parts:
+        if p not in BOTTLE_CHOICES:
+            raise HTTPException(400, f"Pick any of {', '.join(BOTTLE_CHOICES[1:])} - got '{p}'")
+    size_parts = [p for p in parts if p != "beer"]
+    sizes = (tuple(sorted({ml for p in size_parts for ml in SIZE_GROUP[int(p)]}))
+             if size_parts else None)
+    want_beer = not parts or "beer" in parts
+    want_spirits = not parts or bool(size_parts)
+    return sizes, want_beer, want_spirits
+
+
+def _search(bottles: list[Bottle], q: str, sizes: tuple[int, ...] | None,
            want_beer: bool, want_spirits: bool, kinds: tuple[str, ...],
            lo: float | None, hi: float | None) -> list[Bottle]:
     """Every bottle whose name contains the search text.
 
-    Filtered the same way the recommender is - by size, kind and budget -
-    because a search box that sits inside a set of filters and then ignores
-    them would be a second, contradictory way of asking the same question.
-    Budget is optional here, unlike the recommender: "what does Vat 69 cost"
-    is a real question with no budget attached to it.
+    Filtered the same way the recommender is - by kind and budget - because a
+    search box that sits inside a set of filters and then ignores them would
+    be a second, contradictory way of asking the same question. Size is the
+    exception: `sizes=None` means every size, which is the default - see
+    _parse_search_sizes for why. Budget is optional here, unlike the
+    recommender: "what does Vat 69 cost" is a real question with no budget
+    attached to it.
 
     Matched on words, not a single substring: "old rum" finds "Old Monk Xxx
     Rum" and "Old Chief Premium Xxx Rum" alike, which a single contiguous
@@ -582,7 +612,7 @@ def _search(bottles: list[Bottle], q: str, sizes: tuple[int, ...],
                 continue
             if kinds and b.kind not in kinds:
                 continue
-            if b.size_ml not in sizes:
+            if sizes is not None and b.size_ml not in sizes:
                 continue
         if lo is not None and b.mid < lo:
             continue
@@ -1020,8 +1050,8 @@ def meta(db: Session = Depends(get_db), _: User = Depends(current_user)):
 
 @router.get("/search", response_model=dict)
 def search(
-    state: str,
-    q: str,
+    state: str = "",
+    q: str = "",
     bottle: str = "any",
     kind: str = "",
     budget_min: float | None = None,
@@ -1034,11 +1064,20 @@ def search(
     The recommender answers "what should I buy" out of a budget; this
     answers "what does this specific bottle cost" - checking on a brand you
     already have in mind rather than browsing for one. Respects whatever
-    size, kind and budget filters are already set on the page, so searching
-    inside a narrowed set of results stays narrowed rather than quietly
-    searching everything and ignoring what was picked. Budget is optional
-    here, unlike the recommender - a plain "what does Vat 69 cost" has no
-    budget attached to it at all.
+    kind and budget filters are already set on the page, so searching inside
+    a narrowed set of results stays narrowed rather than quietly searching
+    everything and ignoring what was picked. Size is deliberately not
+    narrowed by default - see _parse_search_sizes. Budget is optional here,
+    unlike the recommender - a plain "what does Vat 69 cost" has no budget
+    attached to it at all.
+
+    `state` is optional and defaults to every state at once. The recommender
+    needs one specific state because alcohol pricing genuinely is
+    state-specific - there is no sane single answer to "what should I buy"
+    without knowing where. "Does anyone sell this at all" has no such
+    natural default, and defaulting search to whichever state the
+    recommender happened to have selected meant a bottle Delhi doesn't carry
+    read as "not found" even when Madhya Pradesh had it three taps away.
     """
     q = q.strip()
     if len(q) < 2:
@@ -1046,30 +1085,44 @@ def search(
     if budget_min is not None and budget_max is not None and budget_max < budget_min:
         raise HTTPException(400, "budget_max must be at least budget_min")
 
-    sizes, want_beer, want_spirits = _parse_bottle(bottle)
+    sizes, want_beer, want_spirits = _parse_search_sizes(bottle)
     kinds = _parse_kinds(kind)
 
     by_state = _overrides_by_state(db)
-    bottles = _apply_overrides(for_state(state), by_state.get(state, []), state)
-    if not bottles:
+    known_states = sorted(set(STATES) | set(by_state))
+    is_all = not state.strip() or state.strip().lower() == "all"
+    if not is_all and state not in known_states:
         raise HTTPException(
             404,
             f"No published prices for {state} yet — we only have "
-            f"{', '.join(STATES)}.",
+            f"{', '.join(known_states)}.",
         )
+    search_states = known_states if is_all else [state]
 
-    regions = _regions_for(state)
+    # Every state's table, built once. The compare strip is the same set of
+    # columns regardless of which state a hit happens to come from, so there
+    # is no reason to rebuild it per hit or per searched state.
     tables = {
-        r: _apply_overrides(for_state(r), by_state.get(r, []), r) for r in regions
+        s: _apply_overrides(for_state(s), by_state.get(s, []), s) for s in known_states
     }
-    tables_by_size = {r: _by_size(rows) for r, rows in tables.items()}
+    tables_by_size = {s: _by_size(rows) for s, rows in tables.items()}
 
-    hits = _search(bottles, q, sizes, want_beer, want_spirits, kinds,
-                   budget_min, budget_max)
+    hits: list[tuple[str, Bottle]] = []
+    for st in search_states:
+        for b in _search(tables[st], q, sizes, want_beer, want_spirits, kinds,
+                         budget_min, budget_max):
+            hits.append((st, b))
+
+    # Re-ranked as one list rather than state by state, so the closest match
+    # to the text overall comes first regardless of which state holds it.
+    ql = " ".join(bn_key(q).split())
+    hits.sort(key=lambda sb: (not _brand_key(sb[1].brand).startswith(ql),
+                              len(sb[1].brand)))
 
     results = []
-    for b in hits[:25]:
+    for st, b in hits[:25]:
         abv, abv_known = _strength(b)
+        regions = _regions_for(st)
         compare = _compare(tables_by_size, regions, b.brand, b.size_ml)
         priced = [c for c in compare if c["total"] is not None]
         cheapest = min(priced, key=lambda c: c["total"])["region"] if priced else None
@@ -1078,6 +1131,9 @@ def search(
             "kind": b.kind,
             "size_ml": b.size_ml,
             "size_name": SPIRIT_SIZES.get(b.size_ml) if b.kind != "beer" else None,
+            # Which state this exact row came from - always present, since a
+            # global search can turn up the same brand from several states.
+            "state": st,
             "price": round(b.mid),
             "unit_price": b.price,
             "unit_price_max": b.price_max,
@@ -1091,9 +1147,10 @@ def search(
         })
 
     return {
-        "state": state,
+        "state": "all" if is_all else state,
+        "is_all": is_all,
+        "states_searched": search_states,
         "q": q,
-        "regions": list(regions),
         "results": results,
         "count": len(results),
         "truncated": len(hits) > len(results),

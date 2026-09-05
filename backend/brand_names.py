@@ -128,6 +128,23 @@ def core(name: str, kind: str) -> str:
     return f"{kind}|{' '.join(sorted(words)) if words else k}"
 
 
+def titlecase(s: str) -> str:
+    """Capitalise a shouted name word by word, not with str.title().
+
+    str.title() capitalises every letter that follows a non-letter, which
+    includes the letter after an apostrophe: "FOSTER'S".title() is "Foster'S",
+    and "DEWAR'S ... 1ST FILL".title() is "Dewar'S ... 1St Fill". Splitting on
+    whitespace and capitalising each word avoids both - "Foster's" comes out
+    correctly, because .capitalize() only touches the first character of the
+    word and lowercases the rest.
+
+    A token with a digit in it is left alone: "8PM".capitalize() would be
+    "8pm", which is wrong the other way.
+    """
+    return " ".join(w if any(c.isdigit() for c in w) else w.capitalize()
+                    for w in s.split())
+
+
 def display(names: list[str]) -> str:
     """The name to show for a cluster: the shortest, tidied for case.
 
@@ -141,8 +158,7 @@ def display(names: list[str]) -> str:
     """
     best = min(names, key=lambda n: (len(n), n))
     if best.isupper():
-        best = " ".join(w if any(c.isdigit() for c in w) else w.capitalize()
-                        for w in best.split())
+        best = titlecase(best)
     return best
 
 

@@ -202,6 +202,39 @@ def _menu(place: Place, limit: int = 4) -> list[dict]:
     ]
 
 
+def _search_places(places: list[Place], q: str, cuisine: str, kind: str,
+                   veg_only: bool) -> list[Place]:
+    """Every place whose name contains the search text.
+
+    Filtered by cuisine, kind and veg the same way the recommender is - a
+    search box inside a set of filters that ignored them would be a second,
+    contradictory way of asking. No budget filter, unlike the recommender:
+    "is there a Karim's" has no budget attached to it.
+
+    Matched on words, not one contiguous substring, for the same reason the
+    drink search is: "karim delhi" should find "Karim's, Old Delhi" even
+    though the words appear in the opposite order in the name.
+    """
+    qwords = _place_key(q).split()
+    if not qwords:
+        return []
+    out = []
+    for p in places:
+        if veg_only and not p.veg_only:
+            continue
+        if cuisine != "any" and cuisine not in p.cuisines:
+            continue
+        if kind != "any" and p.kind != kind:
+            continue
+        pk = _place_key(p.name)
+        if all(w in pk for w in qwords):
+            out.append(p)
+
+    ql = " ".join(qwords)
+    out.sort(key=lambda p: (not _place_key(p.name).startswith(ql), len(p.name)))
+    return out
+
+
 def _pick(places: list[Place], lo: float, hi: float, people: int,
           cuisine: str, kind: str, veg_only: bool,
           favourites: list[str], been_to: list[str],
@@ -420,6 +453,29 @@ def list_places(city: str = "", db: Session = Depends(get_db),
     return [_place_out(r) for r in q.order_by(PlaceOverride.id.desc()).all()]
 
 
+def _known_names(db: Session, city: str = "") -> list[dict]:
+    """Every restaurant we already hold, published or added by hand.
+
+    Not /places above: that lists only hand-added corrections, for managing
+    them. This is every name search's autocomplete can suggest - the full
+    catalogue for one city, or every city at once when none is given.
+    """
+    added = {c for (c,) in db.query(PlaceOverride.city).distinct()}
+    cities = [city] if city else sorted(set(CITIES) | added)
+    out: dict[tuple[str, str], dict] = {}
+    for c in cities:
+        for p in _apply_place_overrides(for_city(c), db, c):
+            out.setdefault((p.name, p.city), {"name": p.name, "area": p.area, "city": p.city})
+    return sorted(out.values(), key=lambda x: x["name"].lower())
+
+
+@router.get("/names", response_model=list[dict])
+def list_names(city: str = "", db: Session = Depends(get_db),
+              _: User = Depends(current_user)):
+    """Restaurant names for a search box's autocomplete."""
+    return _known_names(db, city)
+
+
 @router.post("/places", response_model=dict)
 def set_place(body: PlaceIn, db: Session = Depends(get_db),
               caller: User = Depends(current_user)):
@@ -487,6 +543,83 @@ def meta(db: Session = Depends(get_db), _: User = Depends(current_user)):
         "place_count": len(PLACES),
         "dish_count": len(DISHES),
         "min_budget_span": MIN_BUDGET_SPAN,
+    }
+
+
+@router.get("/search", response_model=dict)
+def search(
+    city: str = "",
+    q: str = "",
+    cuisine: str = "any",
+    kind: str = "any",
+    veg: bool = False,
+    db: Session = Depends(get_db),
+    caller: User = Depends(current_user),
+):
+    """Find one restaurant by name - a different question from "where should
+    I eat", which needs a city and a budget to mean anything. Checking on a
+    name already in mind doesn't need either.
+
+    `city` is optional and defaults to every city at once. The recommender
+    needs one specific city because "where should I eat" has no sane answer
+    without knowing where you are; "does this place exist" has no such
+    natural default, so it starts everywhere and narrows only when asked.
+    """
+    q = q.strip()
+    if len(q) < 2:
+        raise HTTPException(400, "Type at least 2 letters to search")
+    if cuisine != "any" and cuisine not in CUISINES:
+        raise HTTPException(400, f"We have no places tagged {cuisine!r}")
+    if kind != "any" and kind not in KINDS:
+        raise HTTPException(400, f"Pick one of {['any', *KINDS]}")
+
+    added = {c for (c,) in db.query(PlaceOverride.city).distinct()}
+    known_cities = sorted(set(CITIES) | added)
+    is_all = not city.strip() or city.strip().lower() == "all"
+    if not is_all and city not in known_cities:
+        raise HTTPException(
+            404,
+            f"No published prices for {city} yet — we only have "
+            f"{', '.join(known_cities)}.",
+        )
+    search_cities = known_cities if is_all else [city]
+
+    hits: list[Place] = []
+    for c in search_cities:
+        places = _apply_place_overrides(for_city(c), db, c)
+        hits.extend(_search_places(places, q, cuisine, kind, veg))
+
+    # Re-ranked as one list rather than city by city, so the closest match to
+    # the text overall comes first regardless of which city holds it.
+    ql = " ".join(_place_key(q).split())
+    hits.sort(key=lambda p: (not _place_key(p.name).startswith(ql), len(p.name)))
+
+    results = []
+    for p in hits[:25]:
+        results.append({
+            "name": p.name,
+            "area": p.area,
+            "city": p.city,
+            "cuisines": list(p.cuisines),
+            "kind": p.kind,
+            "kind_name": KINDS.get(p.kind, p.kind),
+            "veg_only": p.veg_only,
+            "for_two": p.for_two,
+            "for_two_max": p.for_two_max if p.is_range else None,
+            "is_estimate_range": p.is_range,
+            "added_by_hand": "added-by-hand" in p.sources,
+            "menu": _menu(p),
+            "sources": list(p.sources),
+        })
+
+    return {
+        "city": "all" if is_all else city,
+        "is_all": is_all,
+        "cities_searched": search_cities,
+        "q": q,
+        "results": results,
+        "count": len(results),
+        "truncated": len(hits) > len(results),
     }
 
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getFoodMeta, getFoodRecommendation, getFriends } from '../api'
+import { getFoodMeta, getFoodRecommendation, getFriends, searchFood, listPlaceNames } from '../api'
 
 import LoadingSpinner from '../components/LoadingSpinner'
 import PlaceEditForm from '../components/PlaceEditForm'
@@ -70,6 +70,20 @@ export default function RecommendFood({ tab, setTab }) {
   const [editing, setEditing] = useState(null)
   const [showAllPicks, setShowAllPicks] = useState(false)
   const [showAllStreet, setShowAllStreet] = useState(false)
+  // Finding a specific restaurant is a different question from being
+  // recommended one - it needs no budget and no head count, so it gets its
+  // own box rather than being folded into the budget-ranked picks above.
+  const [query, setQuery]           = useState('')
+  const [searchBusy, setSearchBusy] = useState(false)
+  const [searchError, setSearchError] = useState('')
+  const [searchResult, setSearchResult] = useState(null)
+  // Independent of the City field above, and defaults to every city at once
+  // for the same reason the drink search defaults to every state: "is there
+  // a Karim's" has no natural single city to assume, unlike "where should I
+  // eat", which cannot mean anything without one.
+  const [searchCity, setSearchCity] = useState('')
+  const [nameOptions, setNameOptions] = useState([])
+  const [showSuggestions, setShowSuggestions] = useState(false)
 
   // Two independent calls, loaded independently, so a failure in either says
   // which one broke instead of leaving an empty form with a generic message.
@@ -108,10 +122,32 @@ export default function RecommendFood({ tab, setTab }) {
       .catch(() => setFriends([]))
   }, [user?.name])
 
+  // Re-fetched whenever the searched city changes. An empty city already
+  // means "every place, every city" on the server, so "All cities" needs no
+  // special case here. A failed fetch just leaves search without
+  // suggestions - typing and pressing Search still works either way.
+  useEffect(() => {
+    listPlaceNames(searchCity).then((r) => setNameOptions(r.data)).catch(() => setNameOptions([]))
+  }, [searchCity])
+
   const peopleN = Math.max(1, parseInt(people, 10) || 0)
   const loN = budgetMin
   const hiN = budgetMax
   const canRun = city && peopleN >= 1 && hiN - loN >= MIN_SPAN
+  const canSearch = query.trim().length >= 2
+
+  // Suggestions as you type, ranked the same way the drink search's are:
+  // starts-with first, then anywhere it appears, capped at eight.
+  const qLower = query.trim().toLowerCase()
+  const suggestions = qLower.length === 0 ? [] : nameOptions
+    .filter((p) => p.name.toLowerCase().includes(qLower))
+    .sort((a, b) => {
+      const aStarts = a.name.toLowerCase().startsWith(qLower)
+      const bStarts = b.name.toLowerCase().startsWith(qLower)
+      if (aStarts !== bStarts) return aStarts ? -1 : 1
+      return a.name.length - b.name.length
+    })
+    .slice(0, 8)
 
   // Dragging either thumb pushes the other rather than crossing it, so the
   // minimum span holds without ever refusing the drag.
@@ -166,6 +202,29 @@ export default function RecommendFood({ tab, setTab }) {
       )
       setResult(null)
     } finally { setBusy(false) }
+  }
+
+  // City is search's own - searchCity, defaulting to every city - not the
+  // recommender's City field above. Cuisine, kind and veg are shared, since
+  // narrowing a search inside filters already ticked is what people expect.
+  const runSearch = async (over = {}) => {
+    // Picking a suggestion passes the name straight through rather than
+    // relying on the query box's state, which setQuery() just started
+    // updating but hasn't actually applied in this same tick yet.
+    const q = (over.q ?? query).trim()
+    if (q.length < 2) { setSearchError('Type at least 2 letters to search'); return }
+    setSearchError(''); setSearchBusy(true)
+    try {
+      const r = await searchFood({
+        city: over.city ?? searchCity, q, cuisine, kind, veg,
+      })
+      setSearchResult(r.data)
+    } catch (err) {
+      setSearchError(
+        err.response?.data?.detail || `Could not search (${err.response?.status || 'network error'}).`
+      )
+      setSearchResult(null)
+    } finally { setSearchBusy(false) }
   }
 
   if (!meta) return <LoadingSpinner />
@@ -320,6 +379,174 @@ export default function RecommendFood({ tab, setTab }) {
             >
               + Add a place we don&apos;t have
             </button>
+          )}
+        </div>
+
+        {/* Checking a specific restaurant rather than browsing for one - a
+            different question from the budget-ranked picks below, so it gets
+            its own box and its own results rather than being folded in. */}
+        <div className="card space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <label className="label mb-0">Search a restaurant</label>
+            {/* Its own city, defaulting to every city at once - independent
+                of the City field above, which has to pick one specific city
+                for "where should I eat" to mean anything. */}
+            <select
+              className="input text-xs py-1 w-auto max-w-[45%]"
+              value={searchCity}
+              onChange={(e) => setSearchCity(e.target.value)}
+            >
+              <option value="">All cities</option>
+              {(meta?.cities ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div className="relative">
+            <button
+              type="button" onClick={runSearch}
+              disabled={searchBusy || !canSearch}
+              aria-label="Search"
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 disabled:opacity-40"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <circle cx="11" cy="11" r="7" />
+                <line x1="21" y1="21" x2="16.2" y2="16.2" />
+              </svg>
+            </button>
+            <input
+              className="input text-sm pl-10 py-3" value={query}
+              placeholder="Search a restaurant — e.g. Karim's, Barbeque Nation"
+              onChange={(e) => { setQuery(e.target.value); setShowSuggestions(true) }}
+              onFocus={() => setShowSuggestions(true)}
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { setShowSuggestions(false); runSearch() } }}
+            />
+
+            {/* An in-app dropdown, not the browser's own <datalist> - that
+                renders as the phone's own keyboard predictive-text bar on
+                iOS rather than a list under the field, with no way to tap an
+                option into the box. */}
+            {showSuggestions && suggestions.length > 0 && (
+              <ul className="absolute left-0 right-0 top-full mt-1 z-20 bg-white border border-amber-200 rounded-md shadow-lg overflow-hidden">
+                {suggestions.map((p) => (
+                  <li key={`${p.name}-${p.city}`}>
+                    <button
+                      type="button"
+                      onMouseDown={() => {
+                        setQuery(p.name)
+                        setShowSuggestions(false)
+                        runSearch({ q: p.name })
+                      }}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-amber-50 border-b border-amber-50 last:border-0"
+                    >
+                      {p.name}
+                      <span className="text-gray-400 font-normal"> · {p.city}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <p className="text-[10px] text-gray-400 pl-1">
+            {searchCity ? `Searches ${searchCity}` : 'Searches every city'} with whatever cuisine and kind filters are set above.
+          </p>
+
+          {searchError && (
+            <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{searchError}</p>
+          )}
+
+          {searchResult && (
+            <div className="space-y-2 pt-1">
+              {searchResult.results.length === 0 ? (
+                <p className="text-xs text-gray-400 text-center py-3">
+                  Nothing called &quot;{searchResult.q}&quot; found{' '}
+                  {searchResult.is_all ? 'in any city' : `in ${searchResult.city}`} with these filters.
+                </p>
+              ) : (
+                <>
+                  {searchResult.results.map((p, i) => (
+                    <div key={`${p.name}-${p.city}-${i}`} className="rounded-md border border-amber-100 p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-black text-gray-900 flex-1 min-w-0 break-words">
+                          {p.name}
+                          {p.veg_only && (
+                            <span className="ml-1.5 badge bg-green-50 text-green-700 border border-green-200">
+                              pure veg
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-sm font-black text-brand-600 flex-shrink-0">
+                          ~{INR(p.for_two_max ? (p.for_two + p.for_two_max) / 2 : p.for_two)}
+                        </p>
+                      </div>
+                      <p className="text-[11px] font-bold text-gray-700 mt-0.5">
+                        {p.area}
+                        <span className="font-normal text-gray-400">
+                          {' '}· {p.cuisines.join(', ')}
+                          {p.kind !== 'dine-in' && ` · ${p.kind_name}`}
+                          {/* Only worth saying in "All cities" mode, where a
+                              search can turn up more than one city at once. */}
+                          {searchResult.is_all && <> · <span className="font-bold">{p.city}</span></>}
+                        </span>
+                      </p>
+                      <p className="text-[10px] text-gray-400 mt-0.5">
+                        {p.for_two_max
+                          ? `${INR(p.for_two)}–${INR(p.for_two_max)} for two`
+                          : `${INR(p.for_two)} for two`}
+                      </p>
+
+                      {p.menu.length > 0 && (
+                        <div className="mt-2 pt-2 border-t border-amber-100 space-y-0.5">
+                          {p.menu.map((d) => (
+                            <div key={d.name} className="flex items-baseline gap-2">
+                              <span className="text-[10px] text-gray-500 flex-1 min-w-0 break-words">{d.name}</span>
+                              <span className="text-[10px] font-bold text-gray-600 flex-shrink-0">
+                                {d.price_max ? `${INR(d.price)}–${INR(d.price_max)}` : INR(d.price)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => setEditing(editing === `s${i}` ? null : `s${i}`)}
+                        className="text-[10px] font-bold text-gray-400 hover:text-brand-600 mt-1"
+                      >
+                        {editing === `s${i}` ? 'Close' : 'Prices changed? Fix it'}
+                      </button>
+
+                      {editing === `s${i}` && (
+                        <PlaceEditForm
+                          city={p.city}
+                          cities={meta?.cities ?? []}
+                          cuisines={meta?.cuisines_by_city?.[p.city] ?? meta?.cuisines ?? []}
+                          kinds={meta?.kinds ?? []}
+                          initial={{
+                            name: p.name, city: p.city, area: p.area,
+                            cuisines: p.cuisines, kind: p.kind,
+                            veg_only: p.veg_only, for_two: p.for_two,
+                          }}
+                          onCancel={() => setEditing(null)}
+                          onDone={() => {
+                            setEditing(null)
+                            loadMeta()
+                            // Re-run with whatever searchCity already is,
+                            // "All cities" included.
+                            runSearch()
+                          }}
+                        />
+                      )}
+                    </div>
+                  ))}
+                  {searchResult.truncated && (
+                    <p className="text-[10px] text-gray-400 text-center">
+                      Showing the closest {searchResult.results.length} matches — narrow the search to see more precisely.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
           )}
         </div>
 
