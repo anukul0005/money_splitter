@@ -163,7 +163,7 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
   const dailyMeanWO = calcMeanWO(dailyValues)
 
   const dailyPointColors = dailyLabels.map((d) => isWeekend(d) ? '#f97316' : '#22c55e')
-  const dailyPointSizes  = dailyLabels.map((d) => isWeekend(d) ? 7 : 5)
+  const dailyPointSizes  = dailyLabels.map((d) => isWeekend(d) ? 3.5 : 2.5)
 
   const dailyLineData = {
     labels: dailyLabels.map(fmtDayLabel),
@@ -182,10 +182,12 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
       },
       borderWidth: 2.5,
       pointRadius: dailyPointSizes,
-      pointHoverRadius: dailyPointSizes.map((r) => r + 3),
+      pointHoverRadius: dailyPointSizes.map((r) => r + 2.5),
+      pointHitRadius: 8,
       pointBackgroundColor: dailyPointColors,
       pointBorderColor: dailyPointColors,
-      tension: 0.3,
+      pointBorderWidth: 0,
+      tension: 0,
       fill: true,
     }],
   }
@@ -216,12 +218,8 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
         ticks: {
           font: { size: 11, family: "'Space Grotesk'" },
           maxRotation: 0,
-          callback: (val, i) => {
-            const raw = dailyLabels[i]
-            if (!raw) return null
-            const day = parseInt(raw.split('-')[2])
-            return (day === 1 || (day - 1) % 5 === 0) ? fmtDayLabel(raw) : null
-          },
+          autoSkip: true,
+          maxTicksLimit: 6,
         },
         grid: { display: false },
       },
