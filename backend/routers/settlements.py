@@ -9,7 +9,7 @@ from schemas import SettlementOut, BalanceEntry, Transaction, PastPayment, Payme
 router = APIRouter(prefix="/settlements", tags=["settlements"])
 
 
-def _calculate(group: Group) -> SettlementOut:
+def _calculate(group: Group, include_payments: bool = True) -> SettlementOut:
     member_names = [m.name for m in group.members]
     if not member_names:
         return SettlementOut(group_id=group.id, balances=[], transactions=[], past_payments=[])
@@ -59,14 +59,17 @@ def _calculate(group: Group) -> SettlementOut:
                         paid[payer] -= individual  # payer received that repayment, so it's no longer owed to them
 
     # Recorded payments move money for real: the payer has now covered that much
-    # of their share, and the recipient is owed that much less.
-    for pay in getattr(group, "payments", []) or []:
-        amt = float(pay.amount or 0)
-        for m in member_names:
-            if m.lower() == (pay.from_member or "").lower():
-                paid[m] += amt
-            elif m.lower() == (pay.to_member or "").lower():
-                paid[m] -= amt
+    # of their share, and the recipient is owed that much less. Callers wanting
+    # the original, pre-payment debt (e.g. a per-group figure on the Friends
+    # page that should read the same before and after a settlement) skip this.
+    if include_payments:
+        for pay in getattr(group, "payments", []) or []:
+            amt = float(pay.amount or 0)
+            for m in member_names:
+                if m.lower() == (pay.from_member or "").lower():
+                    paid[m] += amt
+                elif m.lower() == (pay.to_member or "").lower():
+                    paid[m] -= amt
 
     balances: list[BalanceEntry] = []
     net_map: dict[str, float] = {}

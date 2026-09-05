@@ -146,7 +146,7 @@ def _member_share(e, name: str) -> float | None:
     return e.individual_amount if e.individual_amount else (e.amount / max(e.divider, 1))
 
 
-def _pairwise_group_debts(g: Group) -> dict[tuple[str, str], float]:
+def _pairwise_group_debts(g: Group, include_payments: bool = True) -> dict[tuple[str, str], float]:
     """(debtor, creditor) -> what the debtor still owes the creditor here.
 
     Delegates to the settlement engine rather than tracking raw pairs, so the
@@ -158,11 +158,16 @@ def _pairwise_group_debts(g: Group) -> dict[tuple[str, str], float]:
     owes her ₹45 back — technically true, useless in practice, and it made a
     fully-paid member look unsettled. Netting across the group collapses that
     to a single ₹45 from Anubhav to Anukul and shows Shubhi as square.
+
+    `include_payments=False` freezes the figure at what the expenses alone
+    say, ignoring any Payment rows — used for the per-group breakdown on a
+    friend's page, which is meant to read the same before and after a
+    settlement rather than jump the moment a payment lands in this group.
     """
     from routers.settlements import _calculate
 
     debts: dict[tuple[str, str], float] = defaultdict(float)
-    for t in _calculate(g).transactions:
+    for t in _calculate(g, include_payments=include_payments).transactions:
         debts[(t.from_member, t.to_member)] += t.amount
     return {k: v for k, v in debts.items() if abs(v) > 0.01}
 
@@ -196,6 +201,11 @@ def get_friends(db: Session = Depends(get_db), caller: User = Depends(current_us
                 net.setdefault(n.lower(), 0.0)
                 display.setdefault(n.lower(), n)
 
+        # The overall total (below) tracks reality and moves as payments land.
+        # The per-group figure (per_group) is frozen at what the expenses alone
+        # say, so a group's card doesn't visibly change the moment a payment
+        # happens to be recorded against it.
+        frozen_debts = _pairwise_group_debts(g, include_payments=False)
         for (debtor, creditor), amt in _pairwise_group_debts(g).items():
             dl, cl = debtor.lower(), creditor.lower()
             # Membership is what makes someone a friend, so a debt naming
@@ -209,10 +219,17 @@ def get_friends(db: Session = Depends(get_db), caller: User = Depends(current_us
             if dl == name_l and cl != name_l:
                 net[cl] = net.get(cl, 0.0) - amt
                 display.setdefault(cl, creditor)
-                per_group[cl][g.id] -= amt
             elif cl == name_l and dl != name_l:
                 net[dl] = net.get(dl, 0.0) + amt
                 display.setdefault(dl, debtor)
+
+        for (debtor, creditor), amt in frozen_debts.items():
+            dl, cl = debtor.lower(), creditor.lower()
+            if dl not in members_l or cl not in members_l:
+                continue
+            if dl == name_l and cl != name_l:
+                per_group[cl][g.id] -= amt
+            elif cl == name_l and dl != name_l:
                 per_group[dl][g.id] += amt
 
     result = []
