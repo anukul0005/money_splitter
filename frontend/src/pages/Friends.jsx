@@ -69,23 +69,21 @@ export default function Friends() {
             onClick={() => nav('/groups')}
             title="All groups"
             aria-label="All groups"
-            className="flex items-center gap-1.5 bg-cream border border-amber-200 text-gray-500 hover:bg-amber-50 rounded-md px-3 py-2 text-xs font-bold active:scale-95 transition-all shadow-sm"
+            className="flex items-center justify-center bg-cream border border-amber-200 text-gray-500 hover:bg-amber-50 rounded-md w-9 h-9 active:scale-95 transition-all shadow-sm"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
             </svg>
-            Groups
           </button>
           <button
             onClick={() => nav('/groups/new')}
             title="New group"
             aria-label="New group"
-            className="flex items-center gap-1.5 bg-cream border border-amber-200 text-gray-500 hover:bg-amber-50 rounded-md px-3 py-2 text-xs font-bold active:scale-95 transition-all shadow-sm"
+            className="flex items-center justify-center bg-cream border border-amber-200 text-gray-500 hover:bg-amber-50 rounded-md w-9 h-9 active:scale-95 transition-all shadow-sm"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
             </svg>
-            Group
           </button>
           {/* Record a payment for any group, from one place */}
           <button
