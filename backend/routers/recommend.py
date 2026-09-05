@@ -1087,6 +1087,10 @@ def search(
 
     sizes, want_beer, want_spirits = _parse_search_sizes(bottle)
     kinds = _parse_kinds(kind)
+    # Same rule as the recommender: a kind card (whisky/rum/vodka/gin) rules
+    # out beer, which is none of those.
+    if kinds:
+        want_beer = False
 
     by_state = _overrides_by_state(db)
     known_states = sorted(set(STATES) | set(by_state))
@@ -1197,6 +1201,13 @@ def recommend(
     # Optional, and separate from the size picker: which of whisky, rum,
     # vodka, gin to show. Nothing ticked still means everything.
     kinds = _parse_kinds(kind)
+    # Beer isn't one of those four cards, so ticking one is implicitly asking
+    # to not see beer - the size picker's own "beer" card stays independent,
+    # but a kind filter always wins over it. Without this, picking "Whisky"
+    # left beer showing anyway, since nothing here had ever checked kinds
+    # before deciding want_beer.
+    if kinds:
+        want_beer = False
 
     by_state = _overrides_by_state(db)
     bottles = _apply_overrides(for_state(state), by_state.get(state, []), state)
