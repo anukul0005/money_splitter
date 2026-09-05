@@ -149,14 +149,7 @@ export default function Recommend() {
   const [searchBusy, setSearchBusy] = useState(false)
   const [searchError, setSearchError] = useState('')
   const [searchResult, setSearchResult] = useState(null)
-  // Independent of the main State field above. That one has to be one
-  // specific state, because alcohol pricing genuinely is state-specific and
-  // "what should I buy" has no sane answer without knowing where. "Does
-  // anyone sell this at all" has no such natural default, so this starts on
-  // every state at once - '' means all, matching what the server does with
-  // an empty state.
-  const [searchState, setSearchState] = useState('')
-  // Every brand the searched state(s) already know, so typing "j" offers
+  // Every brand any state already knows, so typing "j" offers
   // Johnnie Walker before you finish the word rather than after you search
   // for it and get nothing back.
   const [brandOptions, setBrandOptions] = useState([])
@@ -206,15 +199,14 @@ export default function Recommend() {
       .catch(() => setFriends([]))
   }, [user?.name])
 
-  // Re-fetched whenever the searched state changes, since Delhi's list and
-  // Gurugram's are entirely different catalogues - and the server already
-  // treats an empty state as "every brand, every state", so this needs no
-  // special case for the default "All states" setting. A failed fetch just
-  // leaves search without suggestions rather than breaking it - typing and
-  // pressing Search still works either way.
+  // Search is always global - a bottle's price mostly won't exist in every
+  // state anyway, so narrowing to one state only hid real matches instead of
+  // finding them. The server already treats an empty state as "every brand,
+  // every state". A failed fetch just leaves search without suggestions
+  // rather than breaking it - typing and pressing Search still works either way.
   useEffect(() => {
-    listBrands(searchState).then((r) => setBrandOptions(r.data)).catch(() => setBrandOptions([]))
-  }, [searchState])
+    listBrands('').then((r) => setBrandOptions(r.data)).catch(() => setBrandOptions([]))
+  }, [])
 
   const peopleN = Math.max(1, parseInt(people, 10) || 0)
   // The bottle sizes among the picked cards, beer excluded — beer has no one
@@ -289,11 +281,11 @@ export default function Recommend() {
     } finally { setBusy(false) }
   }
 
-  // The size and kind cards are shared with the recommender, but the state
-  // is search's own - see searchState above - and defaults to every state
-  // rather than whatever the recommender's dropdown happens to show.
-  // Budget is left out on purpose: "what does Vat 69 cost" has no budget
-  // attached to it, unlike "what should I buy".
+  // The size and kind cards are shared with the recommender, but search
+  // always runs across every state - unlike the main State field above,
+  // which has to pick one specific state for the recommender to make sense
+  // at all. Budget is left out on purpose: "what does Vat 69 cost" has no
+  // budget attached to it, unlike "what should I buy".
   const runSearch = async (over = {}) => {
     // Picking a suggestion passes the brand straight through rather than
     // relying on the query box's state, which setQuery() just started
@@ -303,7 +295,7 @@ export default function Recommend() {
     setSearchError(''); setSearchBusy(true)
     try {
       const r = await searchRecommend({
-        state: over.state ?? searchState, q,
+        q,
         bottle: bottles.length ? bottles.join(',') : 'any',
         kind: kinds.join(','),
       })
@@ -513,21 +505,7 @@ export default function Recommend() {
             different question from the budget-ranked picks below, so it gets
             its own box and its own results rather than being folded in. */}
         <div className="card space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <label className="label mb-0">Search a bottle</label>
-            {/* Its own state, defaulting to every state at once - see
-                searchState. Independent of the State field above, which has
-                to pick one specific state for the recommender to make sense
-                at all. */}
-            <select
-              className="input text-xs py-1 w-auto max-w-[45%]"
-              value={searchState}
-              onChange={(e) => setSearchState(e.target.value)}
-            >
-              <option value="">All states</option>
-              {(meta?.states ?? []).map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
+          <label className="label mb-0">Search a bottle</label>
           {/* A magnifying glass inside the field rather than a label above it
               plus a button beside it - one large, obvious box to type into,
               the same shape a phone's own search fields use. The icon is
@@ -592,7 +570,7 @@ export default function Recommend() {
             )}
           </div>
           <p className="text-[10px] text-gray-400 pl-1">
-            {searchState ? `Searches ${searchState}` : 'Searches every state'} with whatever kind cards are ticked above, any size — budget is not applied here.
+            Searches every state, with whatever kind cards are ticked above, any size — budget is not applied here.
           </p>
 
           {searchError && (
@@ -648,10 +626,10 @@ export default function Recommend() {
                           onDone={() => {
                             setEditing(null)
                             loadMeta()
-                            // Re-run with whatever searchState already is,
-                            // "All states" included - narrowing to just the
-                            // edited row's state would silently drop out of
-                            // All mode every time a price got fixed.
+                            // Re-run across every state again - narrowing to
+                            // just the edited row's state would silently
+                            // drop the rest of the results every time a
+                            // price got fixed.
                             runSearch()
                           }}
                         />
