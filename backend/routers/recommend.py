@@ -142,6 +142,12 @@ GENERIC_WORDS = {
     "new", "no", "xxx",
 }
 
+# An age statement's own filler, dropped before comparing two names in
+# _same_bottle - "12 Years Old" and "Aged 12 Years" say the same thing about
+# the same bottle, and neither "old" nor "aged" showing up (or not) on either
+# side should decide whether two spellings match.
+_AGE_FILLER = {"old", "aged", "years", "yrs", "yr"}
+
 
 @lru_cache(maxsize=16384)
 def _brand_key(brand: str) -> str:
@@ -192,19 +198,38 @@ def _same_bottle(a: str, b: str) -> bool:
     So one name matching the other on whole words counts. Whole words matter:
     without the boundary "Bacardi" would match "Bacardi Apple", and they are
     different bottles at different prices.
+
+    Every word of the shorter name has to appear somewhere in the longer one,
+    not necessarily contiguously. A retail catalogue's "Bushmills 12 Years
+    Old" and the official list's "Bushmills Triple Distilled Aged 12 Years
+    Single Malt Rare Irish Whisky" are the same bottle, but "Triple Distilled
+    Aged" sits between "Bushmills" and "12", which a contiguous-substring
+    match missed entirely - two states stocking the identical whisky showed a
+    price in one and a dash in the other. Word order carries no information
+    in these lists (see brand_names.core for the same reasoning), so
+    scattering does not make it a different bottle.
+
+    An age statement is also idiom, not vocabulary: the same fact is "12
+    Years Old" on one list and "Aged 12 Years" on the other, and neither
+    "old" nor "aged" appearing on both sides is a coincidence worth failing
+    the match over - the number is what actually says which bottle this is.
+    Dropped from both names before comparing, so the two spellings of that
+    one fact stop counting as a mismatch.
     """
     ka, kb = _brand_key(a), _brand_key(b)
     if ka == kb:
         return True
-    long, short = (ka, kb) if len(ka) >= len(kb) else (kb, ka)
+    wa = [w for w in ka.split() if w not in _AGE_FILLER]
+    wb = [w for w in kb.split() if w not in _AGE_FILLER]
+    long_words, short_words = (wa, wb) if len(wa) >= len(wb) else (wb, wa)
     # The shorter name has to actually name something. Without this, a row
     # published as "Premium Whisky" matched Blenders Pride, Royal Stag and
     # everything else with those two words in it, and quietly reported its
     # price as theirs.
-    if not any(w not in GENERIC_WORDS for w in short.split()):
+    if not short_words or not any(w not in GENERIC_WORDS for w in short_words):
         return False
-    return (long.startswith(short + " ") or long.endswith(" " + short)
-            or f" {short} " in long)
+    long_set = set(long_words)
+    return all(w in long_set for w in short_words)
 
 
 def _by_size(bottles: list[Bottle]) -> dict[int, list[Bottle]]:
@@ -1123,8 +1148,38 @@ def search(
     hits.sort(key=lambda sb: (not _brand_key(sb[1].brand).startswith(ql),
                               len(sb[1].brand)))
 
+    # Global search turns up the same bottle once per state it's priced in -
+    # a retail catalogue's "Bushmills 12 Years Old" and Delhi's official
+    # "Bushmills Triple Distilled Aged 12 Years Single Malt Rare Irish
+    # Whisky" used to read as two different results, each with its own
+    # compare strip showing a dash for the other's state. _same_bottle
+    # already recognises them as one bottle for the strip - the same check
+    # groups them into one card here too, so a global search shows one row
+    # per bottle, not one per state's own spelling of it.
+    #
+    # Delhi's is the state whose list this app treats as most authoritative
+    # (a live government feed, parsed in full - see delhi_prices.py), so a
+    # merged group displays under Delhi's name and price when Delhi is one of
+    # the states that has it, falling back to the shortest name otherwise -
+    # the same "shortest wins" rule brand_names.display uses elsewhere.
+    groups: list[list[tuple[str, Bottle]]] = []
+    for st, b in hits:
+        for g in groups:
+            rst, rb = g[0]
+            if rb.kind == b.kind and rb.size_ml == b.size_ml and _same_bottle(rb.brand, b.brand):
+                g.append((st, b))
+                break
+        else:
+            groups.append([(st, b)])
+
+    def _representative(group: list[tuple[str, Bottle]]) -> tuple[str, Bottle]:
+        delhi = [x for x in group if x[0] == "Delhi"]
+        pool = delhi if delhi else group
+        return min(pool, key=lambda x: len(x[1].brand))
+
     results = []
-    for st, b in hits[:25]:
+    for group in groups[:25]:
+        st, b = _representative(group)
         abv, abv_known = _strength(b)
         regions = _regions_for(st)
         compare = _compare(tables_by_size, regions, b.brand, b.size_ml)
@@ -1157,7 +1212,7 @@ def search(
         "q": q,
         "results": results,
         "count": len(results),
-        "truncated": len(hits) > len(results),
+        "truncated": len(groups) > len(results),
     }
 
 
