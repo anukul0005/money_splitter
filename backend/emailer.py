@@ -52,13 +52,14 @@ def _email_for(db, name: str) -> str | None:
 
 def notify_group_activity(db, group, actor_name: str, verb: str, summary: str,
                           skip_names: list[str] | None = None) -> None:
-    """Tell everyone else in the group about something that just happened.
+    """Tell every member of the group about something that just happened -
+    including whoever just did it, so an edit reads back as confirmation of
+    exactly what changed, not just an announcement to everyone else.
 
     Every member with a findable email gets one, not just the two names in
     people.py's original AG/AS pair — a Mumbai + Diwali trip with Divyank in
     it used to notify nobody at all, since the old rule required exactly two
-    members and both being in the registry. The person who did the thing
-    never gets emailed about their own action.
+    members and both being in the registry.
 
     `skip_names` exists for a narrower reason: a member added in the same
     update gets notify_added_to_group's own, more specific email instead, and
@@ -70,14 +71,18 @@ def notify_group_activity(db, group, actor_name: str, verb: str, summary: str,
     skip = {s.lower() for s in (skip_names or [])}
 
     for m in group.members:
-        if m.name.lower() == (actor_name or "").lower() or m.name.lower() in skip:
+        if m.name.lower() in skip:
             continue
         email = _email_for(db, m.name)
         if not email:
             continue
-        subject = f"{actor_name} {verb} in {group.name}"
+        # Reads as confirmation to the person who did it ("You just..."),
+        # and as an announcement to everyone else ("Anukul just...").
+        is_self = m.name.lower() == (actor_name or "").lower()
+        who = "You" if is_self else actor_name
+        subject = f"{'You' if is_self else actor_name} {verb} in {group.name}"
         body = (
-            f"{actor_name} {verb} in \"{group.name}\":\n\n"
+            f"{who} {verb} in \"{group.name}\":\n\n"
             f"{summary}\n\n"
             f"View it here: {link}"
         )
@@ -88,7 +93,8 @@ def notify_group_activity(db, group, actor_name: str, verb: str, summary: str,
 
 
 def notify_added_to_group(db, group, actor_name: str, added_names: list[str]) -> None:
-    """Tell someone specifically that they were just put in a group.
+    """Tell someone specifically that they were just put in a group -
+    including the person who did the adding, if they added themselves.
 
     Separate from notify_group_activity because "you're in a new group" and
     "someone changed a group you were already in" are different news, worth
@@ -99,15 +105,16 @@ def notify_added_to_group(db, group, actor_name: str, added_names: list[str]) ->
     link = f"{settings.frontend_url}/groups/{group.id}"
 
     for name in added_names:
-        if name.lower() == (actor_name or "").lower():
-            continue
         email = _email_for(db, name)
         if not email:
             continue
-        subject = f"{actor_name} added you to {group.name}"
+        is_self = name.lower() == (actor_name or "").lower()
+        subject = f"You're in {group.name}" if is_self else f"{actor_name} added you to {group.name}"
         body = (
-            f"{actor_name} added you to \"{group.name}\" on Money Splitter.\n\n"
-            f"View it here: {link}"
+            (f"You added yourself to \"{group.name}\" on Money Splitter.\n\n"
+             if is_self else
+             f"{actor_name} added you to \"{group.name}\" on Money Splitter.\n\n")
+            + f"View it here: {link}"
         )
         try:
             _send(email, subject, body)
