@@ -9,7 +9,9 @@ from models import User
 from schemas import (
     UserSignup, UserLogin, UserOut, LoginOut, SetRecovery, ResetPassword,
     AdminReset, AdminSetRecovery, AdminIssueCode, RedeemCode,
+    SetEmail, RequestLoginCode, VerifyLoginCode, UserMeOut,
 )
+from emailer import send_login_code
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -70,7 +72,7 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
     if not secrets.compare_digest(user.password_hash, _hash(payload.password, user.salt)):
         raise HTTPException(401, "Incorrect username or password")
     return LoginOut(
-        id=user.id, name=user.name, is_admin=user.is_admin,
+        id=user.id, name=user.name, is_admin=user.is_admin, email=user.email,
         created_at=user.created_at, token=create_token(user),
     )
 
@@ -356,6 +358,130 @@ def admin_set_recovery(payload: AdminSetRecovery, db: Session = Depends(get_db))
     db.commit()
     db.refresh(target)
     return target
+
+
+def _valid_email(email: str) -> bool:
+    email = (email or "").strip()
+    if "@" not in email:
+        return False
+    local, _, domain = email.partition("@")
+    return bool(local) and "." in domain and not domain.startswith(".")
+
+
+@router.get("/me", response_model=UserMeOut)
+def get_me(caller: User = Depends(current_user)):
+    """The signed-in caller's own record, email included - the one place
+    that's safe to read it back from, since list_users (everyone else's
+    names) deliberately never includes it."""
+    return caller
+
+
+@router.post("/me/email", response_model=UserMeOut)
+def set_my_email(payload: SetEmail, db: Session = Depends(get_db),
+                 caller: User = Depends(current_user)):
+    """Attach (or replace) the email your login code and every notification
+    about your groups goes to. Self-service only — nobody sets this for you,
+    since a wrong address would mean a login code goes to somebody else."""
+    email = payload.email.strip().lower()
+    if not _valid_email(email):
+        raise HTTPException(400, "That doesn't look like an email address")
+
+    taken = db.query(User).filter(User.email.ilike(email), User.id != caller.id).first()
+    if taken:
+        raise HTTPException(409, "That email is already attached to another account")
+
+    caller.email = email
+    db.commit()
+    db.refresh(caller)
+    return caller
+
+
+LOGIN_CODE_TTL_MINUTES = 10
+
+
+@router.post("/email-code", response_model=dict)
+def request_login_code(payload: RequestLoginCode, db: Session = Depends(get_db)):
+    """Email a 6-digit code that logs you in, no password needed.
+
+    Responds the same way whether or not the email is on file — a different
+    message for "no such account" would let anyone check who has signed up
+    just by trying addresses.
+    """
+    generic = {"sent": True, "message": "If that email is on an account, a code is on its way."}
+    email = (payload.email or "").strip().lower()
+    if not email:
+        return generic
+
+    user = db.query(User).filter(User.email.ilike(email)).first()
+    if not user:
+        return generic
+
+    code = str(secrets.randbelow(1000000)).zfill(6)
+    user.login_code_salt = secrets.token_hex(16)
+    user.login_code_hash = _hash(code, user.login_code_salt)
+    user.login_code_expires_at = datetime.now(timezone.utc) + timedelta(minutes=LOGIN_CODE_TTL_MINUTES)
+    # A fresh code should not inherit an old lockout from a mistyped password
+    # or a previous code that was never used.
+    user.reset_fail_count = 0
+    user.reset_locked_until = None
+    db.commit()
+
+    try:
+        send_login_code(user.email, code)
+    except Exception as e:
+        print(f"[email] login code send failed: {e}")
+
+    return generic
+
+
+@router.post("/email-code/verify", response_model=LoginOut)
+def verify_login_code(payload: VerifyLoginCode, db: Session = Depends(get_db)):
+    """Spend a login code for a session token — the same lockout counter the
+    password-reset flow uses, so this can't be brute-forced any more than
+    that already refuses to allow."""
+    email = (payload.email or "").strip().lower()
+    generic = "That code isn't valid or has expired. Request a new one."
+    now = datetime.now(timezone.utc)
+
+    user = db.query(User).filter(User.email.ilike(email)).first()
+
+    if user and user.reset_locked_until is not None:
+        locked = user.reset_locked_until
+        if locked.tzinfo is None:
+            locked = locked.replace(tzinfo=timezone.utc)
+        if locked > now:
+            mins = max(1, int((locked - now).total_seconds() // 60) + 1)
+            raise HTTPException(429, f"Too many wrong attempts. Try again in {mins} minute(s).")
+
+    if not user or not user.login_code_hash or not user.login_code_salt:
+        raise HTTPException(401, generic)
+
+    expires = user.login_code_expires_at
+    if expires is not None and expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if expires is None or expires < now:
+        raise HTTPException(401, generic)
+
+    if not secrets.compare_digest(user.login_code_hash, _hash((payload.code or "").strip(), user.login_code_salt)):
+        user.reset_fail_count = (user.reset_fail_count or 0) + 1
+        if user.reset_fail_count >= MAX_RESET_ATTEMPTS:
+            user.reset_locked_until = now + timedelta(minutes=LOCKOUT_MINUTES)
+            user.reset_fail_count = 0
+        db.commit()
+        raise HTTPException(401, generic)
+
+    # Burn the code - one login per code, same as the admin-issued kind.
+    user.login_code_hash = None
+    user.login_code_salt = None
+    user.login_code_expires_at = None
+    user.reset_fail_count = 0
+    user.reset_locked_until = None
+    db.commit()
+
+    return LoginOut(
+        id=user.id, name=user.name, is_admin=user.is_admin, email=user.email,
+        created_at=user.created_at, token=create_token(user),
+    )
 
 
 @router.delete("/{user_id}", status_code=204)

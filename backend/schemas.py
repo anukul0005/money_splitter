@@ -21,13 +21,21 @@ class UserOut(BaseModel):
     name: str
     is_admin: bool
     created_at: Optional[datetime] = None
-    # Deliberately no recovery fields here: UserOut is returned by list_users,
-    # which would otherwise hand out every user's recovery question at once.
-    # The reset page reads a single question from /users/recovery-question.
+    # Deliberately no recovery fields, and no email, here: UserOut is
+    # returned by list_users, which would otherwise hand out every account's
+    # recovery question and email address in one response. The reset page
+    # reads a single question from /users/recovery-question; a user's own
+    # email is read from /users/me (UserMeOut, below) - only ever their own.
     model_config = {"from_attributes": True}
 
 
-class LoginOut(UserOut):
+class UserMeOut(UserOut):
+    """Everything UserOut has, plus the one thing that's only ever safe to
+    hand back to the account it belongs to: its own email."""
+    email: Optional[str] = None
+
+
+class LoginOut(UserMeOut):
     """A successful login, plus the token that proves it on later requests."""
     token: str
 
@@ -80,6 +88,21 @@ class AdminSetRecovery(BaseModel):
     target_name: str
     question: str
     answer: str
+
+
+class SetEmail(BaseModel):
+    """Attach an email to your own account - the address a login code and
+    every notification about your groups goes to."""
+    email: str
+
+
+class RequestLoginCode(BaseModel):
+    email: str
+
+
+class VerifyLoginCode(BaseModel):
+    email: str
+    code: str
 
 
 # ─── Member ──────────────────────────────────────────────────────────────────

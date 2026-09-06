@@ -30,6 +30,20 @@ def _compute_individual(amount: float, divider: int) -> float:
     return round(amount / divider, 2) if divider > 0 else amount
 
 
+def _summary(expense: Expense) -> str:
+    """One line for the activity feed and the email that follows it - both
+    read this same string, so a note added here shows up in both places at
+    once rather than needing to be threaded through separately."""
+    line = f"{expense.title or expense.category or 'Expense'}: ₹{expense.amount:,.0f} paid by {expense.paid_by}"
+    note = (expense.notes or "").strip()
+    if note:
+        # An inline separator, not a newline: the activity feed renders this
+        # in a single <span> with no whitespace-pre styling, so a "\n" here
+        # would just collapse into a run-on space instead of a real line break.
+        line += f" · Note: {note}"
+    return line
+
+
 @router.get("/group/{group_id}", response_model=list[ExpenseOut])
 def list_expenses(group_id: int, db: Session = Depends(get_db),
                   caller: User = Depends(current_user)):
@@ -59,7 +73,7 @@ def create_expense(payload: ExpenseCreate, db: Session = Depends(get_db),
     db.add(expense)
     db.flush()
 
-    summary = f"{expense.title or expense.category or 'Expense'}: ₹{expense.amount:,.0f} paid by {expense.paid_by}"
+    summary = _summary(expense)
     # Who did it comes from the token; the summary says who paid
     record_activity(db, group, caller.name, "added an expense", summary)
 
@@ -71,7 +85,7 @@ def create_expense(payload: ExpenseCreate, db: Session = Depends(get_db),
     db.refresh(expense)
 
     try:
-        notify_group_activity(group, expense.paid_by, "added a new expense", summary)
+        notify_group_activity(db, group, expense.paid_by, "added a new expense", summary)
     except Exception as e:
         print(f"[email] expense notification failed: {e}")
 
@@ -100,7 +114,7 @@ def update_expense(expense_id: int, payload: ExpenseCreate, db: Session = Depend
     expense.notes = payload.notes
     # settled_by is intentionally not reset on edit
 
-    summary = f"{expense.title or expense.category or 'Expense'}: ₹{expense.amount:,.0f} paid by {expense.paid_by}"
+    summary = _summary(expense)
     record_activity(db, group, caller.name, "edited an expense", summary)
 
     # Re-index: an edit can change the amount, the date, or whether this is
@@ -109,6 +123,12 @@ def update_expense(expense_id: int, payload: ExpenseCreate, db: Session = Depend
 
     db.commit()
     db.refresh(expense)
+
+    try:
+        notify_group_activity(db, group, caller.name, "edited an expense", summary)
+    except Exception as e:
+        print(f"[email] expense edit notification failed: {e}")
+
     return expense
 
 
@@ -125,3 +145,8 @@ def delete_expense(expense_id: int, db: Session = Depends(get_db),
 
     db.delete(expense)
     db.commit()
+
+    try:
+        notify_group_activity(db, group, caller.name, "deleted an expense", summary)
+    except Exception as e:
+        print(f"[email] expense delete notification failed: {e}")

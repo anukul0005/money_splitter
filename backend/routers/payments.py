@@ -164,7 +164,7 @@ def create_payment_auto(payload: PaymentAuto, db: Session = Depends(get_db),
     db.refresh(payment)
 
     try:
-        notify_group_activity(group, recorder, "recorded a payment", summary)
+        notify_group_activity(db, group, recorder, "recorded a payment", summary)
     except Exception as e:
         print(f"[email] payment notification failed: {e}")
 
@@ -261,7 +261,7 @@ def create_payment(payload: PaymentCreate, db: Session = Depends(get_db),
     db.refresh(payment)
 
     try:
-        notify_group_activity(group, recorder, "recorded a payment", summary)
+        notify_group_activity(db, group, recorder, "recorded a payment", summary)
     except Exception as e:
         print(f"[email] payment notification failed: {e}")
 

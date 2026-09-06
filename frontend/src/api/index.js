@@ -63,6 +63,10 @@ export const listUsersBasic     = ()         => api.get('/users/')
 // set a new password and their own security question.
 export const adminIssueCode     = (data)     => api.post('/users/admin-issue-code', data)
 export const redeemCode         = (data)     => api.post('/users/redeem-code', data)
+export const requestLoginCode   = (data)     => api.post('/users/email-code', data)
+export const verifyLoginCode    = (data)     => api.post('/users/email-code/verify', data)
+export const setMyEmail         = (data)     => api.post('/users/me/email', data)
+export const getMe              = ()         => api.get('/users/me')
 
 // ── Groups ────────────────────────────────────────────────────────────────────
 export const getGroups   = ()            => api.get('/groups/')

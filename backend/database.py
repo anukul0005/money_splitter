@@ -92,6 +92,27 @@ def create_tables():
         conn.execute(text(
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS otc_expires_at TIMESTAMPTZ"
         ))
+        conn.execute(text(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(200)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS login_code_hash VARCHAR(128)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS login_code_salt VARCHAR(64)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS login_code_expires_at TIMESTAMPTZ"
+        ))
+        # Case-insensitive and NULL-safe: a plain UNIQUE constraint on email
+        # would reject a second account with no email at all, since two NULLs
+        # would collide under most people's mental model of "unique" even
+        # though SQL itself treats them as distinct. A partial index only
+        # constrains the rows that actually have one set.
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_users_email "
+            "ON users (lower(email)) WHERE email IS NOT NULL"
+        ))
         # Strength on a hand-entered price. create_all() only builds tables it
         # has never seen, so an existing price_overrides table needs this added
         # explicitly or every read of the column fails.

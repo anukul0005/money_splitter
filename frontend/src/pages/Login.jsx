@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { loginUser, signupUser } from '../api'
+import { loginUser, signupUser, requestLoginCode, verifyLoginCode } from '../api'
 import { RECOVERY_QUESTIONS } from '../utils/security'
 
 const SESSION_KEY = 'splitter_session_v2'
@@ -25,8 +25,54 @@ export default function Login({ onLogin }) {
   const [error, setError]       = useState('')
   const [loading, setLoading]   = useState(false)
 
+  // Email-code login: a second way in, alongside the password form above -
+  // never a replacement for it. 'request' asks for the email; 'code' asks
+  // for the 6-digit code that email just received.
+  const [emailStep, setEmailStep] = useState('request') // 'request' | 'code'
+  const [loginEmail, setLoginEmail] = useState('')
+  const [loginCode, setLoginCode]   = useState('')
+  const [emailNotice, setEmailNotice] = useState('')
+
   const switchMode = (m) => {
     setMode(m); setError(''); setUsername(''); setPassword(''); setConfirmPw(''); setRecAnswer('')
+    setEmailStep('request'); setLoginEmail(''); setLoginCode(''); setEmailNotice('')
+  }
+
+  const handleRequestCode = async (e) => {
+    e.preventDefault()
+    setError('')
+    if (!loginEmail.trim()) { setError('Enter the email on your account.'); return }
+    setLoading(true)
+    try {
+      await requestLoginCode({ email: loginEmail.trim() })
+      // The server answers the same way whether or not that email exists,
+      // on purpose - so this message can't be used to check who has signed up.
+      setEmailNotice('If that email is on an account, a code is on its way — check your inbox.')
+      setEmailStep('code')
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Could not send a code right now.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleVerifyCode = async (e) => {
+    e.preventDefault()
+    setError('')
+    if (loginCode.trim().length !== 6) { setError('Enter the 6-digit code from your email.'); return }
+    setLoading(true)
+    try {
+      const res = await verifyLoginCode({ email: loginEmail.trim(), code: loginCode.trim() })
+      const u = res.data
+      const s = { name: u.name, isAdmin: u.is_admin, id: u.id, token: u.token }
+      localStorage.setItem(SESSION_KEY, JSON.stringify(s))
+      onLogin(s)
+      window.location.reload()
+    } catch (err) {
+      setError(err.response?.data?.detail || "That code isn't valid or has expired.")
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleLogin = async (e) => {
@@ -139,7 +185,7 @@ export default function Login({ onLogin }) {
             <button
               onClick={() => switchMode('login')}
               className={`flex-1 py-3.5 rounded-none text-xs font-bold tracking-widest transition-colors ${
-                mode === 'login'
+                mode === 'login' || mode === 'emailcode'
                   ? 'bg-brand-400 text-white'
                   : 'bg-cream text-gray-400 hover:text-gray-600'
               }`}
@@ -208,7 +254,7 @@ export default function Login({ onLogin }) {
                   {loading ? 'LOGGING IN...' : 'LOG IN →'}
                 </button>
 
-                <div className="text-center pt-1">
+                <div className="text-center pt-1 flex items-center justify-center gap-3">
                   <button
                     type="button"
                     onClick={() => nav('/reset-password')}
@@ -216,9 +262,111 @@ export default function Login({ onLogin }) {
                   >
                     Forgot password?
                   </button>
+                  <span className="text-gray-300">·</span>
+                  <button
+                    type="button"
+                    onClick={() => switchMode('emailcode')}
+                    className="text-[11px] font-bold text-brand-600 hover:text-brand-700 tracking-wide underline-offset-2 hover:underline"
+                  >
+                    Email me a code
+                  </button>
                 </div>
               </form>
 
+            ) : mode === 'emailcode' ? (
+              emailStep === 'request' ? (
+                <form onSubmit={handleRequestCode} className="space-y-4">
+                  <div>
+                    <label className="label">Email</label>
+                    <input
+                      className="input"
+                      type="email"
+                      placeholder="The email on your account"
+                      value={loginEmail}
+                      onChange={e => setLoginEmail(e.target.value)}
+                      autoFocus
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                    />
+                    <p className="text-[10px] text-gray-400 mt-1 leading-relaxed">
+                      Only works if this email is already attached to an account —
+                      set that up from Account settings once you're signed in.
+                    </p>
+                  </div>
+
+                  {error && (
+                    <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-md px-3 py-2">
+                      {error}
+                    </p>
+                  )}
+
+                  <button type="submit" className="btn-primary" disabled={loading}>
+                    {loading ? 'SENDING...' : 'SEND CODE →'}
+                  </button>
+
+                  <div className="text-center pt-1">
+                    <button
+                      type="button"
+                      onClick={() => switchMode('login')}
+                      className="text-[11px] font-bold text-gray-400 hover:text-gray-600 tracking-wide underline-offset-2 hover:underline"
+                    >
+                      ← Use a password instead
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <form onSubmit={handleVerifyCode} className="space-y-4">
+                  {emailNotice && (
+                    <p className="text-xs text-green-700 bg-green-50 border border-green-100 rounded-md px-3 py-2">
+                      {emailNotice}
+                    </p>
+                  )}
+                  <div>
+                    <label className="label">6-digit code</label>
+                    <input
+                      className="input tracking-[0.3em] text-center font-black"
+                      inputMode="numeric"
+                      placeholder="000000"
+                      maxLength={6}
+                      value={loginCode}
+                      onChange={e => setLoginCode(e.target.value.replace(/\D/g, ''))}
+                      autoFocus
+                    />
+                    <p className="text-[10px] text-gray-400 mt-1">
+                      Expires in 10 minutes and works once.
+                    </p>
+                  </div>
+
+                  {error && (
+                    <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-md px-3 py-2">
+                      {error}
+                    </p>
+                  )}
+
+                  <button type="submit" className="btn-primary" disabled={loading}>
+                    {loading ? 'CHECKING...' : 'LOG IN →'}
+                  </button>
+
+                  <div className="text-center pt-1 flex items-center justify-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => { setEmailStep('request'); setError(''); setLoginCode('') }}
+                      className="text-[11px] font-bold text-gray-400 hover:text-gray-600 tracking-wide underline-offset-2 hover:underline"
+                    >
+                      ← Send another code
+                    </button>
+                    <span className="text-gray-300">·</span>
+                    <button
+                      type="button"
+                      onClick={() => switchMode('login')}
+                      className="text-[11px] font-bold text-gray-400 hover:text-gray-600 tracking-wide underline-offset-2 hover:underline"
+                    >
+                      Use a password instead
+                    </button>
+                  </div>
+                </form>
+              )
             ) : (
               <form onSubmit={handleSignup} className="space-y-4">
                 <div>

@@ -6,6 +6,7 @@ from database import get_db
 from models import Group, Member, Expense, User
 from schemas import GroupCreate, GroupOut, GroupSummary, GroupUpdate
 from activity import record_activity
+from emailer import notify_added_to_group, notify_group_activity
 
 router = APIRouter(prefix="/groups", tags=["groups"])
 
@@ -101,6 +102,12 @@ def create_group(payload: GroupCreate, db: Session = Depends(get_db),
 
     db.commit()
     db.refresh(group)
+
+    try:
+        notify_added_to_group(db, group, caller.name, list(payload.members))
+    except Exception as e:
+        print(f"[email] new-group notification failed: {e}")
+
     return group
 
 
@@ -138,16 +145,31 @@ def update_group(group_id: int, payload: GroupUpdate, db: Session = Depends(get_
     # Add new members (skip duplicates case-insensitively)
     db.flush()
     existing_names = {m.name.lower() for m in db.query(Member).filter(Member.group_id == group_id).all()}
+    newly_added = []
     for name in payload.members_add:
         stripped = name.strip()
         if stripped and stripped.lower() not in existing_names:
             db.add(Member(group_id=group_id, name=stripped))
             existing_names.add(stripped.lower())
+            newly_added.append(stripped)
 
     record_activity(db, group, caller.name, "updated the group", group.name)
 
     db.commit()
     db.refresh(group)
+
+    # A newly-added member gets the specific "you're in" email; everyone
+    # already in the group gets the generic "updated" one instead, so a
+    # brand-new member doesn't also read "the group was updated" about a
+    # group they didn't know existed a moment ago.
+    try:
+        if newly_added:
+            notify_added_to_group(db, group, caller.name, newly_added)
+        notify_group_activity(db, group, caller.name, "updated the group", group.name,
+                              skip_names=newly_added)
+    except Exception as e:
+        print(f"[email] group-update notification failed: {e}")
+
     return group
 
 

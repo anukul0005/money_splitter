@@ -27,6 +27,20 @@ class User(Base):
     otc_hash = Column(String(128), nullable=True)
     otc_salt = Column(String(64), nullable=True)
     otc_expires_at = Column(DateTime(timezone=True), nullable=True)
+    # An alternative way in, alongside the password above - never a
+    # replacement for it. Nullable because most accounts won't have one set
+    # right away, and a login with no email on file just isn't offered as an
+    # option for that account. Uniqueness is enforced case-insensitively by
+    # a partial index (see create_tables) rather than a plain UNIQUE
+    # constraint, so two NULLs don't collide.
+    email = Column(String(200), nullable=True)
+    # A one-time login code, same shape and same lockout counter
+    # (reset_fail_count / reset_locked_until above) as the admin-issued
+    # password-reset code - it is a different secret for a different purpose,
+    # so it gets its own hash rather than overloading otc_hash.
+    login_code_hash = Column(String(128), nullable=True)
+    login_code_salt = Column(String(64), nullable=True)
+    login_code_expires_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

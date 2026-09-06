@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { changePassword, setRecovery, getRecoveryQuestion } from '../api'
+import { changePassword, setRecovery, getRecoveryQuestion, getMe, setMyEmail } from '../api'
 import { useUser, isAdmin } from '../UserContext'
 import { ALL_QUESTIONS, RECOVERY_QUESTIONS, KEY_QUESTION, generateKey } from '../utils/security'
 
@@ -36,6 +36,13 @@ export default function Account() {
   const [pwDone, setPwDone]     = useState('')
   const [pwBusy, setPwBusy]     = useState(false)
 
+  // ── Email (login code + notifications go here) ──
+  const [email, setEmail]       = useState('')
+  const [emailInput, setEmailInput] = useState('')
+  const [emailError, setEmailError] = useState('')
+  const [emailDone, setEmailDone]   = useState('')
+  const [emailBusy, setEmailBusy]   = useState(false)
+
   useEffect(() => {
     if (!user?.name) return
     getRecoveryQuestion(user.name)
@@ -44,7 +51,26 @@ export default function Account() {
         if (r.data.has_recovery) setQuestion(r.data.question)
       })
       .catch(() => setExisting(null))
+    getMe()
+      .then((r) => { setEmail(r.data.email || ''); setEmailInput(r.data.email || '') })
+      .catch(() => {})
   }, [user?.name])
+
+  const handleEmail = async (e) => {
+    e.preventDefault()
+    setEmailError(''); setEmailDone('')
+    if (!emailInput.trim()) return setEmailError('Enter an email address.')
+    setEmailBusy(true)
+    try {
+      const res = await setMyEmail({ email: emailInput.trim() })
+      setEmail(res.data.email || '')
+      setEmailDone('Saved')
+    } catch (err) {
+      setEmailError(err.response?.data?.detail || 'Could not save that email.')
+    } finally {
+      setEmailBusy(false)
+    }
+  }
 
   const isKey = question === KEY_QUESTION
 
@@ -209,6 +235,55 @@ export default function Account() {
 
             <button type="submit" className="btn-primary" disabled={secBusy}>
               {secBusy ? 'Saving…' : existing ? 'Update answer' : 'Save answer'}
+            </button>
+          </form>
+        </div>
+
+        {/* ── Email ── */}
+        <div className="card">
+          <h2 className="text-sm font-bold text-gray-800">Email</h2>
+          <p className="text-xs text-gray-500 leading-relaxed mt-1 mb-3">
+            Where a login code goes when you sign in with "Email me a code" instead
+            of a password, and where every expense, edit or group you're added to
+            gets emailed to.
+          </p>
+
+          <div
+            className={`text-xs rounded-md px-3 py-2 mb-4 border ${
+              email
+                ? 'bg-green-50 border-green-200 text-green-800'
+                : 'bg-amber-50 border-amber-300 text-gray-600'
+            }`}
+          >
+            {email
+              ? <>Currently set to: <span className="font-semibold">{email}</span></>
+              : 'Not set yet — set one to unlock email login and notifications.'}
+          </div>
+
+          <form onSubmit={handleEmail} className="space-y-3">
+            <div>
+              <label className="label">{email ? 'New email' : 'Your email'}</label>
+              <input
+                className="input"
+                type="email"
+                placeholder="you@example.com"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+            </div>
+
+            {emailError && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{emailError}</p>}
+            {emailDone && (
+              <p className="text-sm font-bold text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2 text-center">
+                ✓ {emailDone}
+              </p>
+            )}
+
+            <button type="submit" className="btn-primary" disabled={emailBusy}>
+              {emailBusy ? 'Saving…' : email ? 'Update email' : 'Save email'}
             </button>
           </form>
         </div>

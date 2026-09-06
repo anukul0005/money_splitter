@@ -22,25 +22,59 @@ def _send(to_email: str, subject: str, body: str) -> None:
         print(f"[email] failed to send to {to_email}: {e}")
 
 
-def notify_group_activity(group, actor_name: str, verb: str, summary: str) -> None:
-    """Notify the other member of a 2-person group about new activity.
+def send_login_code(email: str, code: str) -> None:
+    _send(
+        email,
+        "Your Money Splitter login code",
+        f"Your one-time login code is {code}.\n\n"
+        "It expires in 10 minutes and works once. If you didn't ask for "
+        "this, ignore this email — nobody can sign in without it.",
+    )
 
-    Only fires when both members are in the known PEOPLE registry (i.e. it's
-    an AG/AS-style master-grouped pair) — silently no-ops otherwise.
+
+def _email_for(db, name: str) -> str | None:
+    """Where a notification for this member name actually goes.
+
+    A logged-in account's own address wins, since that is the one thing the
+    person themselves controls (see /users/me/email). Someone who is a group
+    member but never signed up at all - a name on an expense, not an account
+    - falls back to the static registry in people.py, which is the only
+    address this app has ever had for them.
     """
-    member_names = [m.name for m in group.members]
-    if len(member_names) != 2:
-        return
-    infos = {n: person_info(n) for n in member_names}
-    if any(v is None for v in infos.values()):
-        return
+    from models import User  # deferred: emailer is imported by routers that
 
+    user = db.query(User).filter(User.name.ilike(name)).first()
+    if user and user.email:
+        return user.email
+    info = person_info(name)
+    return info["email"] if info else None
+
+
+def notify_group_activity(db, group, actor_name: str, verb: str, summary: str,
+                          skip_names: list[str] | None = None) -> None:
+    """Tell everyone else in the group about something that just happened.
+
+    Every member with a findable email gets one, not just the two names in
+    people.py's original AG/AS pair — a Mumbai + Diwali trip with Divyank in
+    it used to notify nobody at all, since the old rule required exactly two
+    members and both being in the registry. The person who did the thing
+    never gets emailed about their own action.
+
+    `skip_names` exists for a narrower reason: a member added in the same
+    update gets notify_added_to_group's own, more specific email instead, and
+    would otherwise also get this generic "updated the group" one about a
+    group they didn't know existed a moment before.
+    """
     settings = get_settings()
     link = f"{settings.frontend_url}/groups/{group.id}"
+    skip = {s.lower() for s in (skip_names or [])}
 
-    for name, info in infos.items():
-        if name.lower() == (actor_name or "").lower():
-            continue  # skip notifying whoever triggered it
+    for m in group.members:
+        if m.name.lower() == (actor_name or "").lower() or m.name.lower() in skip:
+            continue
+        email = _email_for(db, m.name)
+        if not email:
+            continue
         subject = f"{actor_name} {verb} in {group.name}"
         body = (
             f"{actor_name} {verb} in \"{group.name}\":\n\n"
@@ -48,6 +82,34 @@ def notify_group_activity(group, actor_name: str, verb: str, summary: str) -> No
             f"View it here: {link}"
         )
         try:
-            _send(info["email"], subject, body)
+            _send(email, subject, body)
         except Exception as e:
             print(f"[email] notify_group_activity error: {e}")
+
+
+def notify_added_to_group(db, group, actor_name: str, added_names: list[str]) -> None:
+    """Tell someone specifically that they were just put in a group.
+
+    Separate from notify_group_activity because "you're in a new group" and
+    "someone changed a group you were already in" are different news, worth
+    two distinct, clearly-worded emails rather than one generic "updated the
+    group" that leaves the new member guessing what actually happened.
+    """
+    settings = get_settings()
+    link = f"{settings.frontend_url}/groups/{group.id}"
+
+    for name in added_names:
+        if name.lower() == (actor_name or "").lower():
+            continue
+        email = _email_for(db, name)
+        if not email:
+            continue
+        subject = f"{actor_name} added you to {group.name}"
+        body = (
+            f"{actor_name} added you to \"{group.name}\" on Money Splitter.\n\n"
+            f"View it here: {link}"
+        )
+        try:
+            _send(email, subject, body)
+        except Exception as e:
+            print(f"[email] notify_added_to_group error: {e}")
