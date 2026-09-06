@@ -1252,6 +1252,61 @@ def search(
     }
 
 
+def _recommend_for_state(
+    state: str, by_state: dict, sizes: tuple[int, ...], want_beer: bool,
+    want_spirits: bool, kinds: tuple[str, ...], budget_min: float,
+    budget_max: float, people: int, hist: dict,
+) -> dict | None:
+    """Everything about a recommendation that actually varies by state.
+
+    Pulled out of the endpoint so "one state" and "every state at once" run
+    the identical picking logic rather than a second, easily-diverging copy
+    of it. Returns None for a state with no published prices at all, which
+    a single-state request treats as a 404 and an all-states request simply
+    leaves out rather than failing the whole page over one gap.
+    """
+    bottles = _apply_overrides(for_state(state), by_state.get(state, []), state)
+    if not bottles:
+        return None
+
+    # Every state we have prices for, the one you asked about first. Three NCR
+    # columns answered "is it cheaper over the border" for somebody in Delhi
+    # and nothing for anybody else - a UP price never saw MP, though that is
+    # the comparison worth making.
+    regions = _regions_for(state)
+    tables = {
+        r: _apply_overrides(for_state(r), by_state.get(r, []), r) for r in regions
+    }
+    # Bucketed by size once per region per request, so the comparison strip's
+    # per-pick, per-region lookups never rescan a whole region's table - see
+    # _by_size.
+    tables_by_size = {r: _by_size(rows) for r, rows in tables.items()}
+
+    picks = (_pick(bottles, budget_min, budget_max, people, sizes,
+                   hist["favourites"], hist["brand_avg"], tables_by_size, regions,
+                   hist["brand_last"], kinds)
+             if want_spirits else [])
+    beers = (_beers(bottles, budget_min, budget_max, people, hist["favourites"],
+                    tables_by_size, regions)
+             if want_beer else [])
+
+    return {
+        "regions": list(regions),
+        "picks": picks,
+        "price_band": _band(bottles, sizes, want_beer, want_spirits, kinds),
+        "your_entries": _your_entries(by_state.get(state, []), sizes,
+                                      want_beer, want_spirits,
+                                      budget_min, budget_max),
+        "size_available": any(
+            (want_beer and b.kind == "beer")
+            or (want_spirits and b.size_ml in sizes and b.kind in BOTTLE_KINDS
+                and (not kinds or b.kind in kinds))
+            for b in bottles
+        ),
+        "beers": beers,
+    }
+
+
 @router.get("/", response_model=dict)
 def recommend(
     state: str,
@@ -1301,46 +1356,16 @@ def recommend(
         want_beer = False
 
     by_state = _overrides_by_state(db)
-    bottles = _apply_overrides(for_state(state), by_state.get(state, []), state)
-
-    # Every state we have prices for, the one you asked about first. Three NCR
-    # columns answered "is it cheaper over the border" for somebody in Delhi
-    # and nothing for anybody else - a UP price never saw MP, though that is
-    # the comparison worth making.
-    regions = _regions_for(state)
-    tables = {
-        r: _apply_overrides(for_state(r), by_state.get(r, []), r) for r in regions
-    }
-    # Bucketed by size once per region per request, so the comparison strip's
-    # per-pick, per-region lookups never rescan a whole region's table - see
-    # _by_size.
-    tables_by_size = {r: _by_size(rows) for r, rows in tables.items()}
-
-    if not bottles:
-        raise HTTPException(
-            404,
-            f"No published prices for {state} yet — we only have "
-            f"{', '.join(STATES)}. Prices are set per state, so guessing one "
-            f"from another would be wrong.",
-        )
-
     people_names = [n for n in (names or "").split(",") if n.strip()]
     hist = _history(db, caller, people_names)
-    # The picker decides what you are buying, and it can now ask for both.
-    picks = (_pick(bottles, budget_min, budget_max, people, sizes,
-                   hist["favourites"], hist["brand_avg"], tables_by_size, regions,
-                   hist["brand_last"], kinds)
-             if want_spirits else [])
-    beers = (_beers(bottles, budget_min, budget_max, people, hist["favourites"],
-                    tables_by_size, regions)
-             if want_beer else [])
+    # Shared across every state - what you have actually bought before, and
+    # what you paid for it, is a property of you, not of a price list.
+    learned_drinks = learned(
+        db, DRINK, [g.id for g in db.query(Group).all() if is_member(g, caller)],
+        budget_min, budget_max,
+    )
 
-    return {
-        "state": state,
-        "ncr": list(NCR),
-        # The columns of the side-by-side, in order. Not always three: a state
-        # outside the NCR is prepended so you can see your own price too.
-        "regions": list(regions),
+    shared = {
         "people": people,
         "budget_min": budget_min,
         "budget_max": budget_max,
@@ -1364,32 +1389,52 @@ def recommend(
                             + (["beer"] if want_beer else []))
         ),
         "history": hist,
-        "picks": picks,
-        # Says why a list is empty: no rows at all for this size in this state
-        # is a different problem from everything being over budget.
-        # What that size actually costs here, so an empty list can say "they
-        # run Rs 95-250" instead of leaving you guessing at the range.
-        "price_band": _band(bottles, sizes, want_beer, want_spirits, kinds),
-        # Your own entries for this state, each saying whether it is in the
-        # list above and, if not, why — so a price you typed is never just
-        # silently absent.
-        "your_entries": _your_entries(by_state.get(state, []), sizes,
-                                      want_beer, want_spirits,
-                                      budget_min, budget_max),
-        # Straight from the knowledge base: drinks you have actually bought
-        # whose typical spend lands in this budget. Priced from what you paid,
-        # not from a list, so it is called spend rather than a price.
-        "learned": learned(db, DRINK,
-                           [g.id for g in db.query(Group).all() if is_member(g, caller)],
-                           budget_min, budget_max),
-        "size_available": any(
-            (want_beer and b.kind == "beer")
-            or (want_spirits and b.size_ml in sizes and b.kind in BOTTLE_KINDS
-                and (not kinds or b.kind in kinds))
-            for b in bottles
-        ),
+        "learned": learned_drinks,
         "is_any": is_any,
-        "beers": beers,
         "sources": SOURCES,
         "abv_sources": ABV_SOURCES,
+    }
+
+    # "All states at once": the same picks, run independently per state and
+    # handed back grouped rather than merged into one list - price is a
+    # per-state fact, so a single ranked list would have to pretend a bottle
+    # has one price when it genuinely does not. Every other field the page
+    # needs (budget, kinds, sizes, history) is identical across states, so
+    # only the parts that actually vary by state get nested.
+    if state.strip().lower() == "all":
+        by_state_results = {}
+        for st in STATES:
+            per_state = _recommend_for_state(
+                st, by_state, sizes, want_beer, want_spirits, kinds,
+                budget_min, budget_max, people, hist,
+            )
+            if per_state is not None:
+                by_state_results[st] = per_state
+        return {
+            **shared,
+            "state": "all",
+            "is_all": True,
+            "states_searched": list(STATES),
+            "ncr": list(NCR),
+            "by_state": by_state_results,
+        }
+
+    per_state = _recommend_for_state(
+        state, by_state, sizes, want_beer, want_spirits, kinds,
+        budget_min, budget_max, people, hist,
+    )
+    if per_state is None:
+        raise HTTPException(
+            404,
+            f"No published prices for {state} yet — we only have "
+            f"{', '.join(STATES)}. Prices are set per state, so guessing one "
+            f"from another would be wrong.",
+        )
+
+    return {
+        **shared,
+        "state": state,
+        "is_all": False,
+        "ncr": list(NCR),
+        **per_state,
     }

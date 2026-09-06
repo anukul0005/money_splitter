@@ -354,12 +354,13 @@ export default function Recommend() {
           <div>
             <label className="label">State</label>
             <select className="input" value={state} onChange={(e) => setState(e.target.value)}>
+              <option value="all">All states</option>
               {(meta?.states ?? []).map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
             <p className="text-[10px] text-gray-400 mt-1">
-              Only states with published prices we could source are listed.
-              Every pick also shows what the same bottle costs in the other
-              states we have lists for.
+              {state === 'all'
+                ? "Picks run separately for every state and shown side by side - price is set per state, so there's no one number to rank them by."
+                : 'Only states with published prices we could source are listed. Every pick also shows what the same bottle costs in the other states we have lists for.'}
             </p>
           </div>
 
@@ -721,7 +722,64 @@ export default function Recommend() {
               {INR(result.budget_min)}–{fmtBudgetMax(result.budget_max)}
             </p>
 
-            {result.picks.length === 0 && result.beers.length === 0 && (
+            {/* All states at once - price is set per state, so there is no
+                single ranked list to show. Each state gets its own compact
+                card instead of the full rich one below (its edit form, its
+                own show-more toggle) so ten states don't turn into ten
+                copies of a page-long card - opening one for real just means
+                switching the State field to it. */}
+            {result.is_all && (
+              <div className="space-y-2">
+                {Object.entries(result.by_state).map(([st, data]) => {
+                  const top = [
+                    ...data.picks.map((p) => ({ ...p, isBeer: false })),
+                    ...data.beers.map((b) => ({ ...b, total: b.price, isBeer: true })),
+                  ].slice(0, 3)
+                  return (
+                    <div key={st} className="card p-3.5">
+                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                        <p className="text-sm font-black text-gray-900">{st}</p>
+                        <button
+                          type="button"
+                          onClick={() => { setState(st); run({ state: st }) }}
+                          className="text-[10px] font-bold text-brand-600 hover:text-brand-700 flex-shrink-0"
+                        >
+                          Open in {st} →
+                        </button>
+                      </div>
+                      {top.length === 0 ? (
+                        <p className="text-xs text-gray-400">
+                          {!data.size_available
+                            ? `No ${result.bottle_name} prices published here yet.`
+                            : data.price_band
+                              ? <>Nothing in this budget — they run <span className="font-bold text-gray-500">{INR(data.price_band.min)}–{INR(data.price_band.max)}</span> here.</>
+                              : `Nothing in ${result.bottle_name} here falls in this budget.`}
+                        </p>
+                      ) : (
+                        <div className="space-y-1">
+                          {top.map((p, i) => (
+                            <div key={`${p.brand}-${p.size_ml}-${i}`} className="flex items-start justify-between gap-2 text-xs">
+                              <span className="font-semibold text-gray-700 truncate">
+                                {p.brand}
+                                <span className="text-gray-400 font-normal"> · {p.size_name || `${p.size_ml}ml`}{p.isBeer ? ' · beer' : ''}</span>
+                              </span>
+                              <span className="font-black text-brand-600 flex-shrink-0">{INR(p.total)}</span>
+                            </div>
+                          ))}
+                          {(data.picks.length + data.beers.length) > 3 && (
+                            <p className="text-[10px] text-gray-400">
+                              +{data.picks.length + data.beers.length - 3} more here
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {!result.is_all && result.picks.length === 0 && result.beers.length === 0 && (
               <div className="card text-center py-6">
                 <p className="text-sm text-gray-400">
                   {!result.size_available
@@ -738,7 +796,7 @@ export default function Recommend() {
               </div>
             )}
 
-            {(showAllPicks ? result.picks : result.picks.slice(0, TOP_N)).map((p, i) => (
+            {!result.is_all && (showAllPicks ? result.picks : result.picks.slice(0, TOP_N)).map((p, i) => (
               <div key={`${p.brand}-${p.size_ml}-${i}`} className="card p-3.5">
                 {/* The brand gets the full width and is allowed to wrap. The
                     official state lists print the whole registered label —
@@ -828,7 +886,7 @@ export default function Recommend() {
               </div>
             ))}
 
-            {result.picks.length > TOP_N && (
+            {!result.is_all && result.picks.length > TOP_N && (
               <button
                 type="button"
                 onClick={() => setShowAllPicks((v) => !v)}
