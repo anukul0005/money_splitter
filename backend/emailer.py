@@ -1,8 +1,37 @@
+import socket
 import smtplib
+from contextlib import contextmanager
 from email.mime.text import MIMEText
 
 from database import get_settings
 from people import person_info
+
+
+@contextmanager
+def _ipv4_only():
+    """Force IPv4 name resolution for whatever runs inside this block.
+
+    Render's containers have no outbound IPv6 route, but smtp.gmail.com
+    resolves to both an IPv6 and an IPv4 address - when getaddrinfo hands
+    back the IPv6 one first, connecting fails immediately with "Network is
+    unreachable" rather than falling through to the IPv4 address, since that
+    is a routing-table error, not a timeout or refusal smtplib retries past.
+
+    Patched here rather than at import time so it only affects the SMTP
+    connection below - the database connection to Neon and anything else
+    the app resolves are left alone, in case any of them is one where the
+    IPv6 route genuinely does work.
+    """
+    real_getaddrinfo = socket.getaddrinfo
+
+    def ipv4_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+        return real_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+
+    socket.getaddrinfo = ipv4_getaddrinfo
+    try:
+        yield
+    finally:
+        socket.getaddrinfo = real_getaddrinfo
 
 
 def _send(to_email: str, subject: str, body: str) -> None:
@@ -15,9 +44,10 @@ def _send(to_email: str, subject: str, body: str) -> None:
     msg["From"] = settings.smtp_sender
     msg["To"] = to_email
     try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as server:
-            server.login(settings.smtp_sender, settings.smtp_app_password)
-            server.sendmail(settings.smtp_sender, [to_email], msg.as_string())
+        with _ipv4_only():
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as server:
+                server.login(settings.smtp_sender, settings.smtp_app_password)
+                server.sendmail(settings.smtp_sender, [to_email], msg.as_string())
     except Exception as e:
         print(f"[email] failed to send to {to_email}: {e}")
 
