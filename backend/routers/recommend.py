@@ -139,7 +139,7 @@ GENERIC_WORDS = {
     "premium", "super", "extra", "strong", "superior", "deluxe", "special",
     "exclusive", "original", "classic", "reserve", "select", "fine", "rare",
     "aged", "smooth", "pure", "triple", "distilled", "the", "and", "of",
-    "new", "no", "xxx",
+    "new", "no", "xxx", "single", "irish",
 }
 
 # An age statement's own filler, dropped before comparing two names in
@@ -215,6 +215,24 @@ def _same_bottle(a: str, b: str) -> bool:
     the match over - the number is what actually says which bottle this is.
     Dropped from both names before comparing, so the two spellings of that
     one fact stop counting as a mismatch.
+
+    The shorter name needs *two* real, non-generic words, not one - a bare
+    "Bacardi" is one word once "rum" is discounted, and a first pass at this
+    rule that allowed one word matched it to "Bacardi Anejo Cuatro Aged Gold
+    Rum", a real, ₹2050-dearer, differently-flavoured bottle, not the same
+    one spelled two ways.
+
+    And every word the longer name adds beyond the shorter one has to be
+    filler too, not new content - the same audit that caught the Bacardi
+    case also caught "Moooz Sparkle Vodka" matching "Moooz Sparkle Green
+    Apple Vodka", "Moooz Sparkle Jamun Vodka" *and* "Moooz Sparkle Limon
+    Vodka" all at once, because the base name's words are a subset of every
+    flavour's. A flavour, a house name or an edition is real, identifying
+    information; requiring the extra words to all be generic filler is what
+    tells "Bushmills 12 Years Old" apart (Delhi's longer name for it adds
+    nothing but "Triple Distilled ... Single Malt Rare Irish Whisky", every
+    word of it descriptive) from an actually different, differently-priced
+    bottle that happens to share a base name.
     """
     ka, kb = _brand_key(a), _brand_key(b)
     if ka == kb:
@@ -222,14 +240,16 @@ def _same_bottle(a: str, b: str) -> bool:
     wa = [w for w in ka.split() if w not in _AGE_FILLER]
     wb = [w for w in kb.split() if w not in _AGE_FILLER]
     long_words, short_words = (wa, wb) if len(wa) >= len(wb) else (wb, wa)
-    # The shorter name has to actually name something. Without this, a row
-    # published as "Premium Whisky" matched Blenders Pride, Royal Stag and
-    # everything else with those two words in it, and quietly reported its
-    # price as theirs.
-    if not short_words or not any(w not in GENERIC_WORDS for w in short_words):
+    # The shorter name has to actually name something specific - see the
+    # docstring for why this is two words, not merely non-empty.
+    significant = [w for w in short_words if w not in GENERIC_WORDS]
+    if len(significant) < 2:
         return False
     long_set = set(long_words)
-    return all(w in long_set for w in short_words)
+    if not all(w in long_set for w in short_words):
+        return False
+    extra = long_set - set(short_words)
+    return all(w in GENERIC_WORDS for w in extra)
 
 
 def _by_size(bottles: list[Bottle]) -> dict[int, list[Bottle]]:
