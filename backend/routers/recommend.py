@@ -509,7 +509,7 @@ def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
           regions: tuple[str, ...] = NCR,
           brand_last: dict[str, str] | None = None,
           kinds: tuple[str, ...] = (),
-          limit: int = 30) -> list[dict]:
+          limit: int = 200) -> list[dict]:
     """Every bottle of the chosen size priced inside the budget range.
 
     Brands you actually drink come first. UP alone now lists over nine hundred
@@ -521,6 +521,17 @@ def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
     After that, dearest inside the budget: within one state and one size price
     is the only quality signal there is, and the top of a stated range is what
     someone was willing to spend.
+
+    The cap used to sit at 30, which was well inside the size of a real
+    budget band in a state with a big list - Delhi alone has 67 whisky
+    bottles between ₹2,500 and ₹4,500, so a well-known bottle sitting in the
+    middle of that range by price (Jack Daniel's, say) lost to thirty
+    pricier, less recognisable ones and never reached the response at all -
+    "show all" couldn't surface it because it was never sent. 200 clears the
+    worst case found across every state, kind and a spread of budget bands
+    (142, for cheap Delhi whisky) with room to spare, so nothing that
+    actually fits the budget silently disappears before the page's own "top
+    7 / show all" toggle gets a chance to show it.
     """
     # Favourites are short names off the expense text ("Bacardi"); the state
     # lists are verbose ("Bacardi Limon Original Citrus Rum"). Matching those
@@ -701,8 +712,13 @@ def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
            favourites: list[str] | None = None,
            tables_by_size: dict[str, dict[int, list[Bottle]]] | None = None,
            regions: tuple[str, ...] = NCR,
-           limit: int = 30) -> list[dict]:
+           limit: int = 200) -> list[dict]:
     """Beers you can buy, priced by the bottle.
+
+    Same reasoning as _pick's own limit: a cheap budget band can legitimately
+    match most of a state's beer list (Delhi alone lists 438 beer rows), and
+    a 30-item cap silently dropped anything past the thirtieth without any
+    way for "show all" to recover it.
 
     This used to price a whole round and lead with that — "Rs 960" for six
     bottles — which is not a number anybody recognises. A beer has a price and
