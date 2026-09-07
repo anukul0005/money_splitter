@@ -27,6 +27,13 @@ services:
         sync: false
       - key: SMTP_APP_PASSWORD
         sync: false
+      # The transport that actually works here. Render drops outbound SMTP
+      # on both 465 and 587 - they time out rather than being refused - so
+      # mail leaves over HTTPS instead. SMTP_SENDER is still required
+      # alongside this: it is the From address for both transports, and must
+      # be verified as a sender in Brevo or every send is rejected.
+      - key: BREVO_API_KEY
+        sync: false
       # Used to build the links inside notification emails; without it they
       # point at localhost.
       - key: FRONTEND_URL

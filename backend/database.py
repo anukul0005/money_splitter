@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:5173"
     smtp_sender: str = ""
     smtp_app_password: str = ""
+    # Brevo's HTTP API, used because Render drops outbound SMTP on every port
+    # Gmail offers - see emailer.deliver. Empty means "no HTTP transport
+    # configured", which is the normal state locally, where SMTP works fine.
+    brevo_api_key: str = ""
 
     class Config:
         env_file = ".env"

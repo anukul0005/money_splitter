@@ -1,5 +1,8 @@
+import json
 import socket
 import smtplib
+import urllib.error
+import urllib.request
 from contextlib import contextmanager
 from email.mime.text import MIMEText
 
@@ -50,19 +53,83 @@ def credentials() -> tuple[str, str]:
     return sender, password
 
 
+def _send_via_brevo(sender: str, to_email: str, subject: str, body: str) -> None:
+    """Hand the message to Brevo over HTTPS, raising on any non-2xx.
+
+    Uses urllib rather than requests so this costs no new dependency - it is
+    a single POST, and the stdlib does that perfectly well.
+    """
+    settings = get_settings()
+    payload = json.dumps({
+        "sender": {"email": sender},
+        "to": [{"email": to_email}],
+        "subject": subject,
+        "textContent": body,
+    }).encode()
+    req = urllib.request.Request(
+        "https://api.brevo.com/v3/smtp/email",
+        data=payload,
+        headers={
+            "api-key": settings.brevo_api_key,
+            "content-type": "application/json",
+            "accept": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            resp.read()
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="replace")[:400]
+        # Brevo answers a refused sender with a perfectly clear message that
+        # is worth surfacing verbatim - it is nearly always "this sender is
+        # not verified yet", which no amount of retrying will fix.
+        raise RuntimeError(f"Brevo rejected the message ({e.code}): {detail}") from e
+
+
 def deliver(to_email: str, subject: str, body: str) -> str:
     """Send one email, raising on failure. Returns the transport that worked.
+
+    Two transports, tried in the order that works where the app actually
+    runs. Brevo's HTTPS API goes first because Render silently drops
+    outbound SMTP on every port Gmail offers - 465 and 587 both time out,
+    which is a firewall discarding packets, not anything configuration here
+    can fix. Port 443 obviously works, since the API serves its own traffic
+    on it.
+
+    Gmail SMTP stays as the fallback rather than being deleted: it works
+    perfectly from a laptop, so local development keeps sending mail with no
+    Brevo account and no API key, and the two paths are never special-cased
+    by environment. Whichever one succeeds is named in the return value so a
+    log line says which door the mail actually went through.
 
     Separate from _send because the notification paths want a failure to be
     survivable (a broken mailbox should not fail the request that triggered
     it) while the diagnostics endpoint needs the actual exception to report.
     """
     sender, password = credentials()
-    if not sender or not password:
+    settings = get_settings()
+
+    if not sender:
         raise RuntimeError(
-            "SMTP is not configured: SMTP_SENDER and/or SMTP_APP_PASSWORD "
-            "are empty in this process's environment."
+            "No sender address: SMTP_SENDER is empty in this process's "
+            "environment. It is the From address for both transports."
         )
+
+    attempts: list[str] = []
+
+    if settings.brevo_api_key:
+        try:
+            _send_via_brevo(sender, to_email, subject, body)
+            return "brevo-api"
+        except Exception as e:
+            attempts.append(f"brevo-api: {type(e).__name__}: {e}")
+    else:
+        attempts.append("brevo-api: BREVO_API_KEY not set")
+
+    if not password:
+        attempts.append("smtp: SMTP_APP_PASSWORD not set")
+        raise RuntimeError("could not send - " + "; ".join(attempts))
 
     msg = MIMEText(body)
     msg["Subject"] = subject
@@ -72,7 +139,8 @@ def deliver(to_email: str, subject: str, body: str) -> str:
     # 465 first because implicit TLS is one round trip fewer, then 587 as a
     # fallback: hosts that block outbound SMTP rarely block both ports the
     # same way, and a provider that refuses one often allows the other.
-    attempts: list[str] = []
+    # `attempts` deliberately carries the Brevo failure forward, so a message
+    # that got nowhere reports every door it tried, not just the last one.
     for port, use_ssl in ((465, True), (587, False)):
         try:
             with _ipv4_only():
@@ -98,7 +166,7 @@ def deliver(to_email: str, subject: str, body: str) -> str:
         except Exception as e:
             attempts.append(f"port {port}: {type(e).__name__}: {e}")
 
-    raise RuntimeError("could not reach Gmail SMTP - " + "; ".join(attempts))
+    raise RuntimeError("every email transport failed - " + "; ".join(attempts))
 
 
 def _send(to_email: str, subject: str, body: str) -> None:
