@@ -423,13 +423,22 @@ def email_diagnostics(caller: User = Depends(require_admin), db: Session = Depen
         except Exception as e:
             dns[label] = f"{type(e).__name__}: {e}"
 
+    # 465 and 587 are the ports Gmail actually offers, and both time out on
+    # Render - the host drops outbound SMTP rather than refusing it. 2525 is
+    # here as the interesting case: it is not a standard SMTP port, so hosts
+    # that block SMTP by port number sometimes leave it open, and several
+    # relays (Brevo, SendGrid, Mailgun) listen on it for exactly that reason.
+    # Gmail does not, so this probe points at Brevo - an "open" here means
+    # SMTP is still viable from this host via a relay, and a timeout means
+    # the block is broad and only an HTTPS-based email API will work.
     reachable = {}
-    for port in (465, 587):
+    for host, port in (("smtp.gmail.com", 465), ("smtp.gmail.com", 587),
+                       ("smtp-relay.brevo.com", 2525)):
         try:
-            with _socket.create_connection(("smtp.gmail.com", port), timeout=8):
-                reachable[port] = "open"
+            with _socket.create_connection((host, port), timeout=8):
+                reachable[f"{host}:{port}"] = "open"
         except Exception as e:
-            reachable[port] = f"{type(e).__name__}: {e}"
+            reachable[f"{host}:{port}"] = f"{type(e).__name__}: {e}"
 
     users = db.query(User).all()
     return {
