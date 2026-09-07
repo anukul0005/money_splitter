@@ -34,20 +34,77 @@ def _ipv4_only():
         socket.getaddrinfo = real_getaddrinfo
 
 
-def _send(to_email: str, subject: str, body: str) -> None:
+def credentials() -> tuple[str, str]:
+    """The sender address and app password, cleaned up.
+
+    Gmail displays an app password as four space-separated groups
+    ("abcd efgh ijkl mnop") and that is what gets pasted into a dashboard
+    field. Gmail's SMTP does not accept it that way - the spaces have to
+    come out, or every login fails with a 535 that reads exactly like a
+    wrong password. Stripped here rather than at the call site so both the
+    real send and the diagnostics below see the same value.
+    """
     settings = get_settings()
-    if not settings.smtp_sender or not settings.smtp_app_password:
-        print("[email] SMTP not configured (SMTP_SENDER / SMTP_APP_PASSWORD missing), skipping notification")
-        return
+    sender = (settings.smtp_sender or "").strip()
+    password = "".join((settings.smtp_app_password or "").split())
+    return sender, password
+
+
+def deliver(to_email: str, subject: str, body: str) -> str:
+    """Send one email, raising on failure. Returns the transport that worked.
+
+    Separate from _send because the notification paths want a failure to be
+    survivable (a broken mailbox should not fail the request that triggered
+    it) while the diagnostics endpoint needs the actual exception to report.
+    """
+    sender, password = credentials()
+    if not sender or not password:
+        raise RuntimeError(
+            "SMTP is not configured: SMTP_SENDER and/or SMTP_APP_PASSWORD "
+            "are empty in this process's environment."
+        )
+
     msg = MIMEText(body)
     msg["Subject"] = subject
-    msg["From"] = settings.smtp_sender
+    msg["From"] = sender
     msg["To"] = to_email
+
+    # 465 first because implicit TLS is one round trip fewer, then 587 as a
+    # fallback: hosts that block outbound SMTP rarely block both ports the
+    # same way, and a provider that refuses one often allows the other.
+    attempts: list[str] = []
+    for port, use_ssl in ((465, True), (587, False)):
+        try:
+            with _ipv4_only():
+                if use_ssl:
+                    server = smtplib.SMTP_SSL("smtp.gmail.com", port, timeout=15)
+                else:
+                    server = smtplib.SMTP("smtp.gmail.com", port, timeout=15)
+                with server:
+                    if not use_ssl:
+                        server.starttls()
+                    server.login(sender, password)
+                    server.sendmail(sender, [to_email], msg.as_string())
+            return f"smtp.gmail.com:{port}"
+        except smtplib.SMTPAuthenticationError as e:
+            # Retrying the other port cannot fix a rejected password, and
+            # doing so just earns a second failed-login mark on the account.
+            raise RuntimeError(
+                f"Gmail rejected the credentials for {sender}: {e}. Use a "
+                "16-character App Password (not the account password), and "
+                "make sure SMTP_SENDER is the same Google account that "
+                "generated it."
+            ) from e
+        except Exception as e:
+            attempts.append(f"port {port}: {type(e).__name__}: {e}")
+
+    raise RuntimeError("could not reach Gmail SMTP - " + "; ".join(attempts))
+
+
+def _send(to_email: str, subject: str, body: str) -> None:
     try:
-        with _ipv4_only():
-            with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as server:
-                server.login(settings.smtp_sender, settings.smtp_app_password)
-                server.sendmail(settings.smtp_sender, [to_email], msg.as_string())
+        transport = deliver(to_email, subject, body)
+        print(f"[email] sent to {to_email} via {transport}: {subject}")
     except Exception as e:
         print(f"[email] failed to send to {to_email}: {e}")
 

@@ -17,3 +17,17 @@ services:
       # once and keep it, so sessions survive restarts and redeploys.
       - key: SECRET_KEY
         generateValue: true
+      # Email. Without these the app starts fine and simply sends nothing —
+      # login codes and group notifications are silently skipped — so they
+      # are declared here to make their absence visible in the dashboard
+      # rather than something you find out about from a missing email.
+      # SMTP_APP_PASSWORD is a 16-character Google App Password, not the
+      # account password; paste it without the spaces Google displays.
+      - key: SMTP_SENDER
+        sync: false
+      - key: SMTP_APP_PASSWORD
+        sync: false
+      # Used to build the links inside notification emails; without it they
+      # point at localhost.
+      - key: FRONTEND_URL
+        sync: false

@@ -396,6 +396,87 @@ def set_my_email(payload: SetEmail, db: Session = Depends(get_db),
     return caller
 
 
+@router.get("/email-diagnostics", response_model=dict)
+def email_diagnostics(caller: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Why email isn't arriving, answered from the running server.
+
+    Every send path deliberately swallows its exception so a broken mailbox
+    can't fail the request that triggered it - which also means the real
+    reason only ever reached a log line on the host. This reports the same
+    facts over the API: what the process actually has for config, whether
+    Gmail is reachable from there, and which accounts even have an address
+    for a notification to go to.
+    """
+    import socket as _socket
+
+    from database import get_settings
+    from emailer import credentials
+
+    settings = get_settings()
+    sender, password = credentials()
+    raw_password = settings.smtp_app_password or ""
+
+    dns = {}
+    for family, label in ((_socket.AF_INET, "ipv4"), (_socket.AF_INET6, "ipv6")):
+        try:
+            dns[label] = sorted({r[4][0] for r in _socket.getaddrinfo("smtp.gmail.com", 465, family)})
+        except Exception as e:
+            dns[label] = f"{type(e).__name__}: {e}"
+
+    reachable = {}
+    for port in (465, 587):
+        try:
+            with _socket.create_connection(("smtp.gmail.com", port), timeout=8):
+                reachable[port] = "open"
+        except Exception as e:
+            reachable[port] = f"{type(e).__name__}: {e}"
+
+    users = db.query(User).all()
+    return {
+        "config": {
+            "smtp_sender": sender or None,
+            "smtp_app_password_set": bool(password),
+            "smtp_app_password_length": len(password),
+            "smtp_app_password_had_spaces": raw_password != raw_password.replace(" ", ""),
+            "frontend_url": settings.frontend_url,
+        },
+        "dns_smtp_gmail_com": dns,
+        "tcp_reachable": reachable,
+        "accounts": {
+            "total": len(users),
+            "with_email": sum(1 for u in users if u.email),
+            "without_email": sorted(u.name for u in users if not u.email),
+        },
+        "note": (
+            "smtp_app_password_length should be 16. If tcp_reachable shows "
+            "both ports blocked, the host is blocking outbound SMTP and no "
+            "config change here will help - switch to an HTTP email API. "
+            "POST to this same path with {\"to\": \"you@example.com\"} to "
+            "attempt a real send and see the exact error."
+        ),
+    }
+
+
+@router.post("/email-diagnostics", response_model=dict)
+def email_diagnostics_send(payload: dict, caller: User = Depends(require_admin)):
+    """Attempt one real send and report what happened, verbatim."""
+    from emailer import deliver
+
+    to = (payload.get("to") or caller.email or "").strip()
+    if not to:
+        raise HTTPException(400, "Pass {\"to\": \"someone@example.com\"} - your account has no email set.")
+    try:
+        transport = deliver(
+            to,
+            "Money Splitter email test",
+            "If you're reading this, the server can send mail. "
+            "Login codes and group notifications will arrive the same way.",
+        )
+    except Exception as e:
+        return {"sent": False, "to": to, "error": f"{type(e).__name__}: {e}"}
+    return {"sent": True, "to": to, "transport": transport}
+
+
 LOGIN_CODE_TTL_MINUTES = 10
 
 
