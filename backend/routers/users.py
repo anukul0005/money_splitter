@@ -410,7 +410,7 @@ def email_diagnostics(caller: User = Depends(require_admin), db: Session = Depen
     import socket as _socket
 
     from database import get_settings
-    from emailer import credentials
+    from emailer import _ipv4_only, credentials
 
     settings = get_settings()
     sender, password = credentials()
@@ -431,12 +431,19 @@ def email_diagnostics(caller: User = Depends(require_admin), db: Session = Depen
     # Gmail does not, so this probe points at Brevo - an "open" here means
     # SMTP is still viable from this host via a relay, and a timeout means
     # the block is broad and only an HTTPS-based email API will work.
+    # Probed through the same IPv4-only patch the real send uses. Without it
+    # these connect over IPv6 and fail with "[Errno 101] Network is
+    # unreachable" on a host with no IPv6 route - which says nothing about
+    # whether the port is blocked, and is a different failure from the
+    # timeout an actual send hits. A diagnostic that does not reproduce the
+    # thing it is diagnosing is worse than none.
     reachable = {}
     for host, port in (("smtp.gmail.com", 465), ("smtp.gmail.com", 587),
                        ("smtp-relay.brevo.com", 2525)):
         try:
-            with _socket.create_connection((host, port), timeout=8):
-                reachable[f"{host}:{port}"] = "open"
+            with _ipv4_only():
+                with _socket.create_connection((host, port), timeout=8):
+                    reachable[f"{host}:{port}"] = "open"
         except Exception as e:
             reachable[f"{host}:{port}"] = f"{type(e).__name__}: {e}"
 
