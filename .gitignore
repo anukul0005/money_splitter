@@ -17,3 +17,8 @@ backend/backups/
 
 # Session signing key — never commit; committing it lets anyone forge a login
 backend/.secret_key
+
+# Scratch file the Brevo API key was pasted into while setting up sending.
+# The key belongs in .env and in Render's environment, not in the repo — this
+# entry is here so a stray `git add -A` cannot push it to a public remote.
+backend/brevo.txt
