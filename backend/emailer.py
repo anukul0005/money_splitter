@@ -80,13 +80,22 @@ MONO = "'IBM Plex Mono', 'Courier New', Courier, monospace"
 
 def _layout(heading: str, lines: list[str], button_url: str = "",
             button_label: str = "", highlight: str = "") -> str:
-    """One SplitEasy-branded HTML email.
+    """One SplitEasy-branded HTML email, deliberately restrained.
 
     Table-based with every style inlined, which looks archaic next to the
     app's Tailwind but is what email clients actually support - Gmail strips
     <style> blocks, and Outlook's renderer predates flexbox and grid by a
     decade. Any <div> layout here would collapse in exactly the clients most
     of these emails land in.
+
+    The restraint is the point. A first version had a dark header bar and a
+    filled orange call-to-action, and Gmail moved these straight from the
+    Updates tab into Promotions - the classifier reads a message's
+    appearance, and those two elements are what marketing email looks like.
+    The identity that survives is the wordmark, the type and the accent
+    colour on links, which is enough to be recognisably the app without
+    reading as an advert for it. Anything reintroducing a filled button or a
+    colour-blocked header should expect the Promotions tab back.
 
     Always paired with a plain-text alternative by the callers below, so a
     reader whose client blocks HTML still gets the message.
@@ -110,42 +119,40 @@ def _layout(heading: str, lines: list[str], button_url: str = "",
             f'{highlight}</td></tr></table>'
         )
 
-    button_html = ""
+    link_html = ""
     if button_url and button_label:
-        button_html = (
-            f'<table role="presentation" cellpadding="0" cellspacing="0" '
-            f'border="0" style="margin:6px 0 4px;"><tr>'
-            f'<td style="background:{BRAND_DEEP};border-radius:6px;">'
-            f'<a href="{button_url}" style="display:inline-block;'
-            f'padding:11px 22px;font-family:{FONT};font-size:14px;'
-            f'font-weight:600;color:#ffffff;text-decoration:none;'
-            f'letter-spacing:-0.01em;">{button_label}</a>'
-            f'</td></tr></table>'
+        # A plain underlined link, not a filled button. A large coloured
+        # call-to-action is close to the defining visual feature of marketing
+        # email, and it is what moved these from Gmail's Updates tab to
+        # Promotions the moment it was introduced. The link does the same job
+        # for a reader and carries none of that signal.
+        link_html = (
+            f'<p style="margin:0;font-size:15px;line-height:1.6;">'
+            f'<a href="{button_url}" style="color:{BRAND_DEEP};'
+            f'text-decoration:underline;">{button_label}</a></p>'
         )
 
     return f"""\
 <!doctype html>
-<html><body style="margin:0;padding:0;background:{CANVAS};">
+<html><body style="margin:0;padding:0;background:#ffffff;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
-       style="background:{CANVAS};padding:24px 12px;">
+       style="background:#ffffff;padding:24px 12px;">
 <tr><td align="center">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
-         style="max-width:520px;background:#ffffff;border:1px solid {BORDER};
-                border-radius:8px;overflow:hidden;">
-    <tr><td style="background:{INK};padding:18px 28px;">
-      <span style="font-family:{FONT};font-size:21px;font-weight:700;
-                   letter-spacing:-0.01em;color:{BRAND};">SplitEasy</span>
+         style="max-width:520px;background:#ffffff;">
+    <tr><td style="padding:0 4px 18px;font-family:{FONT};">
+      <span style="font-size:19px;font-weight:700;letter-spacing:-0.01em;
+                   color:{BRAND};">SplitEasy</span>
     </td></tr>
-    <tr><td style="padding:28px;font-family:{FONT};">
-      <h1 style="margin:0 0 16px;font-size:18px;font-weight:600;
+    <tr><td style="padding:0 4px;font-family:{FONT};">
+      <h1 style="margin:0 0 16px;font-size:17px;font-weight:600;
                  letter-spacing:-0.01em;color:{INK};">{heading}</h1>
       {highlight_html}
       {body_html}
-      {button_html}
+      {link_html}
     </td></tr>
-    <tr><td style="border-top:1px solid {BORDER};padding:16px 28px;
-                   font-family:{FONT};font-size:12px;line-height:1.5;
-                   color:{MUTED};">
+    <tr><td style="padding:22px 4px 0;font-family:{FONT};font-size:12px;
+                   line-height:1.5;color:{MUTED};">
       Sent automatically by SplitEasy because you're in this group.
     </td></tr>
   </table>
