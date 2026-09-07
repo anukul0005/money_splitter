@@ -162,6 +162,12 @@ def _send_via_brevo(sender: str, to_email: str, subject: str, body: str,
     a single POST, and the stdlib does that perfectly well.
     """
     settings = get_settings()
+    # Stripped because a key pasted into a dashboard field very often carries
+    # a trailing newline or space, and an HTTP header will happily transmit
+    # it - Brevo then answers "Key not found", which reads as a wrong or
+    # deleted key rather than a whitespace problem and sends you looking in
+    # the wrong place entirely.
+    api_key = (settings.brevo_api_key or "").strip()
     # "SplitEasy" as the display name rather than a bare gmail address - it is
     # what the app calls itself, and a named sender is both more recognisable
     # in a crowded inbox and marginally less spam-like.
@@ -178,7 +184,7 @@ def _send_via_brevo(sender: str, to_email: str, subject: str, body: str,
         "https://api.brevo.com/v3/smtp/email",
         data=payload,
         headers={
-            "api-key": settings.brevo_api_key,
+            "api-key": api_key,
             "content-type": "application/json",
             "accept": "application/json",
         },

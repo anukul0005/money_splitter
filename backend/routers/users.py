@@ -415,6 +415,8 @@ def email_diagnostics(caller: User = Depends(require_admin), db: Session = Depen
     settings = get_settings()
     sender, password = credentials()
     raw_password = settings.smtp_app_password or ""
+    raw_brevo = settings.brevo_api_key or ""
+    brevo_key = raw_brevo.strip()
 
     dns = {}
     for family, label in ((_socket.AF_INET, "ipv4"), (_socket.AF_INET6, "ipv6")):
@@ -454,6 +456,16 @@ def email_diagnostics(caller: User = Depends(require_admin), db: Session = Depen
             "smtp_app_password_set": bool(password),
             "smtp_app_password_length": len(password),
             "smtp_app_password_had_spaces": raw_password != raw_password.replace(" ", ""),
+            # Enough to tell a wrong credential from a missing one without
+            # printing the key itself. Brevo's v3 API keys start "xkeysib-";
+            # the SMTP relay password shown on the same dashboard page does
+            # not, and pasting that one instead is answered with the same
+            # "Key not found" as a deleted key, which is why the prefix is
+            # worth showing.
+            "brevo_api_key_set": bool(brevo_key),
+            "brevo_api_key_length": len(brevo_key),
+            "brevo_api_key_prefix": brevo_key[:8] or None,
+            "brevo_api_key_had_whitespace": raw_brevo != raw_brevo.strip(),
             "frontend_url": settings.frontend_url,
             # Every notification links back to the app through this. It
             # defaults to localhost, which is correct on a laptop and useless
