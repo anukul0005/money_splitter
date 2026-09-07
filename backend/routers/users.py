@@ -455,6 +455,15 @@ def email_diagnostics(caller: User = Depends(require_admin), db: Session = Depen
             "smtp_app_password_length": len(password),
             "smtp_app_password_had_spaces": raw_password != raw_password.replace(" ", ""),
             "frontend_url": settings.frontend_url,
+            # Every notification links back to the app through this. It
+            # defaults to localhost, which is correct on a laptop and useless
+            # in a deployed one - the link arrives in someone's inbox and
+            # opens nothing. Nothing else fails when it is wrong, so it needs
+            # saying out loud rather than being left to notice.
+            "frontend_url_looks_local": (
+                "localhost" in settings.frontend_url
+                or "127.0.0.1" in settings.frontend_url
+            ),
         },
         "dns_smtp_gmail_com": dns,
         "tcp_reachable": reachable,

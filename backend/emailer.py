@@ -4,7 +4,10 @@ import smtplib
 import urllib.error
 import urllib.request
 from contextlib import contextmanager
+from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formataddr
+from html import escape
 
 from database import get_settings
 from people import person_info
@@ -53,19 +56,124 @@ def credentials() -> tuple[str, str]:
     return sender, password
 
 
-def _send_via_brevo(sender: str, to_email: str, subject: str, body: str) -> None:
+# The app's design tokens, copied from frontend/tailwind.config.js. Repeated
+# here rather than imported because email cannot share a stylesheet with the
+# app - every rule has to be inlined into the markup - so these are the one
+# place to change if the palette moves.
+BRAND = "#f97316"        # brand-400, the orange the SplitEasy wordmark uses
+BRAND_DEEP = "#ea580c"   # brand-500, buttons
+INK = "#0f172a"          # field-950, the dark chrome
+BODY_TEXT = "#334155"
+MUTED = "#64748b"
+BORDER = "#e2e8f0"
+CANVAS = "#f8fafc"
+
+# Space Grotesk first, for the handful of desktop clients that have it
+# installed locally. Web fonts are not an option: Gmail and Outlook strip
+# <link> and @import outright, so a font can only be used if the reader
+# already has it. The rest of the stack is what actually renders for almost
+# everyone, chosen to sit close to Space Grotesk's geometric feel.
+FONT = ("'Space Grotesk', 'Segoe UI', -apple-system, BlinkMacSystemFont, "
+        "Helvetica, Arial, sans-serif")
+MONO = "'IBM Plex Mono', 'Courier New', Courier, monospace"
+
+
+def _layout(heading: str, lines: list[str], button_url: str = "",
+            button_label: str = "", highlight: str = "") -> str:
+    """One SplitEasy-branded HTML email.
+
+    Table-based with every style inlined, which looks archaic next to the
+    app's Tailwind but is what email clients actually support - Gmail strips
+    <style> blocks, and Outlook's renderer predates flexbox and grid by a
+    decade. Any <div> layout here would collapse in exactly the clients most
+    of these emails land in.
+
+    Always paired with a plain-text alternative by the callers below, so a
+    reader whose client blocks HTML still gets the message.
+    """
+    body_html = "".join(
+        f'<p style="margin:0 0 14px;font-size:15px;line-height:1.6;'
+        f'color:{BODY_TEXT};">{line}</p>'
+        for line in lines
+    )
+
+    highlight_html = ""
+    if highlight:
+        # The login code, given room to breathe and set in mono so a 0 can be
+        # told from an O while retyping it.
+        highlight_html = (
+            f'<table role="presentation" cellpadding="0" cellspacing="0" '
+            f'border="0" style="margin:0 0 20px;"><tr>'
+            f'<td style="background:{CANVAS};border:1px solid {BORDER};'
+            f'border-radius:6px;padding:16px 28px;font-family:{MONO};'
+            f'font-size:30px;font-weight:600;letter-spacing:6px;color:{INK};">'
+            f'{highlight}</td></tr></table>'
+        )
+
+    button_html = ""
+    if button_url and button_label:
+        button_html = (
+            f'<table role="presentation" cellpadding="0" cellspacing="0" '
+            f'border="0" style="margin:6px 0 4px;"><tr>'
+            f'<td style="background:{BRAND_DEEP};border-radius:6px;">'
+            f'<a href="{button_url}" style="display:inline-block;'
+            f'padding:11px 22px;font-family:{FONT};font-size:14px;'
+            f'font-weight:600;color:#ffffff;text-decoration:none;'
+            f'letter-spacing:-0.01em;">{button_label}</a>'
+            f'</td></tr></table>'
+        )
+
+    return f"""\
+<!doctype html>
+<html><body style="margin:0;padding:0;background:{CANVAS};">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+       style="background:{CANVAS};padding:24px 12px;">
+<tr><td align="center">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+         style="max-width:520px;background:#ffffff;border:1px solid {BORDER};
+                border-radius:8px;overflow:hidden;">
+    <tr><td style="background:{INK};padding:18px 28px;">
+      <span style="font-family:{FONT};font-size:21px;font-weight:700;
+                   letter-spacing:-0.01em;color:{BRAND};">SplitEasy</span>
+    </td></tr>
+    <tr><td style="padding:28px;font-family:{FONT};">
+      <h1 style="margin:0 0 16px;font-size:18px;font-weight:600;
+                 letter-spacing:-0.01em;color:{INK};">{heading}</h1>
+      {highlight_html}
+      {body_html}
+      {button_html}
+    </td></tr>
+    <tr><td style="border-top:1px solid {BORDER};padding:16px 28px;
+                   font-family:{FONT};font-size:12px;line-height:1.5;
+                   color:{MUTED};">
+      Sent automatically by SplitEasy because you're in this group.
+    </td></tr>
+  </table>
+</td></tr>
+</table>
+</body></html>"""
+
+
+def _send_via_brevo(sender: str, to_email: str, subject: str, body: str,
+                    html: str = "") -> None:
     """Hand the message to Brevo over HTTPS, raising on any non-2xx.
 
     Uses urllib rather than requests so this costs no new dependency - it is
     a single POST, and the stdlib does that perfectly well.
     """
     settings = get_settings()
-    payload = json.dumps({
-        "sender": {"email": sender},
+    # "SplitEasy" as the display name rather than a bare gmail address - it is
+    # what the app calls itself, and a named sender is both more recognisable
+    # in a crowded inbox and marginally less spam-like.
+    message = {
+        "sender": {"email": sender, "name": "SplitEasy"},
         "to": [{"email": to_email}],
         "subject": subject,
         "textContent": body,
-    }).encode()
+    }
+    if html:
+        message["htmlContent"] = html
+    payload = json.dumps(message).encode()
     req = urllib.request.Request(
         "https://api.brevo.com/v3/smtp/email",
         data=payload,
@@ -87,8 +195,12 @@ def _send_via_brevo(sender: str, to_email: str, subject: str, body: str) -> None
         raise RuntimeError(f"Brevo rejected the message ({e.code}): {detail}") from e
 
 
-def deliver(to_email: str, subject: str, body: str) -> str:
+def deliver(to_email: str, subject: str, body: str, html: str = "") -> str:
     """Send one email, raising on failure. Returns the transport that worked.
+
+    `body` is the plain-text version and is always required; `html` is
+    optional and sent alongside it, never instead of it, so a client that
+    blocks HTML still shows something readable.
 
     Two transports, tried in the order that works where the app actually
     runs. Brevo's HTTPS API goes first because Render silently drops
@@ -120,7 +232,7 @@ def deliver(to_email: str, subject: str, body: str) -> str:
 
     if settings.brevo_api_key:
         try:
-            _send_via_brevo(sender, to_email, subject, body)
+            _send_via_brevo(sender, to_email, subject, body, html)
             return "brevo-api"
         except Exception as e:
             attempts.append(f"brevo-api: {type(e).__name__}: {e}")
@@ -131,9 +243,17 @@ def deliver(to_email: str, subject: str, body: str) -> str:
         attempts.append("smtp: SMTP_APP_PASSWORD not set")
         raise RuntimeError("could not send - " + "; ".join(attempts))
 
-    msg = MIMEText(body)
+    # multipart/alternative when there is HTML: both versions travel together
+    # and the client picks. Order matters - least-preferred part first, so the
+    # HTML has to be attached last or clients show the plain text.
+    if html:
+        msg = MIMEMultipart("alternative")
+        msg.attach(MIMEText(body, "plain"))
+        msg.attach(MIMEText(html, "html"))
+    else:
+        msg = MIMEText(body)
     msg["Subject"] = subject
-    msg["From"] = sender
+    msg["From"] = formataddr(("SplitEasy", sender))
     msg["To"] = to_email
 
     # 465 first because implicit TLS is one round trip fewer, then 587 as a
@@ -169,9 +289,9 @@ def deliver(to_email: str, subject: str, body: str) -> str:
     raise RuntimeError("every email transport failed - " + "; ".join(attempts))
 
 
-def _send(to_email: str, subject: str, body: str) -> None:
+def _send(to_email: str, subject: str, body: str, html: str = "") -> None:
     try:
-        transport = deliver(to_email, subject, body)
+        transport = deliver(to_email, subject, body, html)
         print(f"[email] sent to {to_email} via {transport}: {subject}")
     except Exception as e:
         print(f"[email] failed to send to {to_email}: {e}")
@@ -180,10 +300,17 @@ def _send(to_email: str, subject: str, body: str) -> None:
 def send_login_code(email: str, code: str) -> None:
     _send(
         email,
-        "Your Money Splitter login code",
+        "Your SplitEasy login code",
         f"Your one-time login code is {code}.\n\n"
         "It expires in 10 minutes and works once. If you didn't ask for "
         "this, ignore this email — nobody can sign in without it.",
+        _layout(
+            "Your login code",
+            ["It expires in 10 minutes and works once.",
+             "If you didn't ask for this, ignore this email — nobody can "
+             "sign in without it."],
+            highlight=code,
+        ),
     )
 
 
@@ -241,8 +368,14 @@ def notify_group_activity(db, group, actor_name: str, verb: str, summary: str,
             f"{summary}\n\n"
             f"View it here: {link}"
         )
+        html = _layout(
+            f"{who} {verb} in {escape(group.name)}",
+            [escape(summary)],
+            button_url=link,
+            button_label="Open in SplitEasy",
+        )
         try:
-            _send(email, subject, body)
+            _send(email, subject, body, html)
         except Exception as e:
             print(f"[email] notify_group_activity error: {e}")
 
@@ -271,7 +404,16 @@ def notify_added_to_group(db, group, actor_name: str, added_names: list[str]) ->
              f"{actor_name} added you to \"{group.name}\" on Money Splitter.\n\n")
             + f"View it here: {link}"
         )
+        html = _layout(
+            f"You're in {escape(group.name)}",
+            [f"You added yourself to \"{escape(group.name)}\" on SplitEasy."
+             if is_self else
+             f"{escape(actor_name)} added you to \"{escape(group.name)}\" "
+             "on SplitEasy."],
+            button_url=link,
+            button_label="Open the group",
+        )
         try:
-            _send(email, subject, body)
+            _send(email, subject, body, html)
         except Exception as e:
             print(f"[email] notify_added_to_group error: {e}")
