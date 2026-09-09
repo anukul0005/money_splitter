@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field, field_validator
 from auth import current_user, is_member
 from database import get_db
 from knowledge import DRINK, DRINK_RE, learned
-from brand_names import core as bn_core, key as bn_key
+from brand_names import canonicalise as bn_canonicalise, core as bn_core, key as bn_key
 from liquor_prices import (
     ABV_SOURCES, BOTTLES, NCR, SOURCES, STATES, Bottle, abv_for, for_state,
 )
@@ -427,6 +427,45 @@ def _text(e) -> str:
     return " ".join(filter(None, [e.title, e.category, e.notes]))
 
 
+@lru_cache(maxsize=1)
+def _catalog_short_names() -> dict[str, str]:
+    """The one short, ordinary name for every bottle the state lists carry,
+    keyed for matching against a person's own free-text expense notes.
+
+    Fixes a real bug: history matching used to check whether the published
+    name - "SEAGRAM'S ROYAL STAG SUPERIOR WHISKY (NEW)" - was a substring of
+    what somebody actually typed - "Royal Stag with soda". That is backwards:
+    the long official name is never contained inside a short human note, so a
+    bottle bought a hundred times over never once registered as a favourite -
+    the feature looked like it did not exist because the match could never
+    fire.
+
+    canonicalise() already solves the harder half of this: it clusters every
+    state's spelling of one product and picks the shortest as the display
+    name (brand_names.display), which is exactly the form a person writes
+    down - "Royal Stag", not the registered label. Matching now runs the
+    other way round: is this short, real name contained in what was typed.
+
+    Cached, because BOTTLES is a large static table that never changes for
+    the life of the process - see _brand_key's docstring for why re-deriving
+    this per request was what made the recommend endpoint time out before.
+    """
+    pairs = [(b.brand, b.kind) for b in BOTTLES]
+    out: dict[str, str] = {}
+    for name in set(bn_canonicalise(pairs).values()):
+        words = bn_key(name).split()
+        # A name left with nothing but category/marketing filler after
+        # canonicalising identifies no actual product - "Premium Whisky" -
+        # and would match almost any drinks note going.
+        if not words or all(w in GENERIC_WORDS for w in words):
+            continue
+        # Padded so a short match can never straddle a word boundary in the
+        # padded text below - both sides are already single-spaced by
+        # bn_key, so padding does the job a \b would do in a regex.
+        out[f" {' '.join(words)} "] = name
+    return out
+
+
 def _history(db: Session, caller: User, names: list[str]) -> dict:
     """What this set of people has actually spent on drinks together.
 
@@ -448,7 +487,16 @@ def _history(db: Session, caller: User, names: list[str]) -> dict:
     brand_hits: dict[str, int] = defaultdict(int)
     brand_spend: dict[str, float] = defaultdict(float)
     brand_last: dict[str, str] = {}
-    known = {b.brand.lower(): b.brand for b in BOTTLES}
+    # The published catalogue's short names, plus anything anyone has
+    # corrected or added by hand - a brand that only exists because somebody
+    # typed it in should count as "known" for history exactly like a
+    # published one, or entering "Old Chief" and then buying it every week
+    # would still never surface a favourite for it.
+    short_names = dict(_catalog_short_names())
+    for r in db.query(PriceOverride).all():
+        words = bn_key(r.brand).split()
+        if words and not all(w in GENERIC_WORDS for w in words):
+            short_names.setdefault(f" {' '.join(words)} ", r.brand)
 
     for g in db.query(Group).all():
         if not is_member(g, caller):
@@ -463,9 +511,12 @@ def _history(db: Session, caller: User, names: list[str]) -> dict:
                 continue
             occasions += 1
             total += e.amount
-            low = t.lower()
-            for key, display in known.items():
-                if key in low:
+            # Padded and normalised the same way _catalog_short_names built
+            # its keys, so a short brand name matches whatever punctuation or
+            # capitalisation the note actually used.
+            padded = f" {bn_key(t)} "
+            for key, display in short_names.items():
+                if key in padded:
                     brand_hits[display] += 1
                     brand_spend[display] += e.amount
                     # Dates are stored ISO (YYYY-MM-DD), so a string compare
@@ -509,18 +560,22 @@ def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
           regions: tuple[str, ...] = NCR,
           brand_last: dict[str, str] | None = None,
           kinds: tuple[str, ...] = (),
-          limit: int = 200) -> list[dict]:
+          limit: int = 200, state: str = "") -> list[dict]:
     """Every bottle of the chosen size priced inside the budget range.
 
-    Brands you actually drink come first. UP alone now lists over nine hundred
-    bottles off the state's own price list, most of them regional labels
-    nobody asked about, so ranking on price alone buried Royal Stag under a
-    dozen brands you have never heard of. What you have bought before is the
-    strongest signal in the data and it goes first.
+    Ranked dearest inside the budget first: within one state and one size,
+    price is the only quality signal there is, and the top of a stated range
+    is what someone was willing to spend. A brand you actually drink still
+    carries `is_favourite` and, if you have a date for it, `last_had` - a
+    real signal worth showing - but it no longer moves the bottle up the
+    list. That was tried: it meant the list mostly showed back what you
+    already know you buy, the opposite of what a recommendation is for.
 
-    After that, dearest inside the budget: within one state and one size price
-    is the only quality signal there is, and the top of a stated range is what
-    someone was willing to spend.
+    Each row also carries `state` (where this exact price is actually from)
+    and `is_price_fallback` (true when that isn't the state being asked
+    about) - see _catalog_for, which is what supplies a bottle no state's own
+    list carries priced at the cheapest rate anyone else charges for it,
+    rather than hiding it outright.
 
     The cap used to sit at 30, which was well inside the size of a real
     budget band in a state with a big list - Delhi alone has 67 whisky
@@ -596,18 +651,32 @@ def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
             "source": b.source,
             "compare": compare,
             "cheapest_region": cheapest,
+            # Where this exact price actually comes from, and whether that
+            # is somewhere other than the state being asked about - see
+            # _catalog_for.
+            "state": b.state,
+            "is_price_fallback": bool(state) and b.state != state,
         })
 
-    # Anything you typed in yourself comes first and is never cut.
+    # Ranked by price alone - dearest inside the budget first, since within
+    # one state and one size that is the only quality signal there actually
+    # is. A brand you buy often or priced yourself still carries its
+    # "you buy this" / "had on <date>" badge (is_favourite, last_had above),
+    # it just no longer jumps the queue to get there: pinning your own
+    # history to the top was tried and it meant the list mostly showed you
+    # what you already know you drink, which is the opposite of what a
+    # recommender is for.
     #
-    # UP alone lists over nine hundred bottles, and with only the eight
-    # dearest-in-budget shown, a bottle somebody added was buried the moment
-    # the budget widened — there is always something pricier. Adding a bottle
-    # and then being unable to find it makes the whole feature feel broken,
-    # so the cap stretches rather than dropping one.
-    out.sort(key=lambda r: (not r["is_mine"], not r["is_favourite"], -r["total"]))
+    # Your own entries are still never cut by the cap, though, regardless of
+    # where they land in the order - UP alone lists over nine hundred
+    # bottles, and a bottle somebody added being buried past the cap the
+    # moment the budget widened made the whole feature feel broken.
+    out.sort(key=lambda r: -r["total"])
     mine = sum(1 for r in out if r["is_mine"])
-    return out[:max(limit, mine + 4)]
+    if len(out) <= max(limit, mine + 4):
+        return out
+    kept = [r for r in out if not r["is_mine"]][:limit]
+    return sorted(kept + [r for r in out if r["is_mine"]], key=lambda r: -r["total"])
 
 
 def _parse_search_sizes(bottle: str) -> tuple[tuple[int, ...] | None, bool, bool]:
@@ -710,9 +779,11 @@ def _legacy_beer_fields(unit: float, size_ml: int, people: int, abv: float,
 
 def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
            favourites: list[str] | None = None,
+           brand_avg: dict[str, int] | None = None,
+           brand_last: dict[str, str] | None = None,
            tables_by_size: dict[str, dict[int, list[Bottle]]] | None = None,
            regions: tuple[str, ...] = NCR,
-           limit: int = 200) -> list[dict]:
+           limit: int = 200, state: str = "") -> list[dict]:
     """Beers you can buy, priced by the bottle.
 
     Same reasoning as _pick's own limit: a cheap budget band can legitimately
@@ -731,13 +802,16 @@ def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
     would throw away every beer on the list.
     """
     fav = [f.lower() for f in (favourites or [])]
+    avg = {k.lower(): v for k, v in (brand_avg or {}).items()}
+    last = {k.lower(): v for k, v in (brand_last or {}).items()}
     out: list[dict] = []
     for b in bottles:
         if b.kind != "beer":
             continue
         # Same containment rule as the spirits: "Budweiser" has to match
         # "Budweiser Magnum Beer" or the ranking never sees a favourite.
-        is_fav = any(f in b.brand.lower() for f in fav)
+        hit = next((f for f in fav if f in b.brand.lower()), None)
+        is_fav = bool(hit)
         unit = b.mid
         if unit <= 0 or unit > hi:
             continue                      # the budget won't buy even one
@@ -767,11 +841,16 @@ def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
             "abv_known": abv_known,
             "alcohol_ml_per_bottle": _units(b.size_ml, abv),
             "is_favourite": is_fav,
+            "matched_favourite": hit,
+            "your_avg": avg.get(hit) if hit else None,
+            "last_had": last.get(hit) if hit else None,
             "is_override": b.source in MANUAL_SOURCES,
             "is_mine": b.source == "manual-added",
             "source": b.source,
             "compare": compare,
             "cheapest_region": cheapest,
+            "state": b.state,
+            "is_price_fallback": bool(state) and b.state != state,
             # Deprecated: the round-priced shape this card used to have. The
             # web app and the API deploy separately, so there is always a
             # window where one is older than the other, and a browser holding
@@ -781,13 +860,16 @@ def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
             **_legacy_beer_fields(unit, b.size_ml, people, abv, buys),
         })
 
-    # Beers you actually buy first, then strongest among what fits, so the
-    # cards read as a real choice rather than an arbitrary list.
-    # Same rule as the spirits: your own entries first and never cut.
-    out.sort(key=lambda r: (not r["is_mine"], not r["is_favourite"],
-                            -r["abv"], r["price"]))
+    # Strongest among what fits, then cheapest - same reasoning and the same
+    # change as _pick's sort: a beer you buy often or priced yourself still
+    # carries its badge, it just doesn't jump the queue for it any more.
+    out.sort(key=lambda r: (-r["abv"], r["price"]))
     mine = sum(1 for r in out if r["is_mine"])
-    return out[:max(limit, mine + 4)]
+    if len(out) > max(limit, mine + 4):
+        kept = [r for r in out if not r["is_mine"]][:limit]
+        out = sorted(kept + [r for r in out if r["is_mine"]],
+                     key=lambda r: (-r["abv"], r["price"]))
+    return out
 
 
 def _your_entries(rows: list[PriceOverride], sizes: tuple[int, ...],
@@ -1252,8 +1334,70 @@ def search(
     }
 
 
+def _grouped_catalog(known_states: list[str], tables: dict[str, list[Bottle]]
+                     ) -> list[list[Bottle]]:
+    """Every bottle this app knows of, once, with every state's own row for
+    it (if any) collected alongside it.
+
+    A single state's own price list used to be the whole catalogue: a bottle
+    Uttar Pradesh sells but Delhi's list has never heard of simply did not
+    exist when Delhi was the selected state, however good a fit its price was
+    for the budget. That is a filter nobody asked for - state pricing is real
+    and worth keeping, but "does this bottle even show up" should not depend
+    on which state happened to be selected when the whole point of the
+    picker is choosing what to buy.
+
+    Grouped by (kind, size) first, the same shortcut _by_size exists for -
+    two bottles of different sizes or categories are never the same bottle,
+    so there is no reason to run the expensive word-matching in _same_bottle
+    across sizes or kinds that could not possibly match anyway.
+
+    This is independent of which state a caller actually asked about, so it
+    is built once per request and reused for every state _catalog_for is
+    then called with - see recommend() and the "all states" branch below,
+    where it used to mean rebuilding this from scratch once per state.
+    """
+    buckets: dict[tuple[str, int], list[Bottle]] = defaultdict(list)
+    for s in known_states:
+        for b in tables.get(s, []):
+            buckets[(b.kind, b.size_ml)].append(b)
+
+    groups: list[list[Bottle]] = []
+    for rows in buckets.values():
+        local: list[list[Bottle]] = []
+        for b in rows:
+            for g in local:
+                if _same_bottle(g[0].brand, b.brand):
+                    g.append(b)
+                    break
+            else:
+                local.append([b])
+        groups.extend(local)
+    return groups
+
+
+def _catalog_for(state: str, groups: list[list[Bottle]]) -> list[Bottle]:
+    """One row per bottle, priced for `state` - natively if it is sold there,
+    otherwise at the cheapest price anyone else charges for it.
+
+    The fallback row is that state's own Bottle, untouched - its `.state`
+    field already says where the price actually came from, which is what
+    lets a card say "not listed in Delhi, priced from Uttar Pradesh" rather
+    than presenting a borrowed price as though it were Delhi's own. Compare
+    against `state` on the returned rows (`b.state != state`) to tell a
+    native price from a borrowed one - see _pick and _beers, which surface
+    that as `is_price_fallback`.
+    """
+    out = []
+    for g in groups:
+        native = next((b for b in g if b.state == state), None)
+        out.append(native if native else min(g, key=lambda b: b.mid))
+    return out
+
+
 def _recommend_for_state(
-    state: str, by_state: dict, sizes: tuple[int, ...], want_beer: bool,
+    state: str, groups: list[list[Bottle]], tables: dict[str, list[Bottle]],
+    by_state: dict, sizes: tuple[int, ...], want_beer: bool,
     want_spirits: bool, kinds: tuple[str, ...], budget_min: float,
     budget_max: float, people: int, hist: dict,
 ) -> dict | None:
@@ -1261,48 +1405,61 @@ def _recommend_for_state(
 
     Pulled out of the endpoint so "one state" and "every state at once" run
     the identical picking logic rather than a second, easily-diverging copy
-    of it. Returns None for a state with no published prices at all, which
-    a single-state request treats as a 404 and an all-states request simply
-    leaves out rather than failing the whole page over one gap.
+    of it. Returns None only when the catalogue is entirely empty, which an
+    all-states request simply leaves out rather than failing the whole page
+    over one gap - the caller validates the state name itself before this is
+    reached (see recommend()), so that is no longer this function's job.
     """
-    bottles = _apply_overrides(for_state(state), by_state.get(state, []), state)
+    bottles = _catalog_for(state, groups)
     if not bottles:
         return None
 
     # Every state we have prices for, the one you asked about first. Three NCR
     # columns answered "is it cheaper over the border" for somebody in Delhi
     # and nothing for anybody else - a UP price never saw MP, though that is
-    # the comparison worth making.
+    # the comparison worth making. This stays capped at MAX_COMPARE_REGIONS
+    # for readability - a strip of ten columns is unreadable on a phone -
+    # which is a different question from whether a bottle is shown at all,
+    # now answered by the full, uncapped `groups` above.
     regions = _regions_for(state)
-    tables = {
-        r: _apply_overrides(for_state(r), by_state.get(r, []), r) for r in regions
-    }
-    # Bucketed by size once per region per request, so the comparison strip's
-    # per-pick, per-region lookups never rescan a whole region's table - see
-    # _by_size.
-    tables_by_size = {r: _by_size(rows) for r, rows in tables.items()}
+    tables_by_size = {r: _by_size(tables.get(r, [])) for r in regions}
 
     picks = (_pick(bottles, budget_min, budget_max, people, sizes,
                    hist["favourites"], hist["brand_avg"], tables_by_size, regions,
-                   hist["brand_last"], kinds)
+                   hist["brand_last"], kinds, state=state)
              if want_spirits else [])
     beers = (_beers(bottles, budget_min, budget_max, people, hist["favourites"],
-                    tables_by_size, regions)
+                    hist["brand_avg"], hist["brand_last"], tables_by_size, regions,
+                    state=state)
              if want_beer else [])
+
+    # This state's own rows only, no borrowed prices - the "all states" quick
+    # comparison card wants to say what a state genuinely stocks, and a
+    # borrowed price would misrepresent that (Delhi showing a Chivas 25 it
+    # has never carried, just because Haryana happens to sell one). The main
+    # single-state view below uses the merged, fallback-inclusive `bottles`
+    # for these same two fields on purpose - see recommend()'s docstring for
+    # why that page shows everything regardless of this state's own list.
+    native = [b for b in bottles if b.state == state]
+
+    def _size_available(rows: list[Bottle]) -> bool:
+        return any(
+            (want_beer and b.kind == "beer")
+            or (want_spirits and b.size_ml in sizes and b.kind in BOTTLE_KINDS
+                and (not kinds or b.kind in kinds))
+            for b in rows
+        )
 
     return {
         "regions": list(regions),
         "picks": picks,
         "price_band": _band(bottles, sizes, want_beer, want_spirits, kinds),
+        "price_band_native": _band(native, sizes, want_beer, want_spirits, kinds),
         "your_entries": _your_entries(by_state.get(state, []), sizes,
                                       want_beer, want_spirits,
                                       budget_min, budget_max),
-        "size_available": any(
-            (want_beer and b.kind == "beer")
-            or (want_spirits and b.size_ml in sizes and b.kind in BOTTLE_KINDS
-                and (not kinds or b.kind in kinds))
-            for b in bottles
-        ),
+        "size_available": _size_available(bottles),
+        "size_available_native": _size_available(native),
         "beers": beers,
     }
 
@@ -1356,6 +1513,29 @@ def recommend(
         want_beer = False
 
     by_state = _overrides_by_state(db)
+    # A state nobody published but somebody entered a price for is a real
+    # state - see meta(). Included here for the same reason: a bottle typed
+    # in against it should still be part of the catalogue everyone else's
+    # recommendation can borrow a fallback price from.
+    known_states = sorted(set(STATES) | set(by_state))
+    is_all = state.strip().lower() == "all"
+    if not is_all and state not in known_states:
+        raise HTTPException(
+            404,
+            f"No published prices for {state} yet — we only have "
+            f"{', '.join(known_states)}. Prices are set per state, so "
+            f"guessing one from another would be wrong.",
+        )
+    # Every state's own table, built once regardless of how many states this
+    # request ends up looking at - "all states" used to mean rebuilding this
+    # from scratch once per state. _grouped_catalog is likewise independent
+    # of which state was actually asked about, so it too is built exactly
+    # once and handed to every per-state call below.
+    tables = {
+        s: _apply_overrides(for_state(s), by_state.get(s, []), s) for s in known_states
+    }
+    groups = _grouped_catalog(known_states, tables)
+
     people_names = [n for n in (names or "").split(",") if n.strip()]
     hist = _history(db, caller, people_names)
     # Shared across every state - what you have actually bought before, and
@@ -1401,12 +1581,12 @@ def recommend(
     # has one price when it genuinely does not. Every other field the page
     # needs (budget, kinds, sizes, history) is identical across states, so
     # only the parts that actually vary by state get nested.
-    if state.strip().lower() == "all":
+    if is_all:
         by_state_results = {}
-        for st in STATES:
+        for st in known_states:
             per_state = _recommend_for_state(
-                st, by_state, sizes, want_beer, want_spirits, kinds,
-                budget_min, budget_max, people, hist,
+                st, groups, tables, by_state, sizes, want_beer, want_spirits,
+                kinds, budget_min, budget_max, people, hist,
             )
             if per_state is not None:
                 by_state_results[st] = per_state
@@ -1414,22 +1594,19 @@ def recommend(
             **shared,
             "state": "all",
             "is_all": True,
-            "states_searched": list(STATES),
+            "states_searched": known_states,
             "ncr": list(NCR),
             "by_state": by_state_results,
         }
 
     per_state = _recommend_for_state(
-        state, by_state, sizes, want_beer, want_spirits, kinds,
-        budget_min, budget_max, people, hist,
+        state, groups, tables, by_state, sizes, want_beer, want_spirits,
+        kinds, budget_min, budget_max, people, hist,
     )
     if per_state is None:
-        raise HTTPException(
-            404,
-            f"No published prices for {state} yet — we only have "
-            f"{', '.join(STATES)}. Prices are set per state, so guessing one "
-            f"from another would be wrong.",
-        )
+        # Only reachable if the whole catalogue is empty, since `state` was
+        # already validated above - see known_states.
+        raise HTTPException(404, f"No prices known anywhere yet for {state}.")
 
     return {
         **shared,
