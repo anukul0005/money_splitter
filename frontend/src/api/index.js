@@ -126,6 +126,14 @@ export const getFoodRecommendation = (p) => api.get('/food/', { params: p })
 export const searchFood        = (p)    => api.get('/food/search', { params: p })
 export const listPlaceNames    = (city) => api.get('/food/names', { params: { city } })
 
+// ── Forecast ───────────────────────────────────────────────────────────────────
+// Two directions on the same question. /budget splits one total into a
+// drinks share and a food share, using your own historical ratio between
+// the two. /items goes the other way: told exactly what's being bought, it
+// prices it out against the same cross-state catalogue /recommend uses.
+export const getForecastBudget = (p)    => api.get('/forecast/budget', { params: p })
+export const getForecastItems  = (body) => api.post('/forecast/items', body)
+
 // ── Corrections people enter by hand ──────────────────────────────────────────
 // Published lists are a starting point, not the last word: a shop charges above
 // the state minimum, a restaurant raises its prices, a place is in no listing at

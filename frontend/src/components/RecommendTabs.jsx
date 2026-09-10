@@ -1,14 +1,16 @@
 /**
- * Drinks / food switch, shared by both halves of the recommender.
+ * Drinks / food / forecast switch, shared by all three halves of the
+ * recommender.
  *
- * It lives in its own file rather than in either page because both pages
- * render their own sticky header, and a tab bar that shifted by a pixel
+ * It lives in its own file rather than in any one page because each page
+ * renders its own sticky header, and a tab bar that shifted by a pixel
  * between them would read as the page jumping on every switch.
  */
 export default function RecommendTabs({ tab, setTab }) {
   const tabs = [
-    ['drinks', 'Drinks'],
-    ['food',   'Food'],
+    ['drinks',   'Drinks'],
+    ['food',     'Food'],
+    ['forecast', 'Forecast'],
   ]
   return (
     <div className="flex gap-1 mt-3 bg-amber-100/60 rounded-lg p-0.5">

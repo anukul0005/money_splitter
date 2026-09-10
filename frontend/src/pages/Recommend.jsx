@@ -6,6 +6,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import PriceEditForm from '../components/PriceEditForm'
 import RecommendTabs from '../components/RecommendTabs'
 import RecommendFood from './RecommendFood'
+import Forecast from './Forecast'
 import { useUser } from '../UserContext'
 
 // A missing number renders as a dash, never as "₹NaN". Number(undefined) is
@@ -329,9 +330,11 @@ export default function Recommend() {
   }
 
   // Below every hook, so switching tabs never changes the hook order. Food
-  // returns before the drinks meta check because it loads its own table and
-  // shouldn't sit behind a spinner waiting for prices it doesn't use.
+  // and Forecast return before the drinks meta check because each loads its
+  // own data and shouldn't sit behind a spinner waiting for prices it
+  // doesn't use.
   if (tab === 'food') return <RecommendFood tab={tab} setTab={setTab} />
+  if (tab === 'forecast') return <Forecast tab={tab} setTab={setTab} />
 
   if (!meta) return <LoadingSpinner />
 
