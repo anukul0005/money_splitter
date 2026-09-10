@@ -1,11 +1,11 @@
 import json
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 from auth import current_user, member_group
 from database import get_db
 from models import Group, Expense, User
 from schemas import ExpenseCreate, ExpenseOut
-from emailer import notify_group_activity
+from emailer import notify_group_activity_bg
 from activity import record_activity
 
 router = APIRouter(prefix="/expenses", tags=["expenses"])
@@ -52,7 +52,8 @@ def list_expenses(group_id: int, db: Session = Depends(get_db),
 
 
 @router.post("/", response_model=ExpenseOut, status_code=201)
-def create_expense(payload: ExpenseCreate, db: Session = Depends(get_db),
+def create_expense(payload: ExpenseCreate, background_tasks: BackgroundTasks,
+                   db: Session = Depends(get_db),
                    caller: User = Depends(current_user)):
     group = member_group(payload.group_id, caller, db)
 
@@ -84,16 +85,16 @@ def create_expense(payload: ExpenseCreate, db: Session = Depends(get_db),
     db.commit()
     db.refresh(expense)
 
-    try:
-        notify_group_activity(db, group, expense.paid_by, "added a new expense", summary)
-    except Exception as e:
-        print(f"[email] expense notification failed: {e}")
+    background_tasks.add_task(
+        notify_group_activity_bg, group.id, expense.paid_by, "added a new expense", summary,
+    )
 
     return expense
 
 
 @router.put("/{expense_id}", response_model=ExpenseOut)
-def update_expense(expense_id: int, payload: ExpenseCreate, db: Session = Depends(get_db),
+def update_expense(expense_id: int, payload: ExpenseCreate, background_tasks: BackgroundTasks,
+                   db: Session = Depends(get_db),
                    caller: User = Depends(current_user)):
     expense = db.query(Expense).filter(Expense.id == expense_id).first()
     if not expense:
@@ -124,16 +125,16 @@ def update_expense(expense_id: int, payload: ExpenseCreate, db: Session = Depend
     db.commit()
     db.refresh(expense)
 
-    try:
-        notify_group_activity(db, group, caller.name, "edited an expense", summary)
-    except Exception as e:
-        print(f"[email] expense edit notification failed: {e}")
+    background_tasks.add_task(
+        notify_group_activity_bg, group.id, caller.name, "edited an expense", summary,
+    )
 
     return expense
 
 
 @router.delete("/{expense_id}", status_code=204)
-def delete_expense(expense_id: int, db: Session = Depends(get_db),
+def delete_expense(expense_id: int, background_tasks: BackgroundTasks,
+                   db: Session = Depends(get_db),
                    caller: User = Depends(current_user)):
     expense = db.query(Expense).filter(Expense.id == expense_id).first()
     if not expense:
@@ -146,7 +147,6 @@ def delete_expense(expense_id: int, db: Session = Depends(get_db),
     db.delete(expense)
     db.commit()
 
-    try:
-        notify_group_activity(db, group, caller.name, "deleted an expense", summary)
-    except Exception as e:
-        print(f"[email] expense delete notification failed: {e}")
+    background_tasks.add_task(
+        notify_group_activity_bg, group.id, caller.name, "deleted an expense", summary,
+    )

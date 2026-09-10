@@ -252,44 +252,88 @@ def _same_bottle(a: str, b: str) -> bool:
     return all(w in GENERIC_WORDS for w in extra)
 
 
-def _by_size(bottles: list[Bottle]) -> dict[int, list[Bottle]]:
-    """One region's table, bucketed by size so a lookup never rescans it.
+class _BottleIndex:
+    """One region's size bucket, indexed for fuzzy brand lookup that doesn't
+    rescan the whole bucket on every call.
 
-    _find_in used to filter a region's whole list by size on every single
-    call - `[b for b in rows if b.size_ml == size_ml]` - and the comparison
-    strip calls it for every pick, in every region, on every request. Against
-    Delhi's 3,257 rows that was several million comparisons for one page
-    load: the "Recommend" button that looked broken was really just taking
-    over twenty seconds to answer. Bucketing once per region per request
-    turns "scan everything" into "look up the bucket".
+    _find_in used to be handed a plain list and scan every row on every
+    call - fine when it was called a few times against a small bucket, not
+    when it is called for every pick in every comparison region (the compare
+    strip re-queries the same bucket once per pick) or for every bottle in
+    every other state while building a state's fallback catalogue (see
+    _catalog_for) - both call the same bucket thousands of times over. A
+    bucket the size of one of Delhi's (hundreds to low thousands of rows)
+    times thousands of calls was several million word-set comparisons and
+    upwards of twenty seconds for a single request.
+
+    Indexed two ways: an exact-key dict for the common case of an identical
+    spelling (O(1)), and an inverted index from each significant word to the
+    bottles carrying it, for the fuzzy case - so a candidate is only ever
+    compared against bottles that already share at least one real word with
+    it, not the whole bucket. "Chivas Regal 25 Years Old" only ever gets
+    compared against bottles containing "chivas", "regal" or "25", not
+    against every whisky in the bucket.
     """
-    out: dict[int, list[Bottle]] = defaultdict(list)
+
+    def __init__(self, bottles: list[Bottle]):
+        self._by_key: dict[str, Bottle] = {}
+        self._by_word: dict[str, list[Bottle]] = defaultdict(list)
+        for b in bottles:
+            k = _brand_key(b.brand)
+            self._by_key.setdefault(k, b)
+            for w in set(k.split()) - _AGE_FILLER - GENERIC_WORDS:
+                self._by_word[w].append(b)
+
+    def find(self, brand: str) -> Bottle | None:
+        """The row in this bucket that is this bottle, or nothing.
+
+        An exact name wins outright. Otherwise the closest variant wins -
+        fewest extra words - so "Bacardi Apple Platinum Original Apple Rum"
+        pairs with Delhi's "Bacardi Apple" rather than its plain "Bacardi".
+        """
+        key = _brand_key(brand)
+        exact = self._by_key.get(key)
+        if exact is not None:
+            return exact
+        words = [w for w in key.split() if w not in _AGE_FILLER and w not in GENERIC_WORDS]
+        if not words:
+            return None
+        seen: set[int] = set()
+        candidates: list[Bottle] = []
+        for w in words:
+            for b in self._by_word.get(w, ()):
+                if id(b) not in seen:
+                    seen.add(id(b))
+                    candidates.append(b)
+        near = [b for b in candidates if _same_bottle(b.brand, brand)]
+        if not near:
+            return None
+        nwords = len(key.split())
+        return min(near, key=lambda b: (abs(len(_brand_key(b.brand).split()) - nwords),
+                                        len(b.brand)))
+
+
+_EMPTY_INDEX = _BottleIndex([])
+
+
+def _by_size(bottles: list[Bottle]) -> dict[int, _BottleIndex]:
+    """One region's table, bucketed by size and indexed for fuzzy lookup -
+    see _BottleIndex for why a plain per-size list stopped being enough.
+    """
+    grouped: dict[int, list[Bottle]] = defaultdict(list)
     for b in bottles:
-        out[b.size_ml].append(b)
-    return out
+        grouped[b.size_ml].append(b)
+    return {size_ml: _BottleIndex(rows) for size_ml, rows in grouped.items()}
 
 
-def _find_in(same: list[Bottle], brand: str) -> Bottle | None:
+def _find_in(bucket: _BottleIndex | None, brand: str) -> Bottle | None:
     """The row in one region's size bucket that is this bottle, or nothing.
 
-    An exact name wins outright. Otherwise the closest variant wins - fewest
-    extra words - so "Bacardi Apple Platinum Original Apple Rum" pairs with
-    Delhi's "Bacardi Apple" rather than its plain "Bacardi".
-
-    Takes the bucket already narrowed to this size - see _by_size - rather
-    than a whole region's table, so the size filter is paid for once per
-    region instead of once per lookup.
+    Thin wrapper kept so every call site reads the same as before; `bucket`
+    is what _by_size now returns per size, or None/missing for a size this
+    region has nothing in.
     """
-    key = _brand_key(brand)
-    exact = [b for b in same if _brand_key(b.brand) == key]
-    if exact:
-        return exact[0]
-    near = [b for b in same if _same_bottle(b.brand, brand)]
-    if not near:
-        return None
-    words = len(key.split())
-    return min(near, key=lambda b: (abs(len(_brand_key(b.brand).split()) - words),
-                                    len(b.brand)))
+    return (bucket or _EMPTY_INDEX).find(brand)
 
 
 # Full state names don't fit a column an inch wide. Shortened here rather than
@@ -1334,69 +1378,68 @@ def search(
     }
 
 
-def _grouped_catalog(known_states: list[str], tables: dict[str, list[Bottle]]
-                     ) -> list[list[Bottle]]:
-    """Every bottle this app knows of, once, with every state's own row for
-    it (if any) collected alongside it.
+def _catalog_for(state: str, known_states: list[str],
+                 tables: dict[str, list[Bottle]]) -> list[Bottle]:
+    """Every bottle this app knows of, priced for `state` where it is sold
+    there, and at the cheapest price anyone else charges for it otherwise.
 
     A single state's own price list used to be the whole catalogue: a bottle
     Uttar Pradesh sells but Delhi's list has never heard of simply did not
-    exist when Delhi was the selected state, however good a fit its price was
-    for the budget. That is a filter nobody asked for - state pricing is real
-    and worth keeping, but "does this bottle even show up" should not depend
-    on which state happened to be selected when the whole point of the
-    picker is choosing what to buy.
+    exist when Delhi was selected, however good a fit its price was for the
+    budget. That is a filter nobody asked for - state pricing is real and
+    worth keeping, but "does this bottle even show up" should not depend on
+    which state happened to be selected.
 
-    Grouped by (kind, size) first, the same shortcut _by_size exists for -
-    two bottles of different sizes or categories are never the same bottle,
-    so there is no reason to run the expensive word-matching in _same_bottle
-    across sizes or kinds that could not possibly match anyway.
+    The first version of this clustered every bottle from every state into
+    one product up front, before knowing which state was even being asked
+    about - a fair-sounding idea that was quadratic in the size of the whole
+    catalogue: comparing every bottle against every other bottle it might be
+    a spelling of, over four million word-set comparisons and upwards of ten
+    seconds for one request, run again from scratch for every state in "all
+    states" mode.
 
-    This is independent of which state a caller actually asked about, so it
-    is built once per request and reused for every state _catalog_for is
-    then called with - see recommend() and the "all states" branch below,
-    where it used to mean rebuilding this from scratch once per state.
+    This only has to answer a much smaller question: which of everyone
+    else's bottles does `state` not already have an equivalent of. Checked
+    with _find_in against `state`'s own list - the same per-size lookup the
+    compare strip already relies on - not against every other bottle from
+    every other state. What's left after that (typically a few hundred rows,
+    not the whole catalogue) is small enough that clustering spellings of the
+    same missing product together - two other states can both be missing the
+    same bottle, spelled differently - costs nothing worth measuring.
+
+    A returned row's own `.state` field says where its price actually came
+    from, which is what lets a card say "not listed in Delhi, priced from
+    Uttar Pradesh" rather than presenting a borrowed price as native - see
+    _pick and _beers, which surface `b.state != state` as `is_price_fallback`.
     """
-    buckets: dict[tuple[str, int], list[Bottle]] = defaultdict(list)
-    for s in known_states:
-        for b in tables.get(s, []):
-            buckets[(b.kind, b.size_ml)].append(b)
+    own = tables.get(state, [])
+    own_by_size = _by_size(own)
 
-    groups: list[list[Bottle]] = []
-    for rows in buckets.values():
-        local: list[list[Bottle]] = []
+    missing: dict[tuple[str, int], list[Bottle]] = defaultdict(list)
+    for s in known_states:
+        if s == state:
+            continue
+        for b in tables.get(s, []):
+            if _find_in(own_by_size.get(b.size_ml, []), b.brand) is None:
+                missing[(b.kind, b.size_ml)].append(b)
+
+    fallback: list[Bottle] = []
+    for rows in missing.values():
+        groups: list[list[Bottle]] = []
         for b in rows:
-            for g in local:
+            for g in groups:
                 if _same_bottle(g[0].brand, b.brand):
                     g.append(b)
                     break
             else:
-                local.append([b])
-        groups.extend(local)
-    return groups
+                groups.append([b])
+        fallback.extend(min(g, key=lambda b: b.mid) for g in groups)
 
-
-def _catalog_for(state: str, groups: list[list[Bottle]]) -> list[Bottle]:
-    """One row per bottle, priced for `state` - natively if it is sold there,
-    otherwise at the cheapest price anyone else charges for it.
-
-    The fallback row is that state's own Bottle, untouched - its `.state`
-    field already says where the price actually came from, which is what
-    lets a card say "not listed in Delhi, priced from Uttar Pradesh" rather
-    than presenting a borrowed price as though it were Delhi's own. Compare
-    against `state` on the returned rows (`b.state != state`) to tell a
-    native price from a borrowed one - see _pick and _beers, which surface
-    that as `is_price_fallback`.
-    """
-    out = []
-    for g in groups:
-        native = next((b for b in g if b.state == state), None)
-        out.append(native if native else min(g, key=lambda b: b.mid))
-    return out
+    return own + fallback
 
 
 def _recommend_for_state(
-    state: str, groups: list[list[Bottle]], tables: dict[str, list[Bottle]],
+    state: str, known_states: list[str], tables: dict[str, list[Bottle]],
     by_state: dict, sizes: tuple[int, ...], want_beer: bool,
     want_spirits: bool, kinds: tuple[str, ...], budget_min: float,
     budget_max: float, people: int, hist: dict,
@@ -1410,7 +1453,7 @@ def _recommend_for_state(
     over one gap - the caller validates the state name itself before this is
     reached (see recommend()), so that is no longer this function's job.
     """
-    bottles = _catalog_for(state, groups)
+    bottles = _catalog_for(state, known_states, tables)
     if not bottles:
         return None
 
@@ -1528,13 +1571,10 @@ def recommend(
         )
     # Every state's own table, built once regardless of how many states this
     # request ends up looking at - "all states" used to mean rebuilding this
-    # from scratch once per state. _grouped_catalog is likewise independent
-    # of which state was actually asked about, so it too is built exactly
-    # once and handed to every per-state call below.
+    # from scratch once per state.
     tables = {
         s: _apply_overrides(for_state(s), by_state.get(s, []), s) for s in known_states
     }
-    groups = _grouped_catalog(known_states, tables)
 
     people_names = [n for n in (names or "").split(",") if n.strip()]
     hist = _history(db, caller, people_names)
@@ -1585,7 +1625,7 @@ def recommend(
         by_state_results = {}
         for st in known_states:
             per_state = _recommend_for_state(
-                st, groups, tables, by_state, sizes, want_beer, want_spirits,
+                st, known_states, tables, by_state, sizes, want_beer, want_spirits,
                 kinds, budget_min, budget_max, people, hist,
             )
             if per_state is not None:
@@ -1600,7 +1640,7 @@ def recommend(
         }
 
     per_state = _recommend_for_state(
-        state, groups, tables, by_state, sizes, want_beer, want_spirits,
+        state, known_states, tables, by_state, sizes, want_beer, want_spirits,
         kinds, budget_min, budget_max, people, hist,
     )
     if per_state is None:

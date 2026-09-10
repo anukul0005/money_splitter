@@ -430,3 +430,55 @@ def notify_added_to_group(db, group, actor_name: str, added_names: list[str]) ->
             _send(email, subject, body, html)
         except Exception as e:
             print(f"[email] notify_added_to_group error: {e}")
+
+
+def notify_group_activity_bg(group_id: int, actor_name: str, verb: str, summary: str,
+                             skip_names: list[str] | None = None) -> None:
+    """notify_group_activity, run from FastAPI's BackgroundTasks after the
+    response has already gone back to the browser.
+
+    Every mutating endpoint used to call notify_group_activity inline, before
+    returning - meaning every save waited on one real network round trip per
+    reachable group member (Brevo's API, or the Gmail SMTP fallback if that
+    fails) before the client ever saw a response. A group with two or three
+    reachable members turned "save" into a multi-second wait for something
+    the person saving never needed to wait for at all.
+
+    Takes a bare group_id and opens its own database session rather than
+    reusing the request's, because a background task runs after the request
+    has finished - including after get_db's `finally: db.close()` has
+    already torn down the session the endpoint was using. Querying a closed
+    session raises, and since this is best-effort already, that failure
+    would have silently undone every notification this same session's work
+    only just got working. A fresh, short-lived session sidesteps that
+    entirely.
+    """
+    from database import get_session_factory
+    from models import Group
+
+    db = get_session_factory()()
+    try:
+        group = db.query(Group).filter(Group.id == group_id).first()
+        if group is not None:
+            notify_group_activity(db, group, actor_name, verb, summary, skip_names)
+    except Exception as e:
+        print(f"[email] backgrounded notify_group_activity failed: {e}")
+    finally:
+        db.close()
+
+
+def notify_added_to_group_bg(group_id: int, actor_name: str, added_names: list[str]) -> None:
+    """notify_added_to_group, backgrounded - see notify_group_activity_bg for
+    why this opens its own session instead of reusing the request's."""
+    from database import get_session_factory
+    from models import Group
+
+    db = get_session_factory()()
+    try:
+        group = db.query(Group).filter(Group.id == group_id).first()
+        if group is not None:
+            notify_added_to_group(db, group, actor_name, added_names)
+    except Exception as e:
+        print(f"[email] backgrounded notify_added_to_group failed: {e}")
+    finally:
+        db.close()

@@ -1,12 +1,12 @@
 import json
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 from auth import current_user, is_member, member_group
 from database import get_db
 from models import Group, Member, Expense, User
 from schemas import GroupCreate, GroupOut, GroupSummary, GroupUpdate
 from activity import record_activity
-from emailer import notify_added_to_group, notify_group_activity
+from emailer import notify_added_to_group_bg, notify_group_activity_bg
 
 router = APIRouter(prefix="/groups", tags=["groups"])
 
@@ -75,7 +75,8 @@ def list_groups(db: Session = Depends(get_db), caller: User = Depends(current_us
 
 
 @router.post("/", response_model=GroupOut, status_code=201)
-def create_group(payload: GroupCreate, db: Session = Depends(get_db),
+def create_group(payload: GroupCreate, background_tasks: BackgroundTasks,
+                 db: Session = Depends(get_db),
                  caller: User = Depends(current_user)):
     group = Group(
         name=payload.name,
@@ -103,10 +104,7 @@ def create_group(payload: GroupCreate, db: Session = Depends(get_db),
     db.commit()
     db.refresh(group)
 
-    try:
-        notify_added_to_group(db, group, caller.name, list(payload.members))
-    except Exception as e:
-        print(f"[email] new-group notification failed: {e}")
+    background_tasks.add_task(notify_added_to_group_bg, group.id, caller.name, list(payload.members))
 
     return group
 
@@ -118,7 +116,8 @@ def get_group(group_id: int, db: Session = Depends(get_db),
 
 
 @router.patch("/{group_id}", response_model=GroupOut)
-def update_group(group_id: int, payload: GroupUpdate, db: Session = Depends(get_db),
+def update_group(group_id: int, payload: GroupUpdate, background_tasks: BackgroundTasks,
+                 db: Session = Depends(get_db),
                  caller: User = Depends(current_user)):
     group = member_group(group_id, caller, db)
 
@@ -162,13 +161,12 @@ def update_group(group_id: int, payload: GroupUpdate, db: Session = Depends(get_
     # already in the group gets the generic "updated" one instead, so a
     # brand-new member doesn't also read "the group was updated" about a
     # group they didn't know existed a moment ago.
-    try:
-        if newly_added:
-            notify_added_to_group(db, group, caller.name, newly_added)
-        notify_group_activity(db, group, caller.name, "updated the group", group.name,
-                              skip_names=newly_added)
-    except Exception as e:
-        print(f"[email] group-update notification failed: {e}")
+    if newly_added:
+        background_tasks.add_task(notify_added_to_group_bg, group.id, caller.name, newly_added)
+    background_tasks.add_task(
+        notify_group_activity_bg, group.id, caller.name, "updated the group", group.name,
+        newly_added,
+    )
 
     return group
 

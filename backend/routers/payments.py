@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from activity import record_activity
 from auth import current_user, is_member, member_group
 from database import get_db
-from emailer import notify_group_activity
+from emailer import notify_group_activity_bg
 from models import Group, Payment, User
 from schemas import PaymentAuto, PaymentCreate, PaymentOut
 
@@ -129,7 +129,8 @@ def _resolve_group(db: Session, frm: str, to: str, ignore_payment_id: int | None
 
 
 @router.post("/auto", response_model=PaymentOut, status_code=201)
-def create_payment_auto(payload: PaymentAuto, db: Session = Depends(get_db),
+def create_payment_auto(payload: PaymentAuto, background_tasks: BackgroundTasks,
+                        db: Session = Depends(get_db),
                         caller: User = Depends(current_user)):
     """Record a transfer without naming a group — the debt decides where it lands.
 
@@ -163,10 +164,7 @@ def create_payment_auto(payload: PaymentAuto, db: Session = Depends(get_db),
     db.commit()
     db.refresh(payment)
 
-    try:
-        notify_group_activity(db, group, recorder, "recorded a payment", summary)
-    except Exception as e:
-        print(f"[email] payment notification failed: {e}")
+    background_tasks.add_task(notify_group_activity_bg, group.id, recorder, "recorded a payment", summary)
 
     return payment
 
@@ -225,7 +223,8 @@ def update_payment(payment_id: int, payload: PaymentAuto, db: Session = Depends(
 
 
 @router.post("/", response_model=PaymentOut, status_code=201)
-def create_payment(payload: PaymentCreate, db: Session = Depends(get_db),
+def create_payment(payload: PaymentCreate, background_tasks: BackgroundTasks,
+                   db: Session = Depends(get_db),
                    caller: User = Depends(current_user)):
     group = member_group(payload.group_id, caller, db)
 
@@ -260,10 +259,7 @@ def create_payment(payload: PaymentCreate, db: Session = Depends(get_db),
     db.commit()
     db.refresh(payment)
 
-    try:
-        notify_group_activity(db, group, recorder, "recorded a payment", summary)
-    except Exception as e:
-        print(f"[email] payment notification failed: {e}")
+    background_tasks.add_task(notify_group_activity_bg, group.id, recorder, "recorded a payment", summary)
 
     return payment
 
