@@ -1,4 +1,6 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, Text, ForeignKey, DateTime
+from sqlalchemy import (
+    Column, Integer, String, Float, Boolean, Text, ForeignKey, DateTime, UniqueConstraint,
+)
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -252,3 +254,105 @@ class KnowledgeItem(Base):
     per_head = Column(Float, nullable=True)
     occurred_on = Column(String(20), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Product(Base):
+    """One alcohol product's taste and rating profile - a fact about the
+    bottle itself, never about where it's sold.
+
+    This is Stage 1 of the alcohol knowledge base: what used to live only in
+    a spreadsheet (Alcohol_Prices_Final_Rated.xlsx) as the "Product Master"
+    sheet, now queryable. Price is deliberately not here - see
+    ProductPrice - because a bottle's taste profile doesn't change crossing
+    a state line, while its price, tax-inclusive, absolutely does.
+
+    `rating` is always on a 0-5 scale regardless of `rating_type`: a real
+    external score is rescaled onto it, an estimate is computed directly on
+    it (see backfill_products.py for the exact formula). `rating_type` is
+    what actually matters when this feeds a recommendation - "Verified
+    (external)" and "Estimated (heuristic)" are not the same kind of fact,
+    and a scoring engine that treats them identically would be more
+    confident than the data supports. `rating_basis` is the one-line why:
+    which source, or which formula and which inputs.
+    """
+
+    __tablename__ = "products"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # The exact brand string this row was built from - see backfill_products
+    # for why this is the join key rather than a further-normalised name:
+    # the enrichment data (taste profile, rating) was researched and written
+    # at this same granularity, one row per distinct published brand string,
+    # not per semantically-merged product family.
+    canonical_name = Column(String(300), nullable=False, unique=True, index=True)
+    brand = Column(String(300), nullable=False)
+    category = Column(String(30), nullable=True)     # whisky, rum, vodka, beer, wine, ...
+    style = Column(String(80), nullable=True)         # "Blended Scotch Whisky", ...
+    body = Column(String(20), nullable=True)          # light | medium | full
+    abv = Column(Float, nullable=True)
+    tasting_notes = Column(Text, nullable=True)
+
+    rating = Column(Float, nullable=True)             # always 0-5
+    rating_type = Column(String(40), nullable=True)   # Verified (external) | Estimated (heuristic) | ...
+    rating_basis = Column(Text, nullable=True)         # why: source, or formula + inputs
+    rating_source = Column(String(80), nullable=True)
+    rating_url = Column(Text, nullable=True)
+
+    # Taste-profile dimensions, each 1-5 (0 where genuinely absent, e.g. a
+    # gin's smokiness). Descriptive, not evaluative - see rating above for
+    # the one number that says "how good", not "what does it taste like".
+    sweetness = Column(Float, nullable=True)
+    smokiness = Column(Float, nullable=True)
+    smoothness = Column(Float, nullable=True)
+    spice = Column(Float, nullable=True)
+    fruit_citrus = Column(Float, nullable=True)
+    oak = Column(Float, nullable=True)
+    intensity = Column(Float, nullable=True)
+    beginner_friendly = Column(Float, nullable=True)
+    sipping_score = Column(Float, nullable=True)
+    mixer_score = Column(Float, nullable=True)
+
+    recommendation_tags = Column(String(300), nullable=True)   # comma-separated
+    # The text actually embedded for retrieval - one flattened summary of
+    # everything above, written once at backfill time rather than assembled
+    # from twelve columns on every search.
+    rag_text = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(),
+                        onupdate=func.now())
+
+    prices = relationship("ProductPrice", back_populates="product",
+                          cascade="all, delete-orphan", lazy="selectin")
+
+
+class ProductPrice(Base):
+    """What one product costs, in one state, at one size - the half of the
+    catalogue that genuinely is state-specific, kept apart from Product on
+    purpose (see its docstring).
+
+    One row per (product, state, size) - the same shape liquor_prices.py's
+    Bottle already has, just persisted rather than rebuilt from a Python
+    module and an Excel file on every request.
+    """
+
+    __tablename__ = "product_prices"
+    # A re-run of the backfill (a refreshed price sheet, say) should update
+    # this state-and-size's price, not pile up a second row beside it.
+    __table_args__ = (UniqueConstraint("product_id", "state", "size_ml",
+                                       name="ux_product_prices_product_state_size"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"),
+                        nullable=False, index=True)
+    state = Column(String(100), nullable=False, index=True)
+    size_ml = Column(Integer, nullable=False)
+    price = Column(Float, nullable=False)
+    price_max = Column(Float, nullable=True)   # set only where the source gave a range
+    source = Column(String(80), nullable=True)
+    source_url = Column(Text, nullable=True)
+    checked_on = Column(String(20), nullable=True)   # ISO date, as published sources use elsewhere
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    product = relationship("Product", back_populates="prices")

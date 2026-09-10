@@ -43,7 +43,7 @@ BOTTLE_SIZES = (180, 375, 750)
 # about the evening, not a filter the recommender needs: a budget on its own
 # is enough to say what you can buy. Made mandatory, it forced a choice before
 # the app had told you anything.
-BOTTLE_CHOICES = ("any", "180", "375", "750", "beer")
+BOTTLE_CHOICES = ("any", "180", "375", "750", "other", "beer")
 
 
 # Budget is a range rather than a ceiling, because "around 500" is what people
@@ -52,10 +52,7 @@ BOTTLE_CHOICES = ("any", "180", "375", "750", "beer")
 # an empty list.
 MIN_BUDGET_SPAN = 60
 
-# Spirits are sold in exactly these three, and everyone names them this way.
-# Anything else in the price table (90ml nips, litres, 200ml travel bottles)
-# is not something you would walk out of a shop with for an evening, so
-# spirits are restricted to these when building a suggestion.
+# The three sizes most spirits are sold in, and everyone names them this way.
 SPIRIT_SIZES = {180: "quarter", 375: "half", 700: "full", 750: "full"}
 SIZE_ORDER = (750, 700, 375, 180)
 
@@ -67,8 +64,41 @@ SIZE_GROUP = {180: (180,), 375: (375,), 750: (700, 750)}
 ALL_SIZES = (180, 375, 700, 750)
 
 
+@lru_cache(maxsize=1)
+def _other_spirit_sizes() -> tuple[int, ...]:
+    """Every non-beer size the published tables actually carry outside the
+    three cards above - 90ml nips, 500ml, 1000ml, even the odd 4.5 litre
+    jeroboam. Real rows, not a hypothetical: 1000ml alone is 145 of them.
+
+    These used to be excluded outright, on the reasoning that a nip or a
+    litre bottle "is not something you would walk out of a shop with for an
+    evening" - true for most evenings, but it also meant a whisky published
+    only in 1000ml could never appear in a suggestion or a search result no
+    matter how well it fit the budget. The "Other" card exists so those
+    sizes are reachable rather than invisible, without disturbing the
+    default three-card evening-sized behaviour anyone who never taps it
+    still gets.
+
+    Cached: this scans the whole BOTTLES table, which is static for the
+    life of the process - see _brand_key's docstring for why that matters
+    at this table's size.
+    """
+    return tuple(sorted({b.size_ml for b in BOTTLES if b.kind != "beer"
+                        and b.size_ml not in (180, 375, 700, 750)}))
+
+
+def _size_group(card: str) -> tuple[int, ...]:
+    """Which actual sizes one size-picker card expands to.
+
+    "other" is the one card with no fixed answer - it means every non-beer
+    size the tables carry outside the three evening-sized cards, which is a
+    property of the data, not a constant anyone chose.
+    """
+    return _other_spirit_sizes() if card == "other" else SIZE_GROUP[int(card)]
+
+
 def _parse_bottle(bottle: str) -> tuple[tuple[int, ...], bool, bool]:
-    """Read the size picker, which takes any combination of its four cards.
+    """Read the size picker, which takes any combination of its five cards.
 
     One card was the old rule and it made "a couple of quarters or a few
     beers" - an ordinary way to plan an evening - unaskable. So the parameter
@@ -88,7 +118,7 @@ def _parse_bottle(bottle: str) -> tuple[tuple[int, ...], bool, bool]:
     if not parts:
         return ALL_SIZES, True, True
     sizes = tuple(sorted({ml for p in parts if p != "beer"
-                          for ml in SIZE_GROUP[int(p)]}))
+                          for ml in _size_group(p)}))
     want_beer = "beer" in parts
     # A picker showing only beer asks only about beer; one showing only sizes
     # asks only about spirits. Both together asks for both.
@@ -670,7 +700,10 @@ def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
             "brand": b.brand,
             "kind": b.kind,
             "size_ml": b.size_ml,
-            "size_name": SPIRIT_SIZES[b.size_ml],
+            # Named sizes only exist for the three evening-sized cards; an
+            # "Other" pick can be any published size, which gets its literal
+            # ml instead of a name nothing has ever given it.
+            "size_name": SPIRIT_SIZES.get(b.size_ml, f"{b.size_ml}ml"),
             "unit_price": b.price,
             "unit_price_max": b.price_max,
             "total": round(price),
@@ -744,7 +777,7 @@ def _parse_search_sizes(bottle: str) -> tuple[tuple[int, ...] | None, bool, bool
         if p not in BOTTLE_CHOICES:
             raise HTTPException(400, f"Pick any of {', '.join(BOTTLE_CHOICES[1:])} - got '{p}'")
     size_parts = [p for p in parts if p != "beer"]
-    sizes = (tuple(sorted({ml for p in size_parts for ml in SIZE_GROUP[int(p)]}))
+    sizes = (tuple(sorted({ml for p in size_parts for ml in _size_group(p)}))
              if size_parts else None)
     want_beer = not parts or "beer" in parts
     want_spirits = not parts or bool(size_parts)
@@ -940,11 +973,12 @@ def _your_entries(rows: list[PriceOverride], sizes: tuple[int, ...],
             reason = f"saved as {r.kind} — tap a bottle size to see it"
         elif r.kind not in BOTTLE_KINDS:
             reason = f"saved as {r.kind}, which isn't suggested for an evening"
-        elif r.size_ml not in SPIRIT_SIZES:
-            reason = (f"saved at {r.size_ml}ml, which isn't one of the three "
-                      f"bottle sizes — re-save it as 180, 375 or 750")
+        elif r.size_ml not in SPIRIT_SIZES and r.size_ml not in _other_spirit_sizes():
+            reason = (f"saved at {r.size_ml}ml, which isn't a size any "
+                      f"published list carries — double check the size")
         elif r.size_ml not in sizes:
-            reason = f"saved at {r.size_ml}ml — tap {r.size_ml}ml to see it"
+            card = f"{r.size_ml}ml" if r.size_ml in SPIRIT_SIZES else "Other"
+            reason = f"saved at {r.size_ml}ml — tap {card} to see it"
         elif not (lo <= r.price <= hi):
             reason = f"Rs {round(r.price)} is outside this budget"
         stamp = r.updated_at or r.created_at
@@ -1229,7 +1263,14 @@ def meta(db: Session = Depends(get_db), _: User = Depends(current_user)):
         "bottle_choices": [
             {"value": str(ml), "name": SPIRIT_SIZES[ml].title(), "hint": f"{ml}ml"}
             for ml in BOTTLE_SIZES
-        ] + [{"value": "beer", "name": "Beer", "hint": "by the bottle"}],
+        ] + [
+            # Every other published size, in one card - 90ml nips up to a
+            # 4.5 litre jeroboam, none of them an "evening" size on their
+            # own but all of them real, priced rows otherwise unreachable
+            # from this picker.
+            {"value": "other", "name": "Other", "hint": "any other published size"},
+            {"value": "beer", "name": "Beer", "hint": "by the bottle"},
+        ],
         # Same "nothing selected means everything" rule as bottle_choices.
         "kind_choices": [{"value": k, "name": k.title()} for k in KIND_CHOICES],
     }
@@ -1540,9 +1581,11 @@ def recommend(
     is_beer = want_beer and not want_spirits and not is_any
     # The card that was tapped, not the sizes it expands to: tapping "Full"
     # asks for 700ml and 750ml, and reporting 700 back would be a number
-    # nobody chose.
-    cards = [int(p) for p in picked if p != "beer"]
-    bottle_ml = cards[0] if len(cards) == 1 else 0
+    # nobody chose. "other" has no single ml value to report - it is a
+    # category of sizes, not one of them - so it is kept out of `cards`
+    # (a list of literal millilitre numbers) and handled separately below.
+    cards = [int(p) for p in picked if p not in ("beer", "other")]
+    bottle_ml = cards[0] if len(cards) == 1 and "other" not in picked else 0
 
     # Optional, and separate from the size picker: which of whisky, rum,
     # vodka, gin to show. Nothing ticked still means everything.
@@ -1606,6 +1649,7 @@ def recommend(
         "bottle_name": (
             "any size" if is_any
             else " · ".join([SPIRIT_SIZES[c] for c in cards]
+                            + (["other sizes"] if "other" in picked else [])
                             + (["beer"] if want_beer else []))
         ),
         "history": hist,

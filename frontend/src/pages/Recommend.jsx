@@ -26,10 +26,11 @@ const FALLBACK_STATES = ['Delhi', 'Maharashtra', 'Uttar Pradesh']
 // How much the group is drinking between them. 180ml across two people is
 // 90ml each, so the hint is computed from the head count rather than fixed.
 const BOTTLES = [
-  ['180',  'Quarter', 180],
-  ['375',  'Half',    375],
-  ['750',  'Full',    750],
-  ['beer', 'Beer',    null],
+  ['180',   'Quarter', 180],
+  ['375',   'Half',    375],
+  ['750',   'Full',    750],
+  ['other', 'Other',   null],
+  ['beer',  'Beer',    null],
 ]
 
 // The four base spirits. Wine, brandy, tequila and liqueur are real
@@ -231,7 +232,10 @@ export default function Recommend() {
   const peopleN = Math.max(1, parseInt(people, 10) || 0)
   // The bottle sizes among the picked cards, beer excluded — beer has no one
   // size to divide between people.
-  const sizesPicked = bottles.filter((b) => b !== 'beer').map(Number)
+  // "other" is a category of sizes, not one ml value - Number('other') is
+  // NaN, which corrupted the "Xml between Y people" line below when it was
+  // the only thing picked.
+  const sizesPicked = bottles.filter((b) => b !== 'beer' && b !== 'other').map(Number)
   const loN = budgetMin
   const hiN = budgetMax
   const canRun = state && peopleN >= 1 && hiN - loN >= MIN_SPAN
@@ -432,7 +436,7 @@ export default function Recommend() {
 
           <div>
             <label className="label">How much between you (optional)</label>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-5 gap-1.5">
               {BOTTLES.map(([v, label, hint]) => (
                 <button
                   key={v}
@@ -449,7 +453,7 @@ export default function Recommend() {
                 >
                   {label}
                   <span className="block text-[9px] font-normal opacity-70">
-                    {hint === null ? 'bottles' : `${hint}ml`}
+                    {v === 'other' ? 'other sizes' : hint === null ? 'bottles' : `${hint}ml`}
                   </span>
                 </button>
               ))}
