@@ -28,7 +28,7 @@ from brand_names import canonicalise as bn_canonicalise, core as bn_core, key as
 from liquor_prices import (
     ABV_SOURCES, BOTTLES, NCR, SOURCES, STATES, Bottle, abv_for, for_state,
 )
-from models import Group, PriceOverride, User
+from models import Group, PriceOverride, Product, User
 
 router = APIRouter(prefix="/recommend", tags=["recommend"])
 
@@ -627,6 +627,60 @@ def _units(volume_ml: float, abv: float) -> float:
     return round(volume_ml * abv / 100, 1)
 
 
+@lru_cache(maxsize=1)
+def _products_by_name() -> dict:
+    """Every product's rating, keyed by the exact brand string the price
+    tables use (the granularity Product was built at - see
+    backfill_products.py), cached for the life of the process.
+
+    Product data changes only when someone re-runs backfill_products.py by
+    hand, never from a user action in the app - querying all 3,919 rows
+    fresh on every single /recommend request was over a second of pure
+    network transfer, every time, for data that is static in every
+    practical sense. A restart (which a deploy already does) is what picks
+    up a re-run backfill; this is not wired to notice one happening while
+    the process is live, which is an acceptable trade for a table nothing
+    yet writes to at runtime.
+
+    Ignores whatever request-scoped `db` session happens to be live when
+    first called, on purpose - opening its own short-lived one instead, so
+    this cache is not accidentally tied to one request's session lifetime.
+    """
+    from database import get_session_factory
+
+    db = get_session_factory()()
+    try:
+        return {
+            row.canonical_name: row
+            for row in db.query(Product.canonical_name, Product.rating,
+                                Product.rating_type, Product.rating_basis).all()
+        }
+    finally:
+        db.close()
+
+
+def _rating_fields(products_by_name: dict | None, brand: str) -> dict:
+    """The knowledge-base rating for this exact brand string, or nothing.
+
+    Deliberately three fields, not one: `rating_type` is what actually
+    matters when this is shown or scored, since "Verified (external)" and
+    "Estimated (heuristic)" are not the same kind of fact - a real citation
+    from Whiskybase and a formula run over a category-level guess should
+    never look equally confident on a card, or be weighted the same by a
+    future recommendation score. A bottle with no Product row at all (an
+    override that was never in the enriched catalogue) gets all three as
+    None, same as one that has a row but no rating.
+    """
+    product = (products_by_name or {}).get(brand)
+    if product is None:
+        return {"rating": None, "rating_type": None, "rating_basis": None}
+    return {
+        "rating": product.rating,
+        "rating_type": product.rating_type,
+        "rating_basis": product.rating_basis,
+    }
+
+
 def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
           sizes: tuple[int, ...], favourites: list[str],
           brand_avg: dict[str, int] | None = None,
@@ -634,7 +688,8 @@ def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
           regions: tuple[str, ...] = NCR,
           brand_last: dict[str, str] | None = None,
           kinds: tuple[str, ...] = (),
-          limit: int = 200, state: str = "") -> list[dict]:
+          limit: int = 200, state: str = "",
+          products_by_name: dict | None = None) -> list[dict]:
     """Every bottle of the chosen size priced inside the budget range.
 
     Ranked dearest inside the budget first: within one state and one size,
@@ -734,6 +789,7 @@ def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
             # this field exists at all despite that.
             "state": b.state,
             "is_price_fallback": bool(state) and b.state != state,
+            **_rating_fields(products_by_name, b.brand),
         })
 
     # Ranked by price alone - dearest inside the budget first, since within
@@ -861,7 +917,8 @@ def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
            brand_last: dict[str, str] | None = None,
            tables_by_size: dict[str, dict[int, list[Bottle]]] | None = None,
            regions: tuple[str, ...] = NCR,
-           limit: int = 200, state: str = "") -> list[dict]:
+           limit: int = 200, state: str = "",
+           products_by_name: dict | None = None) -> list[dict]:
     """Beers you can buy, priced by the bottle.
 
     Same reasoning as _pick's own limit: a cheap budget band can legitimately
@@ -929,6 +986,7 @@ def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
             "cheapest_region": cheapest,
             "state": b.state,
             "is_price_fallback": bool(state) and b.state != state,
+            **_rating_fields(products_by_name, b.brand),
             # Deprecated: the round-priced shape this card used to have. The
             # web app and the API deploy separately, so there is always a
             # window where one is older than the other, and a browser holding
@@ -1518,6 +1576,7 @@ def _recommend_for_state(
     by_state: dict, sizes: tuple[int, ...], want_beer: bool,
     want_spirits: bool, kinds: tuple[str, ...], budget_min: float,
     budget_max: float, people: int, hist: dict,
+    products_by_name: dict | None = None,
 ) -> dict | None:
     """Everything about a recommendation that actually varies by state.
 
@@ -1551,11 +1610,12 @@ def _recommend_for_state(
 
     picks = (_pick(bottles, budget_min, budget_max, people, sizes,
                    hist["favourites"], hist["brand_avg"], tables_by_size, regions,
-                   hist["brand_last"], kinds, state=state)
+                   hist["brand_last"], kinds, state=state,
+                   products_by_name=products_by_name)
              if want_spirits else [])
     beers = (_beers(bottles, budget_min, budget_max, people, hist["favourites"],
                     hist["brand_avg"], hist["brand_last"], tables_by_size, regions,
-                    state=state)
+                    state=state, products_by_name=products_by_name)
              if want_beer else [])
 
     size_available = any(
@@ -1647,6 +1707,7 @@ def recommend(
     tables = {
         s: _apply_overrides(for_state(s), by_state.get(s, []), s) for s in known_states
     }
+    products_by_name = _products_by_name()
 
     people_names = [n for n in (names or "").split(",") if n.strip()]
     hist = _history(db, caller, people_names)
@@ -1700,6 +1761,7 @@ def recommend(
             per_state = _recommend_for_state(
                 st, known_states, tables, by_state, sizes, want_beer, want_spirits,
                 kinds, budget_min, budget_max, people, hist,
+                products_by_name=products_by_name,
             )
             if per_state is not None:
                 by_state_results[st] = per_state
@@ -1715,6 +1777,7 @@ def recommend(
     per_state = _recommend_for_state(
         state, known_states, tables, by_state, sizes, want_beer, want_spirits,
         kinds, budget_min, budget_max, people, hist,
+        products_by_name=products_by_name,
     )
     if per_state is None:
         # Only reachable if the whole catalogue is empty, since `state` was

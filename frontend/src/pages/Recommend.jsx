@@ -115,6 +115,28 @@ function PriceStrip({ compare, cheapest }) {
 }
 
 /**
+ * The knowledge base's 0-5 rating for a bottle, always shown with which kind
+ * of fact it is — a real, cited external rating and a formula's best guess
+ * are not the same thing, and showing them identically would be more
+ * confident than the data actually supports. Verified is green, everything
+ * else (an estimate, or an estimate alongside a real but non-numeric award)
+ * is amber — the same colour convention the underlying spreadsheet already
+ * uses, so the two stay recognisable as the same distinction.
+ */
+function RatingBadge({ rating, type }) {
+  if (rating == null) return null
+  const verified = type === 'Verified (external)'
+  return (
+    <p className={`text-[10px] font-bold mt-0.5 ${verified ? 'text-green-700' : 'text-amber-600'}`}>
+      ★ {rating.toFixed(1)}/5
+      <span className="font-normal opacity-80">
+        {' '}· {verified ? 'verified rating' : 'estimated'}
+      </span>
+    </p>
+  )
+}
+
+/**
  * What to drink, for this many people, on this budget.
  *
  * Grounded in two real things: published state price lists (alcohol is a state
@@ -833,6 +855,8 @@ export default function Recommend() {
                       : ''}
                   </span>
                 </p>
+                <RatingBadge rating={p.rating} type={p.rating_type} />
+
                 {/* Split across the group, and what the budget would stretch to */}
                 <p className="text-[10px] text-gray-400 mt-0.5">
                   {INR(p.per_head)} a head ·{' '}
@@ -951,6 +975,8 @@ export default function Recommend() {
                         {pureAlcohol != null && ` · ${pureAlcohol}ml pure alcohol`}
                       </span>
                     </p>
+                    <RatingBadge rating={b.rating} type={b.rating_type} />
+
                     {/* What the budget does with that — a consequence of the
                         budget, not a property of the beer, so it sits apart. */}
                     {buys != null && (
