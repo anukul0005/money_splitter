@@ -27,15 +27,15 @@ from sqlalchemy.orm import Session
 
 from auth import current_user
 from database import get_db
+from food_prices import for_city
 from liquor_prices import STATES, for_state
 from models import PriceOverride, User
 from routers.food import MIN_BUDGET_SPAN as FOOD_MIN_SPAN
-from routers.food import _history as _food_history
-from routers.food import recommend_food
+from routers.food import _apply_place_overrides, _history as _food_history
 from routers.recommend import MIN_BUDGET_SPAN as DRINK_MIN_SPAN
 from routers.recommend import (
     _apply_overrides, _by_size, _catalog_for, _find_in, _history as _drink_history,
-    _overrides_by_state, recommend,
+    _overrides_by_state,
 )
 
 router = APIRouter(prefix="/forecast", tags=["forecast"])
@@ -99,43 +99,79 @@ def _band(mid: float, min_span: float) -> dict | None:
     return {"min": lo, "max": hi}
 
 
-def _drink_preview(db: Session, caller: User, state: str, band: dict | None,
-                   people: int, names: str) -> dict | None:
-    """A few real picks in this band, in this state - reuses /recommend
-    itself rather than a second pricing pass, so a forecast never disagrees
-    with what the Drinks tab would actually show for the same numbers.
+def _drink_preview(db: Session, state: str, band: dict | None) -> dict | None:
+    """A few real bottles in this band, in this state.
+
+    This first called /recommend itself, on the reasoning that a forecast
+    should never disagree with what the Drinks tab would show for the same
+    numbers. It also called the whole recommender's machinery just to read
+    off three prices: rebuilding every state's own catalogue, running the
+    full history scan /forecast/budget had already just run for the ratio
+    above, computing a comparison strip for every candidate, and looking up
+    the knowledge base - none of which a three-item sample needs. Measured:
+    over half of one request's total time. This does only the one thing a
+    preview needs - price everything in the band and take the priciest few,
+    the same "dearest inside budget" convention /recommend itself uses - by
+    calling _catalog_for directly rather than the endpoint wrapped around it.
 
     A location a state's own list has never heard of still gets an answer:
-    /recommend's own cross-state fallback (see _catalog_for) prices a bottle
-    at whatever the cheapest other state charges when the chosen one doesn't
-    carry it, labelled `is_price_fallback` on each pick exactly as it is on
-    the Drinks tab - "other locations show costs as per the available
-    states" is the same mechanism already built for the recommender, not a
-    new one.
+    the same cross-state fallback /recommend uses (see _catalog_for) prices
+    a bottle at whatever the cheapest other state charges when the chosen
+    one doesn't carry it, labelled `is_price_fallback` here exactly as it is
+    on the Drinks tab.
     """
     if not band or band["max"] <= 0:
         return None
-    try:
-        result = recommend(state=state, people=people, budget_min=band["min"],
-                           budget_max=band["max"], bottle="any", kind="",
-                           names=names, db=db, caller=caller)
-    except HTTPException:
+    by_state = _overrides_by_state(db)
+    known_states = sorted(set(STATES) | set(by_state))
+    if state not in known_states:
         return None
-    picks = (result.get("picks") or [])[:3] + (result.get("beers") or [])[:3]
-    return {"state": state, "sample": picks[:3]}
+
+    # This state's own list first, without building the cross-state merge at
+    # all - a state with a real published table (thousands of rows for the
+    # bigger ones) almost always has *something* in a given price band, so
+    # the common case never needs the expensive part. Only when nothing
+    # native qualifies is the fuller cross-state catalogue built to look
+    # elsewhere - the rare case is the only one that has to pay for it.
+    native = _apply_overrides(for_state(state), by_state.get(state, []), state)
+    matches = sorted(
+        (b for b in native if band["min"] <= b.mid <= band["max"]),
+        key=lambda b: -b.mid,
+    )
+    if not matches:
+        tables = {
+            s: _apply_overrides(for_state(s), by_state.get(s, []), s) for s in known_states
+        }
+        catalog = _catalog_for(state, known_states, tables)
+        matches = sorted(
+            (b for b in catalog if band["min"] <= b.mid <= band["max"]),
+            key=lambda b: -b.mid,
+        )
+
+    sample = [
+        {"brand": b.brand, "kind": b.kind, "size_ml": b.size_ml, "total": round(b.mid),
+         "state": b.state, "is_price_fallback": b.state != state}
+        for b in matches[:3]
+    ]
+    return {"state": state, "sample": sample}
 
 
-def _food_preview(db: Session, caller: User, city: str, band: dict | None,
-                  people: int, names: str) -> dict | None:
-    """A few real picks in this band, in this city - see _drink_preview."""
+def _food_preview(db: Session, city: str, band: dict | None, people: int) -> dict | None:
+    """A few real places in this band, in this city - see _drink_preview for
+    why this prices directly rather than calling /food itself."""
     if not band or band["max"] <= 0:
         return None
     try:
-        result = recommend_food(city=city, people=people, budget_min=band["min"],
-                                budget_max=band["max"], names=names, db=db, caller=caller)
-    except HTTPException:
+        places = _apply_place_overrides(for_city(city), db, city)
+    except Exception:
         return None
-    return {"city": city, "sample": (result.get("picks") or [])[:3]}
+    matches = sorted(
+        ((p, p.total_for(people)) for p in places
+         if band["min"] <= p.total_for(people) <= band["max"]),
+        key=lambda pt: -pt[1],
+    )
+    sample = [{"name": p.name, "total": round(total)} for p, total in matches[:3]]
+    return {"city": city, "sample": sample}
 
 
 @router.get("/budget", response_model=dict)
@@ -210,8 +246,8 @@ def forecast_budget(
         # cheapest other state charges for it (see _drink_preview). Only
         # computed when a location was actually given; forecasting works
         # perfectly well as pure numbers without one.
-        "drink_preview": _drink_preview(db, caller, state, drink_band, people, names) if state else None,
-        "food_preview": _food_preview(db, caller, city, food_band, people, names) if city else None,
+        "drink_preview": _drink_preview(db, state, drink_band) if state else None,
+        "food_preview": _food_preview(db, city, food_band, people) if city else None,
     }
 
 
