@@ -646,10 +646,11 @@ def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
     already know you buy, the opposite of what a recommendation is for.
 
     Each row also carries `state` (where this exact price is actually from)
-    and `is_price_fallback` (true when that isn't the state being asked
-    about) - see _catalog_for, which is what supplies a bottle no state's own
-    list carries priced at the cheapest rate anyone else charges for it,
-    rather than hiding it outright.
+    and `is_price_fallback`. Both are always the state being asked about /
+    False here - bottles come from that state's own list only, not merged
+    across states (see _recommend_for_state) - kept only for field-shape
+    consistency with /forecast/budget's own preview, which builds the same
+    two fields itself from a real cross-state merge (see _catalog_for).
 
     The cap used to sit at 30, which was well inside the size of a real
     budget band in a state with a big list - Delhi alone has 67 whisky
@@ -728,9 +729,9 @@ def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
             "source": b.source,
             "compare": compare,
             "cheapest_region": cheapest,
-            # Where this exact price actually comes from, and whether that
-            # is somewhere other than the state being asked about - see
-            # _catalog_for.
+            # Where this exact price actually comes from. Always the state
+            # being asked about here - see _pick's own docstring for why
+            # this field exists at all despite that.
             "state": b.state,
             "is_price_fallback": bool(state) and b.state != state,
         })
@@ -1466,17 +1467,50 @@ def _catalog_for(state: str, known_states: list[str],
 
     fallback: list[Bottle] = []
     for rows in missing.values():
-        groups: list[list[Bottle]] = []
-        for b in rows:
-            for g in groups:
-                if _same_bottle(g[0].brand, b.brand):
-                    g.append(b)
-                    break
-            else:
-                groups.append([b])
-        fallback.extend(min(g, key=lambda b: b.mid) for g in groups)
+        for g in _cluster_bottles(rows):
+            fallback.append(min(g, key=lambda b: b.mid))
 
     return own + fallback
+
+
+def _cluster_bottles(bottles: list[Bottle]) -> list[list[Bottle]]:
+    """Group bottles that are the same product under different states'
+    spellings, without comparing every pair against every other pair.
+
+    _catalog_for's docstring already covers why the naive version of this -
+    a new bottle compared against every group formed so far - is quadratic
+    and was the whole reason that function exists. The "missing" set it
+    calls this on is meant to be small, but "small" still meant several
+    hundred rows for a wide-open request (any size, any kind), which was
+    still enough naive comparisons to be the dominant cost on a CPU as
+    constrained as Render's free tier, even though it looked instant on a
+    dev machine.
+
+    Indexed the same way _BottleIndex looks up a single bottle: only
+    compare a new bottle against groups that already contain a bottle
+    sharing at least one of its significant words, not every group formed
+    so far. "Chivas Regal 12" only ever gets compared against groups
+    containing "chivas", "regal" or "12" - never against an unrelated
+    whisky's group, however many of those exist.
+    """
+    groups: list[list[Bottle]] = []
+    by_word: dict[str, list[int]] = defaultdict(list)
+    for b in bottles:
+        words = [w for w in _brand_key(b.brand).split()
+                if w not in _AGE_FILLER and w not in GENERIC_WORDS]
+        candidates: set[int] = set()
+        for w in words:
+            candidates.update(by_word.get(w, ()))
+        match = next((gi for gi in candidates
+                     if _same_bottle(groups[gi][0].brand, b.brand)), None)
+        if match is None:
+            groups.append([b])
+            match = len(groups) - 1
+        else:
+            groups[match].append(b)
+        for w in words:
+            by_word[w].append(match)
+    return groups
 
 
 def _recommend_for_state(
@@ -1494,17 +1528,24 @@ def _recommend_for_state(
     over one gap - the caller validates the state name itself before this is
     reached (see recommend()), so that is no longer this function's job.
     """
-    bottles = _catalog_for(state, known_states, tables)
+    # This state's own list only. A cross-state fallback used to fill this
+    # in - a bottle Uttar Pradesh sells but Delhi's own list never carried
+    # would still show up, priced at whatever the cheapest other state
+    # charged - but that meant a Delhi recommendation could suggest a
+    # bottle nobody in Delhi can actually walk into a shop and buy. This
+    # only ever shows what the selected state genuinely stocks; the
+    # comparison strip below still shows what other states charge for the
+    # same bottle, which is the cross-state information actually worth
+    # keeping.
+    bottles = tables.get(state, [])
     if not bottles:
         return None
 
     # Every state we have prices for, the one you asked about first. Three NCR
     # columns answered "is it cheaper over the border" for somebody in Delhi
     # and nothing for anybody else - a UP price never saw MP, though that is
-    # the comparison worth making. This stays capped at MAX_COMPARE_REGIONS
-    # for readability - a strip of ten columns is unreadable on a phone -
-    # which is a different question from whether a bottle is shown at all,
-    # now answered by the full, uncapped `groups` above.
+    # the comparison worth making. Capped at MAX_COMPARE_REGIONS for
+    # readability - a strip of ten columns is unreadable on a phone.
     regions = _regions_for(state)
     tables_by_size = {r: _by_size(tables.get(r, [])) for r in regions}
 
@@ -1517,33 +1558,21 @@ def _recommend_for_state(
                     state=state)
              if want_beer else [])
 
-    # This state's own rows only, no borrowed prices - the "all states" quick
-    # comparison card wants to say what a state genuinely stocks, and a
-    # borrowed price would misrepresent that (Delhi showing a Chivas 25 it
-    # has never carried, just because Haryana happens to sell one). The main
-    # single-state view below uses the merged, fallback-inclusive `bottles`
-    # for these same two fields on purpose - see recommend()'s docstring for
-    # why that page shows everything regardless of this state's own list.
-    native = [b for b in bottles if b.state == state]
-
-    def _size_available(rows: list[Bottle]) -> bool:
-        return any(
-            (want_beer and b.kind == "beer")
-            or (want_spirits and b.size_ml in sizes and b.kind in BOTTLE_KINDS
-                and (not kinds or b.kind in kinds))
-            for b in rows
-        )
+    size_available = any(
+        (want_beer and b.kind == "beer")
+        or (want_spirits and b.size_ml in sizes and b.kind in BOTTLE_KINDS
+            and (not kinds or b.kind in kinds))
+        for b in bottles
+    )
 
     return {
         "regions": list(regions),
         "picks": picks,
         "price_band": _band(bottles, sizes, want_beer, want_spirits, kinds),
-        "price_band_native": _band(native, sizes, want_beer, want_spirits, kinds),
         "your_entries": _your_entries(by_state.get(state, []), sizes,
                                       want_beer, want_spirits,
                                       budget_min, budget_max),
-        "size_available": _size_available(bottles),
-        "size_available_native": _size_available(native),
+        "size_available": size_available,
         "beers": beers,
     }
 

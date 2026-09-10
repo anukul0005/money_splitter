@@ -739,18 +739,10 @@ export default function Recommend() {
               <div className="space-y-2">
                 {Object.entries(result.by_state).map(([st, data]) => {
                   // This card's whole point is "what does this state
-                  // actually have", side by side with the next one — so a
-                  // bottle only shown here because it was the cheapest
-                  // borrowed price from somewhere else would misrepresent
-                  // that state's own list, and there is no room in a
-                  // single truncated line to label it as borrowed the way
-                  // the full single-state view does. Left out here; still
-                  // shown, correctly labelled, once you open this state.
-                  const native = [
-                    ...data.picks.filter((p) => !p.is_price_fallback).map((p) => ({ ...p, isBeer: false })),
-                    ...data.beers.filter((b) => !b.is_price_fallback).map((b) => ({ ...b, total: b.price, isBeer: true })),
-                  ]
-                  const top = native.slice(0, 3)
+                  const top = [
+                    ...data.picks.map((p) => ({ ...p, isBeer: false })),
+                    ...data.beers.map((b) => ({ ...b, total: b.price, isBeer: true })),
+                  ].slice(0, 3)
                   return (
                     <div key={st} className="card p-3.5">
                       <div className="flex items-center justify-between gap-2 mb-1.5">
@@ -765,10 +757,10 @@ export default function Recommend() {
                       </div>
                       {top.length === 0 ? (
                         <p className="text-xs text-gray-400">
-                          {!data.size_available_native
+                          {!data.size_available
                             ? `No ${result.bottle_name} prices published here yet.`
-                            : data.price_band_native
-                              ? <>Nothing in this budget — they run <span className="font-bold text-gray-500">{INR(data.price_band_native.min)}–{INR(data.price_band_native.max)}</span> here.</>
+                            : data.price_band
+                              ? <>Nothing in this budget — they run <span className="font-bold text-gray-500">{INR(data.price_band.min)}–{INR(data.price_band.max)}</span> here.</>
                               : `Nothing in ${result.bottle_name} here falls in this budget.`}
                         </p>
                       ) : (
@@ -782,9 +774,9 @@ export default function Recommend() {
                               <span className="font-black text-brand-600 flex-shrink-0">{INR(p.total)}</span>
                             </div>
                           ))}
-                          {native.length > 3 && (
+                          {(data.picks.length + data.beers.length) > 3 && (
                             <p className="text-[10px] text-gray-400">
-                              +{native.length - 3} more here
+                              +{data.picks.length + data.beers.length - 3} more here
                             </p>
                           )}
                         </div>
@@ -841,15 +833,6 @@ export default function Recommend() {
                       : ''}
                   </span>
                 </p>
-                {/* Not sold under this state's own list — shown anyway rather
-                    than hidden, priced at whatever the cheapest other state
-                    actually charges for it, and said plainly so the number
-                    is never mistaken for this state's own price. */}
-                {p.is_price_fallback && (
-                  <p className="text-[10px] text-amber-600 mt-0.5">
-                    Not listed in {result.state} — price shown from {p.state}
-                  </p>
-                )}
                 {/* Split across the group, and what the budget would stretch to */}
                 <p className="text-[10px] text-gray-400 mt-0.5">
                   {INR(p.per_head)} a head ·{' '}
@@ -968,14 +951,6 @@ export default function Recommend() {
                         {pureAlcohol != null && ` · ${pureAlcohol}ml pure alcohol`}
                       </span>
                     </p>
-                    {/* Same fallback note the spirit cards carry — see there
-                        for why the price is shown rather than hidden. */}
-                    {b.is_price_fallback && (
-                      <p className="text-[10px] text-amber-600 mt-0.5">
-                        Not listed in {result.state} — price shown from {b.state}
-                      </p>
-                    )}
-
                     {/* What the budget does with that — a consequence of the
                         budget, not a property of the beer, so it sits apart. */}
                     {buys != null && (
