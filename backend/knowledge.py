@@ -79,7 +79,19 @@ DRINK_RE = re.compile(
     # expense saying "tequila" or "prosecco" was not read as a drink at all.
     r"tequila|mezcal|brandy|cognac|liqueur|scotch|bourbon|"
     r"prosecco|champagne|sangria|patron|jagermeister|kahlua|malibu|"
-    r"baileys|cointreau|macallan|aberlour|beefeater|johnnie\s*walker)\b",
+    r"baileys|cointreau|macallan|aberlour|beefeater|johnnie\s*walker|"
+    # The literal word itself - added after finding real expenses tagged
+    # with the app's own "Drinks" category (a person explicitly saying so,
+    # the strongest signal there is) whose text mentioned no specific brand
+    # at all ("Bora bora - half", "Legacy", "Vka - Canvas") and so were
+    # invisible to history and the purchase profile despite being tagged as
+    # exactly what they were. One word, recovered 32 real expenses.
+    r"drinks?|"
+    # Old Monk's own common shorthand - "oldm(hf+qr+qr)" - distinct from
+    # "old\s*monk" above, which requires the space/word break this omits.
+    # "bushmill?s?" covers the brand's correct spelling and the one-L typo
+    # ("bushmils") actually found in this app's own expense data.
+    r"oldm|bushmill?s?|backbencher)\b",
     re.I,
 )
 
