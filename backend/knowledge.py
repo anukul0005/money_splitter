@@ -89,7 +89,13 @@ DRINK_RE = re.compile(
     # orders chakhna for a movie - so on its own it is as reliable a signal
     # as a brand name, confirmed against seven real expenses that use it
     # completely alone, no other drink word anywhere in the text.
-    r"oldm|bushmill?s?|backbencher|chakhna)\b",
+    # "monk2" ("Old monk2") has no boundary before the digit for \b to catch -
+    # a letter and a digit are both word characters, so "old\s*monk\b" alone
+    # never matches a bottle count glued straight onto the name. Added as its
+    # own alternative rather than changing the base pattern, since this is
+    # the one real instance found, not a general "any brand plus a number"
+    # case worth taking on here.
+    r"oldm|bushmill?s?|backbencher|chakhna|omlegend|old\s*monk\d|oaksmith)\b",
     re.I,
 )
 
