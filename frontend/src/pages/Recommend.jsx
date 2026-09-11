@@ -173,6 +173,63 @@ function RatingBadge({ rating, type, communityRating, communityCount }) {
   )
 }
 
+// Stage 3's five inputs to match_score, in plain words - the backend's own
+// SCORE_WEIGHTS naming (recommend.py) kept verbatim as the object keys, so
+// there is exactly one place either side has to agree on what each number
+// means.
+const SCORE_LABELS = {
+  budget_fit: 'Fits your budget',
+  purchase_similarity: 'You buy this kind of thing',
+  taste_similarity: 'Matches your taste',
+  rating: 'Rated well',
+  group_preference: 'Popular with this group',
+}
+
+/**
+ * Stage 3 made rank order the recommendation; this is what says why a
+ * specific bottle landed where it did. The percentage alone answers "how
+ * good a match" - the bars answer "a match on what", which is the part a
+ * bare number can't say by itself. Folded behind a tap so a page of picks
+ * doesn't turn into a page of bar charts by default.
+ */
+function MatchBreakdown({ score, breakdown, weights, open, onToggle }) {
+  if (score == null) return null
+  return (
+    <div className="mt-1">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="badge bg-brand-50 text-brand-700 border border-brand-200 font-black"
+      >
+        {score}% match{breakdown && (open ? ' · hide why' : ' · why?')}
+      </button>
+      {open && breakdown && (
+        <div className="mt-1.5 space-y-1 pl-0.5">
+          {Object.entries(breakdown).map(([key, value]) => (
+            <div key={key} className="flex items-center gap-2">
+              <span className="text-[9px] text-gray-500 w-32 flex-shrink-0 truncate">
+                {SCORE_LABELS[key] || key}
+                {weights?.[key] != null && (
+                  <span className="text-gray-400"> ({Math.round(weights[key] * 100)}%)</span>
+                )}
+              </span>
+              <div className="flex-1 h-1.5 bg-amber-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-brand-400 rounded-full"
+                  style={{ width: `${Math.max(0, Math.min(100, value))}%` }}
+                />
+              </div>
+              <span className="text-[9px] font-bold text-gray-500 w-6 text-right flex-shrink-0">
+                {Math.round(value)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /**
  * What to drink, for this many people, on this budget.
  *
@@ -242,6 +299,8 @@ export default function Recommend() {
   // bottle" are two different actions on the same card, and forcing them
   // to share one toggle would close one form the moment the other opens.
   const [rating, setRating] = useState(null)
+  // Same pattern again: which card's Stage 3 score breakdown is expanded.
+  const [whyOpen, setWhyOpen] = useState(null)
 
   // Stage 4: taste, same on/off/replace rule as bottles and kinds above -
   // an array of the exact words the server's taste vocabulary knows (see
@@ -1041,6 +1100,11 @@ export default function Recommend() {
                 </p>
                 <RatingBadge rating={p.rating} type={p.rating_type}
                              communityRating={p.community_rating} communityCount={p.community_review_count} />
+                <MatchBreakdown
+                  score={p.match_score} breakdown={p.score_breakdown} weights={p.score_weights}
+                  open={whyOpen === `p${i}`}
+                  onToggle={() => setWhyOpen(whyOpen === `p${i}` ? null : `p${i}`)}
+                />
 
                 {/* Split across the group, and what the budget would stretch to */}
                 <p className="text-[10px] text-gray-400 mt-0.5">
@@ -1182,6 +1246,11 @@ export default function Recommend() {
                     </p>
                     <RatingBadge rating={b.rating} type={b.rating_type}
                                  communityRating={b.community_rating} communityCount={b.community_review_count} />
+                    <MatchBreakdown
+                      score={b.match_score} breakdown={b.score_breakdown} weights={b.score_weights}
+                      open={whyOpen === `b${i}`}
+                      onToggle={() => setWhyOpen(whyOpen === `b${i}` ? null : `b${i}`)}
+                    />
 
                     {/* What the budget does with that — a consequence of the
                         budget, not a property of the beer, so it sits apart. */}
