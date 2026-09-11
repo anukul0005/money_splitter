@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getRecommendMeta, getRecommendation, getFriends, searchRecommend, listBrands } from '../api'
+import {
+  getRecommendMeta, getRecommendation, getFriends, searchRecommend, listBrands,
+  askRecommend, logRecommendShown, getRecommendEventsSummary,
+} from '../api'
 
 import LoadingSpinner from '../components/LoadingSpinner'
 import PriceEditForm from '../components/PriceEditForm'
@@ -220,6 +223,21 @@ export default function Recommend() {
   // to share one toggle would close one form the moment the other opens.
   const [rating, setRating] = useState(null)
 
+  // Stage 4: one free-text box, answered by the same picking/scoring
+  // pipeline as the form above - see runAsk. Its own busy/error pair so
+  // typing a question never disturbs the filter form's own state.
+  const [askQuery, setAskQuery] = useState('')
+  const [askBusy, setAskBusy]   = useState(false)
+  const [askError, setAskError] = useState('')
+  // What the query was actually read as - shown back so a wrong guess is
+  // obvious rather than silently shaping results nobody asked for.
+  const [extracted, setExtracted] = useState(null)
+
+  // Stage 5: fetched lazily, only once the stats panel is actually opened -
+  // a page nobody expands should never pay for the request.
+  const [eventStats, setEventStats] = useState(null)
+  const [eventStatsBusy, setEventStatsBusy] = useState(false)
+
   // Two independent calls, loaded independently. They used to share a
   // Promise.all, so a failure in either left the state dropdown empty with a
   // generic message and no way to tell which one broke.
@@ -321,6 +339,27 @@ export default function Recommend() {
     return next
   })
 
+  // Fire-and-forget: logging an impression is bookkeeping for Stage 5, not
+  // something the person looking at their results should ever wait on.
+  // Never awaited by a caller, and its own failure is swallowed rather than
+  // surfaced - a missed log costs one row in a stats table nobody is
+  // blocked on; showing an error over it would be a worse trade than the
+  // page just not tracking that one, older habit some pages still are.
+  const logShown = (data, source, query) => {
+    if (!data || data.is_all) return
+    const events = [
+      ...(data.picks ?? []).slice(0, TOP_N).map((p, i) => ({
+        brand: p.brand, kind: p.kind, position: i, match_score: p.match_score,
+      })),
+      ...(data.beers ?? []).slice(0, TOP_N).map((b, i) => ({
+        brand: b.brand, kind: 'beer', position: (data.picks?.length ?? 0) + i,
+        match_score: b.match_score,
+      })),
+    ]
+    if (!events.length) return
+    logRecommendShown({ events: events.map((e) => ({ ...e, source, query })) }).catch(() => {})
+  }
+
   const run = async (over = {}) => {
     setError(''); setBusy(true)
     setShowAllPicks(false); setShowAllBeers(false)
@@ -334,6 +373,8 @@ export default function Recommend() {
         names: withWho.join(','),
       })
       setResult(r.data)
+      setExtracted(null)
+      logShown(r.data, 'recommend', null)
     } catch (err) {
       const code = err.response?.status
       setError(
@@ -344,6 +385,40 @@ export default function Recommend() {
       )
       setResult(null)
     } finally { setBusy(false) }
+  }
+
+  // "I have Rs2,000. 4 people. Want something smooth, not smoky" answered by
+  // the exact same picking and scoring /recommend itself uses - see
+  // /recommend/ask. Reuses `state` from the form above rather than asking
+  // for it a second time, since alcohol pricing is still state-specific
+  // whichever way the question got asked.
+  const runAsk = async () => {
+    const q = askQuery.trim()
+    if (q.length < 3) { setAskError('Say a bit more than that.'); return }
+    setAskError(''); setAskBusy(true)
+    try {
+      const r = await askRecommend({ state, q, names: withWho.join(',') })
+      setResult(r.data)
+      setExtracted(r.data.extracted)
+      setShowAllPicks(false); setShowAllBeers(false)
+      logShown(r.data, 'ask', q)
+    } catch (err) {
+      setAskError(
+        err.response?.data?.detail || `Could not work that out (${err.response?.status || 'network error'}).`
+      )
+    } finally { setAskBusy(false) }
+  }
+
+  // Opened once, fetched once - re-opening the panel just shows what's
+  // already there rather than asking the server again for numbers that
+  // haven't had time to change.
+  const openStats = () => {
+    if (eventStats || eventStatsBusy) return
+    setEventStatsBusy(true)
+    getRecommendEventsSummary(withWho.join(','))
+      .then((r) => setEventStats(r.data))
+      .catch(() => setEventStats({ total_shown: 0, total_converted: 0, by_brand: [] }))
+      .finally(() => setEventStatsBusy(false))
   }
 
   // The size and kind cards are shared with the recommender, but the state
@@ -396,6 +471,58 @@ export default function Recommend() {
       </div>
 
       <div className="px-5 mt-4 space-y-4 max-w-2xl">
+        {/* Stage 4: say it in one line instead of filling in the form below -
+            "I have Rs2,000. 4 people. Want something smooth, not smoky" reads
+            back as a budget, a headcount, a kind and taste thresholds, then
+            runs through the exact same picking and scoring as the form does.
+            Its own card, above the form, since it's a shortcut past the form
+            rather than a part of it. */}
+        <div className="card space-y-2">
+          <label className="label">Or just say what you want</label>
+          <div className="flex gap-2">
+            <input
+              className="input text-sm flex-1"
+              value={askQuery}
+              placeholder="e.g. Rs2000, 4 people, smooth not smoky"
+              onChange={(e) => setAskQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') runAsk() }}
+            />
+            <button
+              type="button" onClick={runAsk}
+              disabled={askBusy || askQuery.trim().length < 3}
+              className="btn-primary px-4 flex-shrink-0"
+            >
+              {askBusy ? '…' : 'Ask'}
+            </button>
+          </div>
+          <p className="text-[10px] text-gray-400 pl-1">
+            Uses the State picked below - a budget, headcount or taste word
+            said here overrides the matching field, whatever it doesn&apos;t
+            mention falls back to the sliders below.
+          </p>
+          {askError && (
+            <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{askError}</p>
+          )}
+          {extracted && (
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              <span className="badge bg-amber-100 text-gray-700 border border-amber-200">
+                {extracted.budget_was_stated ? '' : '~'}{INR(extracted.budget_min)}–{fmtBudgetMax(extracted.budget_max)}
+              </span>
+              <span className="badge bg-amber-100 text-gray-700 border border-amber-200">
+                {extracted.people} {extracted.people === 1 ? 'person' : 'people'}
+              </span>
+              {extracted.kinds.map((k) => (
+                <span key={k} className="badge bg-amber-100 text-gray-700 border border-amber-200 capitalize">{k}</span>
+              ))}
+              {Object.entries(extracted.taste || {}).map(([dim, bounds]) => (
+                <span key={dim} className="badge bg-amber-100 text-gray-700 border border-amber-200">
+                  {dim} {bounds.min != null ? `≥ ${bounds.min}` : `≤ ${bounds.max}`}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div className="card space-y-3">
           {/* State first: alcohol is taxed per state, so it drives every price */}
           <div>
@@ -728,6 +855,46 @@ export default function Recommend() {
             </div>
           )}
         </div>
+
+        {/* Stage 5, closing the loop: did what got shown actually get drunk.
+            Folded away and fetched only on first open - a number nobody asked
+            for is not worth a request on every page load. */}
+        <details className="card" onToggle={(e) => { if (e.target.open) openStats() }}>
+          <summary className="text-[11px] font-bold text-gray-500 cursor-pointer">
+            Your recommendation stats
+          </summary>
+          <div className="mt-2">
+            {eventStatsBusy && <p className="text-xs text-gray-400">Loading…</p>}
+            {eventStats && !eventStatsBusy && (
+              eventStats.total_shown === 0 ? (
+                <p className="text-xs text-gray-400">
+                  Nothing logged yet - run a recommendation and it'll start tracking here.
+                </p>
+              ) : (
+                <>
+                  <p className="text-sm font-bold text-gray-900">
+                    {eventStats.total_converted} of {eventStats.total_shown} suggestions actually bought
+                    <span className="font-normal text-gray-400"> · {eventStats.conversion_rate}%</span>
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {eventStats.by_brand.slice(0, 10).map((b) => (
+                      <span
+                        key={b.brand}
+                        className={`badge border ${
+                          b.converted > 0
+                            ? 'bg-green-50 border-green-200 text-green-700'
+                            : 'bg-amber-50 border-amber-200 text-gray-500'
+                        }`}
+                      >
+                        {b.brand} · {b.converted}/{b.shown}
+                      </span>
+                    ))}
+                  </div>
+                </>
+              )
+            )}
+          </div>
+        </details>
 
         {error && (
           <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{error}</p>

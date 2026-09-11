@@ -117,6 +117,10 @@ export const getFriends             = (name) => api.get('/stats/friends')
 export const getRecommendMeta = ()      => api.get('/recommend/meta')
 export const getRecommendation = (p)    => api.get('/recommend/', { params: p })
 export const searchRecommend   = (p)    => api.get('/recommend/search', { params: p })
+export const askRecommend      = (p)    => api.get('/recommend/ask', { params: p })
+export const logRecommendShown = (body) => api.post('/recommend/events/shown', body)
+export const getRecommendEventsSummary = (names) =>
+  api.get('/recommend/events/summary', { params: { names } })
 
 // ── Food recommender ──────────────────────────────────────────────────────────
 // Same idea, different table: cited Delhi NCR restaurant listings priced the
