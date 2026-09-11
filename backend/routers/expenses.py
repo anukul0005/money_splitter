@@ -11,6 +11,22 @@ from activity import record_activity
 router = APIRouter(prefix="/expenses", tags=["expenses"])
 
 
+def _check_conversions(db, expense, caller_name: str) -> None:
+    """Stage 5's other half of _index below: this expense might be the real
+    drink a past recommendation was hoping for. Checked against whoever is
+    saving the expense, not necessarily `paid_by` - a recommendation is shown
+    to a logged-in person, and it's their action, not the split's payer
+    field, that a conversion should follow. Wrapped for the same reason
+    _index is - a missed conversion costs nothing; failing the expense over
+    it would.
+    """
+    try:
+        from routers.recommend import _text, check_conversions
+        check_conversions(db, caller_name, _text(expense), expense.id, expense.date)
+    except Exception as e:  # pragma: no cover - never worth failing a save
+        print(f"[recommend] conversion hook for expense {expense.id} failed: {e}")
+
+
 def _index(db, expense) -> None:
     """Put this expense into the knowledge base, or take it out.
 
@@ -85,6 +101,8 @@ def create_expense(payload: ExpenseCreate, background_tasks: BackgroundTasks,
     db.commit()
     db.refresh(expense)
 
+    _check_conversions(db, expense, caller.name)
+
     background_tasks.add_task(
         notify_group_activity_bg, group.id, expense.paid_by, "added a new expense", summary,
     )
@@ -124,6 +142,8 @@ def update_expense(expense_id: int, payload: ExpenseCreate, background_tasks: Ba
 
     db.commit()
     db.refresh(expense)
+
+    _check_conversions(db, expense, caller.name)
 
     background_tasks.add_task(
         notify_group_activity_bg, group.id, caller.name, "edited an expense", summary,

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from datetime import date, datetime, timedelta
 from functools import lru_cache
 
 from fastapi import APIRouter, Depends, HTTPException  # noqa: I001
@@ -28,7 +29,7 @@ from brand_names import canonicalise as bn_canonicalise, core as bn_core, key as
 from liquor_prices import (
     ABV_SOURCES, BOTTLES, NCR, SOURCES, STATES, Bottle, abv_for, for_state,
 )
-from models import Group, PriceOverride, Product, ProductReview, User
+from models import Group, PriceOverride, Product, ProductReview, RecommendationEvent, User
 
 router = APIRouter(prefix="/recommend", tags=["recommend"])
 
@@ -2487,3 +2488,163 @@ def recommend(
         "ncr": list(NCR),
         **per_state,
     }
+
+
+# ── Stage 5: did a suggestion actually get drunk? ────────────────────────────
+# The only signal this whole engine is missing: every score in Stage 3 is
+# either static (a bottle's own rating) or purely retrospective (what was
+# already bought before this suggestion existed). Nothing yet closes the
+# loop by noticing which suggestions people actually acted on - this is
+# that loop, logged automatically on the way out of /recommend and /ask,
+# and checked automatically on the way in to a new expense, so using the
+# feature is the only thing anyone ever has to do to feed it.
+
+CONVERSION_WINDOW_DAYS = 14
+
+
+class ShownEventIn(BaseModel):
+    brand: str
+    kind: str | None = None
+    position: int | None = None
+    match_score: int | None = None
+    source: str = "recommend"
+    query: str | None = None
+    names: str = ""
+
+
+class ShownEventsIn(BaseModel):
+    group_id: int | None = None
+    events: list[ShownEventIn]
+
+
+@router.post("/events/shown", response_model=dict)
+def log_shown(payload: ShownEventsIn, db: Session = Depends(get_db),
+             caller: User = Depends(current_user)):
+    """One row per bottle actually rendered on screen, so a later expense
+    for that brand has something to convert. Logged from the frontend right
+    after a /recommend or /ask response comes back - not from inside those
+    endpoints themselves, because "shown" means displayed, and a response
+    the caller never rendered (a request that errored client-side, a stale
+    fetch that got thrown away) isn't a real impression.
+    """
+    if payload.group_id is not None:
+        group = db.query(Group).filter(Group.id == payload.group_id).first()
+        if not group or not is_member(group, caller):
+            raise HTTPException(404, "No such group")
+    rows = [
+        RecommendationEvent(
+            user_name=caller.name,
+            group_id=payload.group_id,
+            brand=e.brand,
+            kind=e.kind,
+            position=e.position,
+            match_score=e.match_score,
+            source=e.source,
+            query=e.query,
+        )
+        for e in payload.events
+    ]
+    db.add_all(rows)
+    db.commit()
+    return {"logged": len(rows)}
+
+
+@router.get("/events/summary", response_model=dict)
+def events_summary(names: str = "", db: Session = Depends(get_db),
+                   caller: User = Depends(current_user)):
+    """How often what got shown turned into what got bought - the whole
+    point of Stage 5. Scoped to the caller alone; `names` narrows to events
+    logged for a shared /recommend query the same way /recommend/profile's
+    own `names` does, not to anyone else's personal history.
+    """
+    people_names = [n for n in (names or "").split(",") if n.strip()]
+    q = db.query(RecommendationEvent).filter(RecommendationEvent.user_name == caller.name)
+    events = q.all()
+
+    by_brand: dict[str, dict] = defaultdict(lambda: {"shown": 0, "converted": 0})
+    total_shown = 0
+    total_converted = 0
+    for ev in events:
+        total_shown += 1
+        by_brand[ev.brand]["shown"] += 1
+        if ev.converted:
+            total_converted += 1
+            by_brand[ev.brand]["converted"] += 1
+
+    brands = [
+        {"brand": b, "shown": c["shown"], "converted": c["converted"],
+         "conversion_rate": round(c["converted"] / c["shown"] * 100, 1) if c["shown"] else 0.0}
+        for b, c in by_brand.items()
+    ]
+    brands.sort(key=lambda r: (-r["converted"], -r["shown"]))
+
+    return {
+        "total_shown": total_shown,
+        "total_converted": total_converted,
+        "conversion_rate": round(total_converted / total_shown * 100, 1) if total_shown else 0.0,
+        "by_brand": brands,
+        "window_days": CONVERSION_WINDOW_DAYS,
+    }
+
+
+def check_conversions(db: Session, user_name: str, expense_text: str,
+                      expense_id: int, expense_date: str | None) -> None:
+    """Called once, right after a real expense is saved (see expenses.py):
+    does its text name a brand this person was shown a recommendation for
+    recently and hasn't already converted? If so, mark the oldest such
+    still-open row converted and move on.
+
+    Brand matching reuses _catalog_short_names/bn_key exactly as _history
+    does, so "had Royal Stag" converts a shown "Royal Stag" the same way it
+    already counts as a favourite there - one matching rule, not two that
+    could quietly disagree.
+
+    The oldest open row, not the newest or all of them: a suggestion shown
+    three times before finally being bought should convert once, for the
+    first time it worked, and a second, unrelated bottle of the same brand
+    bought later should find nothing left to convert - it just wasn't
+    something this feature was tracking anymore.
+
+    Never raises: exactly like _index below it, this is a side effect of
+    saving an expense and a failure here must cost nothing but one missed
+    conversion, never the expense itself.
+    """
+    try:
+        if not expense_text or not is_alcohol(expense_text):
+            return
+        short_names = _catalog_short_names()
+        padded = f" {bn_key(expense_text)} "
+        matched = {display for key, display in short_names.items() if key in padded}
+        if not matched:
+            return
+
+        try:
+            exp_date = date.fromisoformat((expense_date or "")[:10])
+        except ValueError:
+            exp_date = date.today()
+        cutoff = exp_date - timedelta(days=CONVERSION_WINDOW_DAYS)
+
+        candidates = (
+            db.query(RecommendationEvent)
+            .filter(
+                RecommendationEvent.user_name == user_name,
+                RecommendationEvent.converted.is_(False),
+                RecommendationEvent.brand.in_(matched),
+            )
+            .order_by(RecommendationEvent.shown_at)
+            .all()
+        )
+        seen_brands: set[str] = set()
+        for ev in candidates:
+            if ev.brand in seen_brands or ev.shown_at is None:
+                continue
+            shown_date = ev.shown_at.date()
+            if cutoff <= shown_date <= exp_date:
+                ev.converted = True
+                ev.converted_at = datetime.utcnow()
+                ev.expense_id = expense_id
+                seen_brands.add(ev.brand)
+        if seen_brands:
+            db.commit()
+    except Exception as e:  # pragma: no cover - never worth failing an expense save
+        print(f"[recommend] conversion check for expense {expense_id} failed: {e}")

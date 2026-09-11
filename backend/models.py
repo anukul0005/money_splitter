@@ -418,3 +418,43 @@ class ProductReview(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(),
                         onupdate=func.now())
+
+
+class RecommendationEvent(Base):
+    """One bottle shown to one person by /recommend or /recommend/ask, and
+    whether it later turned into a real drink.
+
+    "Later" is judged the same way the purchase profile already reads
+    history (see recommend.py's _history/_catalog_short_names): a brand
+    name found in a new expense's own text within CONVERSION_WINDOW_DAYS
+    of when this row was shown, for that same person, converts the oldest
+    still-unconverted row for that (user, brand) pair - not a click, an
+    opt-in survey, or anything the person has to remember to do, because
+    that would just be a second hand-authored signal layered on top of the
+    one thing this whole engine already promised not to need: someone
+    deciding what they like instead of buying it. This is Stage 5's only
+    reason to exist - stages 1-4 rank bottles well today; this is what
+    would eventually let the ranking notice which of its own suggestions
+    people actually acted on, versus scrolled past.
+
+    Scoped to one group only when the recommendation itself was
+    group-scoped (a `names=` query) - group_id is nullable and null for a
+    solo query, matching how _user_profile's own `groups` argument works.
+    """
+
+    __tablename__ = "recommendation_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_name = Column(String(100), nullable=False, index=True)
+    group_id = Column(Integer, ForeignKey("groups.id", ondelete="SET NULL"), nullable=True)
+    brand = Column(String(200), nullable=False)
+    kind = Column(String(50), nullable=True)
+    position = Column(Integer, nullable=True)     # 0-based rank in the returned list
+    match_score = Column(Integer, nullable=True)  # Stage 3's score, at the moment this was shown
+    source = Column(String(20), nullable=False, default="recommend")  # "recommend" or "ask"
+    query = Column(Text, nullable=True)           # the free-text /ask query, if that's where this came from
+    shown_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    converted = Column(Boolean, nullable=False, default=False, index=True)
+    converted_at = Column(DateTime(timezone=True), nullable=True)
+    expense_id = Column(Integer, ForeignKey("expenses.id", ondelete="SET NULL"), nullable=True)
