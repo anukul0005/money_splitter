@@ -7,8 +7,8 @@
     height: 100%;
     /* iOS Safari: use fill-available so vh doesn't jump with keyboard */
     height: -webkit-fill-available;
-    /* Whole type scale dialled down 1% (rem-based, so everything follows) */
-    font-size: 99%;
+    /* Whole type scale dialled down ~3% total (rem-based, so everything follows) */
+    font-size: 97.5%;
   }
   * { -webkit-tap-highlight-color: transparent; }
   body {
