@@ -481,16 +481,20 @@ export default function Recommend() {
           <label className="label">Or just say what you want</label>
           <div className="flex gap-2">
             <input
-              className="input text-sm flex-1"
+              className="input text-sm flex-1 min-w-0"
               value={askQuery}
               placeholder="e.g. Rs2000, 4 people, smooth not smoky"
               onChange={(e) => setAskQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') runAsk() }}
             />
+            {/* btn-primary bakes in w-full for the buttons that stand alone
+                on their own row; forced back to auto here so it sits beside
+                the input instead of claiming the whole row and pushing the
+                input down to min-content width. */}
             <button
               type="button" onClick={runAsk}
               disabled={askBusy || askQuery.trim().length < 3}
-              className="btn-primary px-4 flex-shrink-0"
+              className="btn-primary w-auto px-5 flex-shrink-0"
             >
               {askBusy ? '…' : 'Ask'}
             </button>
