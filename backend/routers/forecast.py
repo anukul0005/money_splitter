@@ -177,6 +177,12 @@ def forecast_budget(
     people: int = 2,
     budget: float = 2000,
     beer_only: bool = False,
+    include_food: bool = True,
+    # A percentage, not a fraction, because that is what a slider actually
+    # produces. 65 is a starting point picked by hand, not derived from
+    # anything - see the docstring for why this is asked rather than
+    # calculated.
+    drink_share_pct: float = 65,
     state: str = "",
     city: str = "",
     names: str = "",
@@ -185,17 +191,33 @@ def forecast_budget(
 ):
     """Split one total budget into a drinks share and a food share.
 
-    Used to also take a `session` of drinks-only or food-only, each just
-    handing the whole (post-extras) budget to one side with a share of
-    1/0 - a special case of the same split below, not a different
-    calculation, and one a person can already get by not caring what the
-    other number says. Removed as redundant rather than kept as a picker
-    with only one real choice left.
+    The split used to be calculated outright from this person's historical
+    drink-spend-vs-food-spend ratio. That number is real and often
+    surprising - someone who drinks often but eats out even more often can
+    have food dominate total rupees despite costing less per occasion each
+    time - and a forecast that quietly used it while a person expected
+    something closer to their own sense of the evening felt wrong for
+    reasons that had nothing to do with the arithmetic being incorrect.
+    Asked directly instead: `drink_share_pct` is now a plain input the
+    caller sets (a slider, on the page), defaulting to 65/35 rather than to
+    whatever history says. History is still computed and returned
+    (`history_drink_share` / `history_food_share`) so the page can show it
+    as a reference alongside the slider - useful context, not an
+    override.
+
+    `include_food=False` is the one case left of what used to be a
+    three-way session choice: no food side at all, the whole (post-extras)
+    budget goes to drinks. There is no equivalent "drinks only within a
+    mixed session" case worth keeping as its own toggle - a forecast is
+    built around a drinking session by construction, food is what is
+    optional on top of it.
     """
     if people < 1:
         raise HTTPException(400, "There has to be at least one of you")
     if budget <= 0:
         raise HTTPException(400, "Set a budget above zero")
+    if not 0 <= drink_share_pct <= 100:
+        raise HTTPException(400, "Drink share has to be between 0 and 100")
 
     glasses = 0 if beer_only else people * GLASS_COST
     snacks = people * SNACK_COST_PER_PERSON
@@ -203,15 +225,24 @@ def forecast_budget(
     remaining = max(budget - extras, 0)
 
     people_names = [n for n in (names or "").split(",") if n.strip()]
+    # Reference only now, never used to decide the split itself - see the
+    # docstring above.
+    hist_drink_share, hist_food_share, ratio_source = _spend_ratio(db, caller, people_names)
 
-    drink_share, food_share, ratio_source = _spend_ratio(db, caller, people_names)
-    drink_budget = round(remaining * drink_share)
-    food_budget = remaining - drink_budget
+    if include_food:
+        drink_share = drink_share_pct / 100
+        food_share = 1 - drink_share
+        drink_budget = round(remaining * drink_share)
+        food_budget = remaining - drink_budget
+    else:
+        drink_share, food_share = 1.0, 0.0
+        drink_budget, food_budget = remaining, 0.0
 
     return {
         "people": people,
         "budget": budget,
         "beer_only": beer_only,
+        "include_food": include_food,
         # Said plainly, per person, so "why is this ₹450 higher than I typed"
         # is answered on the page rather than left to work out.
         "extras": {
@@ -224,16 +255,18 @@ def forecast_budget(
         # price", which is exactly what a forecast is for.
         "shortfall": round(extras - budget) if extras > budget else 0,
         "remaining": round(remaining),
-        "ratio_source": ratio_source,   # "history" | "n/a" | "default"
         "drink_share": round(drink_share, 3),
         "food_share": round(food_share, 3),
+        "ratio_source": ratio_source,   # "history" | "default" - about the reference numbers below, not the split used
+        "history_drink_share": round(hist_drink_share, 3),
+        "history_food_share": round(hist_food_share, 3),
         "drink_budget": round(drink_budget),
         "food_budget": round(food_budget),
         # Wide enough to hand straight to /recommend and /food's own
         # budget_min/budget_max, so this page can link into a real pick
         # list rather than leaving the forecast as numbers nobody can act on.
         "drink_band": (drink_band := _band(drink_budget, DRINK_MIN_SPAN)),
-        "food_band": (food_band := _band(food_budget, FOOD_MIN_SPAN)),
+        "food_band": (food_band := _band(food_budget, FOOD_MIN_SPAN) if include_food else None),
         "state": state or None,
         "city": city or None,
         # A real sample of what that money buys, in the place asked about -
@@ -242,7 +275,10 @@ def forecast_budget(
         # computed when a location was actually given; forecasting works
         # perfectly well as pure numbers without one.
         "drink_preview": _drink_preview(db, state, drink_band) if state else None,
-        "food_preview": _food_preview(db, city, food_band, people) if city else None,
+        "food_preview": (
+            _food_preview(db, city, food_band, people)
+            if (include_food and city) else None
+        ),
     }
 
 

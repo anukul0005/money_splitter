@@ -21,6 +21,23 @@ const INR = (n) => {
 const FALLBACK_STATES = ['Delhi', 'Maharashtra', 'Uttar Pradesh']
 const FALLBACK_CITIES = ['Delhi', 'Gurugram', 'Noida']
 
+// One location picker, in the vocabulary a person actually recognises - a
+// city, not an excise-table state name - mapped to whichever state that
+// city's drink prices are actually published under. Having a separate
+// State (for drinks) and City (for food) selector, defaulting independently
+// to whatever happened to be first in each list, meant both silently
+// starting on "Delhi" and looking linked when they never were - one
+// picker removes the possibility of that confusion outright.
+const CITY_TO_STATE = {
+  Delhi: 'Delhi',
+  Gurugram: 'Gurugram (Haryana)',
+  Noida: 'Uttar Pradesh',
+}
+// Ghaziabad has no published price list of its own; Noida is the closest
+// supported city and sits in the same state, so it is the sensible default
+// for someone in or near Ghaziabad rather than defaulting to Delhi.
+const DEFAULT_LOCATION = 'Noida'
+
 // The three sizes spirits are actually sold in, same as the Drinks tab - a
 // forecast line for "2 quarters of Old Monk" needs the same vocabulary the
 // recommender already uses, not a fourth invented one.
@@ -72,18 +89,23 @@ export default function Forecast({ tab, setTab }) {
   const [people, setPeople]   = useState('2')
   const [budget, setBudget]   = useState('3000')
   const [beerOnly, setBeerOnly] = useState(false)
-  const [state, setState]     = useState('')
-  const [city, setCity]       = useState('')
+  const [includeFood, setIncludeFood] = useState(true)
+  const [drinkSharePct, setDrinkSharePct] = useState(65)
+  const [location, setLocation] = useState('')
   const [result, setResult]   = useState(null)
   const [error, setError]     = useState('')
   const [busy, setBusy]       = useState(false)
 
   useEffect(() => {
-    if (drinkMeta?.states?.length && !state) setState(drinkMeta.states[0])
-  }, [drinkMeta])
-  useEffect(() => {
-    if (foodMeta?.cities?.length && !city) setCity(foodMeta.cities[0])
+    if (foodMeta?.cities?.length && !location) {
+      setLocation(foodMeta.cities.includes(DEFAULT_LOCATION) ? DEFAULT_LOCATION : foodMeta.cities[0])
+    }
   }, [foodMeta])
+
+  // The state a drink price actually gets looked up under for whichever
+  // city is picked - falls back to whatever /recommend's own meta lists
+  // first if the picked city has no explicit mapping above.
+  const stateForLocation = CITY_TO_STATE[location] || drinkMeta?.states?.[0] || ''
 
   const peopleN = Math.max(1, parseInt(people, 10) || 0)
   const budgetN = Math.max(0, parseFloat(budget) || 0)
@@ -93,7 +115,8 @@ export default function Forecast({ tab, setTab }) {
     try {
       const r = await getForecastBudget({
         people: peopleN, budget: budgetN, beer_only: beerOnly,
-        state, city, names: withWho.join(','),
+        include_food: includeFood, drink_share_pct: drinkSharePct,
+        state: stateForLocation, city: location, names: withWho.join(','),
       })
       setResult(r.data)
     } catch (err) {
@@ -195,22 +218,44 @@ export default function Forecast({ tab, setTab }) {
             </div>
 
             <div>
-              <label className="label">State (for drink prices)</label>
-              <select className="input" value={state} onChange={(e) => setState(e.target.value)}>
-                {(drinkMeta?.states ?? []).map((s) => <option key={s} value={s}>{s}</option>)}
+              <label className="label">Location</label>
+              <select className="input" value={location} onChange={(e) => setLocation(e.target.value)}>
+                {(foodMeta?.cities ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
               <p className="text-[10px] text-gray-400 mt-1">
-                A bottle this state doesn't sell is still priced — at whatever
-                the cheapest other state charges for it, labelled as such.
+                Drink prices use {stateForLocation || 'the matching state'}'s
+                excise list; food prices use {location || 'this city'}'s
+                listings. A bottle not sold here is still priced — at
+                whatever the cheapest other state charges for it, labelled
+                as such.
               </p>
             </div>
 
-            <div>
-              <label className="label">City (for food prices)</label>
-              <select className="input" value={city} onChange={(e) => setCity(e.target.value)}>
-                {(foodMeta?.cities ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
+            <label className="flex items-center gap-2 text-xs font-bold text-gray-600">
+              <input type="checkbox" checked={includeFood} onChange={(e) => setIncludeFood(e.target.checked)} />
+              Include food in this forecast
+            </label>
+
+            {includeFood && (
+              <div>
+                <div className="flex items-baseline justify-between">
+                  <label className="label mb-0">Drinks / food split</label>
+                  <p className="text-xs font-bold text-gray-700">
+                    {drinkSharePct}% drinks · {100 - drinkSharePct}% food
+                  </p>
+                </div>
+                <input
+                  type="range" min="0" max="100" step="5" value={drinkSharePct}
+                  onChange={(e) => setDrinkSharePct(Number(e.target.value))}
+                  className="w-full accent-brand-400"
+                />
+                <p className="text-[10px] text-gray-400 mt-1">
+                  Starts at 65/35 — drag to change. Your own history
+                  suggests a different split; it's shown next to the result
+                  as a reference, not used automatically.
+                </p>
+              </div>
+            )}
 
             {friends.length > 0 && (
               <div>
@@ -276,24 +321,32 @@ export default function Forecast({ tab, setTab }) {
                 </div>
               </div>
 
-              <div className="card p-3.5">
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">
-                  Split of the remaining {INR(result.remaining)}
-                </p>
-                <p className="text-[10px] text-gray-400 mb-2">
-                  {result.ratio_source === 'history'
-                    ? "Based on your own past drinks-with-food sessions"
-                    : "No history yet — using a starting 55/45 lean towards drinks"}
-                </p>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">Drinks ({Math.round(result.drink_share * 100)}%)</span>
-                  <span className="font-black text-brand-600">{INR(result.drink_budget)}</span>
+              {result.include_food && (
+                <div className="card p-3.5">
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">
+                    Split of the remaining {INR(result.remaining)}
+                  </p>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Drinks ({Math.round(result.drink_share * 100)}%)</span>
+                    <span className="font-black text-brand-600">{INR(result.drink_budget)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm mt-1">
+                    <span className="text-gray-600">Food ({Math.round(result.food_share * 100)}%)</span>
+                    <span className="font-black text-brand-600">{INR(result.food_budget)}</span>
+                  </div>
+                  {result.ratio_source === 'history' && (
+                    <p className="text-[10px] text-gray-400 mt-2 pt-2 border-t border-amber-100">
+                      For reference, your own past drinks-and-food spending
+                      works out to{' '}
+                      <span className="font-bold text-gray-500">
+                        {Math.round(result.history_drink_share * 100)}% drinks /{' '}
+                        {Math.round(result.history_food_share * 100)}% food
+                      </span>{' '}
+                      — not used automatically, just shown alongside the split above.
+                    </p>
+                  )}
                 </div>
-                <div className="flex justify-between text-sm mt-1">
-                  <span className="text-gray-600">Food ({Math.round(result.food_share * 100)}%)</span>
-                  <span className="font-black text-brand-600">{INR(result.food_budget)}</span>
-                </div>
-              </div>
+              )}
 
               {(result.drink_budget > 0) && (
                 <div className="card p-3.5">
