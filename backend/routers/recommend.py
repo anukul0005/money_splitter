@@ -1939,6 +1939,16 @@ def ask(
         names=names, db=db, caller=caller,
     )
 
+    # Applied only if it actually narrows anything. Most bottles' taste
+    # dimensions are a category-level guess, not a real per-bottle value (see
+    # Product's own docstring) - whisky in particular is 1,053 of 1,054 rows
+    # sitting on the exact same guessed smoothness, so "smoothness >= 3.5"
+    # can zero out every whisky there is without a single one actually
+    # being un-smooth. Filtering out everything in that case would answer
+    # confidently with nothing, which is worse than admitting the data can't
+    # back up the question - so a taste word that would empty a non-empty
+    # result is dropped instead of applied, and the response says so.
+    taste_applied = False
     if taste:
         products = _products_by_name()
 
@@ -1956,11 +1966,16 @@ def ask(
                     return False
             return True
 
-        result["picks"] = [p for p in result["picks"] if _meets_taste(p["brand"])]
-        result["beers"] = [b for b in result["beers"] if _meets_taste(b["brand"])]
+        had_candidates = bool(result["picks"] or result["beers"])
+        filtered_picks = [p for p in result["picks"] if _meets_taste(p["brand"])]
+        filtered_beers = [b for b in result["beers"] if _meets_taste(b["brand"])]
+        taste_applied = bool(filtered_picks or filtered_beers) or not had_candidates
+        if taste_applied:
+            result["picks"], result["beers"] = filtered_picks, filtered_beers
 
     return {
         "query": q,
+        "taste_filter_applied": taste_applied,
         "extracted": {
             "budget_min": budget_min, "budget_max": budget_max,
             "budget_was_stated": budget is not None,

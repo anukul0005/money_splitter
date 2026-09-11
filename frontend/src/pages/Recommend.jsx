@@ -481,7 +481,12 @@ export default function Recommend() {
           <label className="label">Or just say what you want</label>
           <div className="flex gap-2">
             <input
-              className="input text-sm flex-1 min-w-0"
+              // Smaller than the app's usual 16px input text on purpose - a
+              // natural-language query runs longer than "500" or a brand
+              // name, and 16px was clipping it out of view well before the
+              // box ran out of width. Same size as the badge chips below it
+              // and the result cards' own detail lines, not a one-off.
+              className="input text-xs flex-1 min-w-0"
               value={askQuery}
               placeholder="e.g. Rs2000, 4 people, smooth not smoky"
               onChange={(e) => setAskQuery(e.target.value)}
@@ -525,13 +530,25 @@ export default function Recommend() {
               ))}
             </div>
           )}
+          {/* Most bottles' taste numbers are a category-level guess, not a
+              real per-bottle rating, and a threshold above the guess can
+              zero out an entire category without one of them actually
+              failing it. Said plainly when that's what happened, rather
+              than answering confidently with an empty list. */}
+          {extracted && Object.keys(extracted.taste || {}).length > 0 &&
+           result?.taste_filter_applied === false && (
+            <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-100 rounded-md px-3 py-2">
+              Not enough per-bottle taste data here to narrow by that yet —
+              showing everything else that matched instead.
+            </p>
+          )}
         </div>
 
         <div className="card space-y-3">
           {/* State first: alcohol is taxed per state, so it drives every price */}
           <div>
             <label className="label">State</label>
-            <select className="input" value={state} onChange={(e) => setState(e.target.value)}>
+            <select className="input text-sm" value={state} onChange={(e) => setState(e.target.value)}>
               <option value="all">All states</option>
               {(meta?.states ?? []).map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
@@ -565,7 +582,7 @@ export default function Recommend() {
           <div>
             <label className="label">People</label>
             <input
-              className="input font-bold" type="number" min="1" max="30"
+              className="input text-sm font-bold" type="number" min="1" max="30"
               inputMode="numeric"
               value={people}
               onChange={(e) => setPeople(e.target.value)}
