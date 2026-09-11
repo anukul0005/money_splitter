@@ -21,12 +21,6 @@ const INR = (n) => {
 const FALLBACK_STATES = ['Delhi', 'Maharashtra', 'Uttar Pradesh']
 const FALLBACK_CITIES = ['Delhi', 'Gurugram', 'Noida']
 
-const SESSIONS = [
-  ['drinks_food', 'Drinks + food'],
-  ['drinks_only', 'Just drinks'],
-  ['food_only',   'Just food'],
-]
-
 // The three sizes spirits are actually sold in, same as the Drinks tab - a
 // forecast line for "2 quarters of Old Monk" needs the same vocabulary the
 // recommender already uses, not a fourth invented one.
@@ -77,7 +71,6 @@ export default function Forecast({ tab, setTab }) {
   // ── Budget → split ──────────────────────────────────────────────────────
   const [people, setPeople]   = useState('2')
   const [budget, setBudget]   = useState('3000')
-  const [session, setSession] = useState('drinks_food')
   const [beerOnly, setBeerOnly] = useState(false)
   const [state, setState]     = useState('')
   const [city, setCity]       = useState('')
@@ -94,16 +87,13 @@ export default function Forecast({ tab, setTab }) {
 
   const peopleN = Math.max(1, parseInt(people, 10) || 0)
   const budgetN = Math.max(0, parseFloat(budget) || 0)
-  const drinking = session !== 'food_only'
-  const eating    = session !== 'drinks_only'
 
   const runBudget = async () => {
     setError(''); setBusy(true); setResult(null)
     try {
       const r = await getForecastBudget({
-        people: peopleN, budget: budgetN, session, beer_only: beerOnly,
-        state: drinking ? state : '', city: eating ? city : '',
-        names: withWho.join(','),
+        people: peopleN, budget: budgetN, beer_only: beerOnly,
+        state, city, names: withWho.join(','),
       })
       setResult(r.data)
     } catch (err) {
@@ -182,32 +172,10 @@ export default function Forecast({ tab, setTab }) {
       {mode === 'budget' ? (
         <div className="px-5 mt-4 space-y-4 max-w-2xl">
           <div className="card space-y-3">
-            <div>
-              <label className="label">Session</label>
-              <div className="grid grid-cols-3 gap-1.5">
-                {SESSIONS.map(([v, label]) => (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() => setSession(v)}
-                    className={`rounded-md py-2 text-xs font-bold border transition-all ${
-                      session === v
-                        ? 'bg-brand-400 border-brand-400 text-white'
-                        : 'bg-cream border-amber-200 text-gray-600 hover:bg-amber-50'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {drinking && (
-              <label className="flex items-center gap-2 text-xs font-bold text-gray-600">
-                <input type="checkbox" checked={beerOnly} onChange={(e) => setBeerOnly(e.target.checked)} />
-                Just beer — no disposable glasses needed
-              </label>
-            )}
+            <label className="flex items-center gap-2 text-xs font-bold text-gray-600">
+              <input type="checkbox" checked={beerOnly} onChange={(e) => setBeerOnly(e.target.checked)} />
+              Just beer — no disposable glasses needed
+            </label>
 
             <div>
               <label className="label">People</label>
@@ -226,27 +194,23 @@ export default function Forecast({ tab, setTab }) {
               />
             </div>
 
-            {drinking && (
-              <div>
-                <label className="label">State (for drink prices)</label>
-                <select className="input" value={state} onChange={(e) => setState(e.target.value)}>
-                  {(drinkMeta?.states ?? []).map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-                <p className="text-[10px] text-gray-400 mt-1">
-                  A bottle this state doesn't sell is still priced — at whatever
-                  the cheapest other state charges for it, labelled as such.
-                </p>
-              </div>
-            )}
+            <div>
+              <label className="label">State (for drink prices)</label>
+              <select className="input" value={state} onChange={(e) => setState(e.target.value)}>
+                {(drinkMeta?.states ?? []).map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <p className="text-[10px] text-gray-400 mt-1">
+                A bottle this state doesn't sell is still priced — at whatever
+                the cheapest other state charges for it, labelled as such.
+              </p>
+            </div>
 
-            {eating && (
-              <div>
-                <label className="label">City (for food prices)</label>
-                <select className="input" value={city} onChange={(e) => setCity(e.target.value)}>
-                  {(foodMeta?.cities ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
-            )}
+            <div>
+              <label className="label">City (for food prices)</label>
+              <select className="input" value={city} onChange={(e) => setCity(e.target.value)}>
+                {(foodMeta?.cities ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
 
             {friends.length > 0 && (
               <div>
@@ -312,26 +276,24 @@ export default function Forecast({ tab, setTab }) {
                 </div>
               </div>
 
-              {result.session === 'drinks_food' && (
-                <div className="card p-3.5">
-                  <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">
-                    Split of the remaining {INR(result.remaining)}
-                  </p>
-                  <p className="text-[10px] text-gray-400 mb-2">
-                    {result.ratio_source === 'history'
-                      ? "Based on your own past drinks-with-food sessions"
-                      : "No history yet — using a starting 55/45 lean towards drinks"}
-                  </p>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600">Drinks ({Math.round(result.drink_share * 100)}%)</span>
-                    <span className="font-black text-brand-600">{INR(result.drink_budget)}</span>
-                  </div>
-                  <div className="flex justify-between text-sm mt-1">
-                    <span className="text-gray-600">Food ({Math.round(result.food_share * 100)}%)</span>
-                    <span className="font-black text-brand-600">{INR(result.food_budget)}</span>
-                  </div>
+              <div className="card p-3.5">
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">
+                  Split of the remaining {INR(result.remaining)}
+                </p>
+                <p className="text-[10px] text-gray-400 mb-2">
+                  {result.ratio_source === 'history'
+                    ? "Based on your own past drinks-with-food sessions"
+                    : "No history yet — using a starting 55/45 lean towards drinks"}
+                </p>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Drinks ({Math.round(result.drink_share * 100)}%)</span>
+                  <span className="font-black text-brand-600">{INR(result.drink_budget)}</span>
                 </div>
-              )}
+                <div className="flex justify-between text-sm mt-1">
+                  <span className="text-gray-600">Food ({Math.round(result.food_share * 100)}%)</span>
+                  <span className="font-black text-brand-600">{INR(result.food_budget)}</span>
+                </div>
+              </div>
 
               {(result.drink_budget > 0) && (
                 <div className="card p-3.5">

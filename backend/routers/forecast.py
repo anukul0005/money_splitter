@@ -40,8 +40,6 @@ from routers.recommend import (
 
 router = APIRouter(prefix="/forecast", tags=["forecast"])
 
-SESSION_CHOICES = ("drinks_food", "drinks_only", "food_only")
-
 # A disposable glass, bought per person, whenever a spirit is being poured
 # outside a restaurant - beer is drunk from its own bottle, so a beer-only
 # session buys none. Snacks are also per person: a table of four eating
@@ -178,7 +176,6 @@ def _food_preview(db: Session, city: str, band: dict | None, people: int) -> dic
 def forecast_budget(
     people: int = 2,
     budget: float = 2000,
-    session: str = "drinks_food",
     beer_only: bool = False,
     state: str = "",
     city: str = "",
@@ -186,36 +183,34 @@ def forecast_budget(
     db: Session = Depends(get_db),
     caller: User = Depends(current_user),
 ):
+    """Split one total budget into a drinks share and a food share.
+
+    Used to also take a `session` of drinks-only or food-only, each just
+    handing the whole (post-extras) budget to one side with a share of
+    1/0 - a special case of the same split below, not a different
+    calculation, and one a person can already get by not caring what the
+    other number says. Removed as redundant rather than kept as a picker
+    with only one real choice left.
+    """
     if people < 1:
         raise HTTPException(400, "There has to be at least one of you")
-    if session not in SESSION_CHOICES:
-        raise HTTPException(400, f"session must be one of {', '.join(SESSION_CHOICES)}")
     if budget <= 0:
         raise HTTPException(400, "Set a budget above zero")
 
-    drinking = session in ("drinks_food", "drinks_only")
-    glasses = 0 if (not drinking or beer_only) else people * GLASS_COST
-    snacks = people * SNACK_COST_PER_PERSON if drinking else 0
+    glasses = 0 if beer_only else people * GLASS_COST
+    snacks = people * SNACK_COST_PER_PERSON
     extras = glasses + snacks
     remaining = max(budget - extras, 0)
 
     people_names = [n for n in (names or "").split(",") if n.strip()]
 
-    if session == "food_only":
-        drink_share, food_share, ratio_source = 0.0, 1.0, "n/a"
-        drink_budget, food_budget = 0.0, remaining
-    elif session == "drinks_only":
-        drink_share, food_share, ratio_source = 1.0, 0.0, "n/a"
-        drink_budget, food_budget = remaining, 0.0
-    else:
-        drink_share, food_share, ratio_source = _spend_ratio(db, caller, people_names)
-        drink_budget = round(remaining * drink_share)
-        food_budget = remaining - drink_budget
+    drink_share, food_share, ratio_source = _spend_ratio(db, caller, people_names)
+    drink_budget = round(remaining * drink_share)
+    food_budget = remaining - drink_budget
 
     return {
         "people": people,
         "budget": budget,
-        "session": session,
         "beer_only": beer_only,
         # Said plainly, per person, so "why is this ₹450 higher than I typed"
         # is answered on the page rather than left to work out.
