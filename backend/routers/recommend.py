@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from auth import current_user, is_member
 from database import get_db
-from knowledge import DRINK, DRINK_RE, learned
+from knowledge import DRINK, DRINK_RE, is_alcohol, learned
 from brand_names import canonicalise as bn_canonicalise, core as bn_core, key as bn_key
 from liquor_prices import (
     ABV_SOURCES, BOTTLES, NCR, SOURCES, STATES, Bottle, abv_for, for_state,
@@ -591,7 +591,7 @@ def _history(db: Session, caller: User, names: list[str],
             continue
         for e in g.expenses:
             t = _text(e)
-            if not DRINK_RE.search(t):
+            if not is_alcohol(t):
                 continue
             occasions += 1
             total += e.amount
@@ -696,7 +696,7 @@ def _user_profile(db: Session, caller: User, names: list[str],
             continue
         for e in g.expenses:
             t = _text(e)
-            if not DRINK_RE.search(t):
+            if not is_alcohol(t):
                 continue
             occasions += 1
             occasion_amounts.append(e.amount)

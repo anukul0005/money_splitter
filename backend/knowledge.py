@@ -80,20 +80,55 @@ DRINK_RE = re.compile(
     r"tequila|mezcal|brandy|cognac|liqueur|scotch|bourbon|"
     r"prosecco|champagne|sangria|patron|jagermeister|kahlua|malibu|"
     r"baileys|cointreau|macallan|aberlour|beefeater|johnnie\s*walker|"
-    # The literal word itself - added after finding real expenses tagged
-    # with the app's own "Drinks" category (a person explicitly saying so,
-    # the strongest signal there is) whose text mentioned no specific brand
-    # at all ("Bora bora - half", "Legacy", "Vka - Canvas") and so were
-    # invisible to history and the purchase profile despite being tagged as
-    # exactly what they were. One word, recovered 32 real expenses.
-    r"drinks?|"
     # Old Monk's own common shorthand - "oldm(hf+qr+qr)" - distinct from
     # "old\s*monk" above, which requires the space/word break this omits.
     # "bushmill?s?" covers the brand's correct spelling and the one-L typo
-    # ("bushmils") actually found in this app's own expense data.
-    r"oldm|bushmill?s?|backbencher)\b",
+    # ("bushmils") actually found in this app's own expense data. "chakhna"
+    # is the accompaniment, not the drink itself, but it is Hindi/Punjabi
+    # slang specifically for something eaten *while* drinking - nobody
+    # orders chakhna for a movie - so on its own it is as reliable a signal
+    # as a brand name, confirmed against seven real expenses that use it
+    # completely alone, no other drink word anywhere in the text.
+    r"oldm|bushmill?s?|backbencher|chakhna)\b",
     re.I,
 )
+
+# The bare word, worth far less on its own than any term above: this app's
+# own "Drinks" category also covers coffee, soda and water (see
+# SOFT_DRINK_RE), so "drinks" alone is a weak signal that has to be checked
+# against that list before it counts as alcohol - see is_alcohol.
+GENERIC_DRINK_RE = re.compile(r"\bdrinks?\b", re.I)
+
+# Found by checking every expense the generic word above matched but no real
+# alcohol term did: Barista and Starbucks coffee, Diet Coke, Shikanji,
+# "cold drink" (Indian shorthand for a soda), plain water, tea and lassi all
+# use this app's "Drinks" category too, and would otherwise have been
+# counted as a drinking session on the strength of that category alone.
+SOFT_DRINK_RE = re.compile(
+    r"\b(coffee|barista|starbucks|ccd|cafe\s*coffee\s*day|"
+    r"cold\s*drink|coke|pepsi|sprite|thums\s*up|limca|fanta|"
+    r"diet\s*coke|soda|juice|lassi|milkshake|shikanji|nimbu\s*pani|"
+    r"lemonade|buttermilk|chaas|tea|chai|cappuccino|latte|espresso|"
+    r"mocktail|water)\b",
+    re.I,
+)
+
+
+def is_alcohol(t: str) -> bool:
+    """The one place "is this expense a drinking session" gets decided.
+
+    A real alcohol term (a brand, "liquor", "chakhna", ...) always counts,
+    even alongside a soft drink - someone ordering a beer and a Coke is
+    still drinking. The bare word "drinks" only counts when nothing in
+    SOFT_DRINK_RE explains it instead: this app's own "Drinks" category
+    covers non-alcoholic beverages too, and the category alone cannot tell
+    "Bora bora - half" (alcohol, no soft-drink term, correctly counted)
+    apart from "Starbucks Coffee Drinks" (not alcohol, would otherwise have
+    been counted on the category word alone).
+    """
+    if DRINK_RE.search(t):
+        return True
+    return bool(GENERIC_DRINK_RE.search(t)) and not SOFT_DRINK_RE.search(t)
 
 # Excludes bare "bar" and "pub", which are drinks runs and counted above.
 FOOD_RE = re.compile(
@@ -189,7 +224,7 @@ def classify(t: str) -> str | None:
     """drink, food, or neither. Drink wins a tie - a bar tab is a drinks run."""
     if GROCERY_RE.search(t):
         return None
-    if DRINK_RE.search(t):
+    if is_alcohol(t):
         return DRINK
     if FOOD_RE.search(t):
         return FOOD
