@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   getRecommendMeta, getRecommendation, getFriends, searchRecommend, listBrands,
-  askRecommend, logRecommendShown, getRecommendEventsSummary,
+  logRecommendShown, getRecommendEventsSummary,
 } from '../api'
 
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -42,6 +42,26 @@ const BOTTLES = [
 // they have no card here - leaving all four off still shows everything,
 // same rule as the size picker.
 const KINDS = ['whisky', 'rum', 'vodka', 'gin']
+
+// One row per taste dimension /recommend can filter on (see the backend's
+// own _ASK_TASTE_WORDS - these words are sent to the server verbatim, not
+// reinterpreted here, so there is exactly one place that decides what
+// "smooth" means). Each row is a same-dimension pair: picking one clears
+// the other, tapping the picked one again clears back to "no preference" -
+// the same on/off/replace rule the size and kind pickers above already use.
+// A free-text box was tried here first and dropped: it needed a font small
+// enough to fit a whole sentence, which meant giving up the 16px floor that
+// stops iOS Safari zooming the page on focus - buttons need neither.
+const TASTE_TOGGLES = [
+  { label: 'Smoothness',  pos: ['smooth', 'Smooth'],   neg: ['harsh', 'Harsh'] },
+  { label: 'Smokiness',   pos: ['smoky', 'Smoky'],      neg: ['not smoky', 'Not smoky'] },
+  { label: 'Sweetness',   pos: ['sweet', 'Sweet'],      neg: ['dry', 'Dry'] },
+  { label: 'Spice',       pos: ['spicy', 'Spicy'],      neg: ['not spicy', 'Mild'] },
+  { label: 'Fruitiness',  pos: ['fruity', 'Fruity'],    neg: ['not fruity', 'Not fruity'] },
+  { label: 'Oak',         pos: ['oaky', 'Oaky'],        neg: ['not oaky', 'Not oaky'] },
+  { label: 'Intensity',   pos: ['strong', 'Strong'],    neg: ['light', 'Light'] },
+  { label: 'Ease',        pos: ['beginner', 'Beginner-friendly'], neg: null },
+]
 
 // Long lists are shown seven deep and the rest folded away, so the page opens
 // on a real shortlist instead of a wall of bottles.
@@ -223,15 +243,10 @@ export default function Recommend() {
   // to share one toggle would close one form the moment the other opens.
   const [rating, setRating] = useState(null)
 
-  // Stage 4: one free-text box, answered by the same picking/scoring
-  // pipeline as the form above - see runAsk. Its own busy/error pair so
-  // typing a question never disturbs the filter form's own state.
-  const [askQuery, setAskQuery] = useState('')
-  const [askBusy, setAskBusy]   = useState(false)
-  const [askError, setAskError] = useState('')
-  // What the query was actually read as - shown back so a wrong guess is
-  // obvious rather than silently shaping results nobody asked for.
-  const [extracted, setExtracted] = useState(null)
+  // Stage 4: taste, same on/off/replace rule as bottles and kinds above -
+  // an array of the exact words the server's taste vocabulary knows (see
+  // TASTE_TOGGLES), sent straight through as the `taste` param.
+  const [taste, setTaste] = useState([])
 
   // Stage 5: fetched lazily, only once the stats panel is actually opened -
   // a page nobody expands should never pay for the request.
@@ -339,6 +354,14 @@ export default function Recommend() {
     return next
   })
 
+  // Same-dimension pair, so picking one clears the other rather than
+  // letting "Smooth" and "Harsh" both be on at once - `siblingWords` is
+  // just that row's pos/neg words together.
+  const toggleTaste = (word, siblingWords) => setTaste((cur) => {
+    const withoutPair = cur.filter((w) => !siblingWords.includes(w))
+    return cur.includes(word) ? withoutPair : [...withoutPair, word]
+  })
+
   // Fire-and-forget: logging an impression is bookkeeping for Stage 5, not
   // something the person looking at their results should ever wait on.
   // Never awaited by a caller, and its own failure is swallowed rather than
@@ -371,9 +394,9 @@ export default function Recommend() {
         bottle: bottles.length ? bottles.join(',') : 'any',
         kind: kinds.join(','),
         names: withWho.join(','),
+        taste: taste.join(','),
       })
       setResult(r.data)
-      setExtracted(null)
       logShown(r.data, 'recommend', null)
     } catch (err) {
       const code = err.response?.status
@@ -385,28 +408,6 @@ export default function Recommend() {
       )
       setResult(null)
     } finally { setBusy(false) }
-  }
-
-  // "I have Rs2,000. 4 people. Want something smooth, not smoky" answered by
-  // the exact same picking and scoring /recommend itself uses - see
-  // /recommend/ask. Reuses `state` from the form above rather than asking
-  // for it a second time, since alcohol pricing is still state-specific
-  // whichever way the question got asked.
-  const runAsk = async () => {
-    const q = askQuery.trim()
-    if (q.length < 3) { setAskError('Say a bit more than that.'); return }
-    setAskError(''); setAskBusy(true)
-    try {
-      const r = await askRecommend({ state, q, names: withWho.join(',') })
-      setResult(r.data)
-      setExtracted(r.data.extracted)
-      setShowAllPicks(false); setShowAllBeers(false)
-      logShown(r.data, 'ask', q)
-    } catch (err) {
-      setAskError(
-        err.response?.data?.detail || `Could not work that out (${err.response?.status || 'network error'}).`
-      )
-    } finally { setAskBusy(false) }
   }
 
   // Opened once, fetched once - re-opening the panel just shows what's
@@ -471,79 +472,6 @@ export default function Recommend() {
       </div>
 
       <div className="px-5 mt-4 space-y-4 max-w-2xl">
-        {/* Stage 4: say it in one line instead of filling in the form below -
-            "I have Rs2,000. 4 people. Want something smooth, not smoky" reads
-            back as a budget, a headcount, a kind and taste thresholds, then
-            runs through the exact same picking and scoring as the form does.
-            Its own card, above the form, since it's a shortcut past the form
-            rather than a part of it. */}
-        <div className="card space-y-2">
-          <label className="label">Or just say what you want</label>
-          <div className="flex gap-2">
-            <input
-              // Smaller than the app's usual 16px input text on purpose - a
-              // natural-language query runs longer than "500" or a brand
-              // name, and 16px was clipping it out of view well before the
-              // box ran out of width. Same size as the badge chips below it
-              // and the result cards' own detail lines, not a one-off.
-              className="input text-xs flex-1 min-w-0"
-              value={askQuery}
-              placeholder="e.g. Rs2000, 4 people, smooth not smoky"
-              onChange={(e) => setAskQuery(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') runAsk() }}
-            />
-            {/* btn-primary bakes in w-full for the buttons that stand alone
-                on their own row; forced back to auto here so it sits beside
-                the input instead of claiming the whole row and pushing the
-                input down to min-content width. */}
-            <button
-              type="button" onClick={runAsk}
-              disabled={askBusy || askQuery.trim().length < 3}
-              className="btn-primary w-auto px-5 flex-shrink-0"
-            >
-              {askBusy ? '…' : 'Ask'}
-            </button>
-          </div>
-          <p className="text-[10px] text-gray-400 pl-1">
-            Uses the State picked below - a budget, headcount or taste word
-            said here overrides the matching field, whatever it doesn&apos;t
-            mention falls back to the sliders below.
-          </p>
-          {askError && (
-            <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{askError}</p>
-          )}
-          {extracted && (
-            <div className="flex flex-wrap gap-1.5 pt-1">
-              <span className="badge bg-amber-100 text-gray-700 border border-amber-200">
-                {extracted.budget_was_stated ? '' : '~'}{INR(extracted.budget_min)}–{fmtBudgetMax(extracted.budget_max)}
-              </span>
-              <span className="badge bg-amber-100 text-gray-700 border border-amber-200">
-                {extracted.people} {extracted.people === 1 ? 'person' : 'people'}
-              </span>
-              {extracted.kinds.map((k) => (
-                <span key={k} className="badge bg-amber-100 text-gray-700 border border-amber-200 capitalize">{k}</span>
-              ))}
-              {Object.entries(extracted.taste || {}).map(([dim, bounds]) => (
-                <span key={dim} className="badge bg-amber-100 text-gray-700 border border-amber-200">
-                  {dim} {bounds.min != null ? `≥ ${bounds.min}` : `≤ ${bounds.max}`}
-                </span>
-              ))}
-            </div>
-          )}
-          {/* Most bottles' taste numbers are a category-level guess, not a
-              real per-bottle rating, and a threshold above the guess can
-              zero out an entire category without one of them actually
-              failing it. Said plainly when that's what happened, rather
-              than answering confidently with an empty list. */}
-          {extracted && Object.keys(extracted.taste || {}).length > 0 &&
-           result?.taste_filter_applied === false && (
-            <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-100 rounded-md px-3 py-2">
-              Not enough per-bottle taste data here to narrow by that yet —
-              showing everything else that matched instead.
-            </p>
-          )}
-        </div>
-
         <div className="card space-y-3">
           {/* State first: alcohol is taxed per state, so it drives every price */}
           <div>
@@ -684,6 +612,56 @@ export default function Recommend() {
                 ? 'Nothing picked — whisky, rum, vodka and gin all show. Tap any you fancy, tap again to clear.'
                 : `Only ${kinds.join(', ')} — beer is unaffected by this.`}
             </p>
+          </div>
+
+          {/* Stage 4, as buttons rather than typed text - see TASTE_TOGGLES.
+              A word here is dropped instead of applied if it would empty an
+              otherwise non-empty list (most bottles' taste numbers are a
+              category-level guess, not a real per-bottle rating - see the
+              backend's own note on this), so tapping "Smooth" never trades
+              a real answer for an empty page. */}
+          <div>
+            <label className="label">Taste (optional)</label>
+            <div className="space-y-1.5">
+              {TASTE_TOGGLES.map(({ label, pos, neg }) => {
+                const siblingWords = [pos[0], neg?.[0]].filter(Boolean)
+                return (
+                  <div key={label} className="flex items-center gap-2">
+                    <span className="text-[10px] font-semibold text-gray-500 w-20 flex-shrink-0">
+                      {label}
+                    </span>
+                    <div className="flex gap-1.5 flex-1">
+                      {[pos, neg].filter(Boolean).map(([word, text]) => (
+                        <button
+                          key={word}
+                          type="button"
+                          aria-pressed={taste.includes(word)}
+                          onClick={() => toggleTaste(word, siblingWords)}
+                          className={`flex-1 rounded-md px-2 py-1.5 text-[11px] font-bold border transition-all ${
+                            taste.includes(word)
+                              ? 'bg-brand-400 border-brand-400 text-white'
+                              : 'bg-cream border-amber-200 text-gray-500 hover:bg-amber-50'
+                          }`}
+                        >
+                          {text}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            <p className="text-[10px] text-gray-400 mt-1">
+              {taste.length === 0
+                ? 'Nothing picked — no taste filter. Tap any you fancy, tap again to clear.'
+                : `Looking for ${taste.join(', ')}.`}
+            </p>
+            {result?.taste_filter_applied === false && taste.length > 0 && (
+              <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-100 rounded-md px-2 py-1.5 mt-1">
+                Not enough per-bottle taste data here to narrow by that yet —
+                showing everything else that matched instead.
+              </p>
+            )}
           </div>
 
           <button onClick={run} className="btn-primary" disabled={busy || !canRun}>

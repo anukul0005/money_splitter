@@ -1897,6 +1897,65 @@ def _ask_extract_taste(q: str) -> dict[str, dict[str, float]]:
     return dict(constraints)
 
 
+def _taste_filter_bucket(bucket: dict, taste: dict, products: dict) -> bool:
+    """Filters one picks/beers pair in place against `taste`'s min/max
+    thresholds, unless doing so would empty an otherwise non-empty bucket -
+    see _apply_taste_filter's docstring for why. Returns whether it actually
+    filtered anything.
+    """
+    def _meets_taste(brand: str) -> bool:
+        product = products.get(brand)
+        if product is None:
+            return True  # nothing to check against - not excluded for lacking data
+        for dim, bounds in taste.items():
+            value = getattr(product, dim, None)
+            if value is None:
+                continue
+            if "min" in bounds and value < bounds["min"]:
+                return False
+            if "max" in bounds and value > bounds["max"]:
+                return False
+        return True
+
+    had_candidates = bool(bucket.get("picks") or bucket.get("beers"))
+    filtered_picks = [p for p in bucket.get("picks", []) if _meets_taste(p["brand"])]
+    filtered_beers = [b for b in bucket.get("beers", []) if _meets_taste(b["brand"])]
+    applied = bool(filtered_picks or filtered_beers) or not had_candidates
+    if applied:
+        bucket["picks"], bucket["beers"] = filtered_picks, filtered_beers
+    return applied
+
+
+def _apply_taste_filter(result: dict, taste: dict) -> bool:
+    """Shared by /recommend and /ask: applied only if it actually narrows
+    anything. Most bottles' taste dimensions are a category-level guess,
+    not a real per-bottle value (see Product's own docstring) - whisky in
+    particular is 1,053 of 1,054 rows sitting on the exact same guessed
+    smoothness, so "smoothness >= 3.5" can zero out every whisky there is
+    without a single one actually being un-smooth. Filtering out everything
+    in that case would answer confidently with nothing, which is worse than
+    admitting the data can't back up the question - so a taste constraint
+    that would empty an otherwise non-empty bucket is dropped instead of
+    applied.
+
+    `result["is_all"]` means picks/beers live one level down, per state
+    (`result["by_state"]`), rather than on `result` itself - each state's
+    bucket is judged and filtered on its own terms, since a bottle absent
+    from Delhi's list says nothing about whether it would have passed the
+    filter in Uttar Pradesh.
+    """
+    if not taste:
+        return False
+    products = _products_by_name()
+    if result.get("is_all"):
+        # A list comprehension, not any(...) - any() short-circuits on the
+        # first True and would leave every state after it unfiltered, since
+        # each bucket has to be judged (and filtered) independently.
+        applied = [_taste_filter_bucket(b, taste, products) for b in result.get("by_state", {}).values()]
+        return any(applied)
+    return _taste_filter_bucket(result, taste, products)
+
+
 @router.get("/ask", response_model=dict)
 def ask(
     q: str,
@@ -1939,49 +1998,23 @@ def ask(
         names=names, db=db, caller=caller,
     )
 
-    # Applied only if it actually narrows anything. Most bottles' taste
-    # dimensions are a category-level guess, not a real per-bottle value (see
-    # Product's own docstring) - whisky in particular is 1,053 of 1,054 rows
-    # sitting on the exact same guessed smoothness, so "smoothness >= 3.5"
-    # can zero out every whisky there is without a single one actually
-    # being un-smooth. Filtering out everything in that case would answer
-    # confidently with nothing, which is worse than admitting the data can't
-    # back up the question - so a taste word that would empty a non-empty
-    # result is dropped instead of applied, and the response says so.
-    taste_applied = False
-    if taste:
-        products = _products_by_name()
-
-        def _meets_taste(brand: str) -> bool:
-            product = products.get(brand)
-            if product is None:
-                return True  # nothing to check against - not excluded for lacking data
-            for dim, bounds in taste.items():
-                value = getattr(product, dim, None)
-                if value is None:
-                    continue
-                if "min" in bounds and value < bounds["min"]:
-                    return False
-                if "max" in bounds and value > bounds["max"]:
-                    return False
-            return True
-
-        had_candidates = bool(result["picks"] or result["beers"])
-        filtered_picks = [p for p in result["picks"] if _meets_taste(p["brand"])]
-        filtered_beers = [b for b in result["beers"] if _meets_taste(b["brand"])]
-        taste_applied = bool(filtered_picks or filtered_beers) or not had_candidates
-        if taste_applied:
-            result["picks"], result["beers"] = filtered_picks, filtered_beers
+    taste_applied = _apply_taste_filter(result, taste)
 
     return {
         "query": q,
-        "taste_filter_applied": taste_applied,
         "extracted": {
             "budget_min": budget_min, "budget_max": budget_max,
             "budget_was_stated": budget is not None,
             "people": people, "kinds": list(kinds), "taste": taste,
         },
         **result,
+        # After the spread, not before: `result` already carries its own
+        # taste_filter_applied (always False - ask() calls recommend()
+        # without a `taste` param, letting this function's own extraction
+        # apply the real one instead), and a dict literal keeps the last
+        # value for a repeated key. Spreading first and setting this after
+        # is what makes ask()'s own filtering the one that actually counts.
+        "taste_filter_applied": taste_applied,
     }
 
 
@@ -2334,6 +2367,14 @@ def recommend(
     bottle: str = "any",
     kind: str = "",
     names: str = "",
+    # Comma-separated taste words, straight from the same vocabulary the
+    # /ask query parser knows (see _ASK_TASTE_WORDS) - a button that reads
+    # "Smooth" sends "smooth", one reading "Not smoky" sends "not smoky".
+    # Kept a plain string rather than a list of enums so the frontend's
+    # taste toggles and a typed-out /ask query both end up parsed by the
+    # exact same function - two entry points, one rule for what "smooth"
+    # means.
+    taste: str = "",
     db: Session = Depends(get_db),
     caller: User = Depends(current_user),
 ):
@@ -2476,7 +2517,7 @@ def recommend(
             )
             if per_state is not None:
                 by_state_results[st] = per_state
-        return {
+        response = {
             **shared,
             "state": "all",
             "is_all": True,
@@ -2484,6 +2525,9 @@ def recommend(
             "ncr": list(NCR),
             "by_state": by_state_results,
         }
+        response["taste_filter_applied"] = _apply_taste_filter(
+            response, _ask_extract_taste(taste.replace(",", " ")) if taste.strip() else {})
+        return response
 
     per_state = _recommend_for_state(
         state, known_states, tables, by_state, sizes, want_beer, want_spirits,
@@ -2496,13 +2540,16 @@ def recommend(
         # already validated above - see known_states.
         raise HTTPException(404, f"No prices known anywhere yet for {state}.")
 
-    return {
+    response = {
         **shared,
         "state": state,
         "is_all": False,
         "ncr": list(NCR),
         **per_state,
     }
+    response["taste_filter_applied"] = _apply_taste_filter(
+        response, _ask_extract_taste(taste.replace(",", " ")) if taste.strip() else {})
+    return response
 
 
 # ── Stage 5: did a suggestion actually get drunk? ────────────────────────────
