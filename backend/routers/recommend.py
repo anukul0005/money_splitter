@@ -540,7 +540,9 @@ def _catalog_short_names() -> dict[str, str]:
     return out
 
 
-def _history(db: Session, caller: User, names: list[str]) -> dict:
+def _history(db: Session, caller: User, names: list[str],
+            groups: list[Group] | None = None,
+            price_overrides: list[PriceOverride] | None = None) -> dict:
     """What this set of people has actually spent on drinks together.
 
     Only groups the caller belongs to are considered, so this can't be used to
@@ -551,6 +553,14 @@ def _history(db: Session, caller: User, names: list[str]) -> dict:
     shown as though it were shared history — "12 sessions together" with no
     one named. The numbers still rank the suggestions, but the page only
     presents them once there is somebody to have had them with.
+
+    `groups`/`price_overrides` let a caller that has already fetched these
+    hand them over instead of paying for a second round trip - /recommend
+    was fetching both a second time here on top of its own copies, and
+    Group's members/expenses/payments being eager (lazy="selectin")
+    relationships meant each fresh `db.query(Group).all()` was actually
+    several queries, not one. Left as None (and fetched here, as before)
+    for callers - the /forecast history reuses - that have no copy handy.
     """
     picked = [n.strip() for n in names if n.strip()]
     wanted = {n.lower() for n in picked}
@@ -567,12 +577,12 @@ def _history(db: Session, caller: User, names: list[str]) -> dict:
     # published one, or entering "Old Chief" and then buying it every week
     # would still never surface a favourite for it.
     short_names = dict(_catalog_short_names())
-    for r in db.query(PriceOverride).all():
+    for r in (price_overrides if price_overrides is not None else db.query(PriceOverride).all()):
         words = bn_key(r.brand).split()
         if words and not all(w in GENERIC_WORDS for w in words):
             short_names.setdefault(f" {' '.join(words)} ", r.brand)
 
-    for g in db.query(Group).all():
+    for g in (groups if groups is not None else db.query(Group).all()):
         if not is_member(g, caller):
             continue
         members = {m.name.lower() for m in g.members}
@@ -1898,12 +1908,23 @@ def recommend(
     }
     products_by_name = _products_by_name()
 
+    # Fetched once and handed to both _history and learned() below, which
+    # each used to run their own separate `db.query(Group).all()` - three
+    # copies of the same fetch in one request, each one costing several
+    # queries rather than one since Group's members/expenses/payments are
+    # eager (lazy="selectin") relationships. by_state already holds every
+    # PriceOverride row too (see _overrides_by_state above), so _history's
+    # own separate fetch of the same table is skipped the same way.
+    all_groups = db.query(Group).all()
+    all_overrides = [r for rows in by_state.values() for r in rows]
+
     people_names = [n for n in (names or "").split(",") if n.strip()]
-    hist = _history(db, caller, people_names)
+    hist = _history(db, caller, people_names, groups=all_groups,
+                    price_overrides=all_overrides)
     # Shared across every state - what you have actually bought before, and
     # what you paid for it, is a property of you, not of a price list.
     learned_drinks = learned(
-        db, DRINK, [g.id for g in db.query(Group).all() if is_member(g, caller)],
+        db, DRINK, [g.id for g in all_groups if is_member(g, caller)],
         budget_min, budget_max,
     )
 
