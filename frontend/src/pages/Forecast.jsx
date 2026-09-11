@@ -49,6 +49,17 @@ const SIZES = [
   ['330', 'Beer · 330ml'],
 ]
 
+// The budget mode's own, simpler pickers - one "type" list rather than the
+// Drinks tab's separate kind-picker-plus-beer-toggle, since a forecast
+// preview only needs "what kind of thing", not the fuller distinction.
+const TYPE_CHOICES = [
+  ['whisky', 'Whisky'], ['rum', 'Rum'], ['vodka', 'Vodka'],
+  ['gin', 'Gin'], ['beer', 'Beer'],
+]
+const SIZE_CHOICES = [
+  ['180', 'Quarter'], ['375', 'Half'], ['750', 'Full'],
+]
+
 /**
  * How much this session is actually going to cost.
  *
@@ -92,9 +103,28 @@ export default function Forecast({ tab, setTab }) {
   const [includeFood, setIncludeFood] = useState(true)
   const [drinkSharePct, setDrinkSharePct] = useState(65)
   const [location, setLocation] = useState('')
+  // What the drink preview is narrowed to - both empty means "anything",
+  // same "nothing picked means everything" rule the Drinks tab's own
+  // pickers use. Toggle-able sets, not a single choice: "whisky or rum" is
+  // an ordinary way to ask.
+  const [kinds, setKinds]     = useState([])
+  const [sizes, setSizes]     = useState([])
   const [result, setResult]   = useState(null)
   const [error, setError]     = useState('')
   const [busy, setBusy]       = useState(false)
+
+  const toggleKind = (k) =>
+    setKinds((cur) => (cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k]))
+  const toggleSize = (s) =>
+    setSizes((cur) => (cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s]))
+
+  // Picking only Beer as the type is a strong hint the glass/snacks
+  // checkbox above should follow - a person who just ticked "beer" almost
+  // certainly means the same thing by both. Still a plain checkbox
+  // afterwards, not locked - this only sets the sensible starting value.
+  useEffect(() => {
+    if (kinds.length === 1 && kinds[0] === 'beer') setBeerOnly(true)
+  }, [kinds])
 
   useEffect(() => {
     if (foodMeta?.cities?.length && !location) {
@@ -116,6 +146,7 @@ export default function Forecast({ tab, setTab }) {
       const r = await getForecastBudget({
         people: peopleN, budget: budgetN, beer_only: beerOnly,
         include_food: includeFood, drink_share_pct: drinkSharePct,
+        kind: kinds.join(','), bottle: sizes.join(','),
         state: stateForLocation, city: location, names: withWho.join(','),
       })
       setResult(r.data)
@@ -230,6 +261,53 @@ export default function Forecast({ tab, setTab }) {
                 as such.
               </p>
             </div>
+
+            <div>
+              <label className="label">Type (optional)</label>
+              <div className="grid grid-cols-5 gap-1.5">
+                {TYPE_CHOICES.map(([v, label]) => (
+                  <button
+                    key={v}
+                    type="button"
+                    aria-pressed={kinds.includes(v)}
+                    onClick={() => toggleKind(v)}
+                    className={`rounded-md py-1.5 text-[11px] font-bold border transition-all ${
+                      kinds.includes(v)
+                        ? 'bg-brand-400 border-brand-400 text-white'
+                        : 'bg-cream border-amber-200 text-gray-500 hover:bg-amber-50'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {!(kinds.length === 1 && kinds[0] === 'beer') && (
+              <div>
+                <label className="label">Size (optional)</label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {SIZE_CHOICES.map(([v, label]) => (
+                    <button
+                      key={v}
+                      type="button"
+                      aria-pressed={sizes.includes(v)}
+                      onClick={() => toggleSize(v)}
+                      className={`rounded-md py-1.5 text-[11px] font-bold border transition-all ${
+                        sizes.includes(v)
+                          ? 'bg-brand-400 border-brand-400 text-white'
+                          : 'bg-cream border-amber-200 text-gray-500 hover:bg-amber-50'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[10px] text-gray-400 mt-1">
+                  Nothing picked in either row means any type, any size.
+                </p>
+              </div>
+            )}
 
             <label className="flex items-center gap-2 text-xs font-bold text-gray-600">
               <input type="checkbox" checked={includeFood} onChange={(e) => setIncludeFood(e.target.checked)} />

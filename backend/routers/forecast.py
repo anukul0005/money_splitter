@@ -97,8 +97,42 @@ def _band(mid: float, min_span: float) -> dict | None:
     return {"min": lo, "max": hi}
 
 
-def _drink_preview(db: Session, state: str, band: dict | None) -> dict | None:
-    """A few real bottles in this band, in this state.
+# The same five cards the Drinks tab effectively offers, just reached
+# through one "type" picker here instead of a kind picker plus a separate
+# beer toggle - a forecast preview only needs "what kind of thing", not the
+# Drinks tab's fuller distinction between a spirit's kind and its size.
+FORECAST_KINDS = ("whisky", "rum", "vodka", "gin", "beer")
+# Quarter/half/full, the same three sizes the Drinks tab's own picker uses.
+# Beer isn't sold in these, so a size pick only ever narrows spirits - same
+# rule the Drinks tab itself follows.
+FORECAST_SIZES = {"180": 180, "375": 375, "750": 750}
+
+
+def _parse_forecast_kinds(kind: str) -> tuple[str, ...]:
+    parts = [p.strip().lower() for p in (kind or "").split(",") if p.strip()]
+    for p in parts:
+        if p not in FORECAST_KINDS:
+            raise HTTPException(400, f"kind must be any of {', '.join(FORECAST_KINDS)} - got '{p}'")
+    return tuple(dict.fromkeys(parts))
+
+
+def _parse_forecast_sizes(bottle: str) -> tuple[int, ...]:
+    parts = [p.strip() for p in (bottle or "").split(",") if p.strip()]
+    sizes = []
+    for p in parts:
+        if p not in FORECAST_SIZES:
+            raise HTTPException(
+                400, f"bottle must be any of {', '.join(FORECAST_SIZES)} - got '{p}'")
+        sizes.append(FORECAST_SIZES[p])
+    return tuple(sizes)
+
+
+def _drink_preview(db: Session, state: str, band: dict | None,
+                   kinds: tuple[str, ...] = (), sizes: tuple[int, ...] = ()) -> dict | None:
+    """A few real bottles in this band, in this state, optionally narrowed
+    to a type (whisky/rum/vodka/gin/beer) and a size (quarter/half/full -
+    beer bypasses this the same way it does on the Drinks tab, since it
+    isn't sold in those).
 
     This first called /recommend itself, on the reasoning that a forecast
     should never disagree with what the Drinks tab would show for the same
@@ -125,6 +159,13 @@ def _drink_preview(db: Session, state: str, band: dict | None) -> dict | None:
     if state not in known_states:
         return None
 
+    def _matches(b) -> bool:
+        if kinds and b.kind not in kinds:
+            return False
+        if b.kind != "beer" and sizes and b.size_ml not in sizes:
+            return False
+        return band["min"] <= b.mid <= band["max"]
+
     # This state's own list first, without building the cross-state merge at
     # all - a state with a real published table (thousands of rows for the
     # bigger ones) almost always has *something* in a given price band, so
@@ -132,19 +173,13 @@ def _drink_preview(db: Session, state: str, band: dict | None) -> dict | None:
     # native qualifies is the fuller cross-state catalogue built to look
     # elsewhere - the rare case is the only one that has to pay for it.
     native = _apply_overrides(for_state(state), by_state.get(state, []), state)
-    matches = sorted(
-        (b for b in native if band["min"] <= b.mid <= band["max"]),
-        key=lambda b: -b.mid,
-    )
+    matches = sorted((b for b in native if _matches(b)), key=lambda b: -b.mid)
     if not matches:
         tables = {
             s: _apply_overrides(for_state(s), by_state.get(s, []), s) for s in known_states
         }
         catalog = _catalog_for(state, known_states, tables)
-        matches = sorted(
-            (b for b in catalog if band["min"] <= b.mid <= band["max"]),
-            key=lambda b: -b.mid,
-        )
+        matches = sorted((b for b in catalog if _matches(b)), key=lambda b: -b.mid)
 
     sample = [
         {"brand": b.brand, "kind": b.kind, "size_ml": b.size_ml, "total": round(b.mid),
@@ -183,6 +218,8 @@ def forecast_budget(
     # anything - see the docstring for why this is asked rather than
     # calculated.
     drink_share_pct: float = 65,
+    kind: str = "",
+    bottle: str = "",
     state: str = "",
     city: str = "",
     names: str = "",
@@ -218,6 +255,8 @@ def forecast_budget(
         raise HTTPException(400, "Set a budget above zero")
     if not 0 <= drink_share_pct <= 100:
         raise HTTPException(400, "Drink share has to be between 0 and 100")
+    kinds = _parse_forecast_kinds(kind)
+    sizes = _parse_forecast_sizes(bottle)
 
     glasses = 0 if beer_only else people * GLASS_COST
     snacks = people * SNACK_COST_PER_PERSON
@@ -274,7 +313,7 @@ def forecast_budget(
         # cheapest other state charges for it (see _drink_preview). Only
         # computed when a location was actually given; forecasting works
         # perfectly well as pure numbers without one.
-        "drink_preview": _drink_preview(db, state, drink_band) if state else None,
+        "drink_preview": _drink_preview(db, state, drink_band, kinds, sizes) if state else None,
         "food_preview": (
             _food_preview(db, city, food_band, people)
             if (include_food and city) else None
