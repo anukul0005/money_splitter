@@ -134,6 +134,13 @@ export const listPlaceNames    = (city) => api.get('/food/names', { params: { ci
 export const getForecastBudget = (p)    => api.get('/forecast/budget', { params: p })
 export const getForecastItems  = (body) => api.post('/forecast/items', body)
 
+// ── Product reviews ──────────────────────────────────────────────────────────
+// A real person's own opinion of a bottle - separate from the knowledge
+// base's own rating/estimate, and averaged across everyone who has reviewed
+// it. Submitting again updates your own review rather than adding a second.
+export const getProductReviews = (productId)      => api.get(`/recommend/products/${productId}/reviews`)
+export const submitProductReview = (productId, body) => api.post(`/recommend/products/${productId}/review`, body)
+
 // ── Corrections people enter by hand ──────────────────────────────────────────
 // Published lists are a starting point, not the last word: a shop charges above
 // the state minimum, a restaurant raises its prices, a place is in no listing at

@@ -166,6 +166,15 @@ def _run_migrations(conn, text) -> None:
         ))
     except Exception as e:  # pragma: no cover - depends on the server
         print(f"[warn] pgvector unavailable, retrieval disabled: {e}")
+    # Community reviews' aggregate, added to Product after it already
+    # existed - create_all() never touches an existing table's columns.
+    conn.execute(text(
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS community_rating DOUBLE PRECISION"
+    ))
+    conn.execute(text(
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS "
+        "community_review_count INTEGER NOT NULL DEFAULT 0"
+    ))
     conn.commit()
 
     # `payments`, `activities` and `activity_seen` are created by create_all

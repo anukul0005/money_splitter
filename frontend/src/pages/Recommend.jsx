@@ -4,6 +4,7 @@ import { getRecommendMeta, getRecommendation, getFriends, searchRecommend, listB
 
 import LoadingSpinner from '../components/LoadingSpinner'
 import PriceEditForm from '../components/PriceEditForm'
+import ProductReviewForm from '../components/ProductReviewForm'
 import RecommendTabs from '../components/RecommendTabs'
 import RecommendFood from './RecommendFood'
 import Forecast from './Forecast'
@@ -123,15 +124,28 @@ function PriceStrip({ compare, cheapest }) {
  * is amber — the same colour convention the underlying spreadsheet already
  * uses, so the two stay recognisable as the same distinction.
  */
-function RatingBadge({ rating, type }) {
-  if (rating == null) return null
+function RatingBadge({ rating, type, communityRating, communityCount }) {
+  const hasCommunity = communityCount > 0
+  if (rating == null && !hasCommunity) return null
   const verified = type === 'Verified (external)'
   return (
     <p className={`text-[10px] font-bold mt-0.5 ${verified ? 'text-green-700' : 'text-amber-600'}`}>
-      ★ {rating.toFixed(1)}/5
-      <span className="font-normal opacity-80">
-        {' '}· {verified ? 'verified rating' : 'estimated'}
-      </span>
+      {rating != null && (
+        <>
+          ★ {rating.toFixed(1)}/5
+          <span className="font-normal opacity-80">
+            {' '}· {verified ? 'verified rating' : 'estimated'}
+          </span>
+        </>
+      )}
+      {hasCommunity && (
+        <span className={`font-bold text-blue-700 ${rating != null ? 'ml-1.5' : ''}`}>
+          ★ {communityRating.toFixed(1)}/5
+          <span className="font-normal opacity-80">
+            {' '}· {communityCount} app {communityCount === 1 ? 'review' : 'reviews'}
+          </span>
+        </span>
+      )}
     </p>
   )
 }
@@ -201,6 +215,10 @@ export default function Recommend() {
   // Which card's price form is open, keyed by the card's own key. `'new'`
   // opens the standalone add form. Only one is ever open at a time.
   const [editing, setEditing] = useState(null)
+  // Separate from `editing` on purpose: "fix the price" and "rate this
+  // bottle" are two different actions on the same card, and forcing them
+  // to share one toggle would close one form the moment the other opens.
+  const [rating, setRating] = useState(null)
 
   // Two independent calls, loaded independently. They used to share a
   // Promise.all, so a failure in either left the state dropdown empty with a
@@ -855,7 +873,8 @@ export default function Recommend() {
                       : ''}
                   </span>
                 </p>
-                <RatingBadge rating={p.rating} type={p.rating_type} />
+                <RatingBadge rating={p.rating} type={p.rating_type}
+                             communityRating={p.community_rating} communityCount={p.community_review_count} />
 
                 {/* Split across the group, and what the budget would stretch to */}
                 <p className="text-[10px] text-gray-400 mt-0.5">
@@ -887,13 +906,33 @@ export default function Recommend() {
                   </p>
                 )}
 
-                <button
-                  type="button"
-                  onClick={() => setEditing(editing === `p${i}` ? null : `p${i}`)}
-                  className="text-[10px] font-bold text-gray-400 hover:text-brand-600 mt-1"
-                >
-                  {editing === `p${i}` ? 'Close' : 'Wrong price? Fix it'}
-                </button>
+                <div className="flex gap-3 mt-1">
+                  <button
+                    type="button"
+                    onClick={() => setEditing(editing === `p${i}` ? null : `p${i}`)}
+                    className="text-[10px] font-bold text-gray-400 hover:text-brand-600"
+                  >
+                    {editing === `p${i}` ? 'Close' : 'Wrong price? Fix it'}
+                  </button>
+                  {p.product_id != null && (
+                    <button
+                      type="button"
+                      onClick={() => setRating(rating === `p${i}` ? null : `p${i}`)}
+                      className="text-[10px] font-bold text-gray-400 hover:text-brand-600"
+                    >
+                      {rating === `p${i}` ? 'Close' : 'Rate this bottle'}
+                    </button>
+                  )}
+                </div>
+
+                {rating === `p${i}` && (
+                  <ProductReviewForm
+                    productId={p.product_id}
+                    myName={user?.name}
+                    onCancel={() => setRating(null)}
+                    onDone={() => { setRating(null); run() }}
+                  />
+                )}
 
                 {editing === `p${i}` && (
                   <PriceEditForm
@@ -975,7 +1014,8 @@ export default function Recommend() {
                         {pureAlcohol != null && ` · ${pureAlcohol}ml pure alcohol`}
                       </span>
                     </p>
-                    <RatingBadge rating={b.rating} type={b.rating_type} />
+                    <RatingBadge rating={b.rating} type={b.rating_type}
+                                 communityRating={b.community_rating} communityCount={b.community_review_count} />
 
                     {/* What the budget does with that — a consequence of the
                         budget, not a property of the beer, so it sits apart. */}
@@ -1010,13 +1050,33 @@ export default function Recommend() {
                       </p>
                     )}
 
-                    <button
-                      type="button"
-                      onClick={() => setEditing(editing === `b${i}` ? null : `b${i}`)}
-                      className="text-[10px] font-bold text-gray-400 hover:text-brand-600 mt-1"
-                    >
-                      {editing === `b${i}` ? 'Close' : 'Wrong price? Fix it'}
-                    </button>
+                    <div className="flex gap-3 mt-1">
+                      <button
+                        type="button"
+                        onClick={() => setEditing(editing === `b${i}` ? null : `b${i}`)}
+                        className="text-[10px] font-bold text-gray-400 hover:text-brand-600"
+                      >
+                        {editing === `b${i}` ? 'Close' : 'Wrong price? Fix it'}
+                      </button>
+                      {b.product_id != null && (
+                        <button
+                          type="button"
+                          onClick={() => setRating(rating === `b${i}` ? null : `b${i}`)}
+                          className="text-[10px] font-bold text-gray-400 hover:text-brand-600"
+                        >
+                          {rating === `b${i}` ? 'Close' : 'Rate this bottle'}
+                        </button>
+                      )}
+                    </div>
+
+                    {rating === `b${i}` && (
+                      <ProductReviewForm
+                        productId={b.product_id}
+                        myName={user?.name}
+                        onCancel={() => setRating(null)}
+                        onDone={() => { setRating(null); run() }}
+                      />
+                    )}
 
                     {editing === `b${i}` && (
                       <PriceEditForm

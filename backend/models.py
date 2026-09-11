@@ -298,6 +298,17 @@ class Product(Base):
     rating_source = Column(String(80), nullable=True)
     rating_url = Column(Text, nullable=True)
 
+    # A real person's own opinion, separate from the columns above on
+    # purpose - see ProductReview. Never blended into `rating`/`rating_type`,
+    # which stay exactly what the enrichment pipeline produced: a citation
+    # or a formula's estimate, neither of which is the same kind of fact as
+    # "three people in this app have actually tried it and scored it 4.2".
+    # Recomputed after every review write (see recommend.py's review
+    # endpoints) rather than joined live, since it is read far more often
+    # than it changes.
+    community_rating = Column(Float, nullable=True)
+    community_review_count = Column(Integer, nullable=False, default=0)
+
     # Taste-profile dimensions, each 1-5 (0 where genuinely absent, e.g. a
     # gin's smokiness). Descriptive, not evaluative - see rating above for
     # the one number that says "how good", not "what does it taste like".
@@ -356,3 +367,54 @@ class ProductPrice(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     product = relationship("Product", back_populates="prices")
+
+
+class ProductReview(Base):
+    """One real person's own opinion of a bottle - a score, a written note,
+    and optionally their own take on its taste profile.
+
+    One row per (product, reviewer): submitting again updates that same
+    person's review rather than adding a second one, so the average this
+    feeds (see Product.community_rating) reflects distinct people's
+    opinions, not however many times one person has resubmitted theirs.
+
+    The taste-profile fields here are deliberately separate from Product's
+    own sweetness/smokiness/etc. columns, which mostly came from a
+    category-level guess during enrichment (see Product's docstring) - a
+    real person's actual perception of a bottle they have had is better
+    data than that guess, so once reviews exist their average is written
+    onto Product's columns, replacing the guess rather than sitting beside
+    it unused. Style, body and tasting_notes are text, not numbers, so
+    there is nothing to average there - the most recently updated
+    reviewer's version is what gets shown, the same "latest correction
+    wins" rule PriceOverride already uses for a single shared fact.
+    """
+
+    __tablename__ = "product_reviews"
+    __table_args__ = (UniqueConstraint("product_id", "reviewer",
+                                       name="ux_product_reviews_product_reviewer"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"),
+                        nullable=False, index=True)
+    reviewer = Column(String(100), nullable=False)
+    score = Column(Float, nullable=False)   # 0-5, required - a review with no score isn't one
+    review_text = Column(Text, nullable=True)
+
+    style = Column(String(80), nullable=True)
+    body = Column(String(20), nullable=True)
+    tasting_notes = Column(Text, nullable=True)
+    sweetness = Column(Float, nullable=True)
+    smokiness = Column(Float, nullable=True)
+    smoothness = Column(Float, nullable=True)
+    spice = Column(Float, nullable=True)
+    fruit_citrus = Column(Float, nullable=True)
+    oak = Column(Float, nullable=True)
+    intensity = Column(Float, nullable=True)
+    beginner_friendly = Column(Float, nullable=True)
+    sipping_score = Column(Float, nullable=True)
+    mixer_score = Column(Float, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(),
+                        onupdate=func.now())

@@ -28,7 +28,7 @@ from brand_names import canonicalise as bn_canonicalise, core as bn_core, key as
 from liquor_prices import (
     ABV_SOURCES, BOTTLES, NCR, SOURCES, STATES, Bottle, abv_for, for_state,
 )
-from models import Group, PriceOverride, Product, User
+from models import Group, PriceOverride, Product, ProductReview, User
 
 router = APIRouter(prefix="/recommend", tags=["recommend"])
 
@@ -652,8 +652,11 @@ def _products_by_name() -> dict:
     try:
         return {
             row.canonical_name: row
-            for row in db.query(Product.canonical_name, Product.rating,
-                                Product.rating_type, Product.rating_basis).all()
+            for row in db.query(
+                Product.id, Product.canonical_name, Product.rating,
+                Product.rating_type, Product.rating_basis,
+                Product.community_rating, Product.community_review_count,
+            ).all()
         }
     finally:
         db.close()
@@ -662,23 +665,46 @@ def _products_by_name() -> dict:
 def _rating_fields(products_by_name: dict | None, brand: str) -> dict:
     """The knowledge-base rating for this exact brand string, or nothing.
 
-    Deliberately three fields, not one: `rating_type` is what actually
-    matters when this is shown or scored, since "Verified (external)" and
-    "Estimated (heuristic)" are not the same kind of fact - a real citation
-    from Whiskybase and a formula run over a category-level guess should
-    never look equally confident on a card, or be weighted the same by a
-    future recommendation score. A bottle with no Product row at all (an
-    override that was never in the enriched catalogue) gets all three as
-    None, same as one that has a row but no rating.
+    `rating`/`rating_type`/`rating_basis` are the enrichment pipeline's own
+    facts, untouched by anything a user submits - "Verified (external)" and
+    "Estimated (heuristic)" are not the same kind of fact, and a future
+    recommendation score should never weight them identically.
+    `community_rating`/`community_review_count` are a different, later fact
+    entirely - real people in this app who have actually had the bottle -
+    kept in their own fields rather than blended into the columns above, so
+    a card (or a sort) can tell "a citation", "a guess" and "what people
+    here actually think" apart instead of averaging three different kinds
+    of confidence into one number.
+
+    A bottle with no Product row at all (an override that was never in the
+    enriched catalogue) gets every field as None/0, same as a real row with
+    nothing recorded yet.
     """
     product = (products_by_name or {}).get(brand)
     if product is None:
-        return {"rating": None, "rating_type": None, "rating_basis": None}
+        return {"product_id": None, "rating": None, "rating_type": None,
+                "rating_basis": None, "community_rating": None,
+                "community_review_count": 0}
     return {
+        "product_id": product.id,
         "rating": product.rating,
         "rating_type": product.rating_type,
         "rating_basis": product.rating_basis,
+        "community_rating": product.community_rating,
+        "community_review_count": product.community_review_count,
     }
+
+
+def _effective_rating(fields: dict) -> float:
+    """The one number to sort by: what real reviewers here actually think,
+    once anyone has said so, otherwise the catalogue's own rating, otherwise
+    0 - unrated bottles sort after rated ones rather than being scattered
+    arbitrarily among them by whatever order the price table happened to
+    list them in.
+    """
+    if fields.get("community_review_count"):
+        return fields.get("community_rating") or 0.0
+    return fields.get("rating") or 0.0
 
 
 def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
@@ -792,25 +818,29 @@ def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
             **_rating_fields(products_by_name, b.brand),
         })
 
-    # Ranked by price alone - dearest inside the budget first, since within
-    # one state and one size that is the only quality signal there actually
-    # is. A brand you buy often or priced yourself still carries its
-    # "you buy this" / "had on <date>" badge (is_favourite, last_had above),
-    # it just no longer jumps the queue to get there: pinning your own
-    # history to the top was tried and it meant the list mostly showed you
-    # what you already know you drink, which is the opposite of what a
-    # recommender is for.
+    # Ranked by rating first, highest to lowest - a real community score or
+    # a citation is a stronger signal than price alone, and price was only
+    # ever standing in as "the one quality signal there is" before there
+    # was a better one. Unrated bottles (rating 0, from _effective_rating)
+    # sort after every rated one, then fall back to dearest-inside-budget
+    # among themselves - price is still the tiebreaker it always was, just
+    # no longer the primary key. A brand you buy often or priced yourself
+    # still carries its "you buy this" / "had on <date>" badge
+    # (is_favourite, last_had above); purchase history alone still doesn't
+    # move a bottle up the list on its own - that was tried, and it meant
+    # the list mostly showed back what you already know you drink.
     #
     # Your own entries are still never cut by the cap, though, regardless of
     # where they land in the order - UP alone lists over nine hundred
     # bottles, and a bottle somebody added being buried past the cap the
     # moment the budget widened made the whole feature feel broken.
-    out.sort(key=lambda r: -r["total"])
+    sort_key = lambda r: (-_effective_rating(r), -r["total"])
+    out.sort(key=sort_key)
     mine = sum(1 for r in out if r["is_mine"])
     if len(out) <= max(limit, mine + 4):
         return out
     kept = [r for r in out if not r["is_mine"]][:limit]
-    return sorted(kept + [r for r in out if r["is_mine"]], key=lambda r: -r["total"])
+    return sorted(kept + [r for r in out if r["is_mine"]], key=sort_key)
 
 
 def _parse_search_sizes(bottle: str) -> tuple[tuple[int, ...] | None, bool, bool]:
@@ -996,15 +1026,16 @@ def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
             **_legacy_beer_fields(unit, b.size_ml, people, abv, buys),
         })
 
-    # Strongest among what fits, then cheapest - same reasoning and the same
-    # change as _pick's sort: a beer you buy often or priced yourself still
-    # carries its badge, it just doesn't jump the queue for it any more.
-    out.sort(key=lambda r: (-r["abv"], r["price"]))
+    # Rated first, same as _pick - see there for why. Strongest, then
+    # cheapest, is now the tiebreaker among beers at the same rating (most
+    # of them, in practice, since so few carry a real one) rather than the
+    # primary key.
+    sort_key = lambda r: (-_effective_rating(r), -r["abv"], r["price"])
+    out.sort(key=sort_key)
     mine = sum(1 for r in out if r["is_mine"])
     if len(out) > max(limit, mine + 4):
         kept = [r for r in out if not r["is_mine"]][:limit]
-        out = sorted(kept + [r for r in out if r["is_mine"]],
-                     key=lambda r: (-r["abv"], r["price"]))
+        out = sorted(kept + [r for r in out if r["is_mine"]], key=sort_key)
     return out
 
 
@@ -1299,6 +1330,164 @@ def delete_price(price_id: int, db: Session = Depends(get_db),
     db.delete(row)
     db.commit()
     return {"ok": True, "id": price_id}
+
+
+TASTE_DIMENSIONS = (
+    "sweetness", "smokiness", "smoothness", "spice", "fruit_citrus", "oak",
+    "intensity", "beginner_friendly", "sipping_score", "mixer_score",
+)
+
+
+class ReviewIn(BaseModel):
+    """One person's own review of a bottle - a score, a written note, and
+    optionally their own take on its taste profile and category info.
+    Everything but the score is optional: a review with no written note or
+    opinion on smokiness is still a real review, it just answers less.
+    """
+
+    score: float = Field(ge=0, le=5)
+    review_text: str | None = Field(default=None, max_length=2000)
+    style: str | None = Field(default=None, max_length=80)
+    body: str | None = Field(default=None, max_length=20)
+    tasting_notes: str | None = Field(default=None, max_length=2000)
+    sweetness: float | None = Field(default=None, ge=0, le=5)
+    smokiness: float | None = Field(default=None, ge=0, le=5)
+    smoothness: float | None = Field(default=None, ge=0, le=5)
+    spice: float | None = Field(default=None, ge=0, le=5)
+    fruit_citrus: float | None = Field(default=None, ge=0, le=5)
+    oak: float | None = Field(default=None, ge=0, le=5)
+    intensity: float | None = Field(default=None, ge=0, le=5)
+    beginner_friendly: float | None = Field(default=None, ge=0, le=5)
+    sipping_score: float | None = Field(default=None, ge=0, le=5)
+    mixer_score: float | None = Field(default=None, ge=0, le=5)
+
+
+def _review_out(r: ProductReview) -> dict:
+    return {
+        "id": r.id, "reviewer": r.reviewer, "score": r.score,
+        "review_text": r.review_text, "style": r.style, "body": r.body,
+        "tasting_notes": r.tasting_notes,
+        **{d: getattr(r, d) for d in TASTE_DIMENSIONS},
+        "updated_at": (r.updated_at or r.created_at).isoformat()
+        if (r.updated_at or r.created_at) else None,
+    }
+
+
+def _recompute_product_aggregate(db: Session, product_id: int) -> None:
+    """After a review is written or removed, bring Product's community
+    fields - and, once any review exists, its taste-profile columns - back
+    in line with what people have actually said.
+
+    Numeric taste dimensions are averaged across every reviewer who gave an
+    opinion on that one dimension - not every review answers every field,
+    so each dimension's average is over whoever actually answered it, not
+    over every review count-for-count. A real person's perception of a
+    bottle they have had is better data than the category-level guess most
+    of these started from (see Product's docstring), so once at least one
+    review supplies a dimension, its average replaces the guess outright
+    rather than sitting alongside it unused.
+
+    Style, body and tasting_notes are text - there is nothing to average -
+    so the most recently updated review that actually set that field wins,
+    the same "latest correction stands" rule PriceOverride already uses.
+    """
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if product is None:
+        return
+    reviews = (db.query(ProductReview)
+              .filter(ProductReview.product_id == product_id)
+              .order_by(ProductReview.updated_at.asc()).all())
+
+    if not reviews:
+        product.community_rating = None
+        product.community_review_count = 0
+    else:
+        product.community_rating = round(
+            sum(r.score for r in reviews) / len(reviews), 2)
+        product.community_review_count = len(reviews)
+
+        for dim in TASTE_DIMENSIONS:
+            values = [getattr(r, dim) for r in reviews if getattr(r, dim) is not None]
+            if values:
+                setattr(product, dim, round(sum(values) / len(values), 1))
+
+        for field in ("style", "body", "tasting_notes"):
+            # Reviews are ordered oldest first, so the last non-null value
+            # encountered is the most recently updated one.
+            latest = next((getattr(r, field) for r in reversed(reviews)
+                          if getattr(r, field)), None)
+            if latest:
+                setattr(product, field, latest)
+
+    db.commit()
+    # The cached rating lookup every /recommend call reads from would
+    # otherwise keep serving this product's pre-review numbers until the
+    # process next restarts.
+    _products_by_name.cache_clear()
+
+
+@router.get("/products/{product_id}/reviews", response_model=dict)
+def list_reviews(product_id: int, db: Session = Depends(get_db),
+                 caller: User = Depends(current_user)):
+    """Every review a product has, plus the caller's own if they have one -
+    so the edit form can open already filled in with what they said last
+    time instead of a blank form that would create a second review record
+    the unique constraint then rejects.
+    """
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if product is None:
+        raise HTTPException(404, "No such product")
+    reviews = (db.query(ProductReview)
+              .filter(ProductReview.product_id == product_id)
+              .order_by(ProductReview.updated_at.desc()).all())
+    mine = next((r for r in reviews if r.reviewer == caller.name), None)
+    return {
+        "product_id": product_id,
+        "canonical_name": product.canonical_name,
+        "community_rating": product.community_rating,
+        "community_review_count": product.community_review_count,
+        "reviews": [_review_out(r) for r in reviews],
+        "my_review": _review_out(mine) if mine else None,
+    }
+
+
+@router.post("/products/{product_id}/review", response_model=dict)
+def submit_review(product_id: int, body: ReviewIn, db: Session = Depends(get_db),
+                  caller: User = Depends(current_user)):
+    """Give a bottle a score, and optionally say why - submitting again
+    updates the caller's own review rather than adding a second one, so the
+    community average reflects one opinion per person, however many times
+    they refine it.
+    """
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if product is None:
+        raise HTTPException(404, "No such product")
+
+    row = (db.query(ProductReview)
+          .filter(ProductReview.product_id == product_id,
+                  ProductReview.reviewer == caller.name)
+          .first())
+    if row is None:
+        row = ProductReview(product_id=product_id, reviewer=caller.name)
+        db.add(row)
+    row.score = body.score
+    row.review_text = (body.review_text or "").strip() or None
+    row.style = (body.style or "").strip() or None
+    row.body = (body.body or "").strip() or None
+    row.tasting_notes = (body.tasting_notes or "").strip() or None
+    for dim in TASTE_DIMENSIONS:
+        setattr(row, dim, getattr(body, dim))
+    db.commit()
+    db.refresh(row)
+
+    _recompute_product_aggregate(db, product_id)
+    db.refresh(product)
+
+    return {
+        "review": _review_out(row),
+        "community_rating": product.community_rating,
+        "community_review_count": product.community_review_count,
+    }
 
 
 @router.get("/meta", response_model=dict)
