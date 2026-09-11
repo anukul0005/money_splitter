@@ -862,16 +862,129 @@ def _rating_fields(products_by_name: dict | None, brand: str) -> dict:
     }
 
 
-def _effective_rating(fields: dict) -> float:
-    """The one number to sort by: what real reviewers here actually think,
-    once anyone has said so, otherwise the catalogue's own rating, otherwise
-    0 - unrated bottles sort after rated ones rather than being scattered
-    arbitrarily among them by whatever order the price table happened to
-    list them in.
+# Stage 3 of the alcohol knowledge base: a recommendation SCORE, not a
+# rating. Every component is 0-100; the final number is this weighted sum,
+# and both are always returned together in score_breakdown so nothing is
+# hidden behind one percentage.
+SCORE_WEIGHTS = {
+    "budget_fit": 0.30,
+    "purchase_similarity": 0.25,
+    "taste_similarity": 0.20,
+    "rating": 0.15,
+    "group_preference": 0.10,
+}
+
+
+def _score_budget_fit(price: float, lo: float, hi: float) -> float:
+    """How much of the stated budget this spends, 0-100. Deliberately the
+    same "dearest inside budget" signal ranking already used before this
+    engine existed - the top of a stated range is what someone was
+    actually willing to spend, so it scores highest here too. Not a
+    contradiction of that rule, a generalisation of it into one component
+    among several instead of the only one.
     """
-    if fields.get("community_review_count"):
-        return fields.get("community_rating") or 0.0
-    return fields.get("rating") or 0.0
+    if hi <= lo:
+        return 100.0
+    return max(0.0, min(100.0, (price - lo) / (hi - lo) * 100))
+
+
+def _score_purchase_similarity(brand: str, kind: str, profile: dict | None) -> float:
+    """How much this exact brand, or failing that this category, matches
+    what a profile (Stage 2 - never typed in by hand) shows was actually
+    bought. An exact brand match scores 60-100, scaled by how often it was
+    bought relative to the single most-bought brand; failing that, the
+    category's own measured preference level stands in - high/medium/low
+    as _user_profile computes them, mapped to 70/40/15. No history at all
+    (a brand-new profile) scores a plain 0 - there is nothing yet to call
+    a match.
+    """
+    if not profile:
+        return 0.0
+    purchases = profile.get("purchases") or {}
+    if purchases:
+        top = max(purchases.values())
+        if brand in purchases and top:
+            return 60 + 40 * (purchases[brand] / top)
+    level = (profile.get("category_preferences") or {}).get((kind or "").lower())
+    return {"high": 70.0, "medium": 40.0, "low": 15.0}.get(level, 0.0)
+
+
+def _score_taste_similarity(product, profile: dict | None) -> float:
+    """Cosine similarity, scaled to 0-100, between a candidate's own taste
+    dimensions and the purchase-weighted average from Stage 2's
+    taste_signals - the same PROFILE_TASTE_DIMENSIONS both sides share.
+    Neither "definitely matches" nor "definitely doesn't" is true when
+    there is nothing to compare (a brand-new profile, or a candidate with
+    no taste data of its own) - a neutral 50 there, not 0 or 100, which
+    would silently claim a confidence neither side has.
+    """
+    signals = (profile or {}).get("taste_signals") or {}
+    if not signals or product is None:
+        return 50.0
+    dims = [d for d in PROFILE_TASTE_DIMENSIONS
+           if d in signals and getattr(product, d, None) is not None]
+    if not dims:
+        return 50.0
+    a = [signals[d] for d in dims]
+    b = [getattr(product, d) for d in dims]
+    norm_a = sum(x * x for x in a) ** 0.5
+    norm_b = sum(x * x for x in b) ** 0.5
+    if norm_a == 0 or norm_b == 0:
+        return 50.0
+    cosine = sum(x * y for x, y in zip(a, b)) / (norm_a * norm_b)
+    return max(0.0, min(100.0, cosine * 100))
+
+
+def _score_rating(product) -> float:
+    """The knowledge base's own rating, rescaled onto 0-100. A real
+    community review outranks the catalogue's own rating here, same as it
+    already does for display (see _effective_rating's replacement logic
+    now folded in here) and for the same reason: a real person in this
+    app who has actually had the bottle is better evidence than either a
+    citation or a formula's estimate. `rating_type` in the output says
+    which kind this actually was, so a citation and a formula's guess are
+    never shown as equally confident even though they can score
+    identically here. Nothing on record yet scores a neutral 50.
+    """
+    if product is None:
+        return 50.0
+    if product.community_review_count and product.community_rating is not None:
+        return max(0.0, min(100.0, product.community_rating * 20))
+    if product.rating is None:
+        return 50.0
+    return max(0.0, min(100.0, product.rating * 20))
+
+
+def _score_candidate(brand: str, kind: str, price: float, lo: float, hi: float,
+                     product, profile: dict | None, group_profile: dict | None) -> dict:
+    """A recommendation SCORE for one candidate, never the candidate's own
+    external rating - "Jameson, 84% match" is this application's judgement
+    of fit for this budget and this person's purchase history, not a
+    claim about how good Jameson is. Every component is computed
+    independently and returned in full, so nothing about how a score was
+    reached is hidden behind one percentage.
+
+    `group_preference` scores against `group_profile` - the purchase
+    profile of the specific people named on this request (see
+    _user_profile's own `names` scoping) - falling back to the caller's
+    own solo profile when nobody else was named, so the field always
+    means something rather than going neutral just because a group
+    wasn't specified.
+    """
+    components = {
+        "budget_fit": _score_budget_fit(price, lo, hi),
+        "purchase_similarity": _score_purchase_similarity(brand, kind, profile),
+        "taste_similarity": _score_taste_similarity(product, profile),
+        "rating": _score_rating(product),
+        "group_preference": _score_purchase_similarity(
+            brand, kind, group_profile if group_profile is not None else profile),
+    }
+    final = sum(components[k] * SCORE_WEIGHTS[k] for k in SCORE_WEIGHTS)
+    return {
+        "match_score": round(final),
+        "score_breakdown": {k: round(v, 1) for k, v in components.items()},
+        "score_weights": SCORE_WEIGHTS,
+    }
 
 
 def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
@@ -882,7 +995,9 @@ def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
           brand_last: dict[str, str] | None = None,
           kinds: tuple[str, ...] = (),
           limit: int = 200, state: str = "",
-          products_by_name: dict | None = None) -> list[dict]:
+          products_by_name: dict | None = None,
+          profile: dict | None = None,
+          group_profile: dict | None = None) -> list[dict]:
     """Every bottle of the chosen size priced inside the budget range.
 
     Ranked dearest inside the budget first: within one state and one size,
@@ -983,25 +1098,30 @@ def _pick(bottles: list[Bottle], lo: float, hi: float, people: int,
             "state": b.state,
             "is_price_fallback": bool(state) and b.state != state,
             **_rating_fields(products_by_name, b.brand),
+            **_score_candidate(
+                b.brand, b.kind, price, lo, hi,
+                (products_by_name or {}).get(b.brand), profile, group_profile,
+            ),
         })
 
-    # Ranked by rating first, highest to lowest - a real community score or
-    # a citation is a stronger signal than price alone, and price was only
-    # ever standing in as "the one quality signal there is" before there
-    # was a better one. Unrated bottles (rating 0, from _effective_rating)
-    # sort after every rated one, then fall back to dearest-inside-budget
-    # among themselves - price is still the tiebreaker it always was, just
-    # no longer the primary key. A brand you buy often or priced yourself
-    # still carries its "you buy this" / "had on <date>" badge
-    # (is_favourite, last_had above); purchase history alone still doesn't
-    # move a bottle up the list on its own - that was tried, and it meant
-    # the list mostly showed back what you already know you drink.
+    # Ranked by match_score, highest to lowest - Stage 3's own weighted
+    # judgement of fit (budget position, purchase history, taste
+    # similarity, rating, group preference), superseding the plain
+    # rating-first sort that came before it. That sort is still exactly
+    # one of this score's five inputs (15%), not something this
+    # contradicts - a real community score or citation still pulls a
+    # candidate up, it just no longer decides the order on its own.
+    # Unrated, never-bought, budget-floor bottles score lowest across
+    # every component and sort last as a consequence, not a special case.
+    # A brand you buy often or priced yourself still carries its "you buy
+    # this" / "had on <date>" badge (is_favourite, last_had above) for
+    # display, independent of whether it also happens to score well.
     #
     # Your own entries are still never cut by the cap, though, regardless of
     # where they land in the order - UP alone lists over nine hundred
     # bottles, and a bottle somebody added being buried past the cap the
     # moment the budget widened made the whole feature feel broken.
-    sort_key = lambda r: (-_effective_rating(r), -r["total"])
+    sort_key = lambda r: (-r["match_score"], -r["total"])
     out.sort(key=sort_key)
     mine = sum(1 for r in out if r["is_mine"])
     if len(out) <= max(limit, mine + 4):
@@ -1115,7 +1235,9 @@ def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
            tables_by_size: dict[str, dict[int, list[Bottle]]] | None = None,
            regions: tuple[str, ...] = NCR,
            limit: int = 200, state: str = "",
-           products_by_name: dict | None = None) -> list[dict]:
+           products_by_name: dict | None = None,
+           profile: dict | None = None,
+           group_profile: dict | None = None) -> list[dict]:
     """Beers you can buy, priced by the bottle.
 
     Same reasoning as _pick's own limit: a cheap budget band can legitimately
@@ -1184,6 +1306,14 @@ def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
             "state": b.state,
             "is_price_fallback": bool(state) and b.state != state,
             **_rating_fields(products_by_name, b.brand),
+            # Budget fit is measured from 0, not `lo` - a beer's own price
+            # is one fixed bottle, not a range, and only the ceiling of the
+            # stated budget does any filtering here (see this function's
+            # own docstring for why `lo` is otherwise unused for beer).
+            **_score_candidate(
+                b.brand, b.kind, unit, 0, hi,
+                (products_by_name or {}).get(b.brand), profile, group_profile,
+            ),
             # Deprecated: the round-priced shape this card used to have. The
             # web app and the API deploy separately, so there is always a
             # window where one is older than the other, and a browser holding
@@ -1193,11 +1323,10 @@ def _beers(bottles: list[Bottle], lo: float, hi: float, people: int,
             **_legacy_beer_fields(unit, b.size_ml, people, abv, buys),
         })
 
-    # Rated first, same as _pick - see there for why. Strongest, then
-    # cheapest, is now the tiebreaker among beers at the same rating (most
-    # of them, in practice, since so few carry a real one) rather than the
-    # primary key.
-    sort_key = lambda r: (-_effective_rating(r), -r["abv"], r["price"])
+    # Ranked by match_score, same as _pick and for the same reason - see
+    # there. Strongest, then cheapest, is the tiebreaker among beers at the
+    # same score rather than the primary key.
+    sort_key = lambda r: (-r["match_score"], -r["abv"], r["price"])
     out.sort(key=sort_key)
     mine = sum(1 for r in out if r["is_mine"])
     if len(out) > max(limit, mine + 4):
@@ -1945,6 +2074,8 @@ def _recommend_for_state(
     want_spirits: bool, kinds: tuple[str, ...], budget_min: float,
     budget_max: float, people: int, hist: dict,
     products_by_name: dict | None = None,
+    profile: dict | None = None,
+    group_profile: dict | None = None,
 ) -> dict | None:
     """Everything about a recommendation that actually varies by state.
 
@@ -1979,11 +2110,13 @@ def _recommend_for_state(
     picks = (_pick(bottles, budget_min, budget_max, people, sizes,
                    hist["favourites"], hist["brand_avg"], tables_by_size, regions,
                    hist["brand_last"], kinds, state=state,
-                   products_by_name=products_by_name)
+                   products_by_name=products_by_name,
+                   profile=profile, group_profile=group_profile)
              if want_spirits else [])
     beers = (_beers(bottles, budget_min, budget_max, people, hist["favourites"],
                     hist["brand_avg"], hist["brand_last"], tables_by_size, regions,
-                    state=state, products_by_name=products_by_name)
+                    state=state, products_by_name=products_by_name,
+                    profile=profile, group_profile=group_profile)
              if want_beer else [])
 
     size_available = any(
@@ -2090,6 +2223,17 @@ def recommend(
     people_names = [n for n in (names or "").split(",") if n.strip()]
     hist = _history(db, caller, people_names, groups=all_groups,
                     price_overrides=all_overrides)
+    # Stage 3's own inputs. `profile` is always the caller's solo purchase
+    # profile; `group_profile` is the same computation scoped to whoever
+    # was actually named (see _score_candidate's docstring for why
+    # "group preference" falls back to the solo profile rather than going
+    # neutral when nobody was named) - reusing the same already-fetched
+    # groups/overrides both _history calls above do, for the same reason.
+    profile = _user_profile(db, caller, [], groups=all_groups, price_overrides=all_overrides)
+    group_profile = (
+        _user_profile(db, caller, people_names, groups=all_groups, price_overrides=all_overrides)
+        if people_names else None
+    )
     # Shared across every state - what you have actually bought before, and
     # what you paid for it, is a property of you, not of a price list.
     learned_drinks = learned(
@@ -2141,6 +2285,7 @@ def recommend(
                 st, known_states, tables, by_state, sizes, want_beer, want_spirits,
                 kinds, budget_min, budget_max, people, hist,
                 products_by_name=products_by_name,
+                profile=profile, group_profile=group_profile,
             )
             if per_state is not None:
                 by_state_results[st] = per_state
@@ -2157,6 +2302,7 @@ def recommend(
         state, known_states, tables, by_state, sizes, want_beer, want_spirits,
         kinds, budget_min, budget_max, people, hist,
         products_by_name=products_by_name,
+        profile=profile, group_profile=group_profile,
     )
     if per_state is None:
         # Only reachable if the whole catalogue is empty, since `state` was
