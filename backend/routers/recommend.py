@@ -1798,6 +1798,177 @@ def profile(names: str = "", db: Session = Depends(get_db),
     return _user_profile(db, caller, people_names)
 
 
+# ── Stage 4: a constraint extractor, not a language model ───────────────────
+# "I have ₹2,000. 4 people. Want something smooth, not smoky." becomes a
+# budget, a headcount, a kind and two taste thresholds - keyword and regex
+# matching, nothing downloaded and nothing sent to an API. This app was
+# deliberately built around a 512MB free tier (see knowledge.py's own
+# docstring on why its embeddings are lexical, not neural); a real NLU model
+# does not fit that budget, and does not need to for a vocabulary this small
+# and this literal. SQL and the Stage 3 scorer do the actual work once these
+# are pulled out - this only ever answers "what did they ask for", never
+# "what should they get".
+
+_ASK_BUDGET_RANGE_RE = re.compile(
+    r"(?:rs\.?|inr|₹)?\s*([\d,]{3,7})\s*(?:-|to|and)\s*(?:rs\.?|inr|₹)?\s*([\d,]{3,7})", re.I)
+_ASK_BUDGET_AROUND_RE = re.compile(
+    r"(?:around|approx\.?|about|near|upto|up\s*to)\s*(?:rs\.?|inr|₹)?\s*([\d,]{2,7})", re.I)
+_ASK_BUDGET_PLAIN_RE = re.compile(
+    r"(?:rs\.?|inr|₹)\s*([\d,]{2,7})|([\d,]{3,7})\s*(?:rs\.?|rupees|inr)\b", re.I)
+
+_ASK_PEOPLE_RE = re.compile(
+    r"(\d+)\s*(?:people|person|persons|of\s*us|friends|pax)|(?:for|we\s*are)\s*(\d+)\b", re.I)
+
+_ASK_KIND_RE = {k: re.compile(rf"\b{k}\b", re.I) for k in ("whisky", "rum", "vodka", "gin")}
+_ASK_BEER_RE = re.compile(r"\bbeer\b", re.I)
+
+# word -> (Product dimension, bound, threshold on the same 0-5 scale
+# everything else in the taste profile already uses). Deliberately a small,
+# literal list rather than anything resembling real language understanding -
+# see knowledge.py's own docstring on why that tradeoff is the right one here.
+_ASK_TASTE_WORDS = {
+    "smooth": ("smoothness", "min", 3.5), "harsh": ("smoothness", "max", 2.0),
+    "smoky": ("smokiness", "min", 3.5), "peaty": ("smokiness", "min", 3.5),
+    "sweet": ("sweetness", "min", 3.5), "dry": ("sweetness", "max", 2.0),
+    "spicy": ("spice", "min", 3.5),
+    "fruity": ("fruit_citrus", "min", 3.5), "citrusy": ("fruit_citrus", "min", 3.5),
+    "oaky": ("oak", "min", 3.5), "woody": ("oak", "min", 3.5),
+    "strong": ("intensity", "min", 3.5), "intense": ("intensity", "min", 3.5),
+    "light": ("intensity", "max", 2.5), "mild": ("intensity", "max", 2.5),
+    "beginner": ("beginner_friendly", "min", 3.5), "easy": ("beginner_friendly", "min", 3.5),
+}
+
+
+def _ask_extract_budget(q: str) -> tuple[float, float] | None:
+    """A range if one was actually said ("2000-3000"), otherwise ±20% around
+    a single figure - the same convention /forecast's own _band uses for a
+    point estimate, so "around ₹2,000" behaves the same way here as it does
+    there.
+    """
+    m = _ASK_BUDGET_RANGE_RE.search(q)
+    if m:
+        lo, hi = sorted(float(m.group(i).replace(",", "")) for i in (1, 2))
+        return lo, hi
+    m = _ASK_BUDGET_AROUND_RE.search(q) or _ASK_BUDGET_PLAIN_RE.search(q)
+    if m:
+        mid = float((m.group(1) or m.group(2)).replace(",", ""))
+        return round(mid * 0.8), round(mid * 1.2)
+    return None
+
+
+def _ask_extract_people(q: str) -> int | None:
+    m = _ASK_PEOPLE_RE.search(q)
+    if not m:
+        return None
+    return int(m.group(1) or m.group(2))
+
+
+def _ask_extract_kinds(q: str) -> tuple[str, ...]:
+    found = [k for k, rx in _ASK_KIND_RE.items() if rx.search(q)]
+    if _ASK_BEER_RE.search(q):
+        found.append("beer")
+    return tuple(found)
+
+
+def _ask_extract_taste(q: str) -> dict[str, dict[str, float]]:
+    """Each known taste word sets a threshold on the matching Product
+    dimension; a preceding "not"/"no"/"without" flips which bound it sets
+    (min becomes max and vice versa) at the complementary point on the same
+    0-5 scale - "not smoky" ("smoky" alone means smokiness >= 3.5) becomes
+    smokiness <= 1.5, not a second, independently hand-tuned threshold. Two
+    mentions on the same dimension (rare, but "sweet but not too sweet" is a
+    real if narrow thing to ask) both apply - a min and a max together is a
+    legitimate, if unusually specific, constraint.
+    """
+    ql = q.lower()
+    constraints: dict[str, dict[str, float]] = defaultdict(dict)
+    for word, (dim, bound, threshold) in _ASK_TASTE_WORDS.items():
+        m = re.search(
+            rf"\b(not|no|without|nothing|never)\s+\w*\s*{word}\w*\b|\b{word}\w*\b", ql)
+        if not m:
+            continue
+        negated = bool(re.match(r"^(not|no|without|nothing|never)\b", m.group(0)))
+        if negated:
+            flipped_bound = "max" if bound == "min" else "min"
+            constraints[dim][flipped_bound] = round(5.0 - threshold, 1)
+        else:
+            constraints[dim][bound] = threshold
+    return dict(constraints)
+
+
+@router.get("/ask", response_model=dict)
+def ask(
+    q: str,
+    state: str,
+    names: str = "",
+    db: Session = Depends(get_db),
+    caller: User = Depends(current_user),
+):
+    """Stage 4: "I have ₹2,000. 4 people. Want something smooth, not smoky"
+    - extracted into a budget, a headcount, a kind and taste thresholds
+    (see the functions above), then answered with the exact same picking
+    and Stage 3 scoring /recommend itself uses, with the taste thresholds
+    applied as one more filter before scoring. A query naming no budget
+    defaults to the same 500-1000 /recommend itself defaults to; naming no
+    kind or taste word filters on nothing there, same as leaving every
+    picker on the main page untouched.
+    """
+    if len(q.strip()) < 3:
+        raise HTTPException(400, "Say a bit more than that - a budget, how many people, what you're after.")
+
+    budget = _ask_extract_budget(q)
+    budget_min, budget_max = budget if budget else (500.0, 1000.0)
+    if budget_max - budget_min < MIN_BUDGET_SPAN:
+        budget_max = budget_min + MIN_BUDGET_SPAN
+    people = _ask_extract_people(q) or 2
+    kinds = _ask_extract_kinds(q)
+    taste = _ask_extract_taste(q)
+    # `bottle` is the size/beer picker, `kind` is the whisky/rum/vodka/gin
+    # picker - two different query params on /recommend. A query naming only
+    # "beer" asks the size picker for beer and nothing else; one naming a
+    # spirit kind leaves the size picker alone (still "any" size) and narrows
+    # kind instead.
+    spirit_kinds = tuple(k for k in kinds if k != "beer")
+    want_beer = "beer" in kinds
+    bottle = "beer" if want_beer and not spirit_kinds else "any"
+
+    result = recommend(
+        state=state, people=people, budget_min=budget_min, budget_max=budget_max,
+        bottle=bottle, kind=",".join(spirit_kinds),
+        names=names, db=db, caller=caller,
+    )
+
+    if taste:
+        products = _products_by_name()
+
+        def _meets_taste(brand: str) -> bool:
+            product = products.get(brand)
+            if product is None:
+                return True  # nothing to check against - not excluded for lacking data
+            for dim, bounds in taste.items():
+                value = getattr(product, dim, None)
+                if value is None:
+                    continue
+                if "min" in bounds and value < bounds["min"]:
+                    return False
+                if "max" in bounds and value > bounds["max"]:
+                    return False
+            return True
+
+        result["picks"] = [p for p in result["picks"] if _meets_taste(p["brand"])]
+        result["beers"] = [b for b in result["beers"] if _meets_taste(b["brand"])]
+
+    return {
+        "query": q,
+        "extracted": {
+            "budget_min": budget_min, "budget_max": budget_max,
+            "budget_was_stated": budget is not None,
+            "people": people, "kinds": list(kinds), "taste": taste,
+        },
+        **result,
+    }
+
+
 @router.get("/meta", response_model=dict)
 def meta(db: Session = Depends(get_db), _: User = Depends(current_user)):
     """States we have real prices for, and where those prices came from."""
