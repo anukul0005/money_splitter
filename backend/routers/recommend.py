@@ -631,6 +631,156 @@ def _history(db: Session, caller: User, names: list[str],
     }
 
 
+# The taste dimensions a purchase profile builds a signal from - the same
+# ones _products_by_name now carries. Sipping/mixer/beginner-friendly are
+# left out on purpose: those describe how a bottle is *used*, not what it
+# *tastes like*, and a profile answering "what does this person's palate
+# lean towards" wants the flavour dimensions, not usage ones.
+PROFILE_TASTE_DIMENSIONS = (
+    "sweetness", "smokiness", "smoothness", "spice", "fruit_citrus",
+    "oak", "intensity",
+)
+
+
+def _user_profile(db: Session, caller: User, names: list[str],
+                  groups: list[Group] | None = None,
+                  price_overrides: list[PriceOverride] | None = None) -> dict:
+    """What this person (or this set of people) actually drinks, derived
+    entirely from their own recorded purchases - never typed in by hand.
+
+    Stage 2 of the alcohol knowledge base: _history already proved the
+    brand-matching works (see its own docstring for the bug that made this
+    possible at all - matching a short name against what someone actually
+    wrote, not the other way round); this reuses the identical scan and
+    the identical short-name catalogue, but keeps every brand it found
+    rather than capping to the six a recommendation card has room for, and
+    turns the result into three things a scoring engine can use rather
+    than one a card can display:
+
+    `category_preferences` - how often each kind of thing shows up in what
+    was actually bought, bucketed into high/medium/low by share of
+    occasions. Not a stated preference; a measured one.
+
+    `typical_spend` - the middle half (25th-75th percentile) of what a
+    single drinks occasion has actually cost, so one big blowout night
+    doesn't set the whole range the way an average would.
+
+    `taste_signals` - the purchase-weighted average of every bought
+    brand's own taste-profile numbers (from Product - see its docstring
+    for why those numbers are a mix of real research and a category-level
+    guess, which this inherits along with everything else built on them).
+    Someone who has bought Old Monk twelve times has their signal shaped
+    far more by Old Monk's numbers than by a brand tried once - weighted
+    by purchase count, not averaged flat across distinct brands.
+    """
+    picked = [n.strip() for n in names if n.strip()]
+    wanted = {n.lower() for n in picked}
+    wanted.add(caller.name.lower())
+
+    short_names = dict(_catalog_short_names())
+    for r in (price_overrides if price_overrides is not None else db.query(PriceOverride).all()):
+        words = bn_key(r.brand).split()
+        if words and not all(w in GENERIC_WORDS for w in words):
+            short_names.setdefault(f" {' '.join(words)} ", r.brand)
+
+    brand_counts: dict[str, int] = defaultdict(int)
+    brand_spend: dict[str, float] = defaultdict(float)
+    occasion_amounts: list[float] = []
+    occasions = 0
+
+    for g in (groups if groups is not None else db.query(Group).all()):
+        if not is_member(g, caller):
+            continue
+        members = {m.name.lower() for m in g.members}
+        if not wanted.issubset(members):
+            continue
+        for e in g.expenses:
+            t = _text(e)
+            if not DRINK_RE.search(t):
+                continue
+            occasions += 1
+            occasion_amounts.append(e.amount)
+            padded = f" {bn_key(t)} "
+            for key, display in short_names.items():
+                if key in padded:
+                    brand_counts[display] += 1
+                    brand_spend[display] += e.amount
+
+    if not brand_counts:
+        return {
+            "scoped": bool(picked), "with_names": picked, "occasions": occasions,
+            "purchases": {}, "purchase_avg_spend": {},
+            "category_preferences": {}, "typical_spend": None, "taste_signals": {},
+        }
+
+    # Category share: the catalogue's own kind for a published brand, falling
+    # back to Product.category for a brand that only exists because someone
+    # corrected or added it by hand and was never in the static tables.
+    kind_by_brand: dict[str, str] = {}
+    for b in BOTTLES:
+        kind_by_brand.setdefault(b.brand, b.kind)
+    products = _products_by_name()
+
+    category_counts: dict[str, int] = defaultdict(int)
+    for brand, count in brand_counts.items():
+        product = products.get(brand)
+        kind = kind_by_brand.get(brand) or (product.category if product else None)
+        if kind:
+            category_counts[(kind or "").lower()] += count
+
+    total_cat = sum(category_counts.values()) or 1
+
+    def _level(share: float) -> str:
+        if share >= 0.4:
+            return "high"
+        if share >= 0.15:
+            return "medium"
+        return "low"
+
+    category_preferences = {
+        k: _level(v / total_cat)
+        for k, v in sorted(category_counts.items(), key=lambda x: -x[1])
+    }
+
+    amounts = sorted(occasion_amounts)
+    n = len(amounts)
+    lo = amounts[int(n * 0.25)]
+    hi = amounts[min(n - 1, int(n * 0.75))]
+    # A single occasion (n=1) has no meaningful 25th-75th spread - both
+    # percentiles land on the same number, which is the honest answer, not
+    # a bug to paper over with a fabricated range.
+
+    dim_totals = {d: 0.0 for d in PROFILE_TASTE_DIMENSIONS}
+    dim_weights = {d: 0.0 for d in PROFILE_TASTE_DIMENSIONS}
+    for brand, count in brand_counts.items():
+        product = products.get(brand)
+        if product is None:
+            continue
+        for d in PROFILE_TASTE_DIMENSIONS:
+            v = getattr(product, d, None)
+            if v is not None:
+                dim_totals[d] += v * count
+                dim_weights[d] += count
+    taste_signals = {
+        d: round(dim_totals[d] / dim_weights[d], 1)
+        for d in PROFILE_TASTE_DIMENSIONS if dim_weights[d]
+    }
+
+    favourites = sorted(brand_counts, key=lambda b: -brand_counts[b])
+    return {
+        "scoped": bool(picked),
+        "with_names": picked,
+        "occasions": occasions,
+        # Every brand found, not capped to six - a profile is read by code,
+        # not squeezed onto a card the way _history's own favourites are.
+        "purchases": {b: brand_counts[b] for b in favourites},
+        "purchase_avg_spend": {b: round(brand_spend[b] / brand_counts[b]) for b in favourites},
+        "category_preferences": category_preferences,
+        "typical_spend": {"min": round(lo), "max": round(hi)},
+        "taste_signals": taste_signals,
+    }
+
+
 def _units(volume_ml: float, abv: float) -> float:
     """Millilitres of pure alcohol — the only fair way to compare a strong
     beer against a mild one, or beer against spirits."""
@@ -666,6 +816,13 @@ def _products_by_name() -> dict:
                 Product.id, Product.canonical_name, Product.rating,
                 Product.rating_type, Product.rating_basis,
                 Product.community_rating, Product.community_review_count,
+                # category + taste dimensions: added for the purchase
+                # profile (see _user_profile), which needs a bought
+                # brand's own taste numbers to build a taste signal that
+                # is derived from real purchases rather than typed by hand.
+                Product.category, Product.sweetness, Product.smokiness,
+                Product.smoothness, Product.spice, Product.fruit_citrus,
+                Product.oak, Product.intensity,
             ).all()
         }
     finally:
@@ -1498,6 +1655,18 @@ def submit_review(product_id: int, body: ReviewIn, db: Session = Depends(get_db)
         "community_rating": product.community_rating,
         "community_review_count": product.community_review_count,
     }
+
+
+@router.get("/profile", response_model=dict)
+def profile(names: str = "", db: Session = Depends(get_db),
+           caller: User = Depends(current_user)):
+    """Stage 2: a preference profile derived entirely from what this person
+    (or, with `names`, this set of people) has actually bought - see
+    _user_profile for how every field is computed and why nothing here is
+    typed in by hand.
+    """
+    people_names = [n for n in (names or "").split(",") if n.strip()]
+    return _user_profile(db, caller, people_names)
 
 
 @router.get("/meta", response_model=dict)
