@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   getForecastBudget, getForecastItems, getRecommendMeta, getFoodMeta, getFriends,
+  listBrands, listPlaceNames,
 } from '../api'
 
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -20,6 +21,14 @@ const INR = (n) => {
 
 const FALLBACK_STATES = ['Delhi', 'Maharashtra', 'Uttar Pradesh']
 const FALLBACK_CITIES = ['Delhi', 'Gurugram', 'Noida']
+
+// A raw excise-table state name is meaningless as a place a person actually
+// lives - "Uttar Pradesh" covers a state, not a place; the drink prices
+// this app has for it are Ghaziabad's own local rates, published under that
+// state name because that's the level Uttar Pradesh's excise department
+// sets one MRP at. This only ever relabels the option text - the value
+// stays the real state string every price lookup already keys on.
+const STATE_DISPLAY_LABEL = { 'Uttar Pradesh': 'Ghaziabad' }
 
 // One location picker, in the vocabulary a person actually recognises - a
 // city, not an excise-table state name - mapped to whichever state that
@@ -162,15 +171,53 @@ export default function Forecast({ tab, setTab }) {
   const [itemResult, setItemResult] = useState(null)
   const [itemError, setItemError]   = useState('')
   const [itemBusy, setItemBusy]     = useState(false)
+  // Same catalogue the Drinks tab's own "Search a bottle" box suggests
+  // from, scoped to whichever state this list is being priced against - a
+  // brand this state doesn't sell would suggest itself and then fail to
+  // match at total time anyway.
+  const [brandOptions, setBrandOptions] = useState([])
+  // No per-city field exists here to scope this by, unlike the drinks
+  // side - every restaurant name is offered rather than inventing a
+  // selector nobody asked for.
+  const [placeOptions, setPlaceOptions] = useState([])
+  // Which line's suggestion dropdown is open, by index - only one line is
+  // ever being typed into at a time, so one flag per list is enough.
+  const [openDrinkSuggest, setOpenDrinkSuggest] = useState(null)
+  const [openFoodSuggest, setOpenFoodSuggest] = useState(null)
 
   useEffect(() => {
     if (drinkMeta?.states?.length && !itemState) setItemState(drinkMeta.states[0])
   }, [drinkMeta])
 
+  useEffect(() => {
+    listBrands(itemState).then((r) => setBrandOptions(r.data)).catch(() => setBrandOptions([]))
+  }, [itemState])
+
+  useEffect(() => {
+    listPlaceNames('').then((r) => setPlaceOptions(r.data)).catch(() => setPlaceOptions([]))
+  }, [])
+
   const setDrinkLine = (i, patch) =>
     setDrinkLines((cur) => cur.map((l, idx) => (idx === i ? { ...l, ...patch } : l)))
   const setFoodLine = (i, patch) =>
     setFoodLines((cur) => cur.map((l, idx) => (idx === i ? { ...l, ...patch } : l)))
+
+  // Ranked the same way the Drinks tab's own suggestions are: starts-with
+  // first, then anywhere it appears, capped at eight so the list never
+  // grows past a thumb's reach.
+  const rankSuggestions = (options, key, text) => {
+    const q = text.trim().toLowerCase()
+    if (!q) return []
+    return options
+      .filter((o) => o[key].toLowerCase().includes(q))
+      .sort((a, b) => {
+        const aStarts = a[key].toLowerCase().startsWith(q)
+        const bStarts = b[key].toLowerCase().startsWith(q)
+        if (aStarts !== bStarts) return aStarts ? -1 : 1
+        return a[key].length - b[key].length
+      })
+      .slice(0, 8)
+  }
 
   const runItems = async () => {
     setItemError(''); setItemBusy(true); setItemResult(null)
@@ -491,7 +538,9 @@ export default function Forecast({ tab, setTab }) {
             <div>
               <label className="label">State (for drink prices)</label>
               <select className="input" value={itemState} onChange={(e) => setItemState(e.target.value)}>
-                {(drinkMeta?.states ?? []).map((s) => <option key={s} value={s}>{s}</option>)}
+                {(drinkMeta?.states ?? []).map((s) => (
+                  <option key={s} value={s}>{STATE_DISPLAY_LABEL[s] || s}</option>
+                ))}
               </select>
             </div>
           </div>
@@ -499,25 +548,54 @@ export default function Forecast({ tab, setTab }) {
           <div className="card space-y-3">
             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Drinks</p>
             {drinkLines.map((l, i) => (
-              <div key={i} className="flex gap-1.5 items-start">
-                <input
-                  className="input flex-1 min-w-0" placeholder="e.g. Old Monk"
-                  value={l.brand} onChange={(e) => setDrinkLine(i, { brand: e.target.value })}
-                />
-                <select
-                  className="input w-auto flex-shrink-0" value={l.size_ml}
-                  onChange={(e) => setDrinkLine(i, { size_ml: e.target.value })}
-                >
-                  {SIZES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
-                </select>
-                <input
-                  className="input w-14 flex-shrink-0 text-center" type="number" min="1"
-                  value={l.qty} onChange={(e) => setDrinkLine(i, { qty: e.target.value })}
-                />
-                <button
-                  type="button" onClick={() => setDrinkLines((cur) => cur.filter((_, idx) => idx !== i))}
-                  className="text-gray-300 hover:text-red-500 px-1 flex-shrink-0"
-                >✕</button>
+              <div key={i} className="space-y-1.5 pb-2.5 border-b border-amber-50 last:border-0 last:pb-0">
+                {/* Its own row, full width - squeezed in alongside the size
+                    and quantity fields, a real bottle name ("SEAGRAMS 100
+                    PIPERS EXCEPTIONAL...") had nowhere near enough room to
+                    read back what was actually typed. */}
+                <div className="relative">
+                  <input
+                    className="input" placeholder="e.g. Old Monk"
+                    value={l.brand}
+                    onChange={(e) => { setDrinkLine(i, { brand: e.target.value }); setOpenDrinkSuggest(i) }}
+                    onFocus={() => setOpenDrinkSuggest(i)}
+                    // Delayed so a tap on a suggestion below registers
+                    // before the blur closes the list out from under it.
+                    onBlur={() => setTimeout(
+                      () => setOpenDrinkSuggest((cur) => (cur === i ? null : cur)), 150)}
+                  />
+                  {openDrinkSuggest === i && rankSuggestions(brandOptions, 'brand', l.brand).length > 0 && (
+                    <ul className="absolute left-0 right-0 top-full mt-1 z-20 bg-white border border-amber-200 rounded-md shadow-lg overflow-hidden">
+                      {rankSuggestions(brandOptions, 'brand', l.brand).map((b) => (
+                        <li key={b.brand}>
+                          <button
+                            type="button"
+                            onMouseDown={() => { setDrinkLine(i, { brand: b.brand }); setOpenDrinkSuggest(null) }}
+                            className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-amber-50 border-b border-amber-50 last:border-0"
+                          >
+                            {b.brand}<span className="text-gray-400 font-normal"> · {b.kind}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+                <div className="flex gap-1.5 items-start">
+                  <select
+                    className="input flex-1" value={l.size_ml}
+                    onChange={(e) => setDrinkLine(i, { size_ml: e.target.value })}
+                  >
+                    {SIZES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+                  </select>
+                  <input
+                    className="input w-14 flex-shrink-0 text-center" type="number" min="1"
+                    value={l.qty} onChange={(e) => setDrinkLine(i, { qty: e.target.value })}
+                  />
+                  <button
+                    type="button" onClick={() => setDrinkLines((cur) => cur.filter((_, idx) => idx !== i))}
+                    className="text-gray-300 hover:text-red-500 px-1 flex-shrink-0"
+                  >✕</button>
+                </div>
               </div>
             ))}
             <p className="text-[10px] text-gray-400">
@@ -536,19 +614,42 @@ export default function Forecast({ tab, setTab }) {
           <div className="card space-y-3">
             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Food</p>
             {foodLines.map((l, i) => (
-              <div key={i} className="flex gap-1.5 items-start">
-                <input
-                  className="input flex-1 min-w-0" placeholder="e.g. Dinner for the table"
-                  value={l.name} onChange={(e) => setFoodLine(i, { name: e.target.value })}
-                />
-                <input
-                  className="input w-24 flex-shrink-0" type="number" min="0" placeholder="₹"
-                  value={l.amount} onChange={(e) => setFoodLine(i, { amount: e.target.value })}
-                />
-                <button
-                  type="button" onClick={() => setFoodLines((cur) => cur.filter((_, idx) => idx !== i))}
-                  className="text-gray-300 hover:text-red-500 px-1 flex-shrink-0"
-                >✕</button>
+              <div key={i} className="space-y-1.5 pb-2.5 border-b border-amber-50 last:border-0 last:pb-0">
+                <div className="relative">
+                  <input
+                    className="input" placeholder="e.g. Dinner for the table"
+                    value={l.name}
+                    onChange={(e) => { setFoodLine(i, { name: e.target.value }); setOpenFoodSuggest(i) }}
+                    onFocus={() => setOpenFoodSuggest(i)}
+                    onBlur={() => setTimeout(
+                      () => setOpenFoodSuggest((cur) => (cur === i ? null : cur)), 150)}
+                  />
+                  {openFoodSuggest === i && rankSuggestions(placeOptions, 'name', l.name).length > 0 && (
+                    <ul className="absolute left-0 right-0 top-full mt-1 z-20 bg-white border border-amber-200 rounded-md shadow-lg overflow-hidden">
+                      {rankSuggestions(placeOptions, 'name', l.name).map((p) => (
+                        <li key={`${p.name}-${p.city}`}>
+                          <button
+                            type="button"
+                            onMouseDown={() => { setFoodLine(i, { name: p.name }); setOpenFoodSuggest(null) }}
+                            className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-amber-50 border-b border-amber-50 last:border-0"
+                          >
+                            {p.name}<span className="text-gray-400 font-normal"> · {p.city}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+                <div className="flex gap-1.5 items-start">
+                  <input
+                    className="input flex-1" type="number" min="0" placeholder="₹"
+                    value={l.amount} onChange={(e) => setFoodLine(i, { amount: e.target.value })}
+                  />
+                  <button
+                    type="button" onClick={() => setFoodLines((cur) => cur.filter((_, idx) => idx !== i))}
+                    className="text-gray-300 hover:text-red-500 px-1 flex-shrink-0"
+                  >✕</button>
+                </div>
               </div>
             ))}
             <p className="text-[10px] text-gray-400">
