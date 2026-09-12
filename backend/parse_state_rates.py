@@ -10,10 +10,18 @@ worth stating precisely.
       A cleanly tabulated rate list for FY 2026-27, one row per line, 1337 of
       them. Often prints ABV inside the brand name.
 
-  sources/up/up-liquor-price-list.pdf   -> Uttar Pradesh
-      Ragged multi-line layout, per-brand MRP. Carries the national brands the
-      MP list has none of - Vat 69, Old Monk, Royal Stag, Imperial Blue,
-      100 Pipers, Officer's Choice, Absolut, Smirnoff, Tuborg, Black Dog.
+  sources/up/{Beer,Fl,Wine}_up26.pdf    -> Uttar Pradesh
+      The excise department's own citizen Price Finder
+      (cms.upexciseonline.co/add-liquor-price-finder), exported per liquor
+      type - a real Liquor Type/Sub Type column per row rather than a name
+      to guess a category from. Replaced the old up-liquor-price-list.pdf
+      (kept in sources/ for its own history, no longer parsed here) after
+      that document's Glenfiddich 18YO row turned out to say Rs 1,480 - a
+      typo that a name-guessing parser had no way to catch, only a real
+      category column and a live cross-check did. See
+      parse_up_pricefinder.py for the table extraction and category
+      mapping this new source needs, which is different enough from this
+      file's own MP/old-UP parsing to live on its own.
 
 An earlier build filed the rate list under Uttar Pradesh because that is what
 the folder said. It is Madhya Pradesh. The evidence is unambiguous: it agrees
@@ -55,25 +63,30 @@ try:
 except ImportError:  # pragma: no cover - tooling dependency, not a runtime one
     sys.exit("pypdf is needed to re-parse the PDFs: pip install pypdf")
 
+import parse_up_pricefinder
+
 HERE = Path(__file__).parent
 MP_PDF = HERE / "sources" / "mp" / "mp-rate-list-2026-27.pdf"
-UP_PDF = HERE / "sources" / "up" / "up-liquor-price-list.pdf"
 OUT = HERE / "state_prices.py"
 
 MP, UP = "Madhya Pradesh", "Uttar Pradesh"
 
-WHISKY, RUM, VODKA, BEER, GIN, WINE, BRANDY, TEQUILA, LIQUEUR = (
+WHISKY, RUM, VODKA, BEER, GIN, WINE, BRANDY, TEQUILA, LIQUEUR, RTD = (
     "whisky", "rum", "vodka", "beer", "gin", "wine", "brandy", "tequila",
-    "liqueur")
+    "liqueur", "rtd")
 
 # Sizes worth keeping. Not a filter on what the app shows - it keeps its own
 # rules - just a way of leaving out the 60ml nips and 3-litre cases that would
 # treble the table for no gain.
 #
+# 275/250 are RTD's own standard sizes (a Breezer bottle, a canned premix
+# cocktail) - absent before RTD was a real category, since nothing else is
+# sold in them.
+#
 # 700ml earns its place despite looking like an odd size: it is the standard
 # import bottle, so leaving it out silently dropped 87 rows across the two
 # documents - most of the tequila and a good deal of the imported scotch.
-KEEP_SIZES = {180, 330, 375, 500, 650, 700, 750, 1000}
+KEEP_SIZES = {180, 250, 275, 330, 375, 500, 650, 700, 750, 1000}
 
 # Not on sale to a person walking into a UP shop.
 #
@@ -182,15 +195,10 @@ def _category(name: str, declared: str = "") -> str | None:
         if d.startswith("whisk"):
             return WHISKY
         if d in {"rum", "vodka", "gin", "beer", "wine", "brandy", "tequila",
-                 "liqueur"}:
+                 "liqueur", "rtd"}:
             return d
         if d == "cognac":
             return BRANDY          # brandy under its regional name
-        if d == "rtd":
-            # A Breezer is not a bottle you buy for an evening, and the sizes
-            # it comes in are excluded anyway. Named here so the coverage
-            # audit reports it as a decision rather than a hole.
-            return None
     for table in (CATEGORY_WORDS, CATEGORY_STYLES, CATEGORY_BY_BRAND):
         for kind, pattern in table:
             if re.search(pattern, name, re.I):
@@ -461,6 +469,23 @@ def merge(rows: list[dict]) -> tuple[list[dict], dict[str, str]]:
     return merged, canonical
 
 
+def merge_unpriced(rows: list[dict]) -> list[dict]:
+    """Same canonicalisation and (brand, kind, size, state) dedup as merge(),
+    for rows that only ever came from parse_up_pricefinder's `unpriced` list
+    - no price to span, so there's nothing here for two duplicate rows to
+    disagree on beyond which source named it.
+    """
+    canonical = canonicalise([(r["brand"], r["kind"]) for r in rows])
+    seen: dict[tuple, dict] = {}
+    for r in rows:
+        name = canonical[(r["brand"], r["kind"])]
+        key = (name, r["kind"], r["size"], r["state"])
+        if key not in seen:
+            seen[key] = {**r, "brand": name}
+    out = sorted(seen.values(), key=lambda r: (r["state"], r["kind"], r["brand"].lower(), -r["size"]))
+    return out
+
+
 HEADER = '"""State liquor prices, parsed from the states\' own PDFs.\n\
 \n\
 GENERATED FILE - do not edit by hand. Rebuild with:\n\
@@ -488,10 +513,10 @@ SOURCES = {\n\
         "as_of": "2026-04-04",\n\
         "note": "Madhya Pradesh rate list, financial year 2026-2027 (official PDF)",\n\
     },\n\
-    "up-liquor-price-list": {\n\
-        "url": "sources/up/up-liquor-price-list.pdf",\n\
-        "as_of": "2026-09",\n\
-        "note": "Uttar Pradesh liquor price list, per-brand MRP (official PDF)",\n\
+    "up-price-finder-2026": {\n\
+        "url": "https://cms.upexciseonline.co/add-liquor-price-finder/",\n\
+        "as_of": "2026-09-13",\n\
+        "note": "UP Excise citizen Price Finder, exported per liquor type (official PDFs)",\n\
     },\n\
 }\n\
 \n\
@@ -499,15 +524,26 @@ SOURCES = {\n\
 # price), abv (None where the document did not print it), sources\n\
 ROWS: list[tuple] = [\n'
 
-FOOTER = ']\n\
+MIDDLE = ']\n\
 \n\
 # Strength published inside a brand name in the source documents. Exact, not a\n\
 # category typical, so the app can label it without a "~".\n\
 ABV: dict[str, float] = {\n\
-%s}\n'
+%s}\n\
+\n\
+# A brand the department has registered but marked not currently sold - see\n\
+# parse_up_pricefinder.py for what "0.00" means there. No price to filter\n\
+# or sort by, so these never appear in a recommendation; kept so a search\n\
+# can still say "this exists, not currently sold here" instead of the\n\
+# brand looking like it was never real.\n\
+#\n\
+# brand, kind, size_ml, state, source\n\
+UNPRICED: list[tuple] = [\n'
+
+FOOTER = ']\n'
 
 
-def write(rows: list[dict], path: Path) -> None:
+def write(rows: list[dict], unpriced: list[dict], path: Path) -> None:
     lines = [HEADER]
     for r in rows:
         srcs = ", ".join(repr(s) for s in r["sources"])
@@ -520,24 +556,32 @@ def write(rows: list[dict], path: Path) -> None:
         )
     abv_rows = sorted({(_key(r["brand"]), r["abv"]) for r in rows if r["abv"]})
     body = "".join("    %r: %s,\n" % (k, v) for k, v in abv_rows)
-    lines.append(FOOTER % body)
+    lines.append(MIDDLE % body)
+    for r in unpriced:
+        lines.append("    (%r, %r, %d, %r, %r),\n"
+                     % (r["brand"], r["kind"], r["size"], r["state"], r["source"]))
+    lines.append(FOOTER)
     path.write_text("".join(lines), encoding="utf-8")
 
 
 def main() -> int:
-    for f in (MP_PDF, UP_PDF):
-        if not f.exists():
-            sys.exit(f"missing source PDF: {f}")
+    if not MP_PDF.exists():
+        sys.exit(f"missing source PDF: {MP_PDF}")
 
     mp = parse_rate_list(MP_PDF)
-    up, unsplit, nominal = parse_price_list(UP_PDF)
+    up, up_unpriced, up_stats = parse_up_pricefinder.parse(
+        _category, _clean, _plausible, KEEP_SIZES, EXCLUDE_NAME)
     rows, canonical = merge(mp + up)
+    unpriced = merge_unpriced(up_unpriced)
 
     print(f"MP rate list   : {len(mp):5} usable rows")
-    print(f"UP price list  : {len(up):5} usable rows "
-          f"({unsplit} unsplit, {nominal} not priced for retail)")
+    print(f"UP price finder: {len(up):5} usable rows "
+          f"({up_stats['raw']} raw, {up_stats['unpriced']} not currently "
+          f"priced, {up_stats['dropped_size']} non-standard size, "
+          f"{up_stats['dropped_no_kind']} uncategorisable)")
     print(f"merged         : {len(rows):5} brand/size/state rows")
     print(f"canonical names: {len(set(canonical.values())):5} distinct products")
+    print(f"unpriced (search-only): {len(unpriced):5} rows")
 
     problems = []
     if len(rows) < 800:
@@ -550,7 +594,7 @@ def main() -> int:
     if states != {MP, UP}:
         problems.append(f"expected both states, got {states}")
     kinds = {r["kind"] for r in rows}
-    for need in (WHISKY, RUM, VODKA, BEER):
+    for need in (WHISKY, RUM, VODKA, BEER, RTD):
         if need not in kinds:
             problems.append(f"no {need} rows at all")
     for brand in ("vat 69", "old monk", "royal stag", "imperial blue"):
@@ -581,7 +625,7 @@ def main() -> int:
             print("  *", pr)
         return 1
 
-    write(rows, OUT)
+    write(rows, unpriced, OUT)
     print(f"\nwrote {OUT.name}")
     for st in sorted(states):
         sub = [r for r in rows if r["state"] == st]

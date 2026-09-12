@@ -35,6 +35,7 @@ const BOTTLES = [
   ['750',   'Full',    750],
   ['other', 'Other',   null],
   ['beer',  'Beer',    null],
+  ['rtd',   'RTD',     null],
 ]
 
 // The four base spirits. Wine, brandy, tequila and liqueur are real
@@ -267,6 +268,7 @@ export default function Recommend() {
   const [kinds, setKinds] = useState([])
   const [showAllPicks, setShowAllPicks] = useState(false)
   const [showAllBeers, setShowAllBeers] = useState(false)
+  const [showAllRtds, setShowAllRtds] = useState(false)
   const [withWho, setWithWho] = useState([])
   const [result, setResult]   = useState(null)
   const [error, setError]     = useState('')
@@ -362,12 +364,12 @@ export default function Recommend() {
   }, [searchState])
 
   const peopleN = Math.max(1, parseInt(people, 10) || 0)
-  // The bottle sizes among the picked cards, beer excluded — beer has no one
-  // size to divide between people.
+  // The bottle sizes among the picked cards, beer and RTD excluded — neither
+  // has one size to divide between people.
   // "other" is a category of sizes, not one ml value - Number('other') is
   // NaN, which corrupted the "Xml between Y people" line below when it was
   // the only thing picked.
-  const sizesPicked = bottles.filter((b) => b !== 'beer' && b !== 'other').map(Number)
+  const sizesPicked = bottles.filter((b) => b !== 'beer' && b !== 'rtd' && b !== 'other').map(Number)
   const loN = budgetMin
   const hiN = budgetMax
   const canRun = state && peopleN >= 1 && hiN - loN >= MIN_SPAN
@@ -519,6 +521,141 @@ export default function Recommend() {
 
   const hist = result?.history
 
+  // Shared by the Beer and RTD sections below - same shape (priced by the
+  // one real unit, not a bottle divided into shares), same card, only
+  // `kind` (for the price-fix form) and `prefix` (for this card's own
+  // editing/rating/why-open keys) actually differ between the two.
+  const renderUnitCard = (b, i, prefix, kind) => {
+    // The frontend and the API deploy separately, so there is always a
+    // window where one is ahead of the other. Beer used to be priced as a
+    // round (`total` for `qty` bottles) and is now priced per bottle, so
+    // both shapes are read here — an older API served a card full of
+    // "₹NaN" otherwise.
+    const unit = b.price ?? b.unit_price ??
+      (b.total != null && b.qty ? Math.round(b.total / b.qty) : null)
+    const buys = b.budget_buys ?? b.qty ?? null
+    const perHead = b.bottles_per_head ?? null
+    const roundCost = b.round_for_group ??
+      (unit != null ? Math.round(unit * (result.people || 1)) : null)
+    const pureAlcohol = b.alcohol_ml_per_bottle ?? null
+    const key = `${prefix}${i}`
+    return (
+      <div key={`${b.brand}-${b.size_ml}-${i}`} className="card p-3.5">
+        {/* The brand gets its own line and is allowed to wrap. Sharing a
+            row with the price and the ABV badge meant the long names off
+            the state lists were cut off mid word, which is no use for
+            telling two apart. */}
+        <div className="flex items-start justify-between gap-2">
+          <p className="text-sm font-black text-gray-900 flex-1 min-w-0 break-words">
+            {b.brand}
+            {b.is_favourite && (
+              <span className="ml-1.5 text-[9px] font-bold text-brand-600 uppercase tracking-wider">
+                you buy this
+              </span>
+            )}
+          </p>
+          {/* One bottle. Leading with the price of a round was a number
+              nobody recognises. */}
+          <p className="text-sm font-black text-brand-600 flex-shrink-0">{INR(unit)}</p>
+        </div>
+
+        <p className="text-[11px] font-bold text-gray-700 mt-0.5">
+          1 bottle · {b.size_ml}ml
+          <span className="font-normal text-gray-400">
+            {' '}· {pct(b.abv, b.abv_known)}
+            {pureAlcohol != null && ` · ${pureAlcohol}ml pure alcohol`}
+          </span>
+        </p>
+        <RatingBadge rating={b.rating} type={b.rating_type}
+                     communityRating={b.community_rating} communityCount={b.community_review_count} />
+        <MatchBreakdown
+          score={b.match_score} breakdown={b.score_breakdown} weights={b.score_weights}
+          open={whyOpen === key}
+          onToggle={() => setWhyOpen(whyOpen === key ? null : key)}
+        />
+
+        {/* What the budget does with that — a consequence of the budget,
+            not a property of the bottle, so it sits apart. */}
+        {buys != null && (
+          <p className="text-[10px] text-gray-400 mt-0.5">
+            {fmtBudgetMax(result.budget_max)} buys{' '}
+            <span className="font-bold text-gray-500">
+              {buys} {buys === 1 ? 'bottle' : 'bottles'}
+            </span>
+            {result.people > 1 && perHead != null && ` · ${perHead} each`}
+            {roundCost != null && <> · one each is {INR(roundCost)}</>}
+          </p>
+        )}
+
+        {(b.your_avg != null || b.last_had) && (
+          <p className="text-[10px] text-gray-400 mt-0.5">
+            {b.last_had && (
+              <>
+                Had on <span className="font-bold text-gray-500">{fmtDate(b.last_had)}</span>
+              </>
+            )}
+            {b.last_had && b.your_avg != null && ' · '}
+            {b.your_avg != null && (
+              <>
+                your {b.matched_favourite} nights average{' '}
+                <span className="font-bold text-gray-500">{INR(b.your_avg)}</span>
+              </>
+            )}
+          </p>
+        )}
+
+        <div className="flex gap-3 mt-1">
+          <button
+            type="button"
+            onClick={() => setEditing(editing === key ? null : key)}
+            className="text-[10px] font-bold text-gray-400 hover:text-brand-600"
+          >
+            {editing === key ? 'Close' : 'Wrong price? Fix it'}
+          </button>
+          {b.product_id != null && (
+            <button
+              type="button"
+              onClick={() => setRating(rating === key ? null : key)}
+              className="text-[10px] font-bold text-gray-400 hover:text-brand-600"
+            >
+              {rating === key ? 'Close' : 'Rate this bottle'}
+            </button>
+          )}
+        </div>
+
+        {rating === key && (
+          <ProductReviewForm
+            productId={b.product_id}
+            myName={user?.name}
+            onCancel={() => setRating(null)}
+            onDone={() => { setRating(null); run() }}
+          />
+        )}
+
+        {editing === key && (
+          <PriceEditForm
+            state={result.state}
+            states={meta?.states ?? []}
+            initial={{
+              brand: b.brand, kind, state: result.state,
+              size_ml: b.size_ml, price: unit,
+              abv: b.abv, abv_known: b.abv_known,
+            }}
+            onCancel={() => setEditing(null)}
+            onDone={(saved) => {
+              setEditing(null)
+              loadMeta()
+              if (saved?.state && saved.state !== state) setState(saved.state)
+              run({ state: saved?.state })
+            }}
+          />
+        )}
+
+        <PriceStrip compare={b.compare} cheapest={b.cheapest_region} />
+      </div>
+    )
+  }
+
   return (
     <div className="pb-28 md:pb-10">
       <div className="px-5 pt-10 md:pt-6 pb-4 bg-cream sticky top-0 z-10 border-b border-amber-100/60">
@@ -611,7 +748,7 @@ export default function Recommend() {
 
           <div>
             <label className="label">How much between you (optional)</label>
-            <div className="grid grid-cols-5 gap-1.5">
+            <div className="grid grid-cols-3 gap-1.5">
               {BOTTLES.map(([v, label, hint]) => (
                 <button
                   key={v}
@@ -628,7 +765,7 @@ export default function Recommend() {
                 >
                   {label}
                   <span className="block text-[9px] font-normal opacity-70">
-                    {v === 'other' ? 'other sizes' : hint === null ? 'bottles' : `${hint}ml`}
+                    {v === 'other' ? 'other sizes' : v === 'rtd' ? 'cans/bottles' : hint === null ? 'bottles' : `${hint}ml`}
                   </span>
                 </button>
               ))}
@@ -638,10 +775,10 @@ export default function Recommend() {
                 two sizes at once have no one answer. */}
             <p className="text-[10px] text-gray-400 mt-1">
               {bottles.length === 0
-                ? 'Nothing picked — every size and beer, whatever the budget covers. Tap any you fancy, tap again to clear.'
+                ? 'Nothing picked — every size, beer and RTD, whatever the budget covers. Tap any you fancy, tap again to clear.'
                 : sizesPicked.length === 1 && bottles.length === 1
                   ? `${sizesPicked[0]}ml between ${peopleN} ${peopleN === 1 ? 'person' : 'people'} · ${Math.round(sizesPicked[0] / peopleN)}ml each.`
-                  : `Showing ${bottles.length} at once — ${bottles.length} of the four, whatever the budget covers.`}
+                  : `Showing ${bottles.length} at once, whatever the budget covers.`}
             </p>
           </div>
 
@@ -857,7 +994,13 @@ export default function Recommend() {
                     <div key={`${r.brand}-${r.size_ml}-${r.state}-${i}`} className="rounded-md border border-amber-100 p-3">
                       <div className="flex items-start justify-between gap-2">
                         <p className="text-sm font-black text-gray-900 flex-1 min-w-0 break-words">{r.brand}</p>
-                        <p className="text-sm font-black text-brand-600 flex-shrink-0">{INR(r.price)}</p>
+                        {r.not_currently_sold ? (
+                          <p className="text-[10px] font-bold text-amber-600 flex-shrink-0 uppercase tracking-wide">
+                            not sold here
+                          </p>
+                        ) : (
+                          <p className="text-sm font-black text-brand-600 flex-shrink-0">{INR(r.price)}</p>
+                        )}
                       </div>
                       <p className="text-[11px] font-bold text-gray-700 mt-0.5">
                         {r.size_name ? `1 ${r.size_name} · ` : ''}{r.size_ml}ml
@@ -870,6 +1013,13 @@ export default function Recommend() {
                           {searchResult.is_all && <> · <span className="font-bold">{r.state}</span></>}
                         </span>
                       </p>
+                      {r.not_currently_sold && (
+                        <p className="text-[10px] text-gray-400 mt-0.5">
+                          Registered in {r.state}, but not currently priced for
+                          retail there — not something a shop can sell you
+                          today, so it never shows up in a recommendation.
+                        </p>
+                      )}
                       <PriceStrip compare={r.compare} cheapest={r.cheapest_region} />
 
                       <button
@@ -1052,7 +1202,8 @@ export default function Recommend() {
               </div>
             )}
 
-            {!result.is_all && result.picks.length === 0 && result.beers.length === 0 && (
+            {!result.is_all && result.picks.length === 0 && result.beers.length === 0
+              && !(result.rtds?.length > 0) && (
               <div className="card text-center py-6">
                 <p className="text-sm text-gray-400">
                   {!result.size_available
@@ -1204,139 +1355,8 @@ export default function Recommend() {
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">
                   Strongest first
                 </p>
-                {(showAllBeers ? result.beers : result.beers.slice(0, TOP_N)).map((b, i) => {
-                  // The frontend and the API deploy separately, so there is
-                  // always a window where one is ahead of the other. Beer used
-                  // to be priced as a round (`total` for `qty` bottles) and is
-                  // now priced per bottle, so both shapes are read here — an
-                  // older API served a card full of "₹NaN" otherwise.
-                  const unit = b.price ?? b.unit_price ??
-                    (b.total != null && b.qty ? Math.round(b.total / b.qty) : null)
-                  const buys = b.budget_buys ?? b.qty ?? null
-                  const perHead = b.bottles_per_head ?? null
-                  const roundCost = b.round_for_group ??
-                    (unit != null ? Math.round(unit * (result.people || 1)) : null)
-                  const pureAlcohol = b.alcohol_ml_per_bottle ?? null
-                  return (
-                  <div key={`${b.brand}-${b.size_ml}-${i}`} className="card p-3.5">
-                    {/* The brand gets its own line and is allowed to wrap.
-                        Sharing a row with the price and the ABV badge meant
-                        the long names off the state lists were cut off mid
-                        word, which is no use for telling two apart. */}
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="text-sm font-black text-gray-900 flex-1 min-w-0 break-words">
-                        {b.brand}
-                        {b.is_favourite && (
-                          <span className="ml-1.5 text-[9px] font-bold text-brand-600 uppercase tracking-wider">
-                            you buy this
-                          </span>
-                        )}
-                      </p>
-                      {/* One bottle. Leading with the price of a round was a
-                          number nobody recognises. */}
-                      <p className="text-sm font-black text-brand-600 flex-shrink-0">{INR(unit)}</p>
-                    </div>
-
-                    <p className="text-[11px] font-bold text-gray-700 mt-0.5">
-                      1 bottle · {b.size_ml}ml
-                      <span className="font-normal text-gray-400">
-                        {' '}· {pct(b.abv, b.abv_known)}
-                        {pureAlcohol != null && ` · ${pureAlcohol}ml pure alcohol`}
-                      </span>
-                    </p>
-                    <RatingBadge rating={b.rating} type={b.rating_type}
-                                 communityRating={b.community_rating} communityCount={b.community_review_count} />
-                    <MatchBreakdown
-                      score={b.match_score} breakdown={b.score_breakdown} weights={b.score_weights}
-                      open={whyOpen === `b${i}`}
-                      onToggle={() => setWhyOpen(whyOpen === `b${i}` ? null : `b${i}`)}
-                    />
-
-                    {/* What the budget does with that — a consequence of the
-                        budget, not a property of the beer, so it sits apart. */}
-                    {buys != null && (
-                      <p className="text-[10px] text-gray-400 mt-0.5">
-                        {fmtBudgetMax(result.budget_max)} buys{' '}
-                        <span className="font-bold text-gray-500">
-                          {buys} {buys === 1 ? 'bottle' : 'bottles'}
-                        </span>
-                        {result.people > 1 && perHead != null && ` · ${perHead} each`}
-                        {roundCost != null && <> · one each is {INR(roundCost)}</>}
-                      </p>
-                    )}
-
-                    {/* Same "had it before" line the spirit cards carry — beer
-                        never had one, for no better reason than it having been
-                        added to spirits first. */}
-                    {(b.your_avg != null || b.last_had) && (
-                      <p className="text-[10px] text-gray-400 mt-0.5">
-                        {b.last_had && (
-                          <>
-                            Had on <span className="font-bold text-gray-500">{fmtDate(b.last_had)}</span>
-                          </>
-                        )}
-                        {b.last_had && b.your_avg != null && ' · '}
-                        {b.your_avg != null && (
-                          <>
-                            your {b.matched_favourite} nights average{' '}
-                            <span className="font-bold text-gray-500">{INR(b.your_avg)}</span>
-                          </>
-                        )}
-                      </p>
-                    )}
-
-                    <div className="flex gap-3 mt-1">
-                      <button
-                        type="button"
-                        onClick={() => setEditing(editing === `b${i}` ? null : `b${i}`)}
-                        className="text-[10px] font-bold text-gray-400 hover:text-brand-600"
-                      >
-                        {editing === `b${i}` ? 'Close' : 'Wrong price? Fix it'}
-                      </button>
-                      {b.product_id != null && (
-                        <button
-                          type="button"
-                          onClick={() => setRating(rating === `b${i}` ? null : `b${i}`)}
-                          className="text-[10px] font-bold text-gray-400 hover:text-brand-600"
-                        >
-                          {rating === `b${i}` ? 'Close' : 'Rate this bottle'}
-                        </button>
-                      )}
-                    </div>
-
-                    {rating === `b${i}` && (
-                      <ProductReviewForm
-                        productId={b.product_id}
-                        myName={user?.name}
-                        onCancel={() => setRating(null)}
-                        onDone={() => { setRating(null); run() }}
-                      />
-                    )}
-
-                    {editing === `b${i}` && (
-                      <PriceEditForm
-                        state={result.state}
-                        states={meta?.states ?? []}
-                        initial={{
-                          brand: b.brand, kind: 'beer', state: result.state,
-                          size_ml: b.size_ml, price: unit,
-                          abv: b.abv, abv_known: b.abv_known,
-                        }}
-                        onCancel={() => setEditing(null)}
-                        onDone={(saved) => {
-                        setEditing(null)
-                        loadMeta()
-                        if (saved?.state && saved.state !== state) setState(saved.state)
-                        run({ state: saved?.state })
-                      }}
-                      />
-                    )}
-
-                    {/* Beer now gets the same side-by-side the spirits have. */}
-                    <PriceStrip compare={b.compare} cheapest={b.cheapest_region} />
-                  </div>
-                  )
-                })}
+                {(showAllBeers ? result.beers : result.beers.slice(0, TOP_N))
+                  .map((b, i) => renderUnitCard(b, i, 'b', 'beer'))}
 
                 {result.beers.length > TOP_N && (
                   <button
@@ -1347,6 +1367,30 @@ export default function Recommend() {
                     {showAllBeers
                       ? 'Show fewer'
                       : `Show ${result.beers.length - TOP_N} more beers`}
+                  </button>
+                )}
+              </>
+            )}
+
+            {/* Same card, same reasoning, priced by the one real unit
+                (a can or a bottle) - see renderUnitCard. */}
+            {result.rtds?.length > 0 && (
+              <>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest pt-2">
+                  RTD — ready to drink
+                </p>
+                {(showAllRtds ? result.rtds : result.rtds.slice(0, TOP_N))
+                  .map((x, i) => renderUnitCard(x, i, 'rtd', 'rtd'))}
+
+                {result.rtds.length > TOP_N && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllRtds((v) => !v)}
+                    className="w-full card py-2 text-xs font-bold text-gray-500 hover:text-brand-600"
+                  >
+                    {showAllRtds
+                      ? 'Show fewer'
+                      : `Show ${result.rtds.length - TOP_N} more`}
                   </button>
                 )}
               </>

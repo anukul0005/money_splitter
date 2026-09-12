@@ -299,6 +299,35 @@ BOTTLES = [replace(b, brand=_CANON[(b.brand, b.kind)]) for b in BOTTLES]
 STATES = sorted({b.state for b in BOTTLES})
 
 
+@dataclass(frozen=True)
+class UnpricedBrand:
+    """A real brand the department has registered but not currently priced
+    for retail (see state_prices.py's own UNPRICED for what that means) -
+    no price, so never a recommendation, but real enough that a search
+    should say "this exists, not currently sold here" rather than the
+    brand looking like it was never on any list at all.
+    """
+    brand: str
+    kind: str
+    size_ml: int
+    state: str
+    source: str
+
+
+# Canonicalised the same pass as BOTTLES, over the union of both - a brand
+# that's priced in one state and only registered-not-sold in another still
+# needs one spelling, or the same bottle reads as two different brands
+# depending which state answered.
+_UNPRICED_CANON = canonicalise(
+    [(b.brand, b.kind) for b in BOTTLES] +
+    [(brand, kind) for brand, kind, *_ in state_prices.UNPRICED]
+)
+UNPRICED_BRANDS: list[UnpricedBrand] = [
+    UnpricedBrand(_UNPRICED_CANON[(brand, kind)], kind, size_ml, state, source)
+    for brand, kind, size_ml, state, source in state_prices.UNPRICED
+]
+
+
 def for_state(state: str) -> list[Bottle]:
     return [b for b in BOTTLES if b.state.lower() == (state or "").lower()]
 

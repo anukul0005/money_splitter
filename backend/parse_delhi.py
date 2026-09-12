@@ -52,25 +52,28 @@ FEED_URL = "https://eabkari.delhi.gov.in/WEbservice.asmx/GetBrandPriceList"
 SAVED = HERE / "sources" / "delhi" / "delhi-brand-price-list.json"
 OUT = HERE / "delhi_prices.py"
 
-WHISKY, RUM, VODKA, BEER, GIN, WINE, BRANDY, TEQUILA, LIQUEUR = (
+WHISKY, RUM, VODKA, BEER, GIN, WINE, BRANDY, TEQUILA, LIQUEUR, RTD = (
     "whisky", "rum", "vodka", "beer", "gin", "wine", "brandy", "tequila",
-    "liqueur")
+    "liqueur", "rtd")
 
 # The department's own category, which is a cleaner signal than anything a
 # name-matching pass could do - Delhi's feed carries a category column MP and
-# UP's PDFs did not. Categories with no home in the recommender (RTDs, country
-# liquor, the department's own grab-bag "Mixed Alcoholic Beverages") map to
-# None and are dropped, same as an RTD is dropped from the other two states.
+# UP's PDFs did not. "Country liquor" and the grab-bag "Mixed Alcoholic
+# Beverages" have no home in the recommender and map to None; "Alcopop" is
+# Delhi's own word for RTD (Breezer, canned premix cocktails) - a real,
+# first-class kind here, same as the UP Price Finder's own "LAB" rows.
 CATEGORY = {
     "whisky": WHISKY, "wine": WINE, "vodka": VODKA, "rum": RUM, "gin": GIN,
     "brandy": BRANDY, "tequila": TEQUILA, "liqueur": LIQUEUR,
     "beer (strong)": BEER, "beer (light)": BEER, "draught beer": BEER,
-    "champagne": WINE, "cognac": BRANDY,
-    "country liquor": None, "alcopop": None,
+    "champagne": WINE, "cognac": BRANDY, "alcopop": RTD,
+    "country liquor": None,
     "mixed alcoholic beverages": None,
 }
 
-KEEP_SIZES = {180, 330, 375, 500, 650, 700, 750, 1000}
+# 250/275 are RTD's own standard sizes (a canned premix cocktail, a Breezer
+# bottle) - nothing else is sold in them.
+KEEP_SIZES = {180, 250, 275, 330, 375, 500, 650, 700, 750, 1000}
 MIN_PER_LITRE = {BEER: 60.0}
 MIN_PER_LITRE_DEFAULT = 200.0
 

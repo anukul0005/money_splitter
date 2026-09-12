@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { listBrands, savePrice } from '../api'
 
 const KINDS = ['whisky', 'rum', 'vodka', 'gin', 'tequila', 'beer', 'wine',
-               'brandy', 'liqueur']
-const SIZES = [180, 375, 700, 750, 330, 500, 650, 1000]
+               'brandy', 'liqueur', 'rtd']
+const SIZES = [180, 250, 275, 330, 375, 500, 650, 700, 750, 1000]
 
 /**
  * Correct a bottle's price, or add one the state lists never carried.
