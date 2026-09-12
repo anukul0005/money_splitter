@@ -244,11 +244,20 @@ export default function RecommendFood({ tab, setTab }) {
 
       <div className="px-5 mt-4 space-y-4 max-w-2xl">
         <div className="card space-y-3">
+          {/* Same compact, inline layout as "Search a restaurant"'s own city
+              picker below - one look for every picker of a value on this
+              page. */}
           <div>
-            <label className="label">City</label>
-            <select className="input" value={city} onChange={(e) => setCity(e.target.value)}>
-              {(meta?.cities ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
+            <div className="flex items-center justify-between gap-2">
+              <label className="label mb-0">City</label>
+              <select
+                className="input text-xs py-1 w-auto max-w-[45%]"
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+              >
+                {(meta?.cities ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
             <p className="text-[10px] text-gray-400 mt-1">
               Only cities with published prices we could source are listed.
               Restaurant prices are per city and are never borrowed from the
@@ -319,17 +328,22 @@ export default function RecommendFood({ tab, setTab }) {
             </div>
           </div>
 
+          {/* Side by side rather than one full-width row each - too narrow a
+              column to lay the label and select on one line the way the
+              single-column pickers above do, so these keep the label-above
+              shape but match the same small text every other picker on this
+              page now uses. */}
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="label">Cuisine</label>
-              <select className="input" value={cuisine} onChange={(e) => setCuisine(e.target.value)}>
+              <select className="input text-xs py-1.5" value={cuisine} onChange={(e) => setCuisine(e.target.value)}>
                 <option value="any">Anything</option>
                 {cuisineList.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
             <div>
               <label className="label">Kind of place</label>
-              <select className="input" value={kind} onChange={(e) => setKind(e.target.value)}>
+              <select className="input text-xs py-1.5" value={kind} onChange={(e) => setKind(e.target.value)}>
                 <option value="any">Anywhere</option>
                 {(meta?.kinds ?? []).map((k) => (
                   <option key={k.value} value={k.value}>{k.name}</option>

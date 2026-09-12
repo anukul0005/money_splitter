@@ -669,13 +669,23 @@ export default function Recommend() {
 
       <div className="px-5 mt-4 space-y-4 max-w-2xl">
         <div className="card space-y-3">
-          {/* State first: alcohol is taxed per state, so it drives every price */}
+          {/* State first: alcohol is taxed per state, so it drives every price.
+              Same compact, inline layout as "Search a bottle"'s own state
+              picker below - one look for every picker of a value on this
+              page, not a full-width block for some and an inline one for
+              others. */}
           <div>
-            <label className="label">State</label>
-            <select className="input text-sm" value={state} onChange={(e) => setState(e.target.value)}>
-              <option value="all">All states</option>
-              {(meta?.states ?? []).map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
+            <div className="flex items-center justify-between gap-2">
+              <label className="label mb-0">State</label>
+              <select
+                className="input text-xs py-1 w-auto max-w-[45%]"
+                value={state}
+                onChange={(e) => setState(e.target.value)}
+              >
+                <option value="all">All states</option>
+                {(meta?.states ?? []).map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
             <p className="text-[10px] text-gray-400 mt-1">
               {state === 'all'
                 ? "Picks run separately for every state and shown side by side - price is set per state, so there's no one number to rank them by."

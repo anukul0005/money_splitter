@@ -325,11 +325,19 @@ export default function Forecast({ tab, setTab }) {
               />
             </div>
 
+            {/* Same compact, inline layout the Drinks tab's own pickers use -
+                one look for every picker of a value across the app. */}
             <div>
-              <label className="label">Location</label>
-              <select className="input" value={location} onChange={(e) => setLocation(e.target.value)}>
-                {(foodMeta?.cities ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
+              <div className="flex items-center justify-between gap-2">
+                <label className="label mb-0">Location</label>
+                <select
+                  className="input text-xs py-1 w-auto max-w-[45%]"
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                >
+                  {(foodMeta?.cities ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
               <p className="text-[10px] text-gray-400 mt-1">
                 Drink prices use {stateForLocation || 'the matching state'}'s
                 excise list; food prices use {location || 'this city'}'s
@@ -584,9 +592,15 @@ export default function Forecast({ tab, setTab }) {
                 value={people} onChange={(e) => setPeople(e.target.value)}
               />
             </div>
-            <div>
-              <label className="label">State (for drink prices)</label>
-              <select className="input" value={itemState} onChange={(e) => setItemState(e.target.value)}>
+            {/* Same compact, inline layout every other picker on this page
+                (and the Drinks tab's own pickers) now use. */}
+            <div className="flex items-center justify-between gap-2">
+              <label className="label mb-0">State (for drink prices)</label>
+              <select
+                className="input text-xs py-1 w-auto max-w-[45%]"
+                value={itemState}
+                onChange={(e) => setItemState(e.target.value)}
+              >
                 {(drinkMeta?.states ?? []).map((s) => (
                   <option key={s} value={s}>{STATE_DISPLAY_LABEL[s] || s}</option>
                 ))}
