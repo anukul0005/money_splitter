@@ -19,6 +19,36 @@ const INR = (n) => {
     : '—'
 }
 
+// Same component as Recommend.jsx's own RatingBadge, duplicated rather than
+// imported for the same reason INR is - see its note above. Verified is
+// green, an estimate is amber, matching the Drinks tab's own convention so
+// a rating reads the same fact here that it does there.
+function RatingBadge({ rating, type, communityRating, communityCount }) {
+  const hasCommunity = communityCount > 0
+  if (rating == null && !hasCommunity) return null
+  const verified = type === 'Verified (external)'
+  return (
+    <p className={`text-[10px] font-bold ${verified ? 'text-green-700' : 'text-amber-600'}`}>
+      {rating != null && (
+        <>
+          ★ {rating.toFixed(1)}/5
+          <span className="font-normal opacity-80">
+            {' '}· {verified ? 'verified rating' : 'estimated'}
+          </span>
+        </>
+      )}
+      {hasCommunity && (
+        <span className={`font-bold text-blue-700 ${rating != null ? 'ml-1.5' : ''}`}>
+          ★ {communityRating.toFixed(1)}/5
+          <span className="font-normal opacity-80">
+            {' '}· {communityCount} app {communityCount === 1 ? 'review' : 'reviews'}
+          </span>
+        </span>
+      )}
+    </p>
+  )
+}
+
 const FALLBACK_STATES = ['Delhi', 'Maharashtra', 'Uttar Pradesh']
 const FALLBACK_CITIES = ['Delhi', 'Gurugram', 'Noida']
 
@@ -480,17 +510,36 @@ export default function Forecast({ tab, setTab }) {
                     {result.drink_band && ` (₹${result.drink_band.min}–₹${result.drink_band.max})`}
                   </p>
                   {result.drink_preview?.sample?.length ? (
-                    <div className="space-y-1.5">
+                    <div className="space-y-2">
                       {result.drink_preview.sample.map((p, i) => (
-                        <div key={`${p.brand}-${i}`} className="flex justify-between text-xs">
-                          <span className="font-semibold text-gray-700 truncate pr-2">
-                            {p.brand}{p.is_price_fallback && (
-                              <span className="text-amber-600 font-normal"> (from {p.state})</span>
-                            )}
-                          </span>
-                          <span className="font-black text-brand-600 flex-shrink-0">{INR(p.total ?? p.price)}</span>
+                        <div key={`${p.brand}-${i}`} className="pb-2 border-b border-amber-50 last:border-0 last:pb-0">
+                          <div className="flex justify-between text-xs">
+                            <span className="font-semibold text-gray-700 truncate pr-2">
+                              {p.brand}{p.is_price_fallback && (
+                                <span className="text-amber-600 font-normal"> (from {p.state})</span>
+                              )}
+                            </span>
+                            <span className="font-black text-brand-600 flex-shrink-0">{INR(p.total ?? p.price)}</span>
+                          </div>
+                          <RatingBadge rating={p.rating} type={p.rating_type}
+                                       communityRating={p.community_rating} communityCount={p.community_review_count} />
                         </div>
                       ))}
+                      {/* No match_score here on purpose - that needs this
+                          person's own purchase profile, which is exactly
+                          the per-request history scan this quick preview
+                          is built to skip (see _drink_preview's own
+                          docstring). Open the full Drinks tab for that. */}
+                      <p className="text-[10px] text-gray-400 pt-0.5">
+                        Shown because they're the priciest that still fit this
+                        budget - the same rule the Drinks tab itself ranks by
+                        when nothing else is known yet.{' '}
+                        <button type="button" onClick={() => nav('/recommend')}
+                                className="underline text-gray-500 font-bold">
+                          Open the Drinks tab
+                        </button>{' '}
+                        for the full match breakdown per bottle.
+                      </p>
                     </div>
                   ) : (
                     <p className="text-xs text-gray-400">

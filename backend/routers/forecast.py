@@ -35,7 +35,7 @@ from routers.food import _apply_place_overrides, _history as _food_history
 from routers.recommend import MIN_BUDGET_SPAN as DRINK_MIN_SPAN
 from routers.recommend import (
     _apply_overrides, _by_size, _catalog_for, _find_in, _history as _drink_history,
-    _overrides_by_state,
+    _overrides_by_state, _products_by_name,
 )
 
 router = APIRouter(prefix="/forecast", tags=["forecast"])
@@ -181,11 +181,28 @@ def _drink_preview(db: Session, state: str, band: dict | None,
         catalog = _catalog_for(state, known_states, tables)
         matches = sorted((b for b in catalog if _matches(b)), key=lambda b: -b.mid)
 
-    sample = [
-        {"brand": b.brand, "kind": b.kind, "size_ml": b.size_ml, "total": round(b.mid),
-         "state": b.state, "is_price_fallback": b.state != state}
-        for b in matches[:3]
-    ]
+    # The one enrichment this preview does pay for: a rating. Unlike the
+    # history scan, the comparison strip and the knowledge-base lookup this
+    # function's own docstring measured and skipped, _products_by_name is a
+    # process-lifetime cache (see its own docstring) - reading three entries
+    # out of an already-built dict costs nothing a 3-item sample can't
+    # afford, and "why was this one shown" deserves at least the same
+    # verified-vs-estimated rating the Drinks tab shows for it. What this
+    # still doesn't compute is a match_score: that needs this person's own
+    # purchase profile, which is exactly the expensive history/group scan
+    # this function exists to avoid running for a sample of three.
+    products = _products_by_name()
+    sample = []
+    for b in matches[:3]:
+        product = products.get(b.brand)
+        sample.append({
+            "brand": b.brand, "kind": b.kind, "size_ml": b.size_ml, "total": round(b.mid),
+            "state": b.state, "is_price_fallback": b.state != state,
+            "rating": product.rating if product else None,
+            "rating_type": product.rating_type if product else None,
+            "community_rating": product.community_rating if product else None,
+            "community_review_count": product.community_review_count if product else None,
+        })
     return {"state": state, "sample": sample}
 
 
