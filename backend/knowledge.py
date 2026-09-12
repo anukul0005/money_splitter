@@ -300,12 +300,20 @@ def _squash(s: str) -> str:
 
 
 @lru_cache(maxsize=1)
-def _catalogue() -> tuple[list[tuple[str, str]], np.ndarray]:
-    """Every brand and restaurant we hold, embedded once.
+def _catalogue() -> tuple[list[tuple[str, str]], np.ndarray, list[str], list[str], list[frozenset]]:
+    """Every brand and restaurant we hold, embedded once - and, since this
+    session, normalised, squashed and reduced to its distinctive words once
+    too. _best() used to call _norm/_squash/_distinctive on every one of
+    these ~4,600 names on every single call - twice per expense save, once
+    for drink and once for food - purely to re-derive a fact about a name
+    that hasn't changed since this cache was built. Precomputing it here
+    turned out to be most of what made saving an expense slow.
 
     Built lazily so importing this module stays cheap, and cached because the
     published catalogue is static for the life of the process. Names people
-    have entered themselves are added per call - see `_extra`.
+    have entered themselves are added per call - see `_extra` - and are few
+    enough that recomputing their norm/squash/distinctive fresh each time
+    costs nothing worth caching separately.
 
     Entries that name nothing are left out entirely. Two rows are published
     as "Premium Whisky" and "Vodka Premium", and an expense reading just
@@ -331,25 +339,43 @@ def _catalogue() -> tuple[list[tuple[str, str]], np.ndarray]:
         names.append((FOOD, p.name))
 
     matrix = np.array([embed(n) for _, n in names], dtype=np.float32)
-    return names, matrix
+    norms = [_norm(n) for _, n in names]
+    squashes = [_squash(n) for _, n in names]
+    distinctives = [frozenset(_distinctive(n)) for _, n in names]
+    return names, matrix, norms, squashes, distinctives
 
 
-def _extra(db: Session | None) -> list[tuple[str, str]]:
+@lru_cache(maxsize=1)
+def _extra() -> list[tuple[str, str]]:
     """Brands and places people added themselves.
 
     Without these, somebody's own entry can never be recognised in their own
     expenses: "J&B Drinks" matched nothing because J&B exists only because
     they typed it in. The whole point of the corrections is that they become
     part of what the app knows.
+
+    Cached, and ignores whatever request-scoped `db` a caller has live -
+    opening its own short-lived session instead, the same pattern
+    _products_by_name (routers/recommend.py) uses for the same reason. This
+    used to run two fresh queries against the remote Postgres on every
+    single _best() call - two round trips, twice per expense save (once for
+    drink, once for food) - which was 300-400ms of network time added to
+    every save whether or not a correction had changed since the last one.
+    A correction is a rare, explicit action (typing a price or place in by
+    hand), not something that needs re-checking on every expense - `set_price`
+    and `set_place` clear this cache themselves right after writing one.
     """
-    if db is None:
-        return []
+    from database import get_session_factory
     from models import PlaceOverride, PriceOverride
-    out = [(DRINK, b) for (b,) in db.query(PriceOverride.brand).distinct()
-           if _distinctive(b)]
-    out += [(FOOD, n) for (n,) in db.query(PlaceOverride.name).distinct()
-            if _distinctive(n)]
-    return out
+    db = get_session_factory()()
+    try:
+        out = [(DRINK, b) for (b,) in db.query(PriceOverride.brand).distinct()
+               if _distinctive(b)]
+        out += [(FOOD, n) for (n,) in db.query(PlaceOverride.name).distinct()
+                if _distinctive(n)]
+        return out
+    finally:
+        db.close()
 
 
 # How good a cross-category match has to be before it may overrule the
@@ -376,14 +402,18 @@ def _best(t: str, kind: str,
     shares two more words - but grape fruit is the wrong bottle and Absolut
     is the right family.
     """
-    names, matrix = _catalogue()
+    names, matrix, norms, squashes, distinctives = _catalogue()
     pool = list(names)
     mat = matrix
-    for k, n in _extra(db):
+    extra = _extra()
+    for k, n in extra:
         pool.append((k, n))
-    if len(pool) > len(names):
+    if extra:
         mat = np.vstack([matrix, np.array(
-            [embed(n) for _, n in pool[len(names):]], dtype=np.float32)])
+            [embed(n) for _, n in extra], dtype=np.float32)])
+        norms = norms + [_norm(n) for _, n in extra]
+        squashes = squashes + [_squash(n) for _, n in extra]
+        distinctives = distinctives + [frozenset(_distinctive(n)) for _, n in extra]
 
     mask = np.array([k == kind for k, _ in pool])
     if not mask.any():
@@ -391,6 +421,9 @@ def _best(t: str, kind: str,
     q = np.array(embed(t), dtype=np.float32)
     sims = mat[mask] @ q                        # both sides are unit length
     cands = [n for (k, n), m in zip(pool, mask) if m]
+    cand_norms = [x for x, m in zip(norms, mask) if m]
+    cand_squashes = [x for x, m in zip(squashes, mask) if m]
+    cand_distinctives = [x for x, m in zip(distinctives, mask) if m]
 
     want = _distinctive(t)
     top = float(sims.max())
@@ -405,10 +438,10 @@ def _best(t: str, kind: str,
     # be meaningful - a three-letter run inside a sentence is a coincidence.
     squashed = _squash(t)
     phrase = [i for i in range(len(cands))
-              if (_norm(cands[i]) and f" {_norm(cands[i])} " in padded)
-              or (len(_squash(cands[i])) >= 6 and _squash(cands[i]) in squashed)]
+              if (cand_norms[i] and f" {cand_norms[i]} " in padded)
+              or (len(cand_squashes[i]) >= 6 and cand_squashes[i] in squashed)]
     if phrase:
-        i = max(phrase, key=lambda i: (len(_norm(cands[i])), float(sims[i])))
+        i = max(phrase, key=lambda i: (len(cand_norms[i]), float(sims[i])))
         return cands[i], float(sims[i]), True
 
     # A match has to share a word that identifies something. "Beer at sanawad"
@@ -416,7 +449,7 @@ def _best(t: str, kind: str,
     # every unbranded beer to whichever brand sat nearest and then offered it
     # back as something you buy.
     shared = [i for i in range(len(cands))
-              if _distinctive(cands[i]) and want & _distinctive(cands[i])]
+              if cand_distinctives[i] and want & cand_distinctives[i]]
     if not shared:
         return None, top, False
 
@@ -426,9 +459,9 @@ def _best(t: str, kind: str,
     # a different bottle, and the expense never says grape. A candidate whose
     # every word appears in the expense has not invented anything; among
     # those, the most specific wins.
-    inside = [i for i in shared if _distinctive(cands[i]) <= want]
+    inside = [i for i in shared if cand_distinctives[i] <= want]
     if inside:
-        i = max(inside, key=lambda i: (len(_distinctive(cands[i])), float(sims[i])))
+        i = max(inside, key=lambda i: (len(cand_distinctives[i]), float(sims[i])))
         return cands[i], float(sims[i]), False
 
     i = max(shared, key=lambda i: float(sims[i]))

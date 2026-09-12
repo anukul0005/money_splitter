@@ -11,20 +11,23 @@ from activity import record_activity
 router = APIRouter(prefix="/expenses", tags=["expenses"])
 
 
-def _check_conversions(db, expense, caller_name: str) -> None:
+def _queue_conversion_check(background_tasks: BackgroundTasks, expense, caller_name: str) -> None:
     """Stage 5's other half of _index below: this expense might be the real
     drink a past recommendation was hoping for. Checked against whoever is
     saving the expense, not necessarily `paid_by` - a recommendation is shown
     to a logged-in person, and it's their action, not the split's payer
-    field, that a conversion should follow. Wrapped for the same reason
-    _index is - a missed conversion costs nothing; failing the expense over
-    it would.
+    field, that a conversion should follow.
+
+    Backgrounded, not called inline - it used to run before every save
+    returned, and building _catalog_short_names' cache the first time (a
+    pass over the whole price catalogue) cost 85-230ms added to every
+    single expense save, whether or not the expense even named a drink.
+    See check_conversions_bg's own docstring.
     """
-    try:
-        from routers.recommend import _text, check_conversions
-        check_conversions(db, caller_name, _text(expense), expense.id, expense.date)
-    except Exception as e:  # pragma: no cover - never worth failing a save
-        print(f"[recommend] conversion hook for expense {expense.id} failed: {e}")
+    from routers.recommend import _text, check_conversions_bg
+    background_tasks.add_task(
+        check_conversions_bg, caller_name, _text(expense), expense.id, expense.date,
+    )
 
 
 def _index(db, expense) -> None:
@@ -63,7 +66,7 @@ def _summary(expense: Expense) -> str:
 @router.get("/group/{group_id}", response_model=list[ExpenseOut])
 def list_expenses(group_id: int, db: Session = Depends(get_db),
                   caller: User = Depends(current_user)):
-    member_group(group_id, caller, db)   # 404s for anyone outside the group
+    member_group(group_id, caller, db, with_history=False)   # 404s for anyone outside the group
     return db.query(Expense).filter(Expense.group_id == group_id).order_by(Expense.date, Expense.id).all()
 
 
@@ -71,7 +74,7 @@ def list_expenses(group_id: int, db: Session = Depends(get_db),
 def create_expense(payload: ExpenseCreate, background_tasks: BackgroundTasks,
                    db: Session = Depends(get_db),
                    caller: User = Depends(current_user)):
-    group = member_group(payload.group_id, caller, db)
+    group = member_group(payload.group_id, caller, db, with_history=False)
 
     individual = payload.individual_amount or _compute_individual(payload.amount, payload.divider)
     expense = Expense(
@@ -101,7 +104,7 @@ def create_expense(payload: ExpenseCreate, background_tasks: BackgroundTasks,
     db.commit()
     db.refresh(expense)
 
-    _check_conversions(db, expense, caller.name)
+    _queue_conversion_check(background_tasks, expense, caller.name)
 
     background_tasks.add_task(
         notify_group_activity_bg, group.id, expense.paid_by, "added a new expense", summary,
@@ -117,7 +120,7 @@ def update_expense(expense_id: int, payload: ExpenseCreate, background_tasks: Ba
     expense = db.query(Expense).filter(Expense.id == expense_id).first()
     if not expense:
         raise HTTPException(404, "Expense not found")
-    group = member_group(expense.group_id, caller, db)
+    group = member_group(expense.group_id, caller, db, with_history=False)
 
     individual = payload.individual_amount or _compute_individual(payload.amount, payload.divider)
     expense.date = payload.date
@@ -143,7 +146,7 @@ def update_expense(expense_id: int, payload: ExpenseCreate, background_tasks: Ba
     db.commit()
     db.refresh(expense)
 
-    _check_conversions(db, expense, caller.name)
+    _queue_conversion_check(background_tasks, expense, caller.name)
 
     background_tasks.add_task(
         notify_group_activity_bg, group.id, caller.name, "edited an expense", summary,
@@ -160,7 +163,7 @@ def delete_expense(expense_id: int, background_tasks: BackgroundTasks,
     if not expense:
         raise HTTPException(404, "Expense not found")
 
-    group = member_group(expense.group_id, caller, db)
+    group = member_group(expense.group_id, caller, db, with_history=False)
     summary = f"{expense.title or expense.category or 'Expense'}: ₹{expense.amount:,.0f}"
     record_activity(db, group, caller.name, "deleted an expense", summary)
 

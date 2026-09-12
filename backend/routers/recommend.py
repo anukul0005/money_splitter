@@ -1668,6 +1668,11 @@ def set_price(body: PriceIn, db: Session = Depends(get_db),
     row.set_by = caller.name
     db.commit()
     db.refresh(row)
+    # This brand is now something an expense could name - see knowledge.py's
+    # own _extra, cached for exactly this reason and stale from this moment
+    # until cleared.
+    from knowledge import _extra as _extra_catalogue
+    _extra_catalogue.cache_clear()
     # `known` tells the form whether it corrected the name, so the page can
     # say "that was already in the list" rather than silently renaming it.
     return {**_override_out(row), "matched_existing": known,
@@ -2801,3 +2806,27 @@ def check_conversions(db: Session, user_name: str, expense_text: str,
             db.commit()
     except Exception as e:  # pragma: no cover - never worth failing an expense save
         print(f"[recommend] conversion check for expense {expense_id} failed: {e}")
+
+
+def check_conversions_bg(user_name: str, expense_text: str,
+                         expense_id: int, expense_date: str | None) -> None:
+    """check_conversions, run from FastAPI's BackgroundTasks after the
+    response has already gone back to the browser - same reasoning as
+    notify_group_activity_bg (emailer.py), and the same fix for the same
+    problem: this used to run inline before every expense save returned,
+    and _catalog_short_names' first build (over the full BOTTLES table -
+    7,000+ rows once Stage 1's price catalogue grew) cost 85-230ms every
+    single time, added to every save whether or not the expense even
+    named a drink.
+
+    Takes a bare user_name/expense_id rather than a Session, and opens its
+    own - reusing the request's would mean querying a connection get_db's
+    `finally: db.close()` has already returned to the pool by the time a
+    background task actually runs.
+    """
+    from database import get_session_factory
+    db = get_session_factory()()
+    try:
+        check_conversions(db, user_name, expense_text, expense_id, expense_date)
+    finally:
+        db.close()

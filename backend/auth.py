@@ -23,7 +23,7 @@ from functools import lru_cache
 from hashlib import sha256
 
 from fastapi import Depends, HTTPException, Request
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, noload
 
 from database import get_db
 from models import Group, User
@@ -141,14 +141,29 @@ def is_member(group: Group, user: User) -> bool:
     return any(m.name.lower() == user.name.lower() for m in group.members)
 
 
-def member_group(group_id: int, user: User, db: Session) -> Group:
+def member_group(group_id: int, user: User, db: Session, *,
+                 with_history: bool = True) -> Group:
     """Fetch a group, but only for someone who is in it.
 
     Returns 404 rather than 403 for a group the caller isn't in: telling an
     outsider "that exists, you just can't see it" is itself a leak of who is
     grouped with whom.
+
+    is_member() only ever looks at `group.members`, but Group.expenses and
+    Group.payments are both `lazy="selectin"` - a plain query eagerly pulls
+    a group's entire expense and payment history along with it, every
+    single call. Real callers need that: get_group returns the row
+    straight through and settlements reads group.expenses directly, so
+    `with_history` defaults to keeping it. A caller that only needs the
+    membership check and nothing else - a group's expenses being added to,
+    not read - can pass with_history=False to skip both eager loads, which
+    were otherwise reloading that group's entire history on every single
+    save just to confirm the caller belongs to it.
     """
-    group = db.query(Group).filter(Group.id == group_id).first()
+    query = db.query(Group)
+    if not with_history:
+        query = query.options(noload(Group.expenses), noload(Group.payments))
+    group = query.filter(Group.id == group_id).first()
     if not group or not is_member(group, user):
         raise HTTPException(404, "Group not found")
     return group

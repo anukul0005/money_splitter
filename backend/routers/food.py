@@ -503,6 +503,11 @@ def set_place(body: PlaceIn, db: Session = Depends(get_db),
     row.set_by = caller.name
     db.commit()
     db.refresh(row)
+    # This place is now something an expense could name - see knowledge.py's
+    # own _extra, cached for exactly this reason and stale from this moment
+    # until cleared.
+    from knowledge import _extra as _extra_catalogue
+    _extra_catalogue.cache_clear()
     return _place_out(row)
 
 
