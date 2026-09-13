@@ -5,6 +5,7 @@ import {
   logRecommendShown, getRecommendEventsSummary,
 } from '../api'
 
+import Dropdown from '../components/Dropdown'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PriceEditForm from '../components/PriceEditForm'
 import ProductReviewForm from '../components/ProductReviewForm'
@@ -670,21 +671,22 @@ export default function Recommend() {
       <div className="px-5 mt-4 space-y-4 max-w-2xl">
         <div className="card space-y-3">
           {/* State first: alcohol is taxed per state, so it drives every price.
-              Same compact, inline layout as "Search a bottle"'s own state
-              picker below - one look for every picker of a value on this
-              page, not a full-width block for some and an inline one for
-              others. */}
+              Dropdown, not a native <select> - a native one's open list is a
+              full-screen system sheet on iOS with no CSS reach at all, which
+              is what this replaced. Same compact shape as "Search a
+              bottle"'s own state picker below. */}
           <div>
             <div className="flex items-center justify-between gap-2">
               <label className="label mb-0">State</label>
-              <select
-                className="input text-xs py-1 w-auto max-w-[45%]"
+              <Dropdown
+                className="text-xs py-1 max-w-[45%]"
                 value={state}
-                onChange={(e) => setState(e.target.value)}
-              >
-                <option value="all">All states</option>
-                {(meta?.states ?? []).map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
+                onChange={setState}
+                options={[
+                  { value: 'all', label: 'All states' },
+                  ...(meta?.states ?? []).map((s) => ({ value: s, label: s })),
+                ]}
+              />
             </div>
             <p className="text-[10px] text-gray-400 mt-1">
               {state === 'all'
@@ -911,14 +913,15 @@ export default function Recommend() {
                 searchState. Independent of the State field above, which has
                 to pick one specific state for the recommender to make sense
                 at all. */}
-            <select
-              className="input text-xs py-1 w-auto max-w-[45%]"
+            <Dropdown
+              className="text-xs py-1 max-w-[45%]"
               value={searchState}
-              onChange={(e) => setSearchState(e.target.value)}
-            >
-              <option value="">All states</option>
-              {(meta?.states ?? []).map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
+              onChange={setSearchState}
+              options={[
+                { value: '', label: 'All states' },
+                ...(meta?.states ?? []).map((s) => ({ value: s, label: s })),
+              ]}
+            />
           </div>
           {/* A magnifying glass inside the field rather than a label above it
               plus a button beside it - one large, obvious box to type into,

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getFoodMeta, getFoodRecommendation, getFriends, searchFood, listPlaceNames } from '../api'
 
+import Dropdown from '../components/Dropdown'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PlaceEditForm from '../components/PlaceEditForm'
 import RecommendTabs from '../components/RecommendTabs'
@@ -250,13 +251,12 @@ export default function RecommendFood({ tab, setTab }) {
           <div>
             <div className="flex items-center justify-between gap-2">
               <label className="label mb-0">City</label>
-              <select
-                className="input text-xs py-1 w-auto max-w-[45%]"
+              <Dropdown
+                className="text-xs py-1 max-w-[45%]"
                 value={city}
-                onChange={(e) => setCity(e.target.value)}
-              >
-                {(meta?.cities ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
+                onChange={setCity}
+                options={(meta?.cities ?? []).map((c) => ({ value: c, label: c }))}
+              />
             </div>
             <p className="text-[10px] text-gray-400 mt-1">
               Only cities with published prices we could source are listed.
@@ -405,14 +405,15 @@ export default function RecommendFood({ tab, setTab }) {
             {/* Its own city, defaulting to every city at once - independent
                 of the City field above, which has to pick one specific city
                 for "where should I eat" to mean anything. */}
-            <select
-              className="input text-xs py-1 w-auto max-w-[45%]"
+            <Dropdown
+              className="text-xs py-1 max-w-[45%]"
               value={searchCity}
-              onChange={(e) => setSearchCity(e.target.value)}
-            >
-              <option value="">All cities</option>
-              {(meta?.cities ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
+              onChange={setSearchCity}
+              options={[
+                { value: '', label: 'All cities' },
+                ...(meta?.cities ?? []).map((c) => ({ value: c, label: c })),
+              ]}
+            />
           </div>
           <div className="relative">
             <button

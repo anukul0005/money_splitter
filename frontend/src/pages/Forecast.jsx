@@ -5,6 +5,7 @@ import {
   listBrands, listPlaceNames,
 } from '../api'
 
+import Dropdown from '../components/Dropdown'
 import LoadingSpinner from '../components/LoadingSpinner'
 import RecommendTabs from '../components/RecommendTabs'
 import { useUser } from '../UserContext'
@@ -330,13 +331,12 @@ export default function Forecast({ tab, setTab }) {
             <div>
               <div className="flex items-center justify-between gap-2">
                 <label className="label mb-0">Location</label>
-                <select
-                  className="input text-xs py-1 w-auto max-w-[45%]"
+                <Dropdown
+                  className="text-xs py-1 max-w-[45%]"
                   value={location}
-                  onChange={(e) => setLocation(e.target.value)}
-                >
-                  {(foodMeta?.cities ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
+                  onChange={setLocation}
+                  options={(foodMeta?.cities ?? []).map((c) => ({ value: c, label: c }))}
+                />
               </div>
               <p className="text-[10px] text-gray-400 mt-1">
                 Drink prices use {stateForLocation || 'the matching state'}'s
@@ -596,15 +596,14 @@ export default function Forecast({ tab, setTab }) {
                 (and the Drinks tab's own pickers) now use. */}
             <div className="flex items-center justify-between gap-2">
               <label className="label mb-0">State (for drink prices)</label>
-              <select
-                className="input text-xs py-1 w-auto max-w-[45%]"
+              <Dropdown
+                className="text-xs py-1 max-w-[45%]"
                 value={itemState}
-                onChange={(e) => setItemState(e.target.value)}
-              >
-                {(drinkMeta?.states ?? []).map((s) => (
-                  <option key={s} value={s}>{STATE_DISPLAY_LABEL[s] || s}</option>
-                ))}
-              </select>
+                onChange={setItemState}
+                options={(drinkMeta?.states ?? []).map((s) => ({
+                  value: s, label: STATE_DISPLAY_LABEL[s] || s,
+                }))}
+              />
             </div>
           </div>
 
