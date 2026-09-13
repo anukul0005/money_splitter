@@ -7,6 +7,7 @@ import {
 
 import Dropdown from '../components/Dropdown'
 import LoadingSpinner from '../components/LoadingSpinner'
+import PeoplePicker from '../components/PeoplePicker'
 import PriceEditForm from '../components/PriceEditForm'
 import ProductReviewForm from '../components/ProductReviewForm'
 import RecommendTabs from '../components/RecommendTabs'
@@ -409,12 +410,14 @@ export default function Recommend() {
   }
   const asPct = (v) => (v / BUDGET_MAX) * 100
 
-  // People in the room = you + everyone picked, unless you override the count
-  const toggle = (n) => setWithWho((w) => {
-    const next = w.includes(n) ? w.filter((x) => x !== n) : [...w, n]
+  // People in the room = you + everyone picked, unless you override the
+  // count. PeoplePicker hands back the whole next list rather than one
+  // name to toggle, since a type-ahead adds/removes by that name directly
+  // instead of flipping a button.
+  const setPeopleWith = (next) => {
+    setWithWho(next)
     setPeople(String(next.length + 1))
-    return next
-  })
+  }
 
   // Same-dimension pair, so picking one clears the other rather than
   // letting "Smooth" and "Harsh" both be on at once - `siblingWords` is
@@ -692,22 +695,15 @@ export default function Recommend() {
 
           <div>
             <label className="label">Drinking with</label>
-            <div className="flex flex-wrap gap-1.5">
-              {friends.map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  onClick={() => toggle(n)}
-                  className={`rounded-md px-2.5 py-1 text-xs font-bold border transition-all active:scale-95 ${
-                    withWho.includes(n)
-                      ? 'bg-brand-400 border-brand-400 text-white'
-                      : 'bg-cream border-amber-200 text-gray-600 hover:bg-amber-50'
-                  }`}
-                >
-                  {n}
-                </button>
-              ))}
-            </div>
+            {/* A type-ahead, not a button per friend - see PeoplePicker's own
+                docstring for why a wide friend circle made the old wall of
+                pills worth replacing. */}
+            <PeoplePicker
+              options={friends}
+              selected={withWho}
+              onChange={setPeopleWith}
+              placeholder="Type a name…"
+            />
           </div>
 
           <div>

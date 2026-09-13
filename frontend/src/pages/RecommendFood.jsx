@@ -4,6 +4,7 @@ import { getFoodMeta, getFoodRecommendation, getFriends, searchFood, listPlaceNa
 
 import Dropdown from '../components/Dropdown'
 import LoadingSpinner from '../components/LoadingSpinner'
+import PeoplePicker from '../components/PeoplePicker'
 import PlaceEditForm from '../components/PlaceEditForm'
 import RecommendTabs from '../components/RecommendTabs'
 import { useUser } from '../UserContext'
@@ -164,12 +165,13 @@ export default function RecommendFood({ tab, setTab }) {
   }
   const asPct = (v) => (v / BUDGET_MAX) * 100
 
-  // People at the table = you + everyone picked, unless you override the count
-  const toggle = (n) => setWithWho((w) => {
-    const next = w.includes(n) ? w.filter((x) => x !== n) : [...w, n]
+  // People at the table = you + everyone picked, unless you override the
+  // count. PeoplePicker hands back the whole next list, not one name to
+  // toggle.
+  const setPeopleWith = (next) => {
+    setWithWho(next)
     setPeople(String(next.length + 1))
-    return next
-  })
+  }
 
   // Only cuisines this city actually has rows for. Offering "Seafood" in a
   // city with no seafood row is a filter that can only return nothing.
@@ -267,22 +269,14 @@ export default function RecommendFood({ tab, setTab }) {
 
           <div>
             <label className="label">Eating with</label>
-            <div className="flex flex-wrap gap-1.5">
-              {friends.map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  onClick={() => toggle(n)}
-                  className={`rounded-md px-2.5 py-1 text-xs font-bold border transition-all active:scale-95 ${
-                    withWho.includes(n)
-                      ? 'bg-brand-400 border-brand-400 text-white'
-                      : 'bg-cream border-amber-200 text-gray-600 hover:bg-amber-50'
-                  }`}
-                >
-                  {n}
-                </button>
-              ))}
-            </div>
+            {/* A type-ahead, not a button per friend - see PeoplePicker's
+                own docstring. */}
+            <PeoplePicker
+              options={friends}
+              selected={withWho}
+              onChange={setPeopleWith}
+              placeholder="Type a name…"
+            />
           </div>
 
           <div>

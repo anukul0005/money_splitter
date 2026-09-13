@@ -7,6 +7,7 @@ import {
 
 import Dropdown from '../components/Dropdown'
 import LoadingSpinner from '../components/LoadingSpinner'
+import PeoplePicker from '../components/PeoplePicker'
 import RecommendTabs from '../components/RecommendTabs'
 import { useUser } from '../UserContext'
 
@@ -132,9 +133,6 @@ export default function Forecast({ tab, setTab }) {
       .then((f) => setFriends(f.data.map((x) => x.name)))
       .catch(() => setFriends([]))
   }, [user?.name])
-
-  const toggle = (n) =>
-    setWithWho((cur) => (cur.includes(n) ? cur.filter((x) => x !== n) : [...cur, n]))
 
   // ── Budget → split ──────────────────────────────────────────────────────
   const [people, setPeople]   = useState('2')
@@ -423,22 +421,14 @@ export default function Forecast({ tab, setTab }) {
             {friends.length > 0 && (
               <div>
                 <label className="label">Whose history? (optional)</label>
-                <div className="flex flex-wrap gap-1.5">
-                  {friends.map((n) => (
-                    <button
-                      key={n}
-                      type="button"
-                      onClick={() => toggle(n)}
-                      className={`rounded-md px-2.5 py-1 text-xs font-bold border transition-all active:scale-95 ${
-                        withWho.includes(n)
-                          ? 'bg-brand-400 border-brand-400 text-white'
-                          : 'bg-cream border-amber-200 text-gray-600 hover:bg-amber-50'
-                      }`}
-                    >
-                      {n}
-                    </button>
-                  ))}
-                </div>
+                {/* A type-ahead, not a button per friend - see PeoplePicker's
+                    own docstring. */}
+                <PeoplePicker
+                  options={friends}
+                  selected={withWho}
+                  onChange={setWithWho}
+                  placeholder="Type a name…"
+                />
                 <p className="text-[10px] text-gray-400 mt-1">
                   Nobody picked uses just your own history to work out the
                   drinks/food split.
