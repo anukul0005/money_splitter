@@ -38,3 +38,10 @@ services:
       # point at localhost.
       - key: FRONTEND_URL
         sync: false
+      # Shared secret for GET /cron/daily (birthday emails) - an external
+      # cron pinger (e.g. cron-job.org) calls that URL with ?key=<this> once
+      # a day. Left unset, the endpoint refuses every request rather than
+      # being open by default; generateValue means Render mints one for you,
+      # which you then copy into the pinger's URL.
+      - key: CRON_SECRET
+        generateValue: true
