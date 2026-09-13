@@ -679,7 +679,7 @@ export default function Recommend() {
             <div className="flex items-center justify-between gap-2">
               <label className="label mb-0">State</label>
               <Dropdown
-                className="text-xs py-1 max-w-[65%]"
+                className="text-xs py-1"
                 value={state}
                 onChange={setState}
                 options={[
@@ -909,7 +909,7 @@ export default function Recommend() {
                 to pick one specific state for the recommender to make sense
                 at all. */}
             <Dropdown
-              className="text-xs py-1 max-w-[65%]"
+              className="text-xs py-1"
               value={searchState}
               onChange={setSearchState}
               options={[

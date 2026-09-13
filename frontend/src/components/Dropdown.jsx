@@ -30,15 +30,18 @@ export default function Dropdown({ value, options, onChange, className = '', ali
         // .input bakes in w-full for the app's usual full-width fields;
         // every caller of this component wants a compact, content-sized
         // trigger instead (that's the whole point of it), so w-auto is
-        // fixed here rather than left to each caller to remember. min-w
-        // guards against a real flexbox trap: `truncate`'s overflow:hidden
-        // gives its span an automatic minimum width of 0, so a caller's
-        // max-w that left too little room didn't truncate the text - it
-        // shrank it clean away to nothing, chevron and all, which is what
-        // "State" was actually showing.
-        className={`input w-auto min-w-[88px] inline-flex items-center justify-between gap-1.5 ${className}`}
+        // fixed here rather than left to each caller to remember.
+        //
+        // No truncate, and deliberately no max-w here either: a caller's
+        // max-w combined with a `truncate` span was clipping real option
+        // text mid-word - a fixed cap can't know how long the longest real
+        // option actually is. w-auto with whitespace-nowrap just sizes the
+        // box to whatever's actually selected; a caller that genuinely
+        // needs a cap can still pass its own max-w, but nothing here forces
+        // one, so the box is exactly as wide as it needs to be by default.
+        className={`input w-auto inline-flex items-center justify-between gap-1.5 ${className}`}
       >
-        <span className="truncate">{current?.label ?? value}</span>
+        <span className="whitespace-nowrap">{current?.label ?? value}</span>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
              strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
              className={`flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}>
