@@ -252,7 +252,7 @@ export default function RecommendFood({ tab, setTab }) {
             <div className="flex items-center justify-between gap-2">
               <label className="label mb-0">City</label>
               <Dropdown
-                className="text-xs py-1 max-w-[45%]"
+                className="text-xs py-1 max-w-[65%]"
                 value={city}
                 onChange={setCity}
                 options={(meta?.cities ?? []).map((c) => ({ value: c, label: c }))}
@@ -406,7 +406,7 @@ export default function RecommendFood({ tab, setTab }) {
                 of the City field above, which has to pick one specific city
                 for "where should I eat" to mean anything. */}
             <Dropdown
-              className="text-xs py-1 max-w-[45%]"
+              className="text-xs py-1 max-w-[65%]"
               value={searchCity}
               onChange={setSearchCity}
               options={[

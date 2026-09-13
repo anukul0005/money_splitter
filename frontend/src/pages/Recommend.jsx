@@ -679,7 +679,7 @@ export default function Recommend() {
             <div className="flex items-center justify-between gap-2">
               <label className="label mb-0">State</label>
               <Dropdown
-                className="text-xs py-1 max-w-[45%]"
+                className="text-xs py-1 max-w-[65%]"
                 value={state}
                 onChange={setState}
                 options={[
@@ -688,11 +688,6 @@ export default function Recommend() {
                 ]}
               />
             </div>
-            <p className="text-[10px] text-gray-400 mt-1">
-              {state === 'all'
-                ? "Picks run separately for every state and shown side by side - price is set per state, so there's no one number to rank them by."
-                : 'Only states with published prices we could source are listed. Every pick also shows what the same bottle costs in the other states we have lists for.'}
-            </p>
           </div>
 
           <div>
@@ -914,7 +909,7 @@ export default function Recommend() {
                 to pick one specific state for the recommender to make sense
                 at all. */}
             <Dropdown
-              className="text-xs py-1 max-w-[45%]"
+              className="text-xs py-1 max-w-[65%]"
               value={searchState}
               onChange={setSearchState}
               options={[

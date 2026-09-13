@@ -332,7 +332,7 @@ export default function Forecast({ tab, setTab }) {
               <div className="flex items-center justify-between gap-2">
                 <label className="label mb-0">Location</label>
                 <Dropdown
-                  className="text-xs py-1 max-w-[45%]"
+                  className="text-xs py-1 max-w-[65%]"
                   value={location}
                   onChange={setLocation}
                   options={(foodMeta?.cities ?? []).map((c) => ({ value: c, label: c }))}
@@ -597,7 +597,7 @@ export default function Forecast({ tab, setTab }) {
             <div className="flex items-center justify-between gap-2">
               <label className="label mb-0">State (for drink prices)</label>
               <Dropdown
-                className="text-xs py-1 max-w-[45%]"
+                className="text-xs py-1 max-w-[65%]"
                 value={itemState}
                 onChange={setItemState}
                 options={(drinkMeta?.states ?? []).map((s) => ({
