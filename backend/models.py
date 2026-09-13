@@ -48,6 +48,10 @@ class User(Base):
     # to nothing that uses it invites a birth year nobody meant to publish
     # to be entered anyway.
     birthday = Column(String(5), nullable=True)
+    # Separate and optional, unlike `birthday` above: only present once
+    # something actually wants it (the "you turn X today" line in the
+    # birthday email), never required to set a birthday at all.
+    birth_year = Column(Integer, nullable=True)
     # The last date (ISO, "YYYY-MM-DD") a birthday email actually went out
     # for this account - not the birthday itself, which repeats every year,
     # but the year it was last sent. Guards against the daily cron endpoint

@@ -422,6 +422,12 @@ def set_my_birthday(payload: SetBirthday, db: Session = Depends(get_db),
     if not _valid_birthday(birthday):
         raise HTTPException(400, "Give a real month and day, as MM-DD")
 
+    if payload.birth_year is not None:
+        import datetime
+        if not (1900 <= payload.birth_year <= datetime.date.today().year):
+            raise HTTPException(400, "That birth year doesn't look real")
+        caller.birth_year = payload.birth_year
+
     caller.birthday = birthday
     db.commit()
     db.refresh(caller)

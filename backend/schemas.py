@@ -35,6 +35,8 @@ class UserMeOut(UserOut):
     email: Optional[str] = None
     # "MM-DD" - see models.User.birthday for why no year.
     birthday: Optional[str] = None
+    # Optional - see models.User.birth_year.
+    birth_year: Optional[int] = None
 
 
 class LoginOut(UserMeOut):
@@ -99,8 +101,10 @@ class SetEmail(BaseModel):
 
 
 class SetBirthday(BaseModel):
-    """Your own birthday, day and month only - see models.User.birthday."""
+    """Your own birthday - day and month required, year optional (unlocks
+    the "you turn X today" line in the birthday email; see models.User)."""
     birthday: str
+    birth_year: Optional[int] = None
 
 
 class RequestLoginCode(BaseModel):

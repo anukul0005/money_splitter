@@ -70,7 +70,11 @@ def run_daily(key: str = "", db: Session = Depends(get_db)):
             continue
         try:
             top_partners = top_transaction_partners(db, user, limit=4)
-            send_birthday_wish(user.email, user.name, top_partners)
+            # Years since birth_year, not "how many birthdays have they had" -
+            # the two agree today by construction, since this only runs on
+            # the day that matches `birthday`.
+            age = today.year - user.birth_year if user.birth_year else None
+            send_birthday_wish(user.email, user.name, top_partners, age=age)
             user.last_birthday_wish_sent = iso_today
             db.commit()
             sent.append(user.name)

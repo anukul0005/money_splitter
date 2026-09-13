@@ -358,7 +358,8 @@ def _join_names(names: list[str]) -> str:
     return ", ".join(names[:-1]) + " and " + names[-1]
 
 
-def send_birthday_wish(to_email: str, name: str, top_partners: list[tuple[str, float]]) -> None:
+def send_birthday_wish(to_email: str, name: str, top_partners: list[tuple[str, float]],
+                       age: int | None = None) -> None:
     """One birthday email, sent once a year by the daily cron endpoint (see
     routers/cron.py) to whoever's `birthday` (MM-DD) matches today.
 
@@ -371,12 +372,17 @@ def send_birthday_wish(to_email: str, name: str, top_partners: list[tuple[str, f
     reads as an accusation, not a nudge. Empty list (nobody to name yet)
     still sends a plain birthday wish rather than skipping the email
     outright.
+
+    `age` is `None` whenever the account has no `birth_year` on file (it's
+    optional - see models.User) - the wish is still sent, just without the
+    "you turn X today" line, rather than guessing or skipping the email.
     """
     first = name.split()[0] if name.split() else name
+    age_bit = f" You turn {age} today - congrats!" if age is not None else ""
     lines = [
-        f"Happy birthday, {escape(first)}! Wishing you a genuinely wonderful year ahead.",
+        f"Happy birthday, {escape(first)}!{age_bit} Wishing you a genuinely wonderful year ahead.",
     ]
-    plain_lines = [f"Happy birthday, {first}! Wishing you a genuinely wonderful year ahead."]
+    plain_lines = [f"Happy birthday, {first}!{age_bit} Wishing you a genuinely wonderful year ahead."]
 
     if top_partners:
         names_only = [pname for pname, _amount in top_partners]

@@ -43,10 +43,13 @@ export default function Account() {
   const [emailDone, setEmailDone]   = useState('')
   const [emailBusy, setEmailBusy]   = useState(false)
 
-  // ── Birthday (day + month only — see backend models.User.birthday) ──
+  // ── Birthday (day + month — see backend models.User.birthday; year is
+  // optional and only unlocks the "you turn X today" line in the email) ──
   const [birthday, setBirthday]         = useState('')   // "MM-DD" as last saved
   const [bdayMonth, setBdayMonth]       = useState('')
   const [bdayDay, setBdayDay]           = useState('')
+  const [birthYear, setBirthYear]       = useState('')   // last saved, as a string
+  const [bdayYearInput, setBdayYearInput] = useState('')
   const [bdayError, setBdayError]       = useState('')
   const [bdayDone, setBdayDone]         = useState('')
   const [bdayBusy, setBdayBusy]         = useState(false)
@@ -69,6 +72,8 @@ export default function Account() {
           setBdayMonth(m)
           setBdayDay(d)
         }
+        setBirthYear(r.data.birth_year ? String(r.data.birth_year) : '')
+        setBdayYearInput(r.data.birth_year ? String(r.data.birth_year) : '')
       })
       .catch(() => {})
   }, [user?.name])
@@ -104,11 +109,17 @@ export default function Account() {
     e.preventDefault()
     setBdayError(''); setBdayDone('')
     if (!bdayMonth || !bdayDay) return setBdayError('Pick a month and day.')
+    const yearTrimmed = bdayYearInput.trim()
+    if (yearTrimmed && !/^\d{4}$/.test(yearTrimmed)) return setBdayError('Birth year should be 4 digits, e.g. 1997.')
     const value = `${bdayMonth}-${bdayDay}`
     setBdayBusy(true)
     try {
-      const res = await setMyBirthday({ birthday: value })
+      const res = await setMyBirthday({
+        birthday: value,
+        ...(yearTrimmed ? { birth_year: Number(yearTrimmed) } : {}),
+      })
       setBirthday(res.data.birthday || '')
+      setBirthYear(res.data.birth_year ? String(res.data.birth_year) : '')
       setBdayDone('Saved')
     } catch (err) {
       setBdayError(err.response?.data?.detail || 'Could not save that birthday.')
@@ -337,8 +348,9 @@ export default function Account() {
         <div className="card">
           <h2 className="text-sm font-bold text-gray-800">Birthday</h2>
           <p className="text-xs text-gray-500 leading-relaxed mt-1 mb-3">
-            Day and month only — used to send you a birthday email, and to
-            remind you to give a party to your best friends. No year needed.
+            Day and month send you a birthday email and a nudge to give your
+            best friends a party. Add your birth year too and that email will
+            also say what age you're turning — leave it blank to skip that.
           </p>
 
           <div
@@ -351,6 +363,7 @@ export default function Account() {
             {birthday
               ? <>Currently set to: <span className="font-semibold">
                   {MONTHS.find(([m]) => m === birthday.split('-')[0])?.[1]} {birthday.split('-')[1]}
+                  {birthYear ? `, ${birthYear}` : ''}
                 </span></>
               : 'Not set yet — set it so we know when to wish you a happy birthday.'}
           </div>
@@ -382,6 +395,19 @@ export default function Account() {
                   ).map((d) => <option key={d} value={d}>{Number(d)}</option>)}
                 </select>
               </div>
+            </div>
+
+            <div>
+              <label className="label">Birth year (optional)</label>
+              <input
+                className="input"
+                type="text"
+                inputMode="numeric"
+                maxLength={4}
+                placeholder="e.g. 1997"
+                value={bdayYearInput}
+                onChange={(e) => setBdayYearInput(e.target.value.replace(/\D/g, ''))}
+              />
             </div>
 
             {bdayError && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{bdayError}</p>}
