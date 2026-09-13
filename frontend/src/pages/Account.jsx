@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { changePassword, setRecovery, getRecoveryQuestion, getMe, setMyEmail } from '../api'
+import { changePassword, setRecovery, getRecoveryQuestion, getMe, setMyEmail, setMyBirthday } from '../api'
 import { useUser, isAdmin } from '../UserContext'
 import { ALL_QUESTIONS, RECOVERY_QUESTIONS, KEY_QUESTION, generateKey } from '../utils/security'
 
@@ -43,6 +43,14 @@ export default function Account() {
   const [emailDone, setEmailDone]   = useState('')
   const [emailBusy, setEmailBusy]   = useState(false)
 
+  // ── Birthday (day + month only — see backend models.User.birthday) ──
+  const [birthday, setBirthday]         = useState('')   // "MM-DD" as last saved
+  const [bdayMonth, setBdayMonth]       = useState('')
+  const [bdayDay, setBdayDay]           = useState('')
+  const [bdayError, setBdayError]       = useState('')
+  const [bdayDone, setBdayDone]         = useState('')
+  const [bdayBusy, setBdayBusy]         = useState(false)
+
   useEffect(() => {
     if (!user?.name) return
     getRecoveryQuestion(user.name)
@@ -52,7 +60,16 @@ export default function Account() {
       })
       .catch(() => setExisting(null))
     getMe()
-      .then((r) => { setEmail(r.data.email || ''); setEmailInput(r.data.email || '') })
+      .then((r) => {
+        setEmail(r.data.email || '')
+        setEmailInput(r.data.email || '')
+        setBirthday(r.data.birthday || '')
+        if (r.data.birthday) {
+          const [m, d] = r.data.birthday.split('-')
+          setBdayMonth(m)
+          setBdayDay(d)
+        }
+      })
       .catch(() => {})
   }, [user?.name])
 
@@ -69,6 +86,34 @@ export default function Account() {
       setEmailError(err.response?.data?.detail || 'Could not save that email.')
     } finally {
       setEmailBusy(false)
+    }
+  }
+
+  const MONTHS = [
+    ['01', 'January'], ['02', 'February'], ['03', 'March'], ['04', 'April'],
+    ['05', 'May'], ['06', 'June'], ['07', 'July'], ['08', 'August'],
+    ['09', 'September'], ['10', 'October'], ['11', 'November'], ['12', 'December'],
+  ]
+  // Day 31 offered for every month, Feb included — a birthday is stored as
+  // "MM-DD" with no year (models.User.birthday), so there's no real year to
+  // check Feb 29 against here; the backend treats Feb 29 as Feb 28 on
+  // non-leap years when it sends the wish.
+  const daysInMonth = (m) => (m === '02' ? 29 : ['04', '06', '09', '11'].includes(m) ? 30 : 31)
+
+  const handleBirthday = async (e) => {
+    e.preventDefault()
+    setBdayError(''); setBdayDone('')
+    if (!bdayMonth || !bdayDay) return setBdayError('Pick a month and day.')
+    const value = `${bdayMonth}-${bdayDay}`
+    setBdayBusy(true)
+    try {
+      const res = await setMyBirthday({ birthday: value })
+      setBirthday(res.data.birthday || '')
+      setBdayDone('Saved')
+    } catch (err) {
+      setBdayError(err.response?.data?.detail || 'Could not save that birthday.')
+    } finally {
+      setBdayBusy(false)
     }
   }
 
@@ -284,6 +329,70 @@ export default function Account() {
 
             <button type="submit" className="btn-primary" disabled={emailBusy}>
               {emailBusy ? 'Saving…' : email ? 'Update email' : 'Save email'}
+            </button>
+          </form>
+        </div>
+
+        {/* ── Birthday ── */}
+        <div className="card">
+          <h2 className="text-sm font-bold text-gray-800">Birthday</h2>
+          <p className="text-xs text-gray-500 leading-relaxed mt-1 mb-3">
+            Day and month only — used to send you a birthday email, and to
+            remind you to give a party to your best friends. No year needed.
+          </p>
+
+          <div
+            className={`text-xs rounded-md px-3 py-2 mb-4 border ${
+              birthday
+                ? 'bg-green-50 border-green-200 text-green-800'
+                : 'bg-amber-50 border-amber-300 text-gray-600'
+            }`}
+          >
+            {birthday
+              ? <>Currently set to: <span className="font-semibold">
+                  {MONTHS.find(([m]) => m === birthday.split('-')[0])?.[1]} {birthday.split('-')[1]}
+                </span></>
+              : 'Not set yet — set it so we know when to wish you a happy birthday.'}
+          </div>
+
+          <form onSubmit={handleBirthday} className="space-y-3">
+            <div className="flex gap-2">
+              <div className="flex-[2]">
+                <label className="label">Month</label>
+                <select
+                  className="input"
+                  value={bdayMonth}
+                  onChange={(e) => { setBdayMonth(e.target.value); if (Number(bdayDay) > daysInMonth(e.target.value)) setBdayDay('') }}
+                >
+                  <option value="">Select…</option>
+                  {MONTHS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              </div>
+              <div className="flex-1">
+                <label className="label">Day</label>
+                <select
+                  className="input"
+                  value={bdayDay}
+                  disabled={!bdayMonth}
+                  onChange={(e) => setBdayDay(e.target.value)}
+                >
+                  <option value="">–</option>
+                  {bdayMonth && Array.from({ length: daysInMonth(bdayMonth) }, (_, i) =>
+                    String(i + 1).padStart(2, '0')
+                  ).map((d) => <option key={d} value={d}>{Number(d)}</option>)}
+                </select>
+              </div>
+            </div>
+
+            {bdayError && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{bdayError}</p>}
+            {bdayDone && (
+              <p className="text-sm font-bold text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2 text-center">
+                ✓ {bdayDone}
+              </p>
+            )}
+
+            <button type="submit" className="btn-primary" disabled={bdayBusy}>
+              {bdayBusy ? 'Saving…' : birthday ? 'Update birthday' : 'Save birthday'}
             </button>
           </form>
         </div>

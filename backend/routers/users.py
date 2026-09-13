@@ -9,7 +9,7 @@ from models import User
 from schemas import (
     UserSignup, UserLogin, UserOut, LoginOut, SetRecovery, ResetPassword,
     AdminReset, AdminSetRecovery, AdminIssueCode, RedeemCode,
-    SetEmail, RequestLoginCode, VerifyLoginCode, UserMeOut,
+    SetEmail, SetBirthday, RequestLoginCode, VerifyLoginCode, UserMeOut,
 )
 from emailer import send_login_code
 
@@ -391,6 +391,38 @@ def set_my_email(payload: SetEmail, db: Session = Depends(get_db),
         raise HTTPException(409, "That email is already attached to another account")
 
     caller.email = email
+    db.commit()
+    db.refresh(caller)
+    return caller
+
+
+def _valid_birthday(value: str) -> bool:
+    """"MM-DD", a real month and a real day of it - no year, see
+    models.User.birthday for why."""
+    import calendar
+    import re
+    m = re.match(r"^(\d{2})-(\d{2})$", value or "")
+    if not m:
+        return False
+    month, day = int(m.group(1)), int(m.group(2))
+    if not (1 <= month <= 12):
+        return False
+    # 2000 is a leap year, so Feb 29 still validates here - someone born on
+    # it shouldn't be told their own birthday is invalid.
+    return 1 <= day <= calendar.monthrange(2000, month)[1]
+
+
+@router.post("/me/birthday", response_model=UserMeOut)
+def set_my_birthday(payload: SetBirthday, db: Session = Depends(get_db),
+                    caller: User = Depends(current_user)):
+    """Set (or change) your own birthday - self-service, same reasoning as
+    the email endpoint above: only the account holder should be the one
+    saying when their birthday actually is."""
+    birthday = (payload.birthday or "").strip()
+    if not _valid_birthday(birthday):
+        raise HTTPException(400, "Give a real month and day, as MM-DD")
+
+    caller.birthday = birthday
     db.commit()
     db.refresh(caller)
     return caller

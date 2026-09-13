@@ -66,6 +66,7 @@ export const redeemCode         = (data)     => api.post('/users/redeem-code', d
 export const requestLoginCode   = (data)     => api.post('/users/email-code', data)
 export const verifyLoginCode    = (data)     => api.post('/users/email-code/verify', data)
 export const setMyEmail         = (data)     => api.post('/users/me/email', data)
+export const setMyBirthday      = (data)     => api.post('/users/me/birthday', data)
 export const getMe              = ()         => api.get('/users/me')
 
 // ── Groups ────────────────────────────────────────────────────────────────────

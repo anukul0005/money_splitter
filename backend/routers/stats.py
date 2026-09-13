@@ -416,3 +416,37 @@ def get_group_stats(group_id: int, db: Session = Depends(get_db),
         by_member=[MemberStat(member=k, total_paid=round(v, 2)) for k, v in sorted(by_member.items(), key=lambda x: -x[1])],
         by_date=[TimelineStat(date=k, total=round(v, 2)) for k, v in sorted(by_date.items())],
     )
+
+
+def top_transaction_partners(db: Session, user: User, limit: int = 3) -> list[tuple[str, float]]:
+    """Who this person has moved the most money around with, ranked by the
+    full amount of every expense in every group they share - not a
+    per-share amount, and not who owes whom (see get_friends for that,
+    which nets debts rather than summing spend).
+
+    "Shared" is at the group level: every expense in a group both belong
+    to counts toward every other member of that group, whether or not
+    that particular expense named them as a participant. A trip group of
+    four splitting forty expenses between different subsets of the four is
+    still forty expenses these four people did together, not forty
+    separate questions about who was on each one.
+
+    Historical groups (settled record-keeping only, not live spending) are
+    included on purpose - "who have you actually spent the most with" is a
+    fact about the past as much as the present, and excluding it would
+    quietly favour whoever's newest.
+    """
+    totals: dict[str, float] = defaultdict(float)
+    for g in db.query(Group).all():
+        if not is_member(g, user):
+            continue
+        other_names = [m.name for m in g.members if m.name.lower() != user.name.lower()]
+        if not other_names:
+            continue
+        group_total = sum(e.amount for e in g.expenses)
+        if group_total <= 0:
+            continue
+        for name in other_names:
+            totals[name] += group_total
+    ranked = sorted(totals.items(), key=lambda x: -x[1])
+    return ranked[:limit]

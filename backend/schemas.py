@@ -30,9 +30,11 @@ class UserOut(BaseModel):
 
 
 class UserMeOut(UserOut):
-    """Everything UserOut has, plus the one thing that's only ever safe to
-    hand back to the account it belongs to: its own email."""
+    """Everything UserOut has, plus the things that are only ever safe to
+    hand back to the account it belongs to: its own email and birthday."""
     email: Optional[str] = None
+    # "MM-DD" - see models.User.birthday for why no year.
+    birthday: Optional[str] = None
 
 
 class LoginOut(UserMeOut):
@@ -94,6 +96,11 @@ class SetEmail(BaseModel):
     """Attach an email to your own account - the address a login code and
     every notification about your groups goes to."""
     email: str
+
+
+class SetBirthday(BaseModel):
+    """Your own birthday, day and month only - see models.User.birthday."""
+    birthday: str
 
 
 class RequestLoginCode(BaseModel):

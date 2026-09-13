@@ -43,6 +43,17 @@ class User(Base):
     login_code_hash = Column(String(128), nullable=True)
     login_code_salt = Column(String(64), nullable=True)
     login_code_expires_at = Column(DateTime(timezone=True), nullable=True)
+    # "MM-DD" only - no year. A birthday email only ever needs to know
+    # whether today is the day, and asking for a year that then sits next
+    # to nothing that uses it invites a birth year nobody meant to publish
+    # to be entered anyway.
+    birthday = Column(String(5), nullable=True)
+    # The last date (ISO, "YYYY-MM-DD") a birthday email actually went out
+    # for this account - not the birthday itself, which repeats every year,
+    # but the year it was last sent. Guards against the daily cron endpoint
+    # being hit twice in one day (a retry, an overlapping ping) and mailing
+    # the same "happy birthday" twice.
+    last_birthday_wish_sent = Column(String(10), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

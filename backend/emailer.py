@@ -4,6 +4,7 @@ import smtplib
 import urllib.error
 import urllib.request
 from contextlib import contextmanager
+from email.header import Header
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formataddr
@@ -79,7 +80,8 @@ MONO = "'IBM Plex Mono', 'Courier New', Courier, monospace"
 
 
 def _layout(heading: str, lines: list[str], button_url: str = "",
-            button_label: str = "", highlight: str = "") -> str:
+            button_label: str = "", highlight: str = "",
+            footer: str = "Sent automatically by SplitEasy because you're in this group.") -> str:
     """One SplitEasy-branded HTML email, deliberately restrained.
 
     Table-based with every style inlined, which looks archaic next to the
@@ -153,7 +155,7 @@ def _layout(heading: str, lines: list[str], button_url: str = "",
     </td></tr>
     <tr><td style="padding:22px 4px 0;font-family:{FONT};font-size:12px;
                    line-height:1.5;color:{MUTED};">
-      Sent automatically by SplitEasy because you're in this group.
+      {footer}
     </td></tr>
   </table>
 </td></tr>
@@ -259,13 +261,24 @@ def deliver(to_email: str, subject: str, body: str, html: str = "") -> str:
     # multipart/alternative when there is HTML: both versions travel together
     # and the client picks. Order matters - least-preferred part first, so the
     # HTML has to be attached last or clients show the plain text.
+    #
+    # utf-8 explicitly on every text part and the subject - this legacy MIME
+    # API (compat32, not the modern EmailMessage policy) does not auto-encode
+    # non-ASCII content. A subject or body assigned as a plain str with an
+    # emoji in it (a birthday email's "Happy birthday! \U0001f382", say) sat
+    # fine until .as_string() tried to flatten the message using the
+    # process's own default codec - cp1252 on Windows, ascii on a bare Linux
+    # container - and failed outright with a UnicodeEncodeError, never
+    # reaching the network at all. Header()/the explicit charset argument
+    # both force real RFC 2047 / MIME encoding instead of leaving it to
+    # whatever codec happens to be the platform default.
     if html:
         msg = MIMEMultipart("alternative")
-        msg.attach(MIMEText(body, "plain"))
-        msg.attach(MIMEText(html, "html"))
+        msg.attach(MIMEText(body, "plain", "utf-8"))
+        msg.attach(MIMEText(html, "html", "utf-8"))
     else:
-        msg = MIMEText(body)
-    msg["Subject"] = subject
+        msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = Header(subject, "utf-8")
     msg["From"] = formataddr(("SplitEasy", sender))
     msg["To"] = to_email
 
@@ -305,9 +318,19 @@ def deliver(to_email: str, subject: str, body: str, html: str = "") -> str:
 def _send(to_email: str, subject: str, body: str, html: str = "") -> None:
     try:
         transport = deliver(to_email, subject, body, html)
-        print(f"[email] sent to {to_email} via {transport}: {subject}")
     except Exception as e:
         print(f"[email] failed to send to {to_email}: {e}")
+        return
+    # Logging the send, not sending it - a console that can't render an
+    # emoji subject (cp1252 on Windows) must not make a message that has
+    # already gone out look like it failed. This used to sit inside the
+    # same try/except as deliver() above, so a print() crash here was
+    # caught and reported as "failed to send" for an email that had, in
+    # fact, already been delivered.
+    try:
+        print(f"[email] sent to {to_email} via {transport}: {subject}")
+    except UnicodeEncodeError:
+        print(f"[email] sent to {to_email} via {transport}")
 
 
 def send_login_code(email: str, code: str) -> None:
@@ -323,6 +346,57 @@ def send_login_code(email: str, code: str) -> None:
              "If you didn't ask for this, ignore this email — nobody can "
              "sign in without it."],
             highlight=code,
+        ),
+    )
+
+
+def _join_names(names: list[str]) -> str:
+    """"A, B, C and D" - the last name gets "and" instead of a comma, the
+    way a person would actually say the list out loud."""
+    if len(names) <= 1:
+        return names[0] if names else ""
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def send_birthday_wish(to_email: str, name: str, top_partners: list[tuple[str, float]]) -> None:
+    """One birthday email, sent once a year by the daily cron endpoint (see
+    routers/cron.py) to whoever's `birthday` (MM-DD) matches today.
+
+    `top_partners` is this person's own top spending partners - see
+    stats.top_transaction_partners - named here rather than left generic,
+    since "you should treat these actual people" is the one thing an
+    automated birthday email can say that isn't a form-letter platitude.
+    Only the names go in the email, not the ₹ amounts behind the ranking -
+    a birthday wish saying exactly how much you've spent on your friends
+    reads as an accusation, not a nudge. Empty list (nobody to name yet)
+    still sends a plain birthday wish rather than skipping the email
+    outright.
+    """
+    first = name.split()[0] if name.split() else name
+    lines = [
+        f"Happy birthday, {escape(first)}! Wishing you a genuinely wonderful year ahead.",
+    ]
+    plain_lines = [f"Happy birthday, {first}! Wishing you a genuinely wonderful year ahead."]
+
+    if top_partners:
+        names_only = [pname for pname, _amount in top_partners]
+        friends_html = _join_names([escape(n) for n in names_only])
+        friends_plain = _join_names(names_only)
+        lines.append(
+            f"Don't forget to give a party to your best friends - {friends_html}!"
+        )
+        plain_lines.append(
+            f"Don't forget to give a party to your best friends - {friends_plain}!"
+        )
+
+    _send(
+        to_email,
+        f"🎂 Happy birthday, {first}!",
+        "\n\n".join(plain_lines),
+        _layout(
+            f"Happy birthday, {first}! 🎂",
+            lines,
+            footer="Sent automatically by SplitEasy on the birthday you set in Account settings.",
         ),
     )
 

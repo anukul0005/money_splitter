@@ -14,6 +14,12 @@ class Settings(BaseSettings):
     # Gmail offers - see emailer.deliver. Empty means "no HTTP transport
     # configured", which is the normal state locally, where SMTP works fine.
     brevo_api_key: str = ""
+    # Shared secret an external daily cron pinger sends back, so /cron/* isn't
+    # something anyone who finds the URL can trigger on someone else's
+    # behalf. Empty means the daily-jobs endpoint refuses every request -
+    # deliberately unusable until a real secret is actually set, rather than
+    # silently open in an environment that never configured one.
+    cron_secret: str = ""
 
     class Config:
         env_file = ".env"
@@ -174,6 +180,12 @@ def _run_migrations(conn, text) -> None:
     conn.execute(text(
         "ALTER TABLE products ADD COLUMN IF NOT EXISTS "
         "community_review_count INTEGER NOT NULL DEFAULT 0"
+    ))
+    conn.execute(text(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS birthday VARCHAR(5)"
+    ))
+    conn.execute(text(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_birthday_wish_sent VARCHAR(10)"
     ))
     conn.commit()
 
