@@ -268,16 +268,6 @@ export default function AddExpense() {
 
   const handleCropCancel = () => { setCropFile(null); resetFileInputs() }
 
-  // "Spicy Tokyo Ramen, Lemon Tea - Merchant Name" - a description built
-  // from what was actually on the receipt reads far better than the bare
-  // merchant name alone, and is more useful later when scrolling a
-  // group's expense list looking for "that one time we ate ramen."
-  const buildDescription = (merchant, items) => {
-    const dishes = (items || []).map((i) => i.label).filter(Boolean).slice(0, 3)
-    if (merchant && dishes.length) return `${dishes.join(', ')} - ${merchant}`
-    return merchant || dishes.join(', ') || ''
-  }
-
   const handleScan = async (file) => {
     setCropFile(null)
     setScanError(''); setScanInfo(null)
@@ -298,12 +288,17 @@ export default function AddExpense() {
       // below can't tell apart. Preferred over the keyword guess whenever
       // it's present.
       const category = confidence < 85 ? '' : (llmCategory || guessCategory(merchant, items))
+      // The title is just who the money went to - what was actually
+      // bought reads better as a note alongside it than crowding the
+      // same field.
+      const itemNote = (items || []).map((i) => i.label).filter(Boolean).join(', ')
       setForm((f) => ({
         ...f,
-        title:    buildDescription(merchant, items) || f.title,
+        title:    merchant || f.title,
         amount:   total != null ? String(total) : f.amount,
         date:     date || f.date,
         category: category || f.category,
+        notes:    itemNote || f.notes,
       }))
       setScanInfo({
         provider, confidence, rawText: raw_text, extractionMethod: extraction_method,

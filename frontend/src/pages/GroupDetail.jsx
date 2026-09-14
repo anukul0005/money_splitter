@@ -4,6 +4,7 @@ import { getGroup, getSettlement, getGroupStats, deleteExpense, deleteGroup } fr
 import LoadingSpinner from '../components/LoadingSpinner'
 import ExpenseEditModal from '../components/ExpenseEditModal'
 import RecordPaymentModal from '../components/RecordPaymentModal'
+import StatsPanel from '../components/StatsPanel'
 import { useUser } from '../UserContext'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
@@ -102,8 +103,11 @@ export default function GroupDetail() {
 
         {/* Tabs */}
         <div className="flex gap-1 mt-3">
-          {/* Charts moved to the master group, where they cover the whole member set */}
-          {([['expenses','Expenses'],...(isSolo ? [] : [['settle','Settle Up']])]).map(([v, label]) => (
+          {/* Stats here is this one group only - a master group's own Stats
+              toggle covers every group that shares its exact member set,
+              which a solo group like a personal Monthly Expenses tracker
+              has no equivalent of to find this in otherwise. */}
+          {([['expenses','Expenses'],...(isSolo ? [] : [['settle','Settle Up']]),['stats','Stats']]).map(([v, label]) => (
             <button
               key={v}
               onClick={() => setTab(v)}
@@ -397,6 +401,15 @@ export default function GroupDetail() {
             </div>
           )}
         </div>
+      )}
+
+      {/* Stats tab */}
+      {tab === 'stats' && (
+        <StatsPanel
+          stats={stats}
+          expenses={group.expenses.map((e) => ({ date: e.date, amount: e.amount }))}
+          isSolo={isSolo}
+        />
       )}
 
       {/* Payment Edit Modal */}
