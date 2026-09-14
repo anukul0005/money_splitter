@@ -35,23 +35,36 @@ export default function ReceiptCropper({ file, onCancel, onConfirm }) {
     if (containerRef.current) setContainerW(containerRef.current.clientWidth)
   }, [imgUrl])
 
+  // "Contain", not "cover" - zoom 1 shows the WHOLE photo inside the
+  // frame (letterboxed on whichever side is shorter), rather than filling
+  // the frame and cropping off the rest before the person has touched
+  // anything. A receipt is almost always much taller than this fixed-height
+  // frame, so a "cover" default silently trimmed the top and/or bottom on
+  // load with no way to zoom back out and see them again - the slider only
+  // ever went up from 1, never below the fit it started at.
   const baseScale = natural.w && natural.h
-    ? Math.max(containerW / natural.w, VIEWPORT_H / natural.h)
+    ? Math.min(containerW / natural.w, VIEWPORT_H / natural.h)
     : 1
 
+  // Below the current display size, an axis is entirely visible already -
+  // centered and locked, not clamped toward an edge - rather than only
+  // ever handling the "image bigger than the frame" case a cover-fit
+  // cropper never needed to.
+  const clampAxis = (pos, dispSize, viewSize) => {
+    if (dispSize <= viewSize) return (viewSize - dispSize) / 2
+    return Math.min(0, Math.max(viewSize - dispSize, pos))
+  }
   const clampOffset = (x, y, z) => {
     const dispW = natural.w * baseScale * z
     const dispH = natural.h * baseScale * z
-    const minX = Math.min(0, containerW - dispW)
-    const minY = Math.min(0, VIEWPORT_H - dispH)
-    return { x: Math.min(0, Math.max(minX, x)), y: Math.min(0, Math.max(minY, y)) }
+    return { x: clampAxis(x, dispW, containerW), y: clampAxis(y, dispH, VIEWPORT_H) }
   }
 
   const onImgLoad = () => {
     const el = imgRef.current
     const w = el.naturalWidth, h = el.naturalHeight
     setNatural({ w, h })
-    const scale = Math.max(containerW / w, VIEWPORT_H / h)
+    const scale = Math.min(containerW / w, VIEWPORT_H / h)
     setOffset({ x: (containerW - w * scale) / 2, y: (VIEWPORT_H - h * scale) / 2 })
     setZoom(1)
     setReady(true)
@@ -129,7 +142,7 @@ export default function ReceiptCropper({ file, onCancel, onConfirm }) {
           <div className="flex items-center gap-3">
             <span className="text-xs text-gray-500 font-bold">Zoom</span>
             <input
-              type="range" min="1" max="3" step="0.05"
+              type="range" min="1" max="6" step="0.05"
               value={zoom}
               onChange={(e) => onZoomChange(parseFloat(e.target.value))}
               className="flex-1"
