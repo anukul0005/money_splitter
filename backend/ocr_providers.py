@@ -58,7 +58,10 @@ class OCRSpaceProvider(OCRProvider):
 
         parts = (
             field("apikey", get_settings().ocrspace_api_key)
-            + field("OCREngine", "2")   # engine 2: better with mixed fonts/receipts
+            # Engine 3 (their newest) reads this app's actual receipts
+            # noticeably better and faster than Engine 2 - confirmed
+            # against OCR.space's own online portal, which defaults to it.
+            + field("OCREngine", "3")
             + field("scale", "true")
             + f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="receipt.jpg"\r\n'
               f"Content-Type: image/jpeg\r\n\r\n"

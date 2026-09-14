@@ -13,10 +13,24 @@ from __future__ import annotations
 import re
 from datetime import date as _date
 
-_MONEY = re.compile(r"(?:₹|rs\.?|inr)?\s*([\d,]+\.\d{2}|[\d,]+)\s*$", re.I)
+# Currency marker allowed on either side of the number - "₹408.00" and
+# "408.00Rs" both appear on real receipts (a thermal printer's own POS
+# software picks whichever convention it was built with).
+_MONEY = re.compile(r"(?:₹|rs\.?|inr)?\s*([\d,]+\.\d{2}|[\d,]+)\s*(?:₹|rs\.?|inr)?\s*$", re.I)
 _TOTAL_WORDS = re.compile(r"\b(grand\s*total|total|amount\s*due|net\s*amount|balance\s*due)\b", re.I)
 _TAX_WORDS = re.compile(r"\b(gst|tax|cgst|sgst|vat|service\s*charge)\b", re.I)
 _SUBTOTAL_WORDS = re.compile(r"\bsub\s*total\b", re.I)
+# Neither a tax nor a real line item - a rounding adjustment line would
+# otherwise get counted as one, throwing off the items-vs-total math check
+# by exactly the rounding amount it's supposed to explain.
+_ROUNDING_WORDS = re.compile(r"\b(before\s*rounding|rounding|round\s*off)\b", re.I)
+# A line that's purely receipt bookkeeping, never a merchant's own name -
+# skipped when picking the merchant even though _line_amount would ignore
+# these too (most have no trailing price).
+_METADATA_LINE = re.compile(
+    r"^(store\s*no|order\s*no|table\s*no|bill\s*no|invoice\s*no|receipt\s*no|"
+    r"gstin|fssai|qty|item)\b|^\d{1,2}:\d{2}(:\d{2})?\s*$", re.I,
+)
 _DATE_PATTERNS = [
     (re.compile(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b"), "dmy4"),
     (re.compile(r"\b(\d{4})[/-](\d{1,2})[/-](\d{1,2})\b"), "ymd4"),
@@ -105,7 +119,16 @@ def parse_receipt(raw_text: str) -> dict:
     """
     lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
 
-    merchant = lines[0] if lines else None
+    # First line that isn't the date/time stamp, a store/order/table/bill
+    # number, or a table header ("Item", "Qty") many POS printouts lead
+    # with instead of - or in addition to - an actual merchant name. Falls
+    # back to the literal first line if every line looks like metadata,
+    # since a bare guess still beats leaving the field empty.
+    merchant = next(
+        (l for l in lines if not _METADATA_LINE.search(l)
+         and not any(p.search(l) for p, _ in _DATE_PATTERNS)),
+        lines[0] if lines else None,
+    )
 
     total = subtotal = tax = None
     items: list[dict] = []
@@ -115,6 +138,8 @@ def parse_receipt(raw_text: str) -> dict:
         # (2026 reads as an amount) - skipped outright rather than treated
         # as either a total or a line item.
         if any(p.search(line) for p, _ in _DATE_PATTERNS):
+            continue
+        if _ROUNDING_WORDS.search(line):
             continue
         amt = _line_amount(line)
         if amt is None:
