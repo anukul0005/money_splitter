@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { getGroups, createExpense, scanReceipt } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
+import ReceiptCropper from '../components/ReceiptCropper'
 import { useUser } from '../UserContext'
 
 const CATEGORIES = [
@@ -39,6 +40,7 @@ export default function AddExpense() {
   const [scanBusy, setScanBusy]   = useState(false)
   const [scanError, setScanError] = useState('')
   const [scanInfo, setScanInfo]   = useState(null)   // { provider, confidence } of the last successful scan
+  const [cropFile, setCropFile]   = useState(null)   // photo awaiting the crop step, before it's sent to OCR
   const cameraInputRef  = useRef(null)
   const galleryInputRef = useRef(null)
 
@@ -244,8 +246,19 @@ export default function AddExpense() {
     img.src = url
   })
 
+  const resetFileInputs = () => {
+    if (cameraInputRef.current) cameraInputRef.current.value = ''
+    if (galleryInputRef.current) galleryInputRef.current.value = ''
+  }
+
+  // A photo picked from the camera or gallery goes through the crop step
+  // first (ReceiptCropper) - only the cropped result is ever sent to OCR.
+  const onFilePicked = (file) => { if (file) setCropFile(file) }
+
+  const handleCropCancel = () => { setCropFile(null); resetFileInputs() }
+
   const handleScan = async (file) => {
-    if (!file) return
+    setCropFile(null)
     setScanError(''); setScanInfo(null)
     setScanBusy(true)
     try {
@@ -264,8 +277,7 @@ export default function AddExpense() {
       setScanError(err.response?.data?.detail || 'Could not read that receipt. Try a clearer photo, or enter it manually.')
     } finally {
       setScanBusy(false)
-      if (cameraInputRef.current) cameraInputRef.current.value = ''
-      if (galleryInputRef.current) galleryInputRef.current.value = ''
+      resetFileInputs()
     }
   }
 
@@ -418,14 +430,14 @@ export default function AddExpense() {
               accept="image/*"
               capture="environment"
               className="hidden"
-              onChange={(e) => handleScan(e.target.files?.[0])}
+              onChange={(e) => onFilePicked(e.target.files?.[0])}
             />
             <input
               ref={galleryInputRef}
               type="file"
               accept="image/*"
               className="hidden"
-              onChange={(e) => handleScan(e.target.files?.[0])}
+              onChange={(e) => onFilePicked(e.target.files?.[0])}
             />
 
             {scanBusy && <p className="text-xs text-gray-500 mt-2">Reading the receipt…</p>}
@@ -697,6 +709,14 @@ export default function AddExpense() {
           {submitting ? 'Saving…' : 'Add Expense'}
         </button>
       </form>
+
+      {cropFile && (
+        <ReceiptCropper
+          file={cropFile}
+          onCancel={handleCropCancel}
+          onConfirm={handleScan}
+        />
+      )}
     </div>
   )
 }
