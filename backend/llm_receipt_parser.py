@@ -79,6 +79,13 @@ def extract(raw_text: str) -> dict:
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
+            # Groq sits behind Cloudflare, which fingerprint-blocks the
+            # default "Python-urllib/3.x" user agent as a bot signature
+            # (its own error 1010) before the request ever reaches Groq -
+            # a realistic browser-style UA is enough to pass that check.
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "application/json",
         },
     )
     try:
