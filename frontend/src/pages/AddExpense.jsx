@@ -285,14 +285,19 @@ export default function AddExpense() {
     try {
       const compressed = await compressImage(file)
       const res = await scanReceipt(compressed)
-      const { merchant, date, items, total, confidence, provider, raw_text, extraction_method } = res.data
+      const { merchant, date, items, total, category: llmCategory, confidence, provider, raw_text, extraction_method } = res.data
       // Below the threshold /receipts/scan itself uses to accept a read
       // (see CONFIDENCE_THRESHOLD in routers/receipts.py), the merchant
       // name is exactly as unreliable as everything else in the OCR text -
       // a category guessed from it is compounding one shaky read on top of
       // another, so it's better left blank for a manual pick than silently
-      // wrong.
-      const category = confidence >= 85 ? guessCategory(merchant, items) : ''
+      // wrong. The LLM path (extraction_method "llm") judges the category
+      // itself, from the merchant AND the actual items - "Spicy Tokyo
+      // Ramen" reads as Food to it even when the merchant's own name has
+      // a word like "store" in it, which the keyword-only guessCategory
+      // below can't tell apart. Preferred over the keyword guess whenever
+      // it's present.
+      const category = confidence < 85 ? '' : (llmCategory || guessCategory(merchant, items))
       setForm((f) => ({
         ...f,
         title:    buildDescription(merchant, items) || f.title,
@@ -300,7 +305,10 @@ export default function AddExpense() {
         date:     date || f.date,
         category: category || f.category,
       }))
-      setScanInfo({ provider, confidence, rawText: raw_text, extractionMethod: extraction_method })
+      setScanInfo({
+        provider, confidence, rawText: raw_text, extractionMethod: extraction_method,
+        extracted: { merchant, date, items, total, category: llmCategory },
+      })
     } catch (err) {
       setScanError(err.response?.data?.detail || 'Could not read that receipt. Try a clearer photo, or enter it manually.')
     } finally {
@@ -477,7 +485,32 @@ export default function AddExpense() {
                   {scanInfo.extractionMethod === 'llm' ? ' + AI parsing' : ''} ({scanInfo.confidence}% confidence)
                   {scanInfo.confidence >= 85 ? ' — check it before saving.' : ' — this read is shaky, double-check every field before saving.'}
                 </p>
-                {scanInfo.rawText && (
+                {/* The LLM path already turned the noisy raw text into a
+                    structured guess - showing that guess is more useful
+                    for checking the scan than the raw text it came from.
+                    The regex path has no such summary, so it falls back
+                    to showing what OCR actually read. */}
+                {scanInfo.extractionMethod === 'llm' && scanInfo.extracted ? (
+                  <details className="mt-1.5">
+                    <summary className="text-[11px] text-gray-500 font-bold cursor-pointer">What was extracted</summary>
+                    <div className="text-[10px] text-gray-600 bg-white border border-amber-200 rounded-md p-2 mt-1 space-y-1">
+                      <p><span className="font-bold">Merchant:</span> {scanInfo.extracted.merchant || '—'}</p>
+                      <p><span className="font-bold">Date:</span> {scanInfo.extracted.date || '—'}</p>
+                      <p><span className="font-bold">Category:</span> {scanInfo.extracted.category || '—'}</p>
+                      {scanInfo.extracted.items?.length > 0 && (
+                        <div>
+                          <span className="font-bold">Items:</span>
+                          <ul className="list-disc list-inside">
+                            {scanInfo.extracted.items.map((it, i) => (
+                              <li key={i}>{it.label} — ₹{it.amount}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      <p><span className="font-bold">Total:</span> {scanInfo.extracted.total != null ? `₹${scanInfo.extracted.total}` : '—'}</p>
+                    </div>
+                  </details>
+                ) : scanInfo.rawText && (
                   <details className="mt-1.5">
                     <summary className="text-[11px] text-gray-500 font-bold cursor-pointer">What OCR actually read</summary>
                     <pre className="text-[10px] text-gray-600 bg-white border border-amber-200 rounded-md p-2 mt-1 whitespace-pre-wrap max-h-40 overflow-y-auto">{scanInfo.rawText}</pre>

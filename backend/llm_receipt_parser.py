@@ -28,22 +28,35 @@ from database import get_settings
 # retires it; nothing else in this file should need to change.
 GROQ_MODEL = "openai/gpt-oss-120b"
 
-_SYSTEM_PROMPT = """You read raw OCR text from a receipt. Line breaks may be noisy, spacing may be off, and some characters may be misread. Extract its structured content.
+# Kept identical to the CATEGORIES list in frontend/src/pages/AddExpense.jsx
+# - the two aren't shared code (separate frontend/backend projects), so
+# this needs updating by hand if that list ever changes. The LLM is asked
+# to pick one of these exactly rather than freeform text, because a
+# category the add-expense form doesn't offer as a button can't be
+# pre-selected anyway.
+_CATEGORIES = [
+    "Food", "Drinks", "Snacks", "Travel - Cab", "Travel - Train",
+    "Hotel", "Movie", "Shopping", "Groceries", "Other",
+]
+
+_SYSTEM_PROMPT = f"""You read raw OCR text from a receipt. Line breaks may be noisy, spacing may be off, and some characters may be misread. Extract its structured content.
 
 Respond with ONLY a JSON object, no other text, in exactly this shape:
-{
+{{
   "merchant": string or null,
   "date": string or null (the receipt's own printed date, as ISO YYYY-MM-DD; null if none is printed or you are not confident),
-  "items": [ { "label": string, "amount": number } ],
+  "items": [ {{ "label": string, "amount": number }} ],
   "subtotal": number or null,
   "tax": number or null (every tax/GST/CGST/SGST/VAT line summed together),
-  "total": number or null (the final amount actually payable, not the subtotal)
-}
+  "total": number or null (the final amount actually payable, not the subtotal),
+  "category": string or null, must be EXACTLY one of: {", ".join(_CATEGORIES)}
+}}
 
 Rules:
 - "items" is every distinct line item with a price, EXCLUDING subtotal, tax, rounding, and total lines themselves.
 - Use null for anything you cannot confidently read - never guess or invent a value.
 - Numbers are plain numbers with no currency symbol or thousands separator.
+- "category" is what the receipt is actually FOR, judged from the merchant name and the items themselves - a restaurant or dish names (ramen, chicken, tea, coffee, etc.) means "Food" even if the merchant's name also contains a word like "store" or "mart"; a bar/liquor items means "Drinks"; a general merchandise/clothing/electronics store means "Shopping". Pick the single best fit, or null if genuinely unclear.
 """
 
 
@@ -107,6 +120,10 @@ def extract(raw_text: str) -> dict:
         if label and amount is not None:
             items.append({"label": str(label), "amount": amount})
 
+    category = fields.get("category")
+    if category not in _CATEGORIES:   # a hallucinated or malformed value is worth nothing
+        category = None
+
     return {
         "merchant": fields.get("merchant") or None,
         "date": fields.get("date") or None,
@@ -114,4 +131,5 @@ def extract(raw_text: str) -> dict:
         "subtotal": _num(fields.get("subtotal")),
         "tax": _num(fields.get("tax")),
         "total": _num(fields.get("total")),
+        "category": category,
     }
