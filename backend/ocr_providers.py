@@ -71,13 +71,27 @@ class OCRSpaceProvider(OCRProvider):
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode())
 
-        if data.get("IsErroredOnProcessing"):
-            raise RuntimeError(f"OCR.space error: {data.get('ErrorMessage')}")
-        results = data.get("ParsedResults") or []
-        return results[0]["ParsedText"] if results else ""
+        # 30s was too tight - OCR.space's free tier shares infrastructure
+        # across every free account, and a genuinely successful request
+        # regularly takes 30-45s under load, not just on a bad image. Tried
+        # twice at 45s each (not longer - Render's own request timeout is
+        # the ceiling here) before giving up: a cold/busy backend on the
+        # first attempt is common, and worth one retry before spending the
+        # next provider's quota on what timing out again would rule out
+        # anyway.
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                with urllib.request.urlopen(req, timeout=45) as resp:
+                    data = json.loads(resp.read().decode())
+                if data.get("IsErroredOnProcessing"):
+                    raise RuntimeError(f"OCR.space error: {data.get('ErrorMessage')}")
+                results = data.get("ParsedResults") or []
+                return results[0]["ParsedText"] if results else ""
+            except (TimeoutError, urllib.error.URLError) as e:
+                last_error = e
+        raise RuntimeError(f"OCR.space timed out twice: {last_error}")
 
 
 class AzureVisionProvider(OCRProvider):
