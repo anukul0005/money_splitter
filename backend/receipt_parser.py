@@ -18,9 +18,19 @@ _TOTAL_WORDS = re.compile(r"\b(grand\s*total|total|amount\s*due|net\s*amount|bal
 _TAX_WORDS = re.compile(r"\b(gst|tax|cgst|sgst|vat|service\s*charge)\b", re.I)
 _SUBTOTAL_WORDS = re.compile(r"\bsub\s*total\b", re.I)
 _DATE_PATTERNS = [
-    (re.compile(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b"), "dmy"),
-    (re.compile(r"\b(\d{4})[/-](\d{1,2})[/-](\d{1,2})\b"), "ymd"),
+    (re.compile(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b"), "dmy4"),
+    (re.compile(r"\b(\d{4})[/-](\d{1,2})[/-](\d{1,2})\b"), "ymd4"),
+    (re.compile(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{2})\b"), "dmy2"),
 ]
+_DATE_KEYWORD = re.compile(r"\bdate\b|\bdt\b|\bbilled\s*on\b", re.I)
+# Lines these appear on are never the receipt's own date, even when they
+# happen to contain a date-shaped run of digits - a GSTIN, phone number,
+# or invoice/bill/table number is exactly the kind of thing that
+# coincidentally matches "\d{1,2}[/-]\d{1,2}[/-]\d{4}".
+_NOT_DATE_CONTEXT = re.compile(
+    r"\b(gstin|gst\s*no|pan\s*no|phone|mobile|contact|invoice\s*no|"
+    r"bill\s*no|order\s*no|table\s*no|fssai|cin\b)", re.I,
+)
 
 
 def _to_float(s: str) -> float | None:
@@ -35,26 +45,53 @@ def _line_amount(line: str) -> float | None:
     return _to_float(m.group(1)) if m else None
 
 
-def _parse_date(text: str) -> str | None:
-    """A receipt's own printed date, read as DD/MM/YYYY first - the
-    convention almost every Indian till receipt actually prints in -
-    falling back to YYYY-MM-DD. Returns None rather than guessing when
-    neither pattern is found, so the caller's own default (today) applies
-    instead of a wrong date silently winning."""
-    for pattern, order in _DATE_PATTERNS:
-        m = pattern.search(text)
-        if not m:
+def _date_from_match(order: str, a: str, b: str, c: str) -> tuple[int, int, int]:
+    if order == "dmy4":
+        d, mo, y = int(a), int(b), int(c)
+    elif order == "ymd4":
+        y, mo, d = int(a), int(b), int(c)
+    else:   # dmy2 - a 2-digit year, the "70" cutoff is the usual windowing convention
+        d, mo, yy = int(a), int(b), int(c)
+        y = 2000 + yy if yy < 70 else 1900 + yy
+    return d, mo, y
+
+
+def _parse_date(lines: list[str]) -> str | None:
+    """A receipt's own printed date - read line by line, not as one search
+    over the whole receipt, because a single global search happily matches
+    the first date-shaped digit run it finds, and a GSTIN, phone number or
+    invoice/bill/table number frequently is one. Skips any line that looks
+    like it holds one of those instead (_NOT_DATE_CONTEXT), prefers a line
+    that actually says "date" over an incidental match elsewhere, and
+    rejects a year outside a plausible receipt range so a stray match can't
+    win just because nothing better was found. Returns None - not a guess -
+    when nothing plausible turns up, so the caller's own default (today)
+    applies instead of a wrong date silently winning.
+    """
+    this_year = _date.today().year
+    candidates: list[tuple[bool, str]] = []
+
+    for line in lines:
+        if _NOT_DATE_CONTEXT.search(line):
             continue
-        a, b, c = m.groups()
-        try:
-            if order == "dmy":
-                d, mo, y = int(a), int(b), int(c)
-            else:
-                y, mo, d = int(a), int(b), int(c)
-            return _date(y, mo, d).isoformat()
-        except ValueError:
-            continue
-    return None
+        for pattern, order in _DATE_PATTERNS:
+            m = pattern.search(line)
+            if not m:
+                continue
+            d, mo, y = _date_from_match(order, *m.groups())
+            if not (2015 <= y <= this_year + 1):
+                continue
+            try:
+                iso = _date(y, mo, d).isoformat()
+            except ValueError:
+                continue
+            candidates.append((bool(_DATE_KEYWORD.search(line)), iso))
+            break   # one date per line is enough; move on
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda c: not c[0])   # keyword-flagged lines first
+    return candidates[0][1]
 
 
 def parse_receipt(raw_text: str) -> dict:
@@ -99,7 +136,7 @@ def parse_receipt(raw_text: str) -> dict:
             if label and label != merchant:
                 items.append({"label": label, "amount": amt})
 
-    receipt_date = _parse_date(raw_text)
+    receipt_date = _parse_date(lines)
 
     score = 0
     if merchant:

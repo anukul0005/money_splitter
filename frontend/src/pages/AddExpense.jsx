@@ -191,25 +191,36 @@ export default function AddExpense() {
     setCustomAmts(newAmts)
   }
 
-  // Keyword → category, checked against the merchant name and every item
-  // label the scan found. Deliberately just a guess the person can change -
+  // Keyword → category. Deliberately just a guess the person can change -
   // nowhere near as reliable as the confidence-scored merchant/total/items
   // themselves, so it only ever pre-selects a category button rather than
   // silently deciding one.
+  //
+  // Checked against the merchant name ALONE first, item labels only as a
+  // fallback when the merchant gives no match - a merchant line is what
+  // OCR usually reads most cleanly (biggest text, top of the receipt), and
+  // folding every item label into the same search let one garbled word in
+  // a noisy line item ("...st0re..." from a misread character) outrank an
+  // otherwise-clear merchant name. Word-boundaried (\b...\b) for the same
+  // reason: "store" and "mall" are short enough to turn up as a substring
+  // of unrelated OCR noise if left unanchored.
+  const CATEGORY_RULES = [
+    [/\b(uber|ola|cab|taxi)\b/, 'Travel - Cab'],
+    [/\b(irctc|railway|train)\b/, 'Travel - Train'],
+    [/\b(hotel|resort|inn|lodge)\b/, 'Hotel'],
+    [/\b(cinema|pvr|inox|multiplex|movie)\b/, 'Movie'],
+    [/\b(mart|supermarket|grocery|grocer|bigbasket|dmart|kirana)\b/, 'Groceries'],
+    [/\b(bar|pub|wine|liquor|beer|brewery)\b/, 'Drinks'],
+    [/\b(mall|store|showroom|boutique|apparel)\b/, 'Shopping'],
+    [/\b(cafe|restaurant|grill|kitchen|dhaba|biryani|pizza|diner|food)\b/, 'Food'],
+  ]
   const guessCategory = (merchant, items) => {
-    const text = [merchant, ...(items || []).map((i) => i.label)].join(' ').toLowerCase()
-    const rules = [
-      [/uber|ola|cab|taxi/, 'Travel - Cab'],
-      [/irctc|railway|\btrain\b/, 'Travel - Train'],
-      [/hotel|resort|\binn\b|lodge/, 'Hotel'],
-      [/cinema|pvr|inox|multiplex|movie/, 'Movie'],
-      [/mart|supermarket|grocery|grocer|bigbasket|dmart|kirana/, 'Groceries'],
-      [/bar\b|pub\b|wine|liquor|beer|brewery/, 'Drinks'],
-      [/mall|store|showroom|boutique|apparel/, 'Shopping'],
-      [/cafe|restaurant|grill|kitchen|dhaba|biryani|pizza|diner|food/, 'Food'],
-    ]
-    for (const [re, cat] of rules) if (re.test(text)) return cat
-    return ''
+    const fromText = (text) => {
+      const lower = (text || '').toLowerCase()
+      const hit = CATEGORY_RULES.find(([re]) => re.test(lower))
+      return hit ? hit[1] : ''
+    }
+    return fromText(merchant) || fromText((items || []).map((i) => i.label).join(' '))
   }
 
   // A phone camera photo is routinely 3-8 MB; OCR.space's free tier
@@ -265,12 +276,19 @@ export default function AddExpense() {
       const compressed = await compressImage(file)
       const res = await scanReceipt(compressed)
       const { merchant, date, items, total, confidence, provider } = res.data
+      // Below the threshold /receipts/scan itself uses to accept a read
+      // (see CONFIDENCE_THRESHOLD in routers/receipts.py), the merchant
+      // name is exactly as unreliable as everything else in the OCR text -
+      // a category guessed from it is compounding one shaky read on top of
+      // another, so it's better left blank for a manual pick than silently
+      // wrong.
+      const category = confidence >= 85 ? guessCategory(merchant, items) : ''
       setForm((f) => ({
         ...f,
         title:    merchant || f.title,
         amount:   total != null ? String(total) : f.amount,
         date:     date || f.date,
-        category: guessCategory(merchant, items) || f.category,
+        category: category || f.category,
       }))
       setScanInfo({ provider, confidence })
     } catch (err) {
@@ -443,8 +461,9 @@ export default function AddExpense() {
             {scanBusy && <p className="text-xs text-gray-500 mt-2">Reading the receipt…</p>}
             {scanError && <p className="text-xs text-red-600 mt-2">{scanError}</p>}
             {scanInfo && !scanBusy && (
-              <p className="text-xs text-brand-700 mt-2">
-                ✓ Filled in below from {scanInfo.provider} ({scanInfo.confidence}% confidence) — check it before saving.
+              <p className={`text-xs mt-2 ${scanInfo.confidence >= 85 ? 'text-brand-700' : 'text-amber-700 font-bold'}`}>
+                {scanInfo.confidence >= 85 ? '✓' : '⚠️'} Filled in below from {scanInfo.provider} ({scanInfo.confidence}% confidence)
+                {scanInfo.confidence >= 85 ? ' — check it before saving.' : ' — this read is shaky, double-check every field before saving.'}
               </p>
             )}
           </div>
