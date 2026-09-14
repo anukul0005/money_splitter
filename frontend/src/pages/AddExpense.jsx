@@ -285,7 +285,7 @@ export default function AddExpense() {
     try {
       const compressed = await compressImage(file)
       const res = await scanReceipt(compressed)
-      const { merchant, date, items, total, confidence, provider, raw_text } = res.data
+      const { merchant, date, items, total, confidence, provider, raw_text, extraction_method } = res.data
       // Below the threshold /receipts/scan itself uses to accept a read
       // (see CONFIDENCE_THRESHOLD in routers/receipts.py), the merchant
       // name is exactly as unreliable as everything else in the OCR text -
@@ -300,7 +300,7 @@ export default function AddExpense() {
         date:     date || f.date,
         category: category || f.category,
       }))
-      setScanInfo({ provider, confidence, rawText: raw_text })
+      setScanInfo({ provider, confidence, rawText: raw_text, extractionMethod: extraction_method })
     } catch (err) {
       setScanError(err.response?.data?.detail || 'Could not read that receipt. Try a clearer photo, or enter it manually.')
     } finally {
@@ -473,7 +473,8 @@ export default function AddExpense() {
             {scanInfo && !scanBusy && (
               <>
                 <p className={`text-xs mt-2 ${scanInfo.confidence >= 85 ? 'text-brand-700' : 'text-amber-700 font-bold'}`}>
-                  {scanInfo.confidence >= 85 ? '✓' : '⚠️'} Filled in below from {scanInfo.provider} ({scanInfo.confidence}% confidence)
+                  {scanInfo.confidence >= 85 ? '✓' : '⚠️'} Filled in below from {scanInfo.provider}
+                  {scanInfo.extractionMethod === 'llm' ? ' + AI parsing' : ''} ({scanInfo.confidence}% confidence)
                   {scanInfo.confidence >= 85 ? ' — check it before saving.' : ' — this read is shaky, double-check every field before saving.'}
                 </p>
                 {scanInfo.rawText && (

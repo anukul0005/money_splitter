@@ -112,14 +112,12 @@ def _parse_date(lines: list[str]) -> str | None:
     return candidates[0][1]
 
 
-def parse_receipt(raw_text: str) -> dict:
-    """Best-effort structured guess plus a 0-100 confidence score, from
-    four independent 25-point checks: a merchant name, at least one line
-    item, a total, and the items (plus tax) actually summing close to that
-    total. routers/receipts.py stops trying further OCR providers once
-    this clears CONFIDENCE_THRESHOLD - a receipt that fails the math check
-    is exactly the case where a second provider's read is worth the extra
-    quota.
+def _regex_extract(raw_text: str) -> dict:
+    """The original, dependency-free extraction: dumb line-by-line
+    heuristics, not a model. Used as-is when llm_receipt_parser isn't
+    configured or fails, and still the thing _validate_and_score's math
+    check treats identically to an LLM's output - neither source is
+    trusted just because of where it came from.
     """
     lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
 
@@ -166,22 +164,48 @@ def parse_receipt(raw_text: str) -> dict:
             if label and label != merchant:
                 items.append({"label": label, "amount": amt})
 
-    # No line said "total" at all - the word was misread, or this
-    # receipt's layout doesn't use it ("Net Payable", "You Paid", printed
-    # in a language OCR garbled, or split across two lines OCR read out of
-    # order). Rather than leave the amount at nothing, the largest money
-    # amount on the receipt is pulled out and used as a guess - the total
-    # is, on virtually every receipt shape, the biggest number on it.
-    # Marked `total_inferred` so confidence reflects that this is a guess,
-    # not a labelled fact.
+    return {
+        "merchant": merchant,
+        "date": _parse_date(lines),
+        "items": items,
+        "subtotal": subtotal,
+        "tax": tax,
+        "total": total,
+    }
+
+
+def _validate_and_score(fields: dict) -> dict:
+    """The Python validator, applied identically no matter which source
+    (the LLM, or _regex_extract) produced `fields` - a fluent, confident
+    LLM response is not automatically a correct one, so it earns its
+    confidence score the exact same way a regex-derived read does.
+
+    Four independent 25-point checks: a merchant name, at least one line
+    item, a total, and the items (plus tax) actually summing close to
+    that total. routers/receipts.py stops trying further OCR providers
+    once this clears CONFIDENCE_THRESHOLD - a receipt that fails the math
+    check is exactly the case where a second provider's read is worth the
+    extra quota.
+    """
+    merchant = fields.get("merchant")
+    items = list(fields.get("items") or [])
+    subtotal = fields.get("subtotal")
+    tax = fields.get("tax")
+    total = fields.get("total")
+
+    # No total at all - the word was misread, missing, spelled a way no
+    # rule (or the LLM) recognised, or split across two lines. Rather than
+    # leave the amount at nothing, the largest money amount found is
+    # pulled out and used as a guess - true of virtually every receipt
+    # shape that the biggest number on it is the total. Marked
+    # `total_inferred` so confidence reflects that this is a guess, not a
+    # labelled fact.
     total_inferred = False
     if total is None and items:
         largest = max(items, key=lambda i: i["amount"])
-        items.remove(largest)
+        items = [i for i in items if i is not largest]
         total = largest["amount"]
         total_inferred = True
-
-    receipt_date = _parse_date(lines)
 
     score = 0
     if merchant:
@@ -205,14 +229,40 @@ def parse_receipt(raw_text: str) -> dict:
 
     return {
         "merchant": merchant,
-        "date": receipt_date,
+        "date": fields.get("date"),
         "items": items,
         "subtotal": subtotal,
         "tax": tax,
         "total": total,
         "confidence": score,
-        # Everything OCR actually read, kept on every response (not just
-        # low-confidence ones) so a wrong field is always explainable by
-        # looking at what the provider handed back, rather than guessed at.
-        "raw_text": raw_text,
     }
+
+
+def parse_receipt(raw_text: str) -> dict:
+    """LLM extraction first (see llm_receipt_parser.py, GPT-OSS-120B via
+    Groq) when GROQ_API_KEY is configured, falling back to the regex
+    extractor above on any failure - not configured, a network error, or
+    a malformed response. Either source's fields then go through the same
+    _validate_and_score, and the raw OCR text always comes back alongside
+    the structured guess so a wrong field is explainable by reading what
+    the OCR provider actually returned, not guessed at from outside.
+    """
+    method = "regex"
+    fields = None
+    try:
+        import llm_receipt_parser
+        if llm_receipt_parser.available():
+            fields = llm_receipt_parser.extract(raw_text)
+            method = "llm"
+    except Exception as e:
+        print(f"[receipts] LLM extraction failed, falling back to regex: {e}")
+        fields = None
+
+    if fields is None:
+        fields = _regex_extract(raw_text)
+        method = "regex"
+
+    result = _validate_and_score(fields)
+    result["raw_text"] = raw_text
+    result["extraction_method"] = method
+    return result

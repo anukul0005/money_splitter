@@ -22,3 +22,7 @@ backend/.secret_key
 # The key belongs in .env and in Render's environment, not in the repo — this
 # entry is here so a stray `git add -A` cannot push it to a public remote.
 backend/brevo.txt
+
+# Same reasoning, for the Groq API key pasted in while setting up receipt
+# scanning's LLM extraction step.
+backend/groq_gpt.txt

@@ -56,3 +56,8 @@ services:
         sync: false
       - key: GOOGLE_VISION_API_KEY
         sync: false
+      # Structured extraction of a scanned receipt's fields (GPT-OSS-120B
+      # via Groq) - optional; the app falls back to a regex-based
+      # extractor when this is blank.
+      - key: GROQ_API_KEY
+        sync: false
