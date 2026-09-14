@@ -31,6 +31,10 @@ _METADATA_LINE = re.compile(
     r"^(store\s*no|order\s*no|table\s*no|bill\s*no|invoice\s*no|receipt\s*no|"
     r"gstin|fssai|qty|item)\b|^\d{1,2}:\d{2}(:\d{2})?\s*$", re.I,
 )
+# A bare code/number ("#160101", "16-01-01") isn't a merchant name either -
+# a real one has at least one letter in it. Checked separately from
+# _METADATA_LINE because this has no keyword to key off, just shape.
+_CODE_LINE = re.compile(r"^#?\s*[\d\s\-]+$")
 _DATE_PATTERNS = [
     (re.compile(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b"), "dmy4"),
     (re.compile(r"\b(\d{4})[/-](\d{1,2})[/-](\d{1,2})\b"), "ymd4"),
@@ -126,6 +130,7 @@ def parse_receipt(raw_text: str) -> dict:
     # since a bare guess still beats leaving the field empty.
     merchant = next(
         (l for l in lines if not _METADATA_LINE.search(l)
+         and not _CODE_LINE.match(l)
          and not any(p.search(l) for p, _ in _DATE_PATTERNS)),
         lines[0] if lines else None,
     )
@@ -161,6 +166,21 @@ def parse_receipt(raw_text: str) -> dict:
             if label and label != merchant:
                 items.append({"label": label, "amount": amt})
 
+    # No line said "total" at all - the word was misread, or this
+    # receipt's layout doesn't use it ("Net Payable", "You Paid", printed
+    # in a language OCR garbled, or split across two lines OCR read out of
+    # order). Rather than leave the amount at nothing, the largest money
+    # amount on the receipt is pulled out and used as a guess - the total
+    # is, on virtually every receipt shape, the biggest number on it.
+    # Marked `total_inferred` so confidence reflects that this is a guess,
+    # not a labelled fact.
+    total_inferred = False
+    if total is None and items:
+        largest = max(items, key=lambda i: i["amount"])
+        items.remove(largest)
+        total = largest["amount"]
+        total_inferred = True
+
     receipt_date = _parse_date(lines)
 
     score = 0
@@ -169,8 +189,8 @@ def parse_receipt(raw_text: str) -> dict:
     if items:
         score += 25
     if total is not None:
-        score += 25
-    if total is not None and items:
+        score += 10 if total_inferred else 25
+    if total is not None and items and not total_inferred:
         # ₹2 or 5%, whichever is larger - generous on purpose, since OCR
         # reliably drops a digit or a decimal point long before it drops a
         # whole rupee, and this check exists to catch a genuinely wrong
@@ -178,7 +198,7 @@ def parse_receipt(raw_text: str) -> dict:
         items_sum = sum(i["amount"] for i in items) + (tax or 0)
         if abs(items_sum - total) <= max(2.0, total * 0.05):
             score += 25
-    elif total is not None:
+    elif total is not None and not total_inferred:
         # A total with nothing to check it against isn't wrong, just
         # unverified - worth something, not the full 25.
         score += 10
@@ -191,4 +211,8 @@ def parse_receipt(raw_text: str) -> dict:
         "tax": tax,
         "total": total,
         "confidence": score,
+        # Everything OCR actually read, kept on every response (not just
+        # low-confidence ones) so a wrong field is always explainable by
+        # looking at what the provider handed back, rather than guessed at.
+        "raw_text": raw_text,
     }
