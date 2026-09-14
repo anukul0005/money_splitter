@@ -407,6 +407,61 @@ def send_birthday_wish(to_email: str, name: str, top_partners: list[tuple[str, f
     )
 
 
+def _describe_participants(expense, member_names: list[str]) -> str:
+    """"with everyone" when an expense has no explicit participants (null
+    means every group member, same convention ExpenseBase.participants
+    documents), otherwise the actual comma-and-"and" list of who was in on
+    it - so the memory reads as a real recollection of that day, not just
+    an amount."""
+    if not expense.participants:
+        return "with everyone in the group"
+    names = [n.strip() for n in expense.participants.split(",") if n.strip()]
+    return f"with {_join_names(names)}" if names else "with everyone in the group"
+
+
+def notify_group_memory(db, group, expenses: list) -> None:
+    """"On this day last year" - one email per reachable member of `group`,
+    recalling every expense in it that landed on today's date exactly a
+    year ago (see routers/cron.py, which finds `expenses` by an exact
+    string match on Expense.date).
+
+    One email per group rather than one per matching expense: a group that
+    had three things happen on the same day a year ago should read as one
+    memory of that day, not three separate emails landing at once.
+    """
+    settings = get_settings()
+    link = f"{settings.frontend_url}/groups/{group.id}"
+
+    lines, plain_lines = [], []
+    for e in expenses:
+        desc = e.title or e.category or "an expense"
+        who = _describe_participants(e, [m.name for m in group.members])
+        lines.append(f"{escape(desc)} - {escape(e.paid_by)} paid, {escape(who)}.")
+        plain_lines.append(f"{desc} - {e.paid_by} paid, {who}.")
+
+    for m in group.members:
+        email = _email_for(db, m.name)
+        if not email:
+            continue
+        subject = f"📅 A year ago today in {group.name}"
+        body = (
+            f"Exactly a year ago today, this happened in \"{group.name}\":\n\n"
+            + "\n".join(f"- {l}" for l in plain_lines)
+            + f"\n\nView the group: {link}"
+        )
+        html = _layout(
+            f"A year ago today, in {escape(group.name)} 📅",
+            lines,
+            button_url=link,
+            button_label="Open the group",
+            footer="Sent automatically by SplitEasy because an expense in this group happened on this date last year.",
+        )
+        try:
+            _send(email, subject, body, html)
+        except Exception as e:
+            print(f"[email] notify_group_memory error: {e}")
+
+
 def _email_for(db, name: str) -> str | None:
     """Where a notification for this member name actually goes.
 

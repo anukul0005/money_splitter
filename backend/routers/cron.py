@@ -21,8 +21,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db, get_settings
-from emailer import send_birthday_wish
-from models import User
+from emailer import send_birthday_wish, notify_group_memory
+from models import Expense, Group, User
 
 router = APIRouter(prefix="/cron", tags=["cron"])
 
@@ -38,13 +38,15 @@ def _check_key(key: str) -> None:
 
 @router.get("/daily", response_model=dict)
 def run_daily(key: str = "", db: Session = Depends(get_db)):
-    """Everything that needs to happen once a day, today just birthdays.
+    """Everything that needs to happen once a day: birthdays, and "on this
+    day last year" expense memories.
 
-    Idempotent per calendar day via `last_birthday_wish_sent`: a pinger
-    that retries, or fires twice by accident, does not mail the same
-    person twice. Never lets one broken address or one failed lookup stop
-    the rest of the run - a birthday email is exactly the kind of thing
-    that must not go silently unsent for everyone because one row was bad.
+    Idempotent per calendar day via `last_birthday_wish_sent` /
+    `last_memory_sent`: a pinger that retries, or fires twice by accident,
+    does not mail the same person or group twice. Never lets one broken
+    address or one failed lookup stop the rest of the run - either kind of
+    email is exactly the sort of thing that must not go silently unsent for
+    everyone because one row was bad.
     """
     _check_key(key)
     from routers.stats import top_transaction_partners
@@ -82,5 +84,35 @@ def run_daily(key: str = "", db: Session = Depends(get_db)):
             db.rollback()
             failed.append(f"{user.name}: {e}")
 
+    # "On this day last year" - an exact ISO-string match against last
+    # year's same month/day. A Feb 29 today simply matches nothing on a
+    # year that had no such date, which is correct: there is no memory to
+    # recall from a day that never happened.
+    try:
+        last_year_today = today.replace(year=today.year - 1).isoformat()
+    except ValueError:
+        last_year_today = None
+
+    memory_groups, memory_failed = [], []
+    if last_year_today:
+        matches = db.query(Expense).filter(Expense.date == last_year_today).all()
+        by_group: dict[int, list[Expense]] = {}
+        for e in matches:
+            by_group.setdefault(e.group_id, []).append(e)
+
+        for group_id, exps in by_group.items():
+            group = db.get(Group, group_id)
+            if not group or group.last_memory_sent == iso_today:
+                continue
+            try:
+                notify_group_memory(db, group, exps)
+                group.last_memory_sent = iso_today
+                db.commit()
+                memory_groups.append(group.name)
+            except Exception as e:  # pragma: no cover - one bad group must not sink the run
+                db.rollback()
+                memory_failed.append(f"{group.name}: {e}")
+
     return {"date": iso_today, "birthdays_today": sent,
-            "skipped_no_email": skipped_no_email, "failed": failed}
+            "skipped_no_email": skipped_no_email, "failed": failed,
+            "memories_sent": memory_groups, "memories_failed": memory_failed}

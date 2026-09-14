@@ -71,6 +71,12 @@ class Group(Base):
     is_historical = Column(Boolean, default=False)
     category = Column(String(50), nullable=True)   # trip / outing / festival / personal / other
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    # ISO date this group last got an "on this day last year" memory email -
+    # not the memory's own date, which is always exactly a year before
+    # today, but the day the reminder itself went out. Same idempotency
+    # pattern as User.last_birthday_wish_sent: guards against the daily cron
+    # endpoint firing twice in one day and mailing the group twice.
+    last_memory_sent = Column(String(10), nullable=True)
 
     members = relationship("Member", back_populates="group", cascade="all, delete-orphan", lazy="selectin")
     expenses = relationship("Expense", back_populates="group", cascade="all, delete-orphan", lazy="selectin")
