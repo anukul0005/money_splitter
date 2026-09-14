@@ -21,6 +21,14 @@ class Settings(BaseSettings):
     # silently open in an environment that never configured one.
     cron_secret: str = ""
 
+    # Receipt OCR (routers/receipts.py) - three independent providers, each
+    # skipped rather than erroring when its own keys are blank, so this app
+    # runs fine with zero, one, two or three of these configured.
+    ocrspace_api_key: str = ""
+    azure_vision_key: str = ""
+    azure_vision_endpoint: str = ""
+    google_vision_api_key: str = ""
+
     class Config:
         env_file = ".env"
 

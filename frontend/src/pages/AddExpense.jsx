@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { getGroups, createExpense } from '../api'
+import { getGroups, createExpense, scanReceipt } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser } from '../UserContext'
 
@@ -34,6 +34,13 @@ export default function AddExpense() {
   const [successCount, setSuccessCount]   = useState(0)
   const [members, setMembers]             = useState([])
   const [existingTitles, setExistingTitles] = useState([])
+
+  // ── Receipt scan ──
+  const [scanBusy, setScanBusy]   = useState(false)
+  const [scanError, setScanError] = useState('')
+  const [scanInfo, setScanInfo]   = useState(null)   // { provider, confidence } of the last successful scan
+  const cameraInputRef  = useRef(null)
+  const galleryInputRef = useRef(null)
 
   // Split mode state
   const [splitMode, setSplitMode]               = useState('equal')
@@ -182,6 +189,51 @@ export default function AddExpense() {
     setCustomAmts(newAmts)
   }
 
+  // Keyword → category, checked against the merchant name and every item
+  // label the scan found. Deliberately just a guess the person can change -
+  // nowhere near as reliable as the confidence-scored merchant/total/items
+  // themselves, so it only ever pre-selects a category button rather than
+  // silently deciding one.
+  const guessCategory = (merchant, items) => {
+    const text = [merchant, ...(items || []).map((i) => i.label)].join(' ').toLowerCase()
+    const rules = [
+      [/uber|ola|cab|taxi/, 'Travel - Cab'],
+      [/irctc|railway|\btrain\b/, 'Travel - Train'],
+      [/hotel|resort|\binn\b|lodge/, 'Hotel'],
+      [/cinema|pvr|inox|multiplex|movie/, 'Movie'],
+      [/mart|supermarket|grocery|grocer|bigbasket|dmart|kirana/, 'Groceries'],
+      [/bar\b|pub\b|wine|liquor|beer|brewery/, 'Drinks'],
+      [/mall|store|showroom|boutique|apparel/, 'Shopping'],
+      [/cafe|restaurant|grill|kitchen|dhaba|biryani|pizza|diner|food/, 'Food'],
+    ]
+    for (const [re, cat] of rules) if (re.test(text)) return cat
+    return ''
+  }
+
+  const handleScan = async (file) => {
+    if (!file) return
+    setScanError(''); setScanInfo(null)
+    setScanBusy(true)
+    try {
+      const res = await scanReceipt(file)
+      const { merchant, date, items, total, confidence, provider } = res.data
+      setForm((f) => ({
+        ...f,
+        title:    merchant || f.title,
+        amount:   total != null ? String(total) : f.amount,
+        date:     date || f.date,
+        category: guessCategory(merchant, items) || f.category,
+      }))
+      setScanInfo({ provider, confidence })
+    } catch (err) {
+      setScanError(err.response?.data?.detail || 'Could not read that receipt. Try a clearer photo, or enter it manually.')
+    } finally {
+      setScanBusy(false)
+      if (cameraInputRef.current) cameraInputRef.current.value = ''
+      if (galleryInputRef.current) galleryInputRef.current.value = ''
+    }
+  }
+
   const resetExpenseFields = (gid) => {
     setForm((prev) => ({
       group_id:     gid,
@@ -301,6 +353,55 @@ export default function AddExpense() {
             ))}
           </select>
         </div>
+
+        {/* Scan a receipt — pre-fills amount/title/date/category below,
+            nothing here is saved until "Add Expense" is pressed. */}
+        {form.group_id && (
+          <div className="bg-amber-50 border border-amber-200 rounded-md px-4 py-3">
+            <p className="text-xs font-bold text-gray-700 mb-2">Scan a receipt</p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={scanBusy}
+                onClick={() => cameraInputRef.current?.click()}
+                className="flex-1 py-2.5 text-xs font-bold text-gray-700 bg-white border border-amber-300 rounded-md hover:bg-amber-100 active:scale-[0.98] transition-all disabled:opacity-50"
+              >
+                📷 Take photo
+              </button>
+              <button
+                type="button"
+                disabled={scanBusy}
+                onClick={() => galleryInputRef.current?.click()}
+                className="flex-1 py-2.5 text-xs font-bold text-gray-700 bg-white border border-amber-300 rounded-md hover:bg-amber-100 active:scale-[0.98] transition-all disabled:opacity-50"
+              >
+                🖼️ Choose from gallery
+              </button>
+            </div>
+            <input
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={(e) => handleScan(e.target.files?.[0])}
+            />
+            <input
+              ref={galleryInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => handleScan(e.target.files?.[0])}
+            />
+
+            {scanBusy && <p className="text-xs text-gray-500 mt-2">Reading the receipt…</p>}
+            {scanError && <p className="text-xs text-red-600 mt-2">{scanError}</p>}
+            {scanInfo && !scanBusy && (
+              <p className="text-xs text-brand-700 mt-2">
+                ✓ Filled in below from {scanInfo.provider} ({scanInfo.confidence}% confidence) — check it before saving.
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Amount */}
         <div>

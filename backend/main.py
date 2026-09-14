@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from database import create_tables, get_settings
 from routers import (
     groups, expenses, settlements, stats, users, payments, activity, recommend,
-    food, knowledge_api, forecast, cron,
+    food, knowledge_api, forecast, cron, receipts,
 )
 
 
@@ -80,6 +80,7 @@ app.include_router(food.router)
 app.include_router(knowledge_api.router)
 app.include_router(forecast.router)
 app.include_router(cron.router)
+app.include_router(receipts.router)
 
 
 @app.get("/health")

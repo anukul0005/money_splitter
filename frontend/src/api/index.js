@@ -67,6 +67,13 @@ export const requestLoginCode   = (data)     => api.post('/users/email-code', da
 export const verifyLoginCode    = (data)     => api.post('/users/email-code/verify', data)
 export const setMyEmail         = (data)     => api.post('/users/me/email', data)
 export const setMyBirthday      = (data)     => api.post('/users/me/birthday', data)
+// multipart, not JSON - axios sets the right Content-Type + boundary on
+// its own once it sees a FormData body, so nothing is set here by hand.
+export const scanReceipt        = (file)     => {
+  const fd = new FormData()
+  fd.append('file', file)
+  return api.post('/receipts/scan', fd)
+}
 export const getMe              = ()         => api.get('/users/me')
 
 // ── Groups ────────────────────────────────────────────────────────────────────

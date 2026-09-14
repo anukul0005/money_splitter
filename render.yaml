@@ -45,3 +45,14 @@ services:
       # which you then copy into the pinger's URL.
       - key: CRON_SECRET
         generateValue: true
+      # Receipt OCR (routers/receipts.py) - all three optional and
+      # independent. Leaving one blank just skips that provider; the app
+      # runs fine with none set, it just can't scan a receipt yet.
+      - key: OCRSPACE_API_KEY
+        sync: false
+      - key: AZURE_VISION_KEY
+        sync: false
+      - key: AZURE_VISION_ENDPOINT
+        sync: false
+      - key: GOOGLE_VISION_API_KEY
+        sync: false
