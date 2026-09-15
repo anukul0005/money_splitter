@@ -22,7 +22,7 @@ export function buildMasterGroups(groups, minGroups = 2) {
   const byPair = new Map()
   for (const g of groups) {
     const names = g.member_names ?? []
-    if (names.length < 2) continue
+    if (names.length < 1) continue
     const key = pairKey(names)
     if (!byPair.has(key)) byPair.set(key, { key, names, groups: [] })
     byPair.get(key).groups.push(g)

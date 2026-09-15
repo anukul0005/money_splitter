@@ -144,11 +144,12 @@ export default function Home() {
   const owePeople  = friends.filter((f) => owes(f.net)).length
   const owedPeople = friends.filter((f) => owed(f.net)).length
 
-  // Every group (2+ members) is linked to a master group named after its
-  // members — even if it's the only group with that exact member set, so no
-  // group ever shows under its own custom name on Home. Groups with a single
-  // member (nothing to link) fall through to the solo list. Unsettled
-  // entries show first; settled ones are tucked behind a "show settled" toggle.
+  // Every group is linked to a master group named after its members — even
+  // a single-member one, so every one of a person's own personal trackers
+  // (Monthly Expenses Aug, Sep, ...) combines into the one master sharing
+  // their own name, exactly like a recurring trip combines into one master
+  // sharing that same group of friends. Unsettled entries show first;
+  // settled ones are tucked behind a "show settled" toggle.
   const unsettledGroupIds = new Set(balances.map((b) => b.group_id))
   // group_id -> unsettled amount, used to rank what the user sees first
   const netByGroup = Object.fromEntries(balances.map((b) => [b.group_id, Math.abs(b.net)]))
@@ -156,7 +157,14 @@ export default function Home() {
   // still show up inside their super group on Home, each carrying its own
   // "Historical" badge via GroupCard — they're just always settled, so they
   // land behind "Show settled" rather than among the top unsettled cards.
-  const { masters: allMasters, solo: soloGroups } = buildMasterGroups(myGroups, 1)
+  const { masters: everyMaster, solo: soloGroups } = buildMasterGroups(myGroups, 1)
+  // A single-member master can never carry a real balance - nothing to
+  // settle with just yourself - so it would otherwise always sink to
+  // "settled" and sit hidden behind "Show more" no matter how many months
+  // of personal tracking are in it. Pulled out into its own always-visible
+  // section instead of competing with the debt-ranked list below.
+  const personalMasters = everyMaster.filter((m) => m.names.length === 1)
+  const allMasters       = everyMaster.filter((m) => m.names.length > 1)
   const unsettledMasters = allMasters.filter((m) => m.groups.some((g) => unsettledGroupIds.has(g.id)))
   const settledMasters   = allMasters.filter((m) => !m.groups.some((g) => unsettledGroupIds.has(g.id)))
   const unsettledSolo    = soloGroups.filter((g) => unsettledGroupIds.has(g.id))
@@ -259,6 +267,22 @@ export default function Home() {
               + Monthly
           </button>
         </div>
+
+        {/* Personal trackers (every solo group of your own combined into one
+            master, same rule as any other repeated member set) - shown here
+            directly rather than folded into the debt-ranked list below, since
+            a group with just yourself in it can never carry an unsettled
+            balance to rank it by. */}
+        {personalMasters.length > 0 && (
+          <div>
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">
+              Your monthly tracking
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {personalMasters.map((m) => <MasterGroupCard key={m.key} master={m} />)}
+            </div>
+          </div>
+        )}
 
         {/* Groups (every group linked to a master group by members; unsettled first, settled behind a toggle) */}
         {(allMasters.length > 0 || soloGroups.length > 0) && (
