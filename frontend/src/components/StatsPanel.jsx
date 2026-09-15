@@ -393,16 +393,18 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
           </div>
 
           {chartView === 'member' && (
-            <div className="card">
-              <h3 className="text-xs font-bold text-gray-500 mb-3">Who paid how much?</h3>
-              <Bar data={memberChartData} options={hBarOptions} />
-            </div>
+            <>
+              <div className="card">
+                <h3 className="text-xs font-bold text-gray-500 mb-3">Who paid how much?</h3>
+                <Bar data={memberChartData} options={hBarOptions} />
+              </div>
+              {hasMultipleMonths && <MonthlyCard />}
+            </>
           )}
 
           {chartView === 'category' && catData.length > 0 && <CategoryCard />}
 
           {dailyEntries.length > 0 && <DailyCard title="Spend" />}
-          {hasMultipleMonths && <MonthlyCard />}
         </>
       )}
 
