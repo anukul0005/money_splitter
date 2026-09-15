@@ -170,8 +170,8 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
     datasets: [{
       label: 'Monthly Spend',
       data: monthlyEntries.map(([, v]) => v),
-      backgroundColor: '#22c55e',
-      borderRadius: 4,
+      backgroundColor: '#f97316',
+      borderRadius: 0,
       borderSkipped: false,
     }],
   }
@@ -402,9 +402,12 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
             </>
           )}
 
-          {chartView === 'category' && catData.length > 0 && <CategoryCard />}
-
-          {dailyEntries.length > 0 && <DailyCard title="Spend" />}
+          {chartView === 'category' && (
+            <>
+              {catData.length > 0 && <CategoryCard />}
+              {dailyEntries.length > 0 && <DailyCard title="Spend" />}
+            </>
+          )}
         </>
       )}
 
