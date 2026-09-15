@@ -184,7 +184,17 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
     },
     scales: {
       x: { ticks: { font: { size: 11, family: "'Space Grotesk'" } }, grid: { display: false } },
-      y: { ticks: { callback: (v) => `₹${(v/1000).toFixed(0)}k`, font: { size: 11, family: "'Space Grotesk'" } }, grid: { color: '#f1f5f9' } },
+      // stepSize 4000 rather than Chart.js's own auto-picked ticks, which
+      // defaulted to every ₹1k - a cramped, cluttered axis next to bars
+      // that are routinely in the tens of thousands.
+      y: {
+        ticks: {
+          stepSize: 4000,
+          callback: (v) => `₹${(v/1000).toFixed(0)}k`,
+          font: { size: 11, family: "'Space Grotesk'" },
+        },
+        grid: { color: '#f1f5f9' },
+      },
     },
   }
 
