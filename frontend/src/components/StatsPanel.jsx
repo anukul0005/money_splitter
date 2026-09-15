@@ -366,13 +366,12 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
     <div className="px-5 space-y-4 mt-2">
       {isSolo ? (
         <>
-          {hasMultipleMonths ? (
-            <MonthlyCard />
-          ) : dailyEntries.length > 0 ? (
+          {dailyEntries.length > 0 ? (
             <DailyCard title="Daily Spend" />
           ) : (
             <p className="text-xs text-gray-400 text-center py-6">No dated expenses yet</p>
           )}
+          {hasMultipleMonths && <MonthlyCard />}
           {catData.length > 0 && <CategoryCard />}
         </>
       ) : (
@@ -400,12 +399,10 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
             </div>
           )}
 
-          {chartView === 'category' && (
-            <>
-              {catData.length > 0 && <CategoryCard />}
-              {hasMultipleMonths ? <MonthlyCard /> : dailyEntries.length > 0 && <DailyCard title="Spend" />}
-            </>
-          )}
+          {chartView === 'category' && catData.length > 0 && <CategoryCard />}
+
+          {dailyEntries.length > 0 && <DailyCard title="Spend" />}
+          {hasMultipleMonths && <MonthlyCard />}
         </>
       )}
 
