@@ -21,7 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db, get_settings
-from emailer import send_birthday_wish, notify_group_memory
+from emailer import send_birthday_wish, notify_group_memory, send_debt_reminder
 from models import Expense, Group, User
 
 router = APIRouter(prefix="/cron", tags=["cron"])
@@ -38,15 +38,16 @@ def _check_key(key: str) -> None:
 
 @router.get("/daily", response_model=dict)
 def run_daily(key: str = "", db: Session = Depends(get_db)):
-    """Everything that needs to happen once a day: birthdays, and "on this
-    day last year" expense memories.
+    """Everything that needs to happen once a day: birthdays, "on this day
+    last year" expense memories, and - on the 1st of the month only - a
+    reminder to whoever currently owes someone money.
 
     Idempotent per calendar day via `last_birthday_wish_sent` /
-    `last_memory_sent`: a pinger that retries, or fires twice by accident,
-    does not mail the same person or group twice. Never lets one broken
-    address or one failed lookup stop the rest of the run - either kind of
-    email is exactly the sort of thing that must not go silently unsent for
-    everyone because one row was bad.
+    `last_memory_sent` / `last_debt_reminder_sent`: a pinger that retries,
+    or fires twice by accident, does not mail the same person or group
+    twice. Never lets one broken address or one failed lookup stop the
+    rest of the run - any one of these emails is exactly the sort of thing
+    that must not go silently unsent for everyone because one row was bad.
     """
     _check_key(key)
     from routers.stats import top_transaction_partners
@@ -113,6 +114,38 @@ def run_daily(key: str = "", db: Session = Depends(get_db)):
                 db.rollback()
                 memory_failed.append(f"{group.name}: {e}")
 
+    # Monthly dues reminder - the 1st of the month only, not every day,
+    # since a person who owes ₹500 on the 3rd doesn't need to hear about it
+    # 28 more times before the next 1st. Computed per user with
+    # stats.compute_friend_balances - the exact same numbers the Friends
+    # page shows, so this email can never disagree with what someone sees
+    # when they open the app to check.
+    debt_reminders_sent, debt_reminders_failed = [], []
+    if today.day == 1:
+        from routers.stats import compute_friend_balances
+
+        for user in db.query(User).filter(User.email.isnot(None)).all():
+            if user.last_debt_reminder_sent == iso_today:
+                continue
+            try:
+                balances = compute_friend_balances(db, user.name)
+                # Negative net is money `user` owes that friend - see
+                # compute_friend_balances/get_friends for the sign
+                # convention. A user owing nobody gets no email at all;
+                # this is a reminder to pay, not a monthly statement.
+                debts = [(b["name"], -b["net"]) for b in balances if b["net"] < -0.01]
+                if not debts:
+                    continue
+                send_debt_reminder(user.email, user.name, debts)
+                user.last_debt_reminder_sent = iso_today
+                db.commit()
+                debt_reminders_sent.append(user.name)
+            except Exception as e:  # pragma: no cover - one bad row must not sink the run
+                db.rollback()
+                debt_reminders_failed.append(f"{user.name}: {e}")
+
     return {"date": iso_today, "birthdays_today": sent,
             "skipped_no_email": skipped_no_email, "failed": failed,
-            "memories_sent": memory_groups, "memories_failed": memory_failed}
+            "memories_sent": memory_groups, "memories_failed": memory_failed,
+            "debt_reminders_sent": debt_reminders_sent,
+            "debt_reminders_failed": debt_reminders_failed}

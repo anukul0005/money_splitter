@@ -205,6 +205,9 @@ def _run_migrations(conn, text) -> None:
     conn.execute(text(
         "ALTER TABLE groups ADD COLUMN IF NOT EXISTS last_memory_sent VARCHAR(10)"
     ))
+    conn.execute(text(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_debt_reminder_sent VARCHAR(10)"
+    ))
     conn.commit()
 
     # `payments`, `activities` and `activity_seen` are created by create_all

@@ -172,14 +172,19 @@ def _pairwise_group_debts(g: Group, include_payments: bool = True) -> dict[tuple
     return {k: v for k, v in debts.items() if abs(v) > 0.01}
 
 
-@router.get("/friends", response_model=list[dict])
-def get_friends(db: Session = Depends(get_db), caller: User = Depends(current_user)):
-    """Net balance with every person who shares an active group with the caller.
+def compute_friend_balances(db: Session, name: str) -> list[dict]:
+    """Net balance with every person who shares an active group with `name`.
+
+    Plain function, not the endpoint itself, so routers/cron.py's monthly
+    debt-reminder job can compute this for every user in a batch - an
+    endpoint's own `caller: User = Depends(current_user)` only ever
+    resolves to whoever is making the live HTTP request, not a user picked
+    out of a loop.
 
     Each friend also carries a per-group `groups` breakdown so the UI can show
     where the overall net actually comes from.
     """
-    name_l = caller.name.strip().lower()
+    name_l = name.strip().lower()
     groups = db.query(Group).filter(Group.is_historical == False).all()  # noqa: E712
 
     net: dict[str, float] = {}
@@ -244,6 +249,13 @@ def get_friends(db: Session = Depends(get_db), caller: User = Depends(current_us
 
     result.sort(key=lambda r: (-abs(r["net"]), r["name"].lower()))
     return result
+
+
+@router.get("/friends", response_model=list[dict])
+def get_friends(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Net balance with every person who shares an active group with the
+    caller - see compute_friend_balances for the actual computation."""
+    return compute_friend_balances(db, caller.name)
 
 
 @router.get("/global-analytics", response_model=dict)

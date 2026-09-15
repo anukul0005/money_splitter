@@ -58,6 +58,10 @@ class User(Base):
     # being hit twice in one day (a retry, an overlapping ping) and mailing
     # the same "happy birthday" twice.
     last_birthday_wish_sent = Column(String(10), nullable=True)
+    # Same idempotency pattern, for the monthly debt-reminder email (see
+    # routers/cron.py) - the ISO date it last actually went out, not the
+    # 1st-of-the-month trigger itself, which recurs every month.
+    last_debt_reminder_sent = Column(String(10), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

@@ -407,6 +407,56 @@ def send_birthday_wish(to_email: str, name: str, top_partners: list[tuple[str, f
     )
 
 
+def send_debt_reminder(to_email: str, name: str, debts: list[tuple[str, float]]) -> None:
+    """One monthly nudge, sent on the 1st by the daily cron endpoint (see
+    routers/cron.py) to whoever owes anyone money right now.
+
+    `debts` is this person's own outstanding amounts - see
+    stats.compute_friend_balances, filtered by the caller to entries where
+    they're the one who owes - named per creditor rather than a single
+    lump sum, since "here's exactly who to pay and how much" is something
+    a person can act on immediately, a total figure isn't.
+
+    Explicitly tells the reader to ignore this if they've already paid,
+    rather than assuming the app's own numbers are current - a payment
+    made outside the app (cash handed over, a UPI transfer never logged
+    here) doesn't show up until someone records it, so an unpaid-looking
+    balance is sometimes just an unrecorded one. Framed as "confirm with
+    them" rather than "mark it paid yourself," since only the person who
+    was actually paid can know for certain that they received it.
+    """
+    first = name.split()[0] if name.split() else name
+    lines = [f"Here's where things stand as of today, {escape(first)}:"]
+    plain_lines = [f"Here's where things stand as of today, {first}:"]
+
+    for creditor, amount in debts:
+        lines.append(f"You owe <strong>₹{amount:,.2f}</strong> to {escape(creditor)}.")
+        plain_lines.append(f"You owe ₹{amount:,.2f} to {creditor}.")
+
+    closing_html = (
+        "If you've already paid any of these, no action needed on our end - "
+        "just confirm with them directly that they've got it, since a payment "
+        "made outside the app doesn't show up here until someone records it."
+    )
+    lines.append(closing_html)
+    plain_lines.append(
+        "If you've already paid any of these, no action needed on our end - "
+        "just confirm with them directly that they've got it, since a payment "
+        "made outside the app doesn't show up here until someone records it."
+    )
+
+    _send(
+        to_email,
+        "💰 Your SplitEasy dues this month",
+        "\n\n".join(plain_lines),
+        _layout(
+            "Your dues this month 💰",
+            lines,
+            footer="Sent automatically by SplitEasy on the 1st of every month.",
+        ),
+    )
+
+
 def _describe_participants(expense, member_names: list[str]) -> str:
     """"with everyone" when an expense has no explicit participants (null
     means every group member, same convention ExpenseBase.participants
