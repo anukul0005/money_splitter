@@ -262,27 +262,21 @@ export default function Home() {
             </button>
             <button
               className="bg-amber-100 border border-amber-300 rounded-md text-amber-800 hover:bg-amber-200 active:scale-95 font-bold px-3 py-2.5 transition-all duration-150 w-full text-center text-xs"
-              onClick={() => nav('/groups/monthly')}
+              onClick={() => {
+                // Every user's own personal trackers combine into one
+                // master sharing their own name (see buildMasterGroups) -
+                // straight there if it already exists, so this button is
+                // "my monthly tracking" for whoever's logged in. Nothing
+                // created yet for this person falls back to the picker
+                // that starts a first one.
+                const mine = personalMasters[0]
+                if (mine) nav(`/master/${encodeURIComponent(mine.key)}`, { state: { master: mine } })
+                else nav('/groups/monthly')
+              }}
             >
-              + Monthly
+              Monthly
           </button>
         </div>
-
-        {/* Personal trackers (every solo group of your own combined into one
-            master, same rule as any other repeated member set) - shown here
-            directly rather than folded into the debt-ranked list below, since
-            a group with just yourself in it can never carry an unsettled
-            balance to rank it by. */}
-        {personalMasters.length > 0 && (
-          <div>
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">
-              Your monthly tracking
-            </p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {personalMasters.map((m) => <MasterGroupCard key={m.key} master={m} />)}
-            </div>
-          </div>
-        )}
 
         {/* Groups (every group linked to a master group by members; unsettled first, settled behind a toggle) */}
         {(allMasters.length > 0 || soloGroups.length > 0) && (
