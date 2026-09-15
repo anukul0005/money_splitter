@@ -51,9 +51,13 @@ Chart.register(donutPctPlugin)
  *   expenses — [{ date, amount }] across whatever scope is being shown
  *   isSolo   — single-person scope: leads with the daily line instead of by-person
  */
+const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+const DEFAULT_MONTHS_SHOWN = 3
+
 export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
   const [chartView, setChartView] = useState('member')
   const [hoveredDayIdx, setHoveredDayIdx] = useState(null)
+  const [showAllMonths, setShowAllMonths] = useState(false)
 
   if (!stats) return null
 
@@ -138,6 +142,51 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
   const dailyEntries = Object.entries(dailyMap).sort(([a], [b]) => a.localeCompare(b))
   const dailyLabels  = dailyEntries.map(([d]) => d)
   const dailyValues  = dailyEntries.map(([, v]) => v)
+
+  // Month-on-month spend - a daily line across many months of a master
+  // group's combined history is mostly flat gaps between a handful of
+  // spikes, which reads as noise rather than a trend. Bucketed by
+  // calendar month instead whenever the data actually spans more than
+  // one, with only the most recent DEFAULT_MONTHS_SHOWN shown until asked
+  // to expand - a "last 3 months" default is the useful comparison for
+  // recent spending; the full history is one tap away, not the default.
+  const monthlyMap = {}
+  expenses.forEach((e) => {
+    if (e.date && e.date.length >= 7) {
+      const key = e.date.slice(0, 7)   // "YYYY-MM"
+      monthlyMap[key] = (monthlyMap[key] || 0) + e.amount
+    }
+  })
+  const monthlyEntriesAll = Object.entries(monthlyMap).sort(([a], [b]) => a.localeCompare(b))
+  const monthlyEntries = showAllMonths
+    ? monthlyEntriesAll
+    : monthlyEntriesAll.slice(-DEFAULT_MONTHS_SHOWN)
+  const fmtMonthLabel = (key) => {
+    const [y, m] = key.split('-')
+    return `${MONTH_ABBR[parseInt(m) - 1]} ${y}`
+  }
+  const monthlyBarData = {
+    labels: monthlyEntries.map(([k]) => fmtMonthLabel(k)),
+    datasets: [{
+      label: 'Monthly Spend',
+      data: monthlyEntries.map(([, v]) => v),
+      backgroundColor: '#22c55e',
+      borderRadius: 4,
+      borderSkipped: false,
+    }],
+  }
+  const monthlyBarOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: { callbacks: { label: (c) => ` ${INR(c.parsed.y)}` } },
+    },
+    scales: {
+      x: { ticks: { font: { size: 11, family: "'Space Grotesk'" } }, grid: { display: false } },
+      y: { ticks: { callback: (v) => `₹${(v/1000).toFixed(0)}k`, font: { size: 11, family: "'Space Grotesk'" } }, grid: { color: '#f1f5f9' } },
+    },
+  }
 
   const isWeekend = (dateStr) => {
     if (!dateStr) return false
@@ -267,6 +316,25 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
     </div>
   )
 
+  const MonthlyCard = () => (
+    <div className="card">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-bold text-gray-500">Spend by Month</h3>
+        {monthlyEntriesAll.length > DEFAULT_MONTHS_SHOWN && (
+          <button
+            onClick={() => setShowAllMonths((v) => !v)}
+            className="text-[11px] font-bold text-brand-600 hover:text-brand-700"
+          >
+            {showAllMonths ? 'Show last 3 months' : `Show all ${monthlyEntriesAll.length} months`}
+          </button>
+        )}
+      </div>
+      <div className="relative h-56 md:h-72">
+        <Bar data={monthlyBarData} options={monthlyBarOptions} />
+      </div>
+    </div>
+  )
+
   const CategoryCard = () => (
     <div className="card">
       <h3 className="text-xs font-bold text-gray-500 mb-3">Spending by category</h3>
@@ -287,11 +355,20 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
     </div>
   )
 
+  // More than one calendar month of data - a master group's combined
+  // history, most often - reads far better as a month-on-month bar chart
+  // than a daily line stretched thin across mostly-empty gaps. A single
+  // month's worth (one trip, one personal-tracker month) stays daily,
+  // where day-to-day is still the useful resolution.
+  const hasMultipleMonths = monthlyEntriesAll.length > 1
+
   return (
     <div className="px-5 space-y-4 mt-2">
       {isSolo ? (
         <>
-          {dailyEntries.length > 0 ? (
+          {hasMultipleMonths ? (
+            <MonthlyCard />
+          ) : dailyEntries.length > 0 ? (
             <DailyCard title="Daily Spend" />
           ) : (
             <p className="text-xs text-gray-400 text-center py-6">No dated expenses yet</p>
@@ -325,7 +402,7 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
 
           {chartView === 'category' && catData.length > 0 && <CategoryCard />}
 
-          {dailyEntries.length > 0 && <DailyCard title="Spend" />}
+          {hasMultipleMonths ? <MonthlyCard /> : dailyEntries.length > 0 && <DailyCard title="Spend" />}
         </>
       )}
 
