@@ -12,6 +12,7 @@ from html import escape
 
 from database import get_settings
 from people import person_info
+import push as _push
 
 
 @contextmanager
@@ -358,7 +359,7 @@ def _join_names(names: list[str]) -> str:
     return ", ".join(names[:-1]) + " and " + names[-1]
 
 
-def send_birthday_wish(to_email: str, name: str, top_partners: list[tuple[str, float]],
+def send_birthday_wish(db, to_email: str | None, name: str, top_partners: list[tuple[str, float]],
                        age: int | None = None) -> None:
     """One birthday email, sent once a year by the daily cron endpoint (see
     routers/cron.py) to whoever's `birthday` (MM-DD) matches today.
@@ -395,19 +396,21 @@ def send_birthday_wish(to_email: str, name: str, top_partners: list[tuple[str, f
             f"Don't forget to give a party to your best friends - {friends_plain}!"
         )
 
-    _send(
-        to_email,
-        f"🎂 Happy birthday, {first}!",
-        "\n\n".join(plain_lines),
-        _layout(
-            f"Happy birthday, {first}! 🎂",
-            lines,
-            footer="Sent automatically by SplitEasy on the birthday you set in Account settings.",
-        ),
-    )
+    if to_email:
+        _send(
+            to_email,
+            f"🎂 Happy birthday, {first}!",
+            "\n\n".join(plain_lines),
+            _layout(
+                f"Happy birthday, {first}! 🎂",
+                lines,
+                footer="Sent automatically by SplitEasy on the birthday you set in Account settings.",
+            ),
+        )
+    _push.send_push_to_user(db, name, f"🎂 Happy birthday, {first}!", plain_lines[-1] if len(plain_lines) > 1 else plain_lines[0])
 
 
-def send_debt_reminder(to_email: str, name: str, debts: list[tuple[str, float]]) -> None:
+def send_debt_reminder(db, to_email: str | None, name: str, debts: list[tuple[str, float]]) -> None:
     """One monthly nudge, sent on the 1st by the daily cron endpoint (see
     routers/cron.py) to whoever owes anyone money right now.
 
@@ -445,16 +448,22 @@ def send_debt_reminder(to_email: str, name: str, debts: list[tuple[str, float]])
         "made outside the app doesn't show up here until someone records it."
     )
 
-    _send(
-        to_email,
-        "💰 Your SplitEasy dues this month",
-        "\n\n".join(plain_lines),
-        _layout(
-            "Your dues this month 💰",
-            lines,
-            footer="Sent automatically by SplitEasy on the 1st of every month.",
-        ),
-    )
+    if to_email:
+        _send(
+            to_email,
+            "💰 Your SplitEasy dues this month",
+            "\n\n".join(plain_lines),
+            _layout(
+                "Your dues this month 💰",
+                lines,
+                footer="Sent automatically by SplitEasy on the 1st of every month.",
+            ),
+        )
+
+    first_creditor, first_amount = debts[0]
+    push_body = f"You owe ₹{first_amount:,.0f} to {first_creditor}"
+    push_body += "." if len(debts) == 1 else f" and {len(debts) - 1} other{'s' if len(debts) > 2 else ''}."
+    _push.send_push_to_user(db, name, "💰 Your dues this month", push_body, url="/balances/owe")
 
 
 def _describe_participants(expense, member_names: list[str]) -> str:
@@ -489,27 +498,32 @@ def notify_group_memory(db, group, expenses: list) -> None:
         lines.append(f"{escape(desc)} - {escape(e.paid_by)} paid, {escape(who)}.")
         plain_lines.append(f"{desc} - {e.paid_by} paid, {who}.")
 
+    subject = f"📅 A year ago today in {group.name}"
+    push_body = plain_lines[0] if len(plain_lines) == 1 else f"{len(plain_lines)} things happened in {group.name} a year ago today."
+
     for m in group.members:
         email = _email_for(db, m.name)
-        if not email:
-            continue
-        subject = f"📅 A year ago today in {group.name}"
-        body = (
-            f"Exactly a year ago today, this happened in \"{group.name}\":\n\n"
-            + "\n".join(f"- {l}" for l in plain_lines)
-            + f"\n\nView the group: {link}"
-        )
-        html = _layout(
-            f"A year ago today, in {escape(group.name)} 📅",
-            lines,
-            button_url=link,
-            button_label="Open the group",
-            footer="Sent automatically by SplitEasy because an expense in this group happened on this date last year.",
-        )
-        try:
-            _send(email, subject, body, html)
-        except Exception as e:
-            print(f"[email] notify_group_memory error: {e}")
+        if email:
+            body = (
+                f"Exactly a year ago today, this happened in \"{group.name}\":\n\n"
+                + "\n".join(f"- {l}" for l in plain_lines)
+                + f"\n\nView the group: {link}"
+            )
+            html = _layout(
+                f"A year ago today, in {escape(group.name)} 📅",
+                lines,
+                button_url=link,
+                button_label="Open the group",
+                footer="Sent automatically by SplitEasy because an expense in this group happened on this date last year.",
+            )
+            try:
+                _send(email, subject, body, html)
+            except Exception as e:
+                print(f"[email] notify_group_memory error: {e}")
+        # Independent of email: an account with push enabled but no email
+        # on file must still hear about this - send_push_to_user is
+        # itself a no-op for anyone with no account or no subscription.
+        _push.send_push_to_user(db, m.name, subject, push_body, url=link)
 
 
 def _email_for(db, name: str) -> str | None:
@@ -553,29 +567,30 @@ def notify_group_activity(db, group, actor_name: str, verb: str, summary: str,
     for m in group.members:
         if m.name.lower() in skip:
             continue
-        email = _email_for(db, m.name)
-        if not email:
-            continue
         # Reads as confirmation to the person who did it ("You just..."),
         # and as an announcement to everyone else ("Anukul just...").
         is_self = m.name.lower() == (actor_name or "").lower()
         who = "You" if is_self else actor_name
         subject = f"{'You' if is_self else actor_name} {verb} in {group.name}"
-        body = (
-            f"{who} {verb} in \"{group.name}\":\n\n"
-            f"{summary}\n\n"
-            f"View it here: {link}"
-        )
-        html = _layout(
-            f"{who} {verb} in {escape(group.name)}",
-            [escape(summary)],
-            button_url=link,
-            button_label="Open in SplitEasy",
-        )
-        try:
-            _send(email, subject, body, html)
-        except Exception as e:
-            print(f"[email] notify_group_activity error: {e}")
+
+        email = _email_for(db, m.name)
+        if email:
+            body = (
+                f"{who} {verb} in \"{group.name}\":\n\n"
+                f"{summary}\n\n"
+                f"View it here: {link}"
+            )
+            html = _layout(
+                f"{who} {verb} in {escape(group.name)}",
+                [escape(summary)],
+                button_url=link,
+                button_label="Open in SplitEasy",
+            )
+            try:
+                _send(email, subject, body, html)
+            except Exception as e:
+                print(f"[email] notify_group_activity error: {e}")
+        _push.send_push_to_user(db, m.name, subject, summary, url=link)
 
 
 def notify_added_to_group(db, group, actor_name: str, added_names: list[str]) -> None:
@@ -591,30 +606,35 @@ def notify_added_to_group(db, group, actor_name: str, added_names: list[str]) ->
     link = f"{settings.frontend_url}/groups/{group.id}"
 
     for name in added_names:
-        email = _email_for(db, name)
-        if not email:
-            continue
         is_self = name.lower() == (actor_name or "").lower()
         subject = f"You're in {group.name}" if is_self else f"{actor_name} added you to {group.name}"
-        body = (
-            (f"You added yourself to \"{group.name}\" on Money Splitter.\n\n"
-             if is_self else
-             f"{actor_name} added you to \"{group.name}\" on Money Splitter.\n\n")
-            + f"View it here: {link}"
+        push_body = (
+            f"You added yourself to \"{group.name}\"." if is_self
+            else f"{actor_name} added you to \"{group.name}\"."
         )
-        html = _layout(
-            f"You're in {escape(group.name)}",
-            [f"You added yourself to \"{escape(group.name)}\" on SplitEasy."
-             if is_self else
-             f"{escape(actor_name)} added you to \"{escape(group.name)}\" "
-             "on SplitEasy."],
-            button_url=link,
-            button_label="Open the group",
-        )
-        try:
-            _send(email, subject, body, html)
-        except Exception as e:
-            print(f"[email] notify_added_to_group error: {e}")
+
+        email = _email_for(db, name)
+        if email:
+            body = (
+                (f"You added yourself to \"{group.name}\" on Money Splitter.\n\n"
+                 if is_self else
+                 f"{actor_name} added you to \"{group.name}\" on Money Splitter.\n\n")
+                + f"View it here: {link}"
+            )
+            html = _layout(
+                f"You're in {escape(group.name)}",
+                [f"You added yourself to \"{escape(group.name)}\" on SplitEasy."
+                 if is_self else
+                 f"{escape(actor_name)} added you to \"{escape(group.name)}\" "
+                 "on SplitEasy."],
+                button_url=link,
+                button_label="Open the group",
+            )
+            try:
+                _send(email, subject, body, html)
+            except Exception as e:
+                print(f"[email] notify_added_to_group error: {e}")
+        _push.send_push_to_user(db, name, subject, push_body, url=link)
 
 
 def notify_group_activity_bg(group_id: int, actor_name: str, verb: str, summary: str,

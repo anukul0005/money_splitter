@@ -75,6 +75,10 @@ export const scanReceipt        = (file)     => {
   return api.post('/receipts/scan', fd)
 }
 export const getMe              = ()         => api.get('/users/me')
+// ── Push notifications ───────────────────────────────────────────────────────
+export const getVapidPublicKey  = ()         => api.get('/push/vapid-public-key')
+export const subscribePush      = (data)     => api.post('/push/subscribe', data)
+export const unsubscribePush    = (data)     => api.post('/push/unsubscribe', data)
 
 // ── Groups ────────────────────────────────────────────────────────────────────
 export const getGroups   = ()            => api.get('/groups/')

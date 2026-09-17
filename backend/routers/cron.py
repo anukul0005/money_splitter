@@ -64,20 +64,23 @@ def run_daily(key: str = "", db: Session = Depends(get_db)):
     if mmdd == "02-28" and not calendar.isleap(today.year):
         birthdays_today.append("02-29")
 
+    # No longer skipped for having no email: send_birthday_wish sends
+    # whichever of email/push this person actually has, and an account
+    # with neither configured just gets a silent no-op on both - no
+    # separate "nobody to notify" branch needed here.
     sent, skipped_no_email, failed = [], [], []
     for user in db.query(User).filter(User.birthday.in_(birthdays_today)).all():
         if user.last_birthday_wish_sent == iso_today:
             continue
         if not user.email:
-            skipped_no_email.append(user.name)
-            continue
+            skipped_no_email.append(user.name)   # informational only - push may still reach them
         try:
             top_partners = top_transaction_partners(db, user, limit=4)
             # Years since birth_year, not "how many birthdays have they had" -
             # the two agree today by construction, since this only runs on
             # the day that matches `birthday`.
             age = today.year - user.birth_year if user.birth_year else None
-            send_birthday_wish(user.email, user.name, top_partners, age=age)
+            send_birthday_wish(db, user.email, user.name, top_partners, age=age)
             user.last_birthday_wish_sent = iso_today
             db.commit()
             sent.append(user.name)
@@ -124,7 +127,9 @@ def run_daily(key: str = "", db: Session = Depends(get_db)):
     if today.day == 1:
         from routers.stats import compute_friend_balances
 
-        for user in db.query(User).filter(User.email.isnot(None)).all():
+        # Every user, not just ones with an email - send_debt_reminder
+        # sends whichever of email/push this person actually has.
+        for user in db.query(User).all():
             if user.last_debt_reminder_sent == iso_today:
                 continue
             try:
@@ -136,7 +141,7 @@ def run_daily(key: str = "", db: Session = Depends(get_db)):
                 debts = [(b["name"], -b["net"]) for b in balances if b["net"] < -0.01]
                 if not debts:
                     continue
-                send_debt_reminder(user.email, user.name, debts)
+                send_debt_reminder(db, user.email, user.name, debts)
                 user.last_debt_reminder_sent = iso_today
                 db.commit()
                 debt_reminders_sent.append(user.name)

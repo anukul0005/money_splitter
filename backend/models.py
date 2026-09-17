@@ -169,6 +169,27 @@ class ActivitySeen(Base):
     last_seen_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class PushSubscription(Base):
+    """One browser/device's Web Push registration for one user - see push.py
+    for what actually gets sent to it.
+
+    `endpoint` is globally unique by the Push API's own design (it IS the
+    address a push service delivers to, one per browser installation), so
+    re-subscribing the same browser updates its existing row rather than
+    piling up a duplicate. A user can hold several rows at once - one per
+    device/browser they've enabled notifications on.
+    """
+
+    __tablename__ = "push_subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    endpoint = Column(Text, nullable=False, unique=True)
+    p256dh = Column(String(255), nullable=False)
+    auth = Column(String(255), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class PriceOverride(Base):
     """A price somebody corrected by hand, layered over the published tables.
 

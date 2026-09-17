@@ -33,6 +33,17 @@ class Settings(BaseSettings):
     # in receipt_parser.py when this is blank.
     groq_api_key: str = ""
 
+    # Web push (push.py / routers/push.py) - a VAPID keypair identifies this
+    # server to every browser push service. Both blank means push is simply
+    # unavailable; the app degrades the same way it does with any other
+    # optional integration here rather than erroring.
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    # The contact address VAPID requires in every push's claims - not shown
+    # to users, just what a push service could use to reach the sender if
+    # something's wrong (e.g. a push service throttling this key).
+    vapid_claim_email: str = "admin@example.com"
+
     class Config:
         env_file = ".env"
 

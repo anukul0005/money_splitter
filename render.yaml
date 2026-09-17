@@ -61,3 +61,13 @@ services:
       # extractor when this is blank.
       - key: GROQ_API_KEY
         sync: false
+      # Web push (push.py). Not generateValue - a VAPID keypair is real EC
+      # key material, not an arbitrary random string, so it has to be
+      # generated properly (see the deploy notes) and pasted in here.
+      # Leaving these blank just disables push; nothing else breaks.
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_CLAIM_EMAIL
+        sync: false

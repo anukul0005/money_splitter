@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { changePassword, setRecovery, getRecoveryQuestion, getMe, setMyEmail, setMyBirthday } from '../api'
 import { useUser, isAdmin } from '../UserContext'
 import { ALL_QUESTIONS, RECOVERY_QUESTIONS, KEY_QUESTION, generateKey } from '../utils/security'
+import { pushSupported, getExistingSubscription, enablePush, disablePush } from '../push'
 
 /**
  * /account — everything about your own login, in one place.
@@ -54,6 +55,11 @@ export default function Account() {
   const [bdayDone, setBdayDone]         = useState('')
   const [bdayBusy, setBdayBusy]         = useState(false)
 
+  // ── Push notifications ──
+  const [pushOn, setPushOn]       = useState(false)
+  const [pushBusy, setPushBusy]   = useState(false)
+  const [pushError, setPushError] = useState('')
+
   useEffect(() => {
     if (!user?.name) return
     getRecoveryQuestion(user.name)
@@ -76,7 +82,27 @@ export default function Account() {
         setBdayYearInput(r.data.birth_year ? String(r.data.birth_year) : '')
       })
       .catch(() => {})
+    if (pushSupported()) {
+      getExistingSubscription().then((sub) => setPushOn(!!sub)).catch(() => {})
+    }
   }, [user?.name])
+
+  const handleTogglePush = async () => {
+    setPushError(''); setPushBusy(true)
+    try {
+      if (pushOn) {
+        await disablePush()
+        setPushOn(false)
+      } else {
+        await enablePush()
+        setPushOn(true)
+      }
+    } catch (err) {
+      setPushError(err.message || 'Could not change notification settings.')
+    } finally {
+      setPushBusy(false)
+    }
+  }
 
   const handleEmail = async (e) => {
     e.preventDefault()
@@ -342,6 +368,41 @@ export default function Account() {
               {emailBusy ? 'Saving…' : email ? 'Update email' : 'Save email'}
             </button>
           </form>
+        </div>
+
+        {/* ── Push notifications ── */}
+        <div className="card">
+          <h2 className="text-sm font-bold text-gray-800">Push notifications</h2>
+          <p className="text-xs text-gray-500 leading-relaxed mt-1 mb-3">
+            Get a notification on this device for the same things that email
+            you — new expenses, being added to a group, birthdays and
+            monthly reminders — even when SplitEasy isn't open.
+            {' '}On iPhone, this only works after you've added SplitEasy to
+            your Home Screen (Safari's Share button → Add to Home Screen);
+            a regular Safari tab can't receive them at all.
+          </p>
+
+          {!pushSupported() ? (
+            <p className="text-xs text-gray-500 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+              This browser doesn't support push notifications.
+            </p>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={handleTogglePush}
+                disabled={pushBusy}
+                className={`w-full py-2.5 text-xs font-bold rounded-md transition-all active:scale-[0.98] disabled:opacity-50 ${
+                  pushOn
+                    ? 'bg-amber-100 border border-amber-300 text-amber-800 hover:bg-amber-200'
+                    : 'btn-primary'
+                }`}
+              >
+                {pushBusy ? 'Working…' : pushOn ? 'Turn off notifications on this device' : 'Enable notifications on this device'}
+              </button>
+              {pushError && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2 mt-2">{pushError}</p>}
+            </>
+          )}
         </div>
 
         {/* ── Birthday ── */}
