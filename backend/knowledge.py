@@ -338,7 +338,15 @@ def _catalogue() -> tuple[list[tuple[str, str]], np.ndarray, list[str], list[str
         seen.add(key)
         names.append((FOOD, p.name))
 
-    matrix = np.array([embed(n) for _, n in names], dtype=np.float32)
+    # Filled row by row into a preallocated float32 array, never
+    # np.array([embed(n) for ...]): that materialises ~4,600 Python lists of
+    # 2,048 float objects first (~32 bytes each) - measured at a 537 MB peak
+    # to build a 38 MB matrix, which is over a 512 MB instance's whole
+    # limit and got the service OOM-killed on the first expense save after
+    # every restart. This holds one row's list at a time.
+    matrix = np.empty((len(names), len(embed(names[0][1]))), dtype=np.float32)
+    for i, (_, n) in enumerate(names):
+        matrix[i] = embed(n)
     norms = [_norm(n) for _, n in names]
     squashes = [_squash(n) for _, n in names]
     distinctives = [frozenset(_distinctive(n)) for _, n in names]
