@@ -25,6 +25,8 @@ export default function AddExpense() {
   const user = useUser()
   const [params] = useSearchParams()
   const urlGroup     = params.get('group') || ''
+  // Arriving from a master group's "+ Add": the title is asked for up front
+  const askTitle     = params.get('ask') === 'title'
   const defaultGroup = urlGroup || localStorage.getItem(STORED_GROUP_KEY) || ''
   const defaultPayment = localStorage.getItem(STORED_PAYMENT_KEY) || 'cash'
 
@@ -356,6 +358,7 @@ export default function AddExpense() {
     e.preventDefault()
     setError('')
     if (!form.group_id) return setError('Please select a group')
+    if (askTitle && !form.title.trim()) return setError('Enter a title for this expense')
     if (!form.amount || isNaN(form.amount)) return setError('Enter a valid amount')
     if (!form.paid_by) return setError('Select who paid')
     if (splitMode === 'custom' && Math.abs(customTotal - 100) > 0.5)
@@ -799,10 +802,11 @@ export default function AddExpense() {
 
         {/* Title with autocomplete from existing group expenses */}
         <div>
-          <label className="label">Description (optional)</label>
+          <label className="label">{askTitle ? 'Title *' : 'Description (optional)'}</label>
           <input
             className="input"
             placeholder="e.g. dinner at Punjab Grill"
+            autoFocus={askTitle}
             value={form.title}
             onChange={set('title')}
             list="expense-title-suggestions"

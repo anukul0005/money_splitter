@@ -59,17 +59,20 @@ export default function MasterGroupDetail() {
         <div className="flex items-start justify-between gap-3">
           <button onClick={() => nav(-1)} className="text-xs font-bold text-gray-400 mb-2">← Back</button>
           <div className="flex items-center gap-2">
-          {/* A master group is one fixed member set, so a new group inside it
-              is almost always those same people — prefill them. */}
+          {/* "+ Add" adds an expense for these people - into the most recent
+              group of the master (groups arrive newest-activity first), with
+              the title asked for up front. It used to be a "+ New" that made
+              a whole new group, which is rarely what someone inside a master
+              wants to do; Home's "+ New Group" still covers that. */}
           <button
-            onClick={() => nav(`/groups/new?members=${encodeURIComponent((master.names ?? []).join(','))}`)}
-            title={`New group with ${master.name}`}
+            onClick={() => nav(`/add?group=${master.groups[0].id}&ask=title`)}
+            title={`Add an expense for ${master.name}`}
             className="flex-shrink-0 flex items-center gap-1.5 bg-cream border border-amber-200 text-gray-500 hover:bg-amber-50 rounded-md px-3 py-1.5 text-xs font-bold active:scale-95 transition-all shadow-sm"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
             </svg>
-            New
+            Add
           </button>
           <button
             onClick={() => setShowStats((v) => !v)}
