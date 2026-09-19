@@ -1,12 +1,13 @@
 import json
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
-from auth import current_user, member_group
+from auth import current_user, is_member, member_group
 from database import get_db
-from models import Group, Expense, User
+from models import Group, Expense, Member, User
 from schemas import ExpenseCreate, ExpenseOut
 from emailer import notify_group_activity_bg
 from activity import record_activity
+from statement_import import parse_phonepe_csv, time_bucket
 
 router = APIRouter(prefix="/expenses", tags=["expenses"])
 
@@ -109,7 +110,10 @@ def create_expense(payload: ExpenseCreate, background_tasks: BackgroundTasks,
         divider=payload.divider,
         individual_amount=individual,
         split_json=payload.split_json,
+        payment_mode=payload.payment_mode,
         notes=payload.notes,
+        txn_time=payload.txn_time,
+        time_bucket=time_bucket(payload.txn_time),
     )
     db.add(expense)
     db.flush()
@@ -153,6 +157,11 @@ def update_expense(expense_id: int, payload: ExpenseCreate, background_tasks: Ba
     expense.split_json = payload.split_json
     expense.payment_mode = payload.payment_mode
     expense.notes = payload.notes
+    # Only overwritten when a time is actually sent - an edit form that
+    # doesn't show the field must not wipe a time an import filled in.
+    if payload.txn_time is not None:
+        expense.txn_time = payload.txn_time
+        expense.time_bucket = time_bucket(payload.txn_time)
     # settled_by is intentionally not reset on edit
 
     summary = _summary(expense)
@@ -193,3 +202,128 @@ def delete_expense(expense_id: int, background_tasks: BackgroundTasks,
     background_tasks.add_task(
         notify_group_activity_bg, group.id, caller.name, "deleted an expense", summary,
     )
+
+
+_MONTH_ABBR = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
+
+
+def _index_many_bg(expense_ids: list[int]) -> None:
+    """_index_bg over a whole import, one session, one after another - a
+    statement can add hundreds of rows and each food/drink one is a remote
+    embedding call, so this must never run inline."""
+    for eid in expense_ids:
+        _index_bg(eid)
+
+
+@router.post("/import-csv", response_model=dict)
+async def import_statement(background_tasks: BackgroundTasks,
+                           file: UploadFile = File(...),
+                           db: Session = Depends(get_db),
+                           caller: User = Depends(current_user)):
+    """Fill the caller's month-wise "MONTHLY EXPENSES <MON> <YEAR>" groups
+    from a PhonePe statement CSV.
+
+    Per debit line, in this order:
+      1. already imported (same transaction id anywhere the caller is a
+         member) -> skipped, so uploading the same file twice is harmless;
+      2. same date and same amount as an expense already in that month's
+         monthly group -> MERGED into it: time, payment mode, and the
+         merchant name fill whatever was left blank, nothing entered by
+         hand is overwritten;
+      3. the date already has expenses in ANY of the caller's groups ->
+         skipped, that day is treated as already accounted for;
+      4. otherwise -> created in that month's monthly group (made if it
+         doesn't exist yet).
+    Credits ("Received from ...") are ignored - this fills expenses.
+    """
+    raw = await file.read()
+    try:
+        txns = parse_phonepe_csv(raw)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    mine = [g for g in db.query(Group).all() if is_member(g, caller)]
+    existing_dates = {e.date for g in mine for e in g.expenses if e.date}
+    existing_refs = {e.txn_ref for g in mine for e in g.expenses if e.txn_ref}
+    monthly = {
+        g.name.upper(): g for g in mine
+        if g.name.upper().startswith("MONTHLY EXPENSES")
+        and len(g.members) == 1
+    }
+
+    created, merged, dup, skipped_dates, credits = [], 0, 0, set(), 0
+    groups_created: list[str] = []
+    skipped_by_date = 0
+
+    for t in sorted((x for x in txns), key=lambda x: (x.date, x.time or "")):
+        if t.kind != "Debit":
+            credits += 1
+            continue
+        if t.txn_id and t.txn_id in existing_refs:
+            dup += 1
+            continue
+
+        y, m = t.date[:4], int(t.date[5:7])
+        gname = f"MONTHLY EXPENSES {_MONTH_ABBR[m - 1]} {y}"
+        group = monthly.get(gname)
+
+        candidate = None
+        if group is not None:
+            candidate = next(
+                (e for e in group.expenses
+                 if e.date == t.date and abs(e.amount - t.amount) < 0.01 and not e.txn_ref),
+                None,
+            )
+        if candidate is not None:
+            candidate.txn_ref = t.txn_id
+            if t.time and not candidate.txn_time:
+                candidate.txn_time = t.time
+                candidate.time_bucket = time_bucket(t.time)
+            if not candidate.payment_mode:
+                candidate.payment_mode = "upi"
+            if not candidate.title:
+                candidate.title = t.merchant
+            elif t.merchant.lower() not in (candidate.title or "").lower()                     and t.merchant.lower() not in (candidate.notes or "").lower():
+                candidate.notes = (f"{candidate.notes} · " if candidate.notes else "") + f"PhonePe: {t.merchant}"
+            existing_refs.add(t.txn_id)
+            merged += 1
+            continue
+
+        if t.date in existing_dates:
+            skipped_dates.add(t.date)
+            skipped_by_date += 1
+            continue
+
+        if group is None:
+            group = Group(name=gname, description="", emoji="💰", category="personal")
+            db.add(group)
+            db.flush()
+            db.add(Member(group_id=group.id, name=caller.name))
+            db.flush()
+            db.refresh(group)
+            monthly[gname] = group
+            groups_created.append(gname)
+
+        exp = Expense(
+            group_id=group.id, date=t.date, category=None, title=t.merchant,
+            amount=t.amount, paid_by=caller.name, participants=None, divider=1,
+            individual_amount=t.amount, payment_mode="upi", notes=None,
+            txn_time=t.time, time_bucket=time_bucket(t.time), txn_ref=t.txn_id or None,
+        )
+        db.add(exp)
+        created.append(exp)
+        existing_refs.add(t.txn_id)
+
+    db.commit()
+    if created:
+        background_tasks.add_task(_index_many_bg, [e.id for e in created])
+
+    return {
+        "created": len(created),
+        "merged": merged,
+        "skipped_already_imported": dup,
+        "skipped_transactions_on_accounted_dates": skipped_by_date,
+        "accounted_dates": sorted(skipped_dates),
+        "credits_ignored": credits,
+        "groups_created": groups_created,
+    }

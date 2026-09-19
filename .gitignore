@@ -26,3 +26,6 @@ backend/brevo.txt
 # Same reasoning, for the Groq API key pasted in while setting up receipt
 # scanning's LLM extraction step.
 backend/groq_gpt.txt
+
+# Personal payment statements used to test the CSV import - never commit
+PhonePe_Transaction_Statement*.csv

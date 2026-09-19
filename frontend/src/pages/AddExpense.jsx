@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { getGroups, createExpense, scanReceipt } from '../api'
+import { getGroups, createExpense, scanReceipt, importStatement } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ReceiptCropper from '../components/ReceiptCropper'
 import { useUser } from '../UserContext'
@@ -41,6 +41,10 @@ export default function AddExpense() {
   const [scanError, setScanError] = useState('')
   const [scanInfo, setScanInfo]   = useState(null)   // { provider, confidence } of the last successful scan
   const [cropFile, setCropFile]   = useState(null)   // photo awaiting the crop step, before it's sent to OCR
+  const [csvBusy, setCsvBusy]     = useState(false)
+  const [csvError, setCsvError]   = useState('')
+  const [csvResult, setCsvResult] = useState(null)
+  const csvInputRef     = useRef(null)
   const cameraInputRef  = useRef(null)
   const galleryInputRef = useRef(null)
 
@@ -61,6 +65,7 @@ export default function AddExpense() {
     divider:      '',
     notes:        '',
     payment_mode: defaultPayment,
+    txn_time:     '',
   })
 
   const amountRef = useRef(null)
@@ -268,6 +273,20 @@ export default function AddExpense() {
 
   const handleCropCancel = () => { setCropFile(null); resetFileInputs() }
 
+  const handleCsv = async (file) => {
+    if (!file) return
+    setCsvError(''); setCsvResult(null); setCsvBusy(true)
+    try {
+      const res = await importStatement(file)
+      setCsvResult(res.data)
+    } catch (err) {
+      setCsvError(err.response?.data?.detail || 'Could not import that file.')
+    } finally {
+      setCsvBusy(false)
+      if (csvInputRef.current) csvInputRef.current.value = ''
+    }
+  }
+
   const handleScan = async (file) => {
     setCropFile(null)
     setScanError(''); setScanInfo(null)
@@ -323,6 +342,7 @@ export default function AddExpense() {
       divider:      String(members.length || 2),
       notes:        '',
       payment_mode: prev.payment_mode,  // persist the payment mode
+      txn_time:     '',
     }))
     setSplitMode('equal')
     setGentlemanFlipped(false)
@@ -354,6 +374,7 @@ export default function AddExpense() {
         notes:        form.notes || null,
         split_json:   buildSplitJson(),
         payment_mode: form.payment_mode || null,
+        txn_time:     form.txn_time || null,
         recorded_by:  user?.name || null,
       })
       localStorage.setItem(STORED_GROUP_KEY, form.group_id)
@@ -372,6 +393,7 @@ export default function AddExpense() {
     (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase())
   )
   const selectedGroup = groups.find((g) => String(g.id) === String(form.group_id))
+  const isMonthly = !!selectedGroup?.name?.toUpperCase().startsWith('MONTHLY EXPENSES')
 
   return (
     <div className="pb-28 md:pb-10">
@@ -470,6 +492,42 @@ export default function AddExpense() {
               className="hidden"
               onChange={(e) => onFilePicked(e.target.files?.[0])}
             />
+
+            {isMonthly && (
+              <>
+                <button
+                  type="button"
+                  disabled={csvBusy}
+                  onClick={() => csvInputRef.current?.click()}
+                  className="w-full mt-2 py-2.5 text-xs font-bold text-gray-700 bg-white border border-amber-300 rounded-md hover:bg-amber-100 active:scale-[0.98] transition-all disabled:opacity-50"
+                >
+                  📄 Upload PhonePe statement (.csv)
+                </button>
+                <input
+                  ref={csvInputRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  onChange={(e) => handleCsv(e.target.files?.[0])}
+                />
+                {csvBusy && <p className="text-xs text-gray-500 mt-2">Importing statement…</p>}
+                {csvError && <p className="text-xs text-red-600 mt-2">{csvError}</p>}
+                {csvResult && !csvBusy && (
+                  <div className="text-xs text-brand-700 mt-2 space-y-0.5">
+                    <p className="font-bold">✓ Statement imported into your monthly groups</p>
+                    <p>{csvResult.created} added · {csvResult.merged} merged with existing entries</p>
+                    <p className="text-gray-500">
+                      {csvResult.skipped_transactions_on_accounted_dates} skipped (dates already in your groups)
+                      {csvResult.skipped_already_imported > 0 && ` · ${csvResult.skipped_already_imported} already imported`}
+                      {` · ${csvResult.credits_ignored} received payments ignored`}
+                    </p>
+                    {csvResult.groups_created?.length > 0 && (
+                      <p className="text-gray-500">New groups: {csvResult.groups_created.join(', ')}</p>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
 
             {scanBusy && <p className="text-xs text-gray-500 mt-2">Reading the receipt…</p>}
             {scanError && <p className="text-xs text-red-600 mt-2">{scanError}</p>}
@@ -762,6 +820,16 @@ export default function AddExpense() {
           <label className="label">Date</label>
           <input className="input" type="date" value={form.date} onChange={set('date')} />
         </div>
+
+        {/* Time of the transaction - monthly trackers only, optional. Kept
+            for later analysis, which groups on the time-of-day bucket the
+            server derives from it (00-06, 06-12, 12-18, 18-24). */}
+        {isMonthly && (
+          <div>
+            <label className="label">Time (optional)</label>
+            <input className="input" type="time" value={form.txn_time} onChange={set('txn_time')} />
+          </div>
+        )}
 
         {/* Notes */}
         <div>

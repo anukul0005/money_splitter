@@ -115,6 +115,16 @@ class Expense(Base):
     payment_mode = Column(String(50), nullable=True)  # cash / upi / credit_card / debit_card
     notes = Column(Text, nullable=True)
     settled_by = Column(Text, nullable=True)   # JSON array of member names who settled their share
+    # "HH:MM" the money actually moved, optional - and its coarse label,
+    # derived from it (see routers/expenses.time_bucket) and stored beside
+    # it so analysis can group on a clean categorical column instead of
+    # re-deriving one from free-form times every time.
+    txn_time = Column(String(5), nullable=True)
+    time_bucket = Column(String(20), nullable=True)
+    # A bank/UPI transaction id when this row came from (or was merged
+    # with) an imported statement line - what stops re-uploading the same
+    # statement from creating everything twice.
+    txn_ref = Column(String(100), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     group = relationship("Group", back_populates="expenses")

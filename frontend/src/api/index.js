@@ -74,6 +74,11 @@ export const scanReceipt        = (file)     => {
   fd.append('file', file)
   return api.post('/receipts/scan', fd)
 }
+export const importStatement    = (file)     => {
+  const fd = new FormData()
+  fd.append('file', file)
+  return api.post('/expenses/import-csv', fd)
+}
 export const getMe              = ()         => api.get('/users/me')
 // ── Push notifications ───────────────────────────────────────────────────────
 export const getVapidPublicKey  = ()         => api.get('/push/vapid-public-key')

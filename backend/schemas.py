@@ -147,6 +147,9 @@ class ExpenseBase(BaseModel):
     # Who is logged in and entering this — not necessarily who paid, so the
     # activity feed can name the right person.
     recorded_by: Optional[str] = None
+    # Optional "HH:MM" of the transaction; the coarse label is derived
+    # server-side (ExpenseOut.time_bucket), never trusted from the client.
+    txn_time: Optional[str] = None
 
     @field_validator("amount")
     @classmethod
@@ -155,12 +158,26 @@ class ExpenseBase(BaseModel):
             raise ValueError("amount must be positive")
         return round(v, 2)
 
+    @field_validator("txn_time")
+    @classmethod
+    def txn_time_must_be_hhmm(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or v.strip() == "":
+            return None
+        v = v.strip()
+        parts = v.split(":")
+        if len(parts) != 2 or not all(p.isdigit() for p in parts) or not (
+            0 <= int(parts[0]) < 24 and 0 <= int(parts[1]) < 60
+        ):
+            raise ValueError("txn_time must be HH:MM (24-hour)")
+        return f"{int(parts[0]):02d}:{int(parts[1]):02d}"
+
 class ExpenseCreate(ExpenseBase):
     group_id: int
 
 class ExpenseOut(ExpenseBase):
     id: int
     group_id: int
+    time_bucket: Optional[str] = None
     settled_by: Optional[str] = None   # JSON array of names who settled
     created_at: Optional[datetime] = None
     model_config = {"from_attributes": True}
