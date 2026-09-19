@@ -4,6 +4,7 @@ import { getGroups, createExpense, scanReceipt, importStatement } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ReceiptCropper from '../components/ReceiptCropper'
 import { useUser } from '../UserContext'
+import { pairKey } from '../utils/masterGroups'
 
 const CATEGORIES = [
   'Food','Drinks','Snacks','Travel - Cab','Travel - Train',
@@ -392,9 +393,17 @@ export default function AddExpense() {
 
   if (loading) return <LoadingSpinner text="Loading groups…" />
 
-  const userGroups = groups.filter((g) =>
+  const myGroups = groups.filter((g) =>
     (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase())
   )
+  // Arrived from inside a group (/add?group=...): offer only that group's
+  // siblings - the groups sharing its exact set of people, i.e. its master
+  // group - not every group the person is in. Opened with no group in the
+  // URL, everything is still offered.
+  const originGroup = urlGroup ? groups.find((g) => String(g.id) === String(urlGroup)) : null
+  const userGroups = originGroup
+    ? myGroups.filter((g) => pairKey(g.member_names ?? []) === pairKey(originGroup.member_names ?? []))
+    : myGroups
   const selectedGroup = groups.find((g) => String(g.id) === String(form.group_id))
   const isMonthly = !!selectedGroup?.name?.toUpperCase().startsWith('MONTHLY EXPENSES')
 
