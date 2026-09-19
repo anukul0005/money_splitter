@@ -4,9 +4,10 @@
 
 @layer base {
   html {
-    height: 100%;
-    /* iOS Safari: use fill-available so vh doesn't jump with keyboard */
-    height: -webkit-fill-available;
+    /* No height on html: `-webkit-fill-available` here made the layout
+       viewport taller than what iOS Safari actually shows, and the
+       position:fixed bottom nav is pinned to the layout viewport - so it
+       floated up mid-screen instead of sitting at the bottom edge. */
     /* Whole type scale dialled down ~3% total (rem-based, so everything follows) */
     font-size: 97.5%;
   }
@@ -18,8 +19,9 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     overscroll-behavior: none;
-    min-height: 100%;
-    min-height: -webkit-fill-available;
+    /* dvh tracks the visible height as Safari's toolbars expand/collapse */
+    min-height: 100vh;
+    min-height: 100dvh;
     /* Nothing should ever scroll the page sideways. `clip` rather than
        `hidden` so the sticky page headers keep working. */
     overflow-x: clip;

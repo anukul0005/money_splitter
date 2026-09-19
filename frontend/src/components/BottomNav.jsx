@@ -27,7 +27,7 @@ export default function BottomNav({ user, onLogout }) {
   }
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-field-950 border-t border-field-800 pb-safe z-50 md:hidden">
+    <nav className="fixed bottom-0 left-0 right-0 bg-field-950 border-t border-field-800 pb-safe z-50 md:hidden" style={{ transform: 'translateZ(0)' }}>
       <div className="flex items-center justify-around h-16 px-2">
         {items.map(({ to, label, icon: Icon, highlight }) => (
           <NavLink

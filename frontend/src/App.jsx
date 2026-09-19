@@ -67,7 +67,7 @@ export default function App() {
             tree away and rebuilds it. Belt and braces next to the server's
             no-store headers: nothing rendered for the previous person can
             survive into the next person's session. */}
-        <div key={user.name} className="flex min-h-screen bg-canvas">
+        <div key={user.name} className="flex min-h-screen min-h-dvh bg-canvas">
           {/* Desktop sidebar */}
           <Sidebar user={user} onLogout={handleLogout} />
 
