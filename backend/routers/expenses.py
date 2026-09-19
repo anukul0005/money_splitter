@@ -125,13 +125,15 @@ def create_expense(payload: ExpenseCreate, background_tasks: BackgroundTasks,
     db.commit()
     db.refresh(expense)
 
-    # Indexed just after the response, not before it - see _index_bg.
-    background_tasks.add_task(_index_bg, expense.id)
-    _queue_conversion_check(background_tasks, expense, caller.name)
-
+    # Notification first: background tasks run in the order added, and
+    # indexing takes several seconds - queued ahead of it, a restart or
+    # deploy landing in that window killed the process before anyone was
+    # told anything. See _index_bg for why indexing is deferred at all.
     background_tasks.add_task(
         notify_group_activity_bg, group.id, expense.paid_by, "added a new expense", summary,
     )
+    background_tasks.add_task(_index_bg, expense.id)
+    _queue_conversion_check(background_tasks, expense, caller.name)
 
     return expense
 
@@ -170,16 +172,18 @@ def update_expense(expense_id: int, payload: ExpenseCreate, background_tasks: Ba
     db.commit()
     db.refresh(expense)
 
+    # Notification first, then the slow work - tasks run in the order added,
+    # and a restart during the ~7s embedding call used to kill the process
+    # before the notification was ever sent.
+    background_tasks.add_task(
+        notify_group_activity_bg, group.id, caller.name, "edited an expense", summary,
+    )
     # Re-index after the response: an edit can change the amount, the date,
     # or whether this is food at all, and a stale vector would keep
     # answering the old question - but the ~7s embedding call is not
     # something the person saving should wait on.
     background_tasks.add_task(_index_bg, expense.id)
     _queue_conversion_check(background_tasks, expense, caller.name)
-
-    background_tasks.add_task(
-        notify_group_activity_bg, group.id, caller.name, "edited an expense", summary,
-    )
 
     return expense
 
