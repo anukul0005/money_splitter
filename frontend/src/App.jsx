@@ -72,8 +72,8 @@ export default function App() {
           <Sidebar user={user} onLogout={handleLogout} />
 
           {/* Main content — offset by sidebar width on desktop */}
-          <div className="flex-1 min-w-0 md:ml-56">
-            <div className="max-w-4xl mx-auto">
+          <div className="flex-1 min-w-0 md:ml-56 flex flex-col min-h-dvh">
+            <div className="max-w-4xl mx-auto w-full flex-1">
               <Routes>
                 <Route path="/"           element={<Home />} />
                 <Route path="/groups"     element={<Groups />} />
@@ -96,10 +96,14 @@ export default function App() {
                 )}
               </Routes>
             </div>
-          </div>
 
-          {/* Mobile bottom nav */}
-          <BottomNav user={user} onLogout={handleLogout} />
+            {/* Mobile bottom nav - last in the column and sticky, NOT
+                position:fixed: fixed pins to iOS Safari's layout viewport,
+                which drifts from the visible screen (keyboard, pickers,
+                collapsing toolbars) and left the bar floating mid-screen.
+                Sticky sits in the flow and sticks to the visible bottom. */}
+            <BottomNav user={user} onLogout={handleLogout} />
+          </div>
         </div>
       </BrowserRouter>
     </UserContext.Provider>
