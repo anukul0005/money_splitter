@@ -170,7 +170,8 @@ def create_payment_auto(payload: PaymentAuto, background_tasks: BackgroundTasks,
 
 
 @router.put("/{payment_id}", response_model=PaymentOut)
-def update_payment(payment_id: int, payload: PaymentAuto, db: Session = Depends(get_db),
+def update_payment(payment_id: int, payload: PaymentAuto, background_tasks: BackgroundTasks,
+                   db: Session = Depends(get_db),
                    caller: User = Depends(current_user)):
     """Correct a payment that was entered wrong.
 
@@ -219,6 +220,10 @@ def update_payment(payment_id: int, payload: PaymentAuto, db: Session = Depends(
 
     db.commit()
     db.refresh(payment)
+
+    # Editing a payment used to write the activity row and nothing else - no
+    # email, no push - so someone whose balance just changed heard nothing.
+    background_tasks.add_task(notify_group_activity_bg, group.id, editor, "edited a payment", summary)
     return payment
 
 
@@ -265,7 +270,8 @@ def create_payment(payload: PaymentCreate, background_tasks: BackgroundTasks,
 
 
 @router.delete("/{payment_id}", status_code=204)
-def delete_payment(payment_id: int, db: Session = Depends(get_db),
+def delete_payment(payment_id: int, background_tasks: BackgroundTasks,
+                   db: Session = Depends(get_db),
                    caller: User = Depends(current_user)):
     payment = db.query(Payment).filter(Payment.id == payment_id).first()
     if not payment:
@@ -278,3 +284,5 @@ def delete_payment(payment_id: int, db: Session = Depends(get_db),
 
     db.delete(payment)
     db.commit()
+
+    background_tasks.add_task(notify_group_activity_bg, group.id, caller.name, "deleted a payment", summary)
