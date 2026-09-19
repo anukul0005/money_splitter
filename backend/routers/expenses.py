@@ -45,6 +45,27 @@ def _index(db, expense) -> None:
         print(f"[knowledge] indexing expense {expense.id} failed: {e}")
 
 
+def _index_bg(expense_id: int) -> None:
+    """_index, run after the response has gone back - embedding an expense
+    is a remote call that took ~7s on its own, and every save (food/drink
+    ones, which is most of them) sat waiting on it. Opens its own session
+    for the same reason notify_group_activity_bg does: the request's is
+    already closed by the time a background task runs. The index is a
+    retrieval aid, so it being a few seconds behind a save costs nothing."""
+    from database import get_session_factory
+    db = get_session_factory()()
+    try:
+        expense = db.query(Expense).filter(Expense.id == expense_id).first()
+        if expense is not None:
+            _index(db, expense)
+            db.commit()
+    except Exception as e:  # pragma: no cover - never worth failing anything
+        db.rollback()
+        print(f"[knowledge] backgrounded indexing of expense {expense_id} failed: {e}")
+    finally:
+        db.close()
+
+
 def _compute_individual(amount: float, divider: int) -> float:
     return round(amount / divider, 2) if divider > 0 else amount
 
@@ -97,13 +118,11 @@ def create_expense(payload: ExpenseCreate, background_tasks: BackgroundTasks,
     # Who did it comes from the token; the summary says who paid
     record_activity(db, group, caller.name, "added an expense", summary)
 
-    # Tonight's drinks are searchable before the next recommendation is asked
-    # for. In the same transaction as the expense, so the two cannot disagree.
-    _index(db, expense)
-
     db.commit()
     db.refresh(expense)
 
+    # Indexed just after the response, not before it - see _index_bg.
+    background_tasks.add_task(_index_bg, expense.id)
     _queue_conversion_check(background_tasks, expense, caller.name)
 
     background_tasks.add_task(
@@ -139,13 +158,14 @@ def update_expense(expense_id: int, payload: ExpenseCreate, background_tasks: Ba
     summary = _summary(expense)
     record_activity(db, group, caller.name, "edited an expense", summary)
 
-    # Re-index: an edit can change the amount, the date, or whether this is
-    # food at all, and a stale vector would keep answering the old question.
-    _index(db, expense)
-
     db.commit()
     db.refresh(expense)
 
+    # Re-index after the response: an edit can change the amount, the date,
+    # or whether this is food at all, and a stale vector would keep
+    # answering the old question - but the ~7s embedding call is not
+    # something the person saving should wait on.
+    background_tasks.add_task(_index_bg, expense.id)
     _queue_conversion_check(background_tasks, expense, caller.name)
 
     background_tasks.add_task(
