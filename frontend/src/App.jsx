@@ -14,6 +14,7 @@ import Login       from './pages/Login'
 import ResetPassword from './pages/ResetPassword'
 import AdminRecovery from './pages/AdminRecovery'
 import AdminCodes    from './pages/AdminCodes'
+import Loans from './pages/Loans'
 import Account       from './pages/Account'
 import Notifications from './pages/Notifications'
 import Balances      from './pages/Balances'
@@ -88,6 +89,7 @@ export default function App() {
                 <Route path="/friends" element={<Friends />} />
                 <Route path="/friends/:name" element={<FriendDetail />} />
                 <Route path="/account" element={<Account />} />
+                <Route path="/loans" element={<Loans />} />
                 <Route path="/notifications" element={<Notifications />} />
                 <Route path="/balances/:kind" element={<Balances />} />
                 {/* Admin-only: the route simply does not exist for others */}

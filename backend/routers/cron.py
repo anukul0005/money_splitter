@@ -149,7 +149,11 @@ def run_daily(key: str = "", db: Session = Depends(get_db)):
                 db.rollback()
                 debt_reminders_failed.append(f"{user.name}: {e}")
 
-    return {"date": iso_today, "birthdays_today": sent,
+    # Recurring shared bills and loan reminders - see loan_jobs.py
+    from loan_jobs import run_bills, run_loan_reminders
+    loan_summary = {**run_bills(db, today), **run_loan_reminders(db, today)}
+
+    return {"date": iso_today, "birthdays_today": sent, **loan_summary,
             "skipped_no_email": skipped_no_email, "failed": failed,
             "memories_sent": memory_groups, "memories_failed": memory_failed,
             "debt_reminders_sent": debt_reminders_sent,

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getGroups, getOverview, getUserSummary, getGlobalAnalytics, getUserGroupBalances, getFriends } from '../api'
+import { getGroups, getOverview, getUserSummary, getGlobalAnalytics, getUserGroupBalances, getFriends, getLoans } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser, isAdmin } from '../UserContext'
 import { buildMasterGroups } from '../utils/masterGroups'
@@ -78,6 +78,7 @@ export default function Home() {
   const [analytics,   setAnalytics]   = useState(null)
   const [balances,    setBalances]    = useState([])   // per-group, ranks the group list
   const [friends,     setFriends]     = useState([])   // per-person netted, drives the headline
+  const [loans,       setLoans]       = useState(null) // loans + shared bills, see /loans
   const [loading,     setLoading]     = useState(true)
   const [error,       setError]       = useState('')
   const [showSettled, setShowSettled] = useState(false)
@@ -102,6 +103,7 @@ export default function Home() {
           .then((r) => setFriends(r.data))
           .catch(() => {})
       }
+      getLoans().then((r) => setLoans(r.data)).catch(() => {})
       getGlobalAnalytics(user?.name ?? '')
         .then((a) => setAnalytics(a.data))
         .catch(() => {})
@@ -139,10 +141,17 @@ export default function Home() {
   // owing Divyank in one group while he owes you more in two others.
   // Same threshold as the Friends list, so the headline total and the rows
   // that explain it can never disagree.
-  const totalOwe  = friends.filter((f) => owes(f.net)).reduce((s, f) => s + Math.abs(f.net), 0)
-  const totalOwed = friends.filter((f) => owed(f.net)).reduce((s, f) => s + f.net, 0)
-  const owePeople  = friends.filter((f) => owes(f.net)).length
-  const owedPeople = friends.filter((f) => owed(f.net)).length
+  // Loans and shared-bill dues are added on top: they never pass through a
+  // group, so the friends list above can't see them. People are unioned by
+  // name so someone owed through both a group and a loan counts once.
+  const lt = loans?.totals
+  const totalOwe  = friends.filter((f) => owes(f.net)).reduce((s, f) => s + Math.abs(f.net), 0) + (lt?.owe ?? 0)
+  const totalOwed = friends.filter((f) => owed(f.net)).reduce((s, f) => s + f.net, 0) + (lt?.owed ?? 0)
+  const namesUnion = (a, b) => new Set([...a, ...b].map((n) => n.toLowerCase())).size
+  const owePeople  = namesUnion(friends.filter((f) => owes(f.net)).map((f) => f.name), lt?.owe_people ?? [])
+  const owedPeople = namesUnion(friends.filter((f) => owed(f.net)).map((f) => f.name), lt?.owed_people ?? [])
+  const openLoans  = (loans?.loans ?? []).filter((l) => !l.paid).length
+  const activeBills = (loans?.bills ?? []).length
 
   // Every group is linked to a master group named after its members — even
   // a single-member one, so every one of a person's own personal trackers
@@ -271,6 +280,31 @@ export default function Home() {
               Monthly
           </button>
         </div>
+
+        {/* Loans, borrowings and recurring shared bills */}
+        <button
+          onClick={() => nav('/loans')}
+          className="card w-full text-left flex items-center gap-3 active:scale-[0.98] transition-transform border-brand-300 bg-brand-50/40"
+        >
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Loans & bills</p>
+            <p className="text-sm font-bold text-gray-900 mt-1">
+              {openLoans + activeBills === 0
+                ? 'Track loans and shared monthly bills'
+                : `${openLoans} open loan${openLoans !== 1 ? 's' : ''} · ${activeBills} recurring bill${activeBills !== 1 ? 's' : ''}`}
+            </p>
+            {lt && (lt.owe > 0 || lt.owed > 0) && (
+              <p className="text-xs text-gray-500 mt-0.5">
+                {lt.owe > 0 && <span className="text-red-600 font-semibold">You owe {INR(lt.owe)}</span>}
+                {lt.owe > 0 && lt.owed > 0 && ' · '}
+                {lt.owed > 0 && <span className="text-green-600 font-semibold">Owed to you {INR(lt.owed)}</span>}
+              </p>
+            )}
+          </div>
+          <svg className="w-3.5 h-3.5 text-gray-300 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
 
         {/* Groups (every group linked to a master group by members; unsettled first, settled behind a toggle) */}
         {(allMasters.length > 0 || soloGroups.length > 0) && (

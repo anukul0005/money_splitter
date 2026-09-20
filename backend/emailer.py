@@ -687,3 +687,24 @@ def notify_added_to_group_bg(group_id: int, actor_name: str, added_names: list[s
         print(f"[email] backgrounded notify_added_to_group failed: {e}")
     finally:
         db.close()
+
+
+def send_notice(db, name: str, subject: str, lines: list[str], push_body: str,
+                url: str = "/loans") -> None:
+    """One plain notification to one person - email if they have one, push
+    if they've enabled it, independently, the same rule the group
+    notifications follow. `lines` are plain text; escaped here for the HTML
+    version so callers don't each have to remember to."""
+    email = _email_for(db, name)
+    if email:
+        link = f"{get_settings().frontend_url}{url}"
+        try:
+            _send(
+                email, subject, "\n\n".join(lines) + f"\n\nOpen SplitEasy: {link}",
+                _layout(subject, [escape(l) for l in lines],
+                        button_url=link, button_label="Open in SplitEasy",
+                        footer="Sent automatically by SplitEasy."),
+            )
+        except Exception as e:
+            print(f"[email] send_notice error: {e}")
+    _push.send_push_to_user(db, name, subject, push_body, url=url)

@@ -80,6 +80,14 @@ export const importStatement    = (file)     => {
   return api.post('/expenses/import-csv', fd)
 }
 export const getMe              = ()         => api.get('/users/me')
+// ── Loans, borrowings and recurring shared bills ─────────────────────────────
+export const getLoans          = ()          => api.get('/loans/')
+export const createLoan        = (data)      => api.post('/loans/', data)
+export const repayLoan         = (id, data)  => api.post(`/loans/${id}/payments`, data)
+export const deleteLoan        = (id)        => api.delete(`/loans/${id}`)
+export const createBill        = (data)      => api.post('/loans/bills', data)
+export const markChargePaid    = (id)        => api.post(`/loans/bills/charges/${id}/paid`)
+export const stopBill          = (id)        => api.delete(`/loans/bills/${id}`)
 // ── Push notifications ───────────────────────────────────────────────────────
 export const getVapidPublicKey  = ()         => api.get('/push/vapid-public-key')
 export const subscribePush      = (data)     => api.post('/push/subscribe', data)

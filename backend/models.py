@@ -514,3 +514,92 @@ class RecommendationEvent(Base):
     converted = Column(Boolean, nullable=False, default=False, index=True)
     converted_at = Column(DateTime(timezone=True), nullable=True)
     expense_id = Column(Integer, ForeignKey("expenses.id", ondelete="SET NULL"), nullable=True)
+
+
+class Loan(Base):
+    """Money one person lent another outside any group's expenses.
+
+    Names, not user ids, for lender/borrower - the same convention every
+    group member and payment here uses. Interest is optional and only ever
+    charged once the loan is overdue: see loan_calc.outstanding, which
+    derives what's owed from these rows plus LoanPayment rows on demand
+    rather than storing a balance that could drift from them.
+    """
+
+    __tablename__ = "loans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    lender = Column(String(100), nullable=False, index=True)
+    borrower = Column(String(100), nullable=False, index=True)
+    principal = Column(Float, nullable=False)
+    has_interest = Column(Boolean, nullable=False, default=False)
+    rate_pct = Column(Float, nullable=False, default=3.6)   # per month, compounding, once overdue
+    start_date = Column(String(10), nullable=False)          # ISO
+    due_date = Column(String(10), nullable=False)            # ISO
+    note = Column(Text, nullable=True)
+    created_by = Column(String(100), nullable=True)
+    # ISO date the last reminder email/push went out - guards a retried or
+    # doubled cron ping from reminding the borrower twice in one day.
+    last_reminded = Column(String(10), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    payments = relationship("LoanPayment", back_populates="loan",
+                            cascade="all, delete-orphan", lazy="selectin")
+
+
+class LoanPayment(Base):
+    """One repayment against a Loan."""
+
+    __tablename__ = "loan_payments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    loan_id = Column(Integer, ForeignKey("loans.id", ondelete="CASCADE"), nullable=False, index=True)
+    amount = Column(Float, nullable=False)
+    date = Column(String(10), nullable=False)   # ISO
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    loan = relationship("Loan", back_populates="payments")
+
+
+class RecurringBill(Base):
+    """A shared subscription (Netflix, rent...) one person pays and bills
+    the others for, on the same day every month, on its own.
+
+    Lives only in the loans/bills section - the monthly charges are
+    RecurringCharge rows, not group expenses. `members` is a comma list
+    that includes the payer, so the split is amount / len(members).
+    """
+
+    __tablename__ = "recurring_bills"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(200), nullable=False)
+    amount = Column(Float, nullable=False)
+    payer = Column(String(100), nullable=False, index=True)
+    members = Column(Text, nullable=False)          # comma-separated names, payer included
+    day_of_month = Column(Integer, nullable=False, default=1)
+    active = Column(Boolean, nullable=False, default=True)
+    # "YYYY-MM" of the last month billed - the guard that makes a repeated
+    # cron ping harmless, and what lets a missed day be caught up later.
+    last_billed = Column(String(7), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    charges = relationship("RecurringCharge", back_populates="bill",
+                           cascade="all, delete-orphan", lazy="selectin")
+
+
+class RecurringCharge(Base):
+    """One member's share of one month of a RecurringBill."""
+
+    __tablename__ = "recurring_charges"
+
+    id = Column(Integer, primary_key=True, index=True)
+    bill_id = Column(Integer, ForeignKey("recurring_bills.id", ondelete="CASCADE"), nullable=False, index=True)
+    period = Column(String(7), nullable=False)      # "YYYY-MM"
+    member = Column(String(100), nullable=False, index=True)
+    share = Column(Float, nullable=False)
+    paid = Column(Boolean, nullable=False, default=False)
+    paid_on = Column(String(10), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    bill = relationship("RecurringBill", back_populates="charges")
