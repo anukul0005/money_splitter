@@ -11,7 +11,7 @@ import { useState } from 'react'
  * Selected people show as removable chips above the box; the box itself
  * only ever suggests names not already picked.
  */
-export default function PeoplePicker({ options, selected, onChange, placeholder = 'Add a person' }) {
+export default function PeoplePicker({ options, selected, onChange, placeholder = 'Add a person', allowNew = false }) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
 
@@ -25,6 +25,13 @@ export default function PeoplePicker({ options, selected, onChange, placeholder 
       return a.length - b.length
     })
     .slice(0, 8)
+
+  // A typed name that isn't already an option or picked - offered as a new
+  // person when the caller allows it (loans and bills can name someone who
+  // isn't in any group yet).
+  const typed = query.trim()
+  const canAddNew = allowNew && typed.length > 0 &&
+    ![...options, ...selected].some((n) => n.toLowerCase() === qLower)
 
   const add = (name) => {
     onChange([...selected, name])
@@ -62,10 +69,14 @@ export default function PeoplePicker({ options, selected, onChange, placeholder 
           // restaurant search suggestions already use.
           onBlur={() => setTimeout(() => setOpen(false), 150)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && suggestions.length > 0) add(suggestions[0])
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              if (suggestions.length > 0) add(suggestions[0])
+              else if (canAddNew) add(typed)
+            }
           }}
         />
-        {open && suggestions.length > 0 && (
+        {open && (suggestions.length > 0 || canAddNew) && (
           <ul className="absolute left-0 right-0 top-full mt-1 z-20 bg-white border border-amber-200 rounded-md shadow-lg overflow-hidden max-h-56 overflow-y-auto">
             {suggestions.map((n) => (
               <li key={n}>
@@ -78,6 +89,17 @@ export default function PeoplePicker({ options, selected, onChange, placeholder 
                 </button>
               </li>
             ))}
+            {canAddNew && (
+              <li>
+                <button
+                  type="button"
+                  onMouseDown={() => add(typed)}
+                  className="w-full text-left px-3 py-2 text-xs font-bold text-brand-600 hover:bg-amber-50"
+                >
+                  + Add "{typed}" as a new person
+                </button>
+              </li>
+            )}
           </ul>
         )}
       </div>

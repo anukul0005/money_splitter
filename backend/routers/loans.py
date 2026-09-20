@@ -24,14 +24,33 @@ router = APIRouter(prefix="/loans", tags=["loans"])
 
 def _known_people(db: Session, caller: User) -> dict[str, str]:
     """lower-name -> display name of everyone who shares a group with the
-    caller (and the caller). Loans and bills can only name these people -
-    otherwise anyone could put a debt in front of a stranger."""
+    caller (and the caller). See _resolve_person for who else is allowed."""
     people = {caller.name.lower(): caller.name}
     for g in db.query(Group).all():
         if is_member(g, caller):
             for m in g.members:
                 people.setdefault(m.name.lower(), m.name)
     return people
+
+
+def _resolve_person(db: Session, people: dict[str, str], raw: str) -> str | None:
+    """A name a loan or bill may use, or None if it must be refused.
+
+    Someone the caller shares a group with resolves to their display name.
+    A name that isn't an account at all is a new person and is accepted as
+    typed - there's no one signed in under it to see the debt. A name that
+    IS someone's account but shares no group with the caller is refused:
+    otherwise anyone could put a debt in front of a stranger.
+    """
+    name = (raw or "").strip()
+    if not name or len(name) > 100:
+        return None
+    known = people.get(name.lower())
+    if known:
+        return known
+    if db.query(User).filter(User.name.ilike(name)).first():
+        return None
+    return name
 
 
 def _same(a: str, b: str) -> bool:
@@ -162,9 +181,9 @@ def list_all(db: Session = Depends(get_db), caller: User = Depends(current_user)
 def create_loan(payload: LoanCreate, db: Session = Depends(get_db),
                 caller: User = Depends(current_user)):
     people = _known_people(db, caller)
-    other = people.get(payload.other.strip().lower())
+    other = _resolve_person(db, people, payload.other)
     if not other or _same(other, caller.name):
-        raise HTTPException(400, "Pick someone you share a group with")
+        raise HTTPException(400, "Pick someone you share a group with, or type a new name")
     start = _iso(payload.start_date or date.today().isoformat(), "Start date")
     due = _iso(payload.due_date, "Due date")
     lender, borrower = (caller.name, other) if payload.role == "lent" else (other, caller.name)
@@ -211,9 +230,9 @@ def create_bill(payload: BillCreate, db: Session = Depends(get_db),
     people = _known_people(db, caller)
     members = {caller.name.lower(): caller.name}
     for raw in payload.members:
-        n = people.get(raw.strip().lower())
+        n = _resolve_person(db, people, raw)
         if not n:
-            raise HTTPException(400, f"{raw} isn't someone you share a group with")
+            raise HTTPException(400, f"{raw} is already an account you don't share a group with")
         members[n.lower()] = n
     if len(members) < 2:
         raise HTTPException(400, "A shared bill needs at least one other person")

@@ -5,6 +5,7 @@ import {
   createBill, markChargePaid, stopBill, getFriends,
 } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
+import PeoplePicker from '../components/PeoplePicker'
 import { useUser } from '../UserContext'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
@@ -111,10 +112,15 @@ export default function Loans() {
             </div>
             <div>
               <label className="label">{loan.role === 'lent' ? 'Lent to' : 'Borrowed from'} *</label>
-              <select className="input" value={loan.other} onChange={(e) => setLoan((f) => ({ ...f, other: e.target.value }))}>
-                <option value="">Select…</option>
-                {people.map((n) => <option key={n} value={n}>{n}</option>)}
-              </select>
+              {/* Single pick: choosing again replaces the previous one.
+                  allowNew - the person needn't be in any group yet. */}
+              <PeoplePicker
+                options={people.filter((n) => !same(n, me))}
+                selected={loan.other ? [loan.other] : []}
+                onChange={(list) => setLoan((f) => ({ ...f, other: list.length ? list[list.length - 1] : '' }))}
+                placeholder="Type a name"
+                allowNew
+              />
             </div>
             <div className="flex gap-2">
               <div className="flex-1">
@@ -170,18 +176,13 @@ export default function Loans() {
             </div>
             <div>
               <label className="label">Shared with *</label>
-              <div className="flex flex-wrap gap-2">
-                {people.filter((n) => !same(n, me)).map((n) => {
-                  const on = bill.members.includes(n)
-                  return (
-                    <button type="button" key={n}
-                      onClick={() => setBill((f) => ({ ...f, members: on ? f.members.filter((x) => x !== n) : [...f.members, n] }))}
-                      className={`px-3 py-1.5 text-xs font-bold border ${on ? 'bg-brand-400 text-white border-brand-400' : 'bg-amber-50 text-gray-600 border-amber-200'}`}>
-                      {n}
-                    </button>
-                  )
-                })}
-              </div>
+              <PeoplePicker
+                options={people.filter((n) => !same(n, me))}
+                selected={bill.members}
+                onChange={(list) => setBill((f) => ({ ...f, members: list }))}
+                placeholder="Type a name"
+                allowNew
+              />
               {bill.amount && bill.members.length > 0 && (
                 <p className="text-xs text-gray-500 mt-2">
                   Each of {bill.members.length + 1} pays {INR(parseFloat(bill.amount) / (bill.members.length + 1))}
