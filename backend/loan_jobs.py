@@ -58,8 +58,10 @@ def run_loan_reminders(db, today: date) -> dict:
     for loan in db.query(Loan).all():
         if loan.last_reminded == iso:
             continue
-        due = date.fromisoformat(loan.due_date)
         owed = outstanding(loan, today)
+        # An EMI loan is reminded about its next open instalment, not only
+        # about its final date.
+        due = date.fromisoformat(owed["next_due_date"] or loan.due_date)
         if owed["total_due"] <= 0.01 or not _is_reminder_day(due, today):
             continue
         try:

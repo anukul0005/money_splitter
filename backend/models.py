@@ -541,6 +541,11 @@ class Loan(Base):
     # ISO date the last reminder email/push went out - guards a retried or
     # doubled cron ping from reminding the borrower twice in one day.
     last_reminded = Column(String(10), nullable=True)
+    # Optional EMI plan: JSON [{"pct": <% of principal>, "date": "YYYY-MM-DD"}, ...]
+    # and, for an interest-bearing one, the day of each month overdue
+    # instalments are charged interest - see loan_calc._outstanding_emi.
+    emi_plan = Column(Text, nullable=True)
+    interest_day = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     payments = relationship("LoanPayment", back_populates="loan",

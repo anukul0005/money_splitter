@@ -7,6 +7,7 @@ frontend adds to the group-derived ones.
 """
 from __future__ import annotations
 
+import json
 from datetime import date
 from typing import Optional
 
@@ -16,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from auth import current_user, is_member
 from database import get_db
-from loan_calc import outstanding
+from loan_calc import emi_plan, outstanding
 from models import Group, Loan, LoanPayment, RecurringBill, RecurringCharge, User
 
 router = APIRouter(prefix="/loans", tags=["loans"])
@@ -57,14 +58,21 @@ def _same(a: str, b: str) -> bool:
     return a.strip().lower() == b.strip().lower()
 
 
+class EmiItem(BaseModel):
+    pct: float                 # share of the principal, in percent
+    date: str                  # when this instalment is due
+
+
 class LoanCreate(BaseModel):
     role: str                  # "lent" (caller is the lender) | "borrowed"
     other: str
     amount: float
-    start_date: Optional[str] = None
-    due_date: str
+    start_date: Optional[str] = None      # the date the loan was taken - optional
+    due_date: Optional[str] = None        # required unless there's an EMI plan
     interest: bool = False
     note: Optional[str] = None
+    emi: Optional[list[EmiItem]] = None   # optional payment plan
+    interest_day: Optional[int] = None    # day of month interest is charged on overdue EMIs
 
     @field_validator("amount")
     @classmethod
@@ -120,7 +128,8 @@ def _loan_out(loan: Loan) -> dict:
         "id": loan.id, "lender": loan.lender, "borrower": loan.borrower,
         "principal": loan.principal, "has_interest": loan.has_interest,
         "rate_pct": loan.rate_pct, "start_date": loan.start_date,
-        "due_date": loan.due_date, "note": loan.note, **o,
+        "due_date": loan.due_date, "note": loan.note,
+        "interest_day": loan.interest_day, "emi": bool(emi_plan(loan)), **o,
         "paid": o["total_due"] <= 0.01,
         "payments": [{"id": p.id, "amount": p.amount, "date": p.date} for p in loan.payments],
     }
@@ -184,12 +193,32 @@ def create_loan(payload: LoanCreate, db: Session = Depends(get_db),
     other = _resolve_person(db, people, payload.other)
     if not other or _same(other, caller.name):
         raise HTTPException(400, "Pick someone you share a group with, or type a new name")
-    start = _iso(payload.start_date or date.today().isoformat(), "Start date")
-    due = _iso(payload.due_date, "Due date")
+    start = _iso(payload.start_date or date.today().isoformat(), "Loan taken date")
+
+    plan_json = None
+    if payload.emi:
+        plan = []
+        for item in payload.emi:
+            if item.pct <= 0:
+                raise HTTPException(400, "Each EMI share must be above 0%")
+            plan.append({"pct": round(item.pct, 4), "date": _iso(item.date, "EMI date")})
+        if abs(sum(x["pct"] for x in plan) - 100) > 0.01:
+            raise HTTPException(400, "EMI shares must add up to 100% of the principal")
+        plan.sort(key=lambda x: x["date"])
+        plan_json = json.dumps(plan)
+        due = plan[-1]["date"]     # the loan is due when its last EMI is
+    elif payload.due_date:
+        due = _iso(payload.due_date, "Due date")
+    else:
+        raise HTTPException(400, "Give a due date, or an EMI plan")
+
+    if payload.interest_day is not None and not 1 <= payload.interest_day <= 28:
+        raise HTTPException(400, "Interest charge day must be 1-28")
     lender, borrower = (caller.name, other) if payload.role == "lent" else (other, caller.name)
     loan = Loan(lender=lender, borrower=borrower, principal=payload.amount,
                 has_interest=payload.interest, rate_pct=3.6, start_date=start,
-                due_date=due, note=payload.note, created_by=caller.name)
+                due_date=due, note=payload.note, created_by=caller.name,
+                emi_plan=plan_json, interest_day=payload.interest_day if plan_json else None)
     db.add(loan)
     db.commit()
     db.refresh(loan)

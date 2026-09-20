@@ -26,7 +26,9 @@ export default function Loans() {
   const [error, setError]     = useState('')
   const [showForm, setShowForm] = useState(false)
 
-  const [loan, setLoan] = useState({ role: 'lent', other: '', amount: '', due_date: '', interest: false, note: '' })
+  const blankLoan = { role: 'lent', other: '', amount: '', start_date: '', due_date: '', interest: false, note: '',
+                      emi: false, emiCount: 3, emiFirst: '', emiRows: [], interest_day: '' }
+  const [loan, setLoan] = useState(blankLoan)
   const [bill, setBill] = useState({ title: '', amount: '', members: [], day_of_month: 1 })
 
   const load = () => getLoans().then((r) => setData(r.data)).catch(() => setError('Could not load.'))
@@ -42,12 +44,44 @@ export default function Loans() {
     catch (e) { setError(e.response?.data?.detail || 'Something went wrong.') }
   }
 
+  // "N equal EMIs, one a month from <first date>" - a starting point the
+  // rows below stay editable from (shares are % of the principal).
+  const addMonthsIso = (iso, n) => {
+    const d = new Date(iso + 'T00:00:00')
+    const day = d.getDate()
+    d.setDate(1); d.setMonth(d.getMonth() + n)
+    d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()))
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+  const buildRows = (count, first) => {
+    const n = Math.max(1, Math.min(60, Number(count) || 1))
+    const each = Math.floor((100 / n) * 100) / 100
+    return Array.from({ length: n }, (_, i) => ({
+      pct: i === n - 1 ? String(Math.round((100 - each * (n - 1)) * 100) / 100) : String(each),
+      date: first ? addMonthsIso(first, i) : '',
+    }))
+  }
+  const emiSum = loan.emiRows.reduce((s, r) => s + (parseFloat(r.pct) || 0), 0)
+
   const submitLoan = (e) => {
     e.preventDefault()
-    if (!loan.other || !loan.amount || !loan.due_date) return setError('Person, amount and due date are required.')
+    if (!loan.other || !loan.amount) return setError('Person and amount are required.')
+    if (!loan.emi && !loan.due_date) return setError('Give a due date, or convert it to EMIs.')
+    if (loan.emi) {
+      if (loan.emiRows.length === 0 || loan.emiRows.some((r) => !r.date || !(parseFloat(r.pct) > 0)))
+        return setError('Each EMI needs a share and a date.')
+      if (Math.abs(emiSum - 100) > 0.01) return setError('EMI shares must add up to 100%.')
+    }
     run(async () => {
-      await createLoan({ ...loan, amount: parseFloat(loan.amount), note: loan.note || null })
-      setLoan({ role: 'lent', other: '', amount: '', due_date: '', interest: false, note: '' })
+      await createLoan({
+        role: loan.role, other: loan.other, amount: parseFloat(loan.amount),
+        start_date: loan.start_date || null,
+        due_date: loan.emi ? null : loan.due_date,
+        interest: loan.interest, note: loan.note || null,
+        emi: loan.emi ? loan.emiRows.map((r) => ({ pct: parseFloat(r.pct), date: r.date })) : null,
+        interest_day: loan.emi && loan.interest && loan.interest_day ? Number(loan.interest_day) : null,
+      })
+      setLoan(blankLoan)
       setShowForm(false)
     })
   }
@@ -129,19 +163,77 @@ export default function Loans() {
                   onChange={(e) => setLoan((f) => ({ ...f, amount: e.target.value }))} />
               </div>
               <div className="flex-1">
+                <label className="label">Loan taken on (optional)</label>
+                <input className="input" type="date" value={loan.start_date}
+                  onChange={(e) => setLoan((f) => ({ ...f, start_date: e.target.value }))} />
+              </div>
+            </div>
+
+            {!loan.emi && (
+              <div>
                 <label className="label">Due date *</label>
                 <input className="input" type="date" value={loan.due_date}
                   onChange={(e) => setLoan((f) => ({ ...f, due_date: e.target.value }))} />
               </div>
-            </div>
+            )}
+
+            <label className="flex items-start gap-2 text-xs text-gray-600">
+              <input type="checkbox" checked={loan.emi} className="mt-0.5"
+                onChange={(e) => setLoan((f) => ({ ...f, emi: e.target.checked, emiRows: e.target.checked ? buildRows(f.emiCount, f.emiFirst) : [] }))} />
+              <span>Convert to EMIs — repay in instalments, each a share of the principal</span>
+            </label>
+
+            {loan.emi && (
+              <div className="bg-amber-50 border border-amber-200 rounded-md p-3 space-y-2">
+                <div className="flex gap-2">
+                  <div className="w-24">
+                    <label className="label">No. of EMIs</label>
+                    <input className="input" type="number" min="1" max="60" value={loan.emiCount}
+                      onChange={(e) => setLoan((f) => ({ ...f, emiCount: e.target.value, emiRows: buildRows(e.target.value, f.emiFirst) }))} />
+                  </div>
+                  <div className="flex-1">
+                    <label className="label">First EMI date</label>
+                    <input className="input" type="date" value={loan.emiFirst}
+                      onChange={(e) => setLoan((f) => ({ ...f, emiFirst: e.target.value, emiRows: buildRows(f.emiCount, e.target.value) }))} />
+                  </div>
+                </div>
+                {loan.emiRows.map((r, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-gray-500 w-8">#{i + 1}</span>
+                    <div className="relative w-24">
+                      <input className="input pr-6 text-right" type="number" min="0" step="any" value={r.pct}
+                        onChange={(e) => setLoan((f) => ({ ...f, emiRows: f.emiRows.map((x, j) => j === i ? { ...x, pct: e.target.value } : x) }))} />
+                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">%</span>
+                    </div>
+                    <input className="input flex-1" type="date" value={r.date}
+                      onChange={(e) => setLoan((f) => ({ ...f, emiRows: f.emiRows.map((x, j) => j === i ? { ...x, date: e.target.value } : x) }))} />
+                  </div>
+                ))}
+                <p className={`text-xs font-bold ${Math.abs(emiSum - 100) <= 0.01 ? 'text-green-700' : 'text-red-600'}`}>
+                  Total {Math.round(emiSum * 100) / 100}% {Math.abs(emiSum - 100) <= 0.01 ? '✓' : '— must be 100%'}
+                </p>
+              </div>
+            )}
+
             <label className="flex items-start gap-2 text-xs text-gray-600">
               <input type="checkbox" checked={loan.interest} className="mt-0.5"
                 onChange={(e) => setLoan((f) => ({ ...f, interest: e.target.checked }))} />
               <span>
-                Charge interest if it's late — nothing if it's repaid by the due date,
-                then 3.6% a month, compounding, for each month it stays unpaid.
+                {loan.emi
+                  ? 'Charge interest on any EMI that passes its date unpaid: 3.6% a month (x1.036), compounding, on what is still unpaid of it.'
+                  : 'Charge interest if it is late: nothing if repaid by the due date, then 3.6% a month, compounding, for each month it stays unpaid.'}
               </span>
             </label>
+
+            {loan.emi && loan.interest && (
+              <div>
+                <label className="label">Interest charge day (of each month)</label>
+                <input className="input" type="number" min="1" max="28" placeholder="e.g. 5 (defaults to the first EMI's day)"
+                  value={loan.interest_day}
+                  onChange={(e) => setLoan((f) => ({ ...f, interest_day: e.target.value }))} />
+              </div>
+            )}
+
             <div>
               <label className="label">Note (optional)</label>
               <input className="input" value={loan.note} onChange={(e) => setLoan((f) => ({ ...f, note: e.target.value }))} />
@@ -208,7 +300,7 @@ export default function Loans() {
                       {iOwe ? `You owe ${other}` : `${other} owes you`}
                     </p>
                     <p className="text-xs text-gray-400 mt-0.5">
-                      Lent {INR(l.principal)} · due {l.due_date}
+                      Lent {INR(l.principal)}{l.start_date ? ` on ${l.start_date}` : ''} · {l.emi ? `last EMI ${l.due_date}` : `due ${l.due_date}`}
                       {l.has_interest ? ' · interest if late' : ' · no interest'}
                     </p>
                     {l.note && <p className="text-xs text-gray-500 mt-0.5">{l.note}</p>}
@@ -221,6 +313,18 @@ export default function Loans() {
                   <p className="text-xs text-amber-700 mt-1">
                     Includes {INR(l.interest)} interest · {l.months_overdue} month{l.months_overdue !== 1 ? 's' : ''} overdue
                   </p>
+                )}
+                {l.installments?.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {l.installments.map((i, k) => (
+                      <div key={k} className="flex items-center justify-between text-[11px]">
+                        <span className="text-gray-500">EMI {k + 1} · {i.pct}% · {i.date}</span>
+                        <span className={i.paid ? 'text-green-600 font-bold' : i.overdue ? 'text-red-600 font-bold' : 'text-gray-700 font-bold'}>
+                          {i.paid ? 'Paid ✓' : `${INR(i.balance)}${i.overdue ? ' overdue' : ''}`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 )}
                 {l.payments.length > 0 && (
                   <p className="text-[11px] text-gray-400 mt-1">
