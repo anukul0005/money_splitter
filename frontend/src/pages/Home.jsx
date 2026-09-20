@@ -150,8 +150,6 @@ export default function Home() {
   const namesUnion = (a, b) => new Set([...a, ...b].map((n) => n.toLowerCase())).size
   const owePeople  = namesUnion(friends.filter((f) => owes(f.net)).map((f) => f.name), lt?.owe_people ?? [])
   const owedPeople = namesUnion(friends.filter((f) => owed(f.net)).map((f) => f.name), lt?.owed_people ?? [])
-  const openLoans  = (loans?.loans ?? []).filter((l) => !l.paid).length
-  const activeBills = (loans?.bills ?? []).length
 
   // Every group is linked to a master group named after its members — even
   // a single-member one, so every one of a person's own personal trackers
@@ -259,7 +257,7 @@ export default function Home() {
 
         {/* Quick actions — available to everyone, not just admins: anyone can
             start a group, and they're a member of whatever they create. */}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-3 gap-3">
             <button className="btn-primary py-2.5 px-3 text-xs" onClick={() => nav('/groups/new')}>
               + New Group
             </button>
@@ -279,32 +277,13 @@ export default function Home() {
             >
               Monthly
           </button>
+            <button
+              className="bg-amber-100 border border-amber-300 rounded-md text-amber-800 hover:bg-amber-200 active:scale-95 font-bold px-3 py-2.5 transition-all duration-150 w-full text-center text-xs"
+              onClick={() => nav('/loans')}
+            >
+              Loans
+            </button>
         </div>
-
-        {/* Loans, borrowings and recurring shared bills */}
-        <button
-          onClick={() => nav('/loans')}
-          className="card w-full text-left flex items-center gap-3 active:scale-[0.98] transition-transform border-brand-300 bg-brand-50/40"
-        >
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Loans & bills</p>
-            <p className="text-sm font-bold text-gray-900 mt-1">
-              {openLoans + activeBills === 0
-                ? 'Track loans and shared monthly bills'
-                : `${openLoans} open loan${openLoans !== 1 ? 's' : ''} · ${activeBills} recurring bill${activeBills !== 1 ? 's' : ''}`}
-            </p>
-            {lt && (lt.owe > 0 || lt.owed > 0) && (
-              <p className="text-xs text-gray-500 mt-0.5">
-                {lt.owe > 0 && <span className="text-red-600 font-semibold">You owe {INR(lt.owe)}</span>}
-                {lt.owe > 0 && lt.owed > 0 && ' · '}
-                {lt.owed > 0 && <span className="text-green-600 font-semibold">Owed to you {INR(lt.owed)}</span>}
-              </p>
-            )}
-          </div>
-          <svg className="w-3.5 h-3.5 text-gray-300 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-          </svg>
-        </button>
 
         {/* Groups (every group linked to a master group by members; unsettled first, settled behind a toggle) */}
         {(allMasters.length > 0 || soloGroups.length > 0) && (
