@@ -27,7 +27,7 @@ export default function Loans() {
   const [showForm, setShowForm] = useState(false)
 
   const blankLoan = { role: 'lent', other: '', amount: '', start_date: '', due_date: '', interest: false, note: '',
-                      emi: false, emiCount: 3, emiFirst: '', emiRows: [], interest_day: '' }
+                      emi: false, emiCount: 3, emiFirst: '', emiRows: [] }
   const [loan, setLoan] = useState(blankLoan)
   const [bill, setBill] = useState({ title: '', amount: '', members: [], day_of_month: 1 })
 
@@ -79,7 +79,6 @@ export default function Loans() {
         due_date: loan.emi ? null : loan.due_date,
         interest: loan.interest, note: loan.note || null,
         emi: loan.emi ? loan.emiRows.map((r) => ({ pct: parseFloat(r.pct), date: r.date })) : null,
-        interest_day: loan.emi && loan.interest && loan.interest_day ? Number(loan.interest_day) : null,
       })
       setLoan(blankLoan)
       setShowForm(false)
@@ -220,19 +219,10 @@ export default function Loans() {
                 onChange={(e) => setLoan((f) => ({ ...f, interest: e.target.checked }))} />
               <span>
                 {loan.emi
-                  ? 'Charge interest on any EMI that passes its date unpaid: 3.6% a month (x1.036), compounding, on what is still unpaid of it.'
+                  ? 'Charge interest on any EMI left unpaid after its date: 3.6% a month (x1.036), compounding, for every full month since that EMI date.'
                   : 'Charge interest if it is late: nothing if repaid by the due date, then 3.6% a month, compounding, for each month it stays unpaid.'}
               </span>
             </label>
-
-            {loan.emi && loan.interest && (
-              <div>
-                <label className="label">Interest charge day (of each month)</label>
-                <input className="input" type="number" min="1" max="28" placeholder="e.g. 5 (defaults to the first EMI's day)"
-                  value={loan.interest_day}
-                  onChange={(e) => setLoan((f) => ({ ...f, interest_day: e.target.value }))} />
-              </div>
-            )}
 
             <div>
               <label className="label">Note (optional)</label>

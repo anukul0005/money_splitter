@@ -41,9 +41,8 @@ def _outstanding_emi(loan, plan: list[dict], as_of: date) -> dict:
     """An EMI loan: the principal is split into instalments (each a % of
     it, each with its own date). Repayments clear the oldest open
     instalment first. Once an instalment's date has passed with money
-    still owing on it, that balance grows by rate_pct on each monthly
-    charge day (`interest_day`), compounding - only if the loan has
-    interest at all.
+    still owing on it, that balance grows by rate_pct for every full month
+    since its date, compounding - only if the loan has interest at all.
     """
     principal = float(loan.principal)
     rate = float(loan.rate_pct) / 100.0
@@ -54,19 +53,22 @@ def _outstanding_emi(loan, plan: list[dict], as_of: date) -> dict:
     pays = sorted(((_d(p.date), float(p.amount)) for p in loan.payments), key=lambda x: x[0])
     paid_total = sum(a for _, a in pays)
 
-    events: list[tuple[date, int, float]] = [(d, 0, a) for d, a in pays if d <= as_of]
-    charges = 0
+    # Payments, and - for an interest-bearing loan - one charge per EMI on
+    # each monthly anniversary of THAT EMI's own date (its date + 1 month,
+    # + 2 months, ...). So an EMI that fell due earlier has been charged
+    # more times than a later one, and a loan taken earlier, being due
+    # earlier, costs more than one taken later.
+    events: list[tuple[date, int, int, float]] = [(d, 0, -1, a) for d, a in pays if d <= as_of]
     if loan.has_interest:
-        day = int(getattr(loan, "interest_day", None) or insts[0]["date"].day)
-        m = insts[0]["date"].replace(day=1)
-        while m <= as_of:
-            t = date(m.year, m.month, min(day, calendar.monthrange(m.year, m.month)[1]))
-            if insts[0]["date"] < t <= as_of:
-                events.append((t, 1, 0.0))
-            m = add_months(m, 1)
+        for idx, inst in enumerate(insts):
+            k = 1
+            while add_months(inst["date"], k) <= as_of:
+                events.append((add_months(inst["date"], k), 1, idx, 0.0))
+                k += 1
     events.sort(key=lambda e: (e[0], e[1]))
 
-    for when, kind, amt in events:
+    charged = [0] * len(insts)
+    for when, kind, idx, amt in events:
         if kind == 0:
             left = amt
             for i in insts:
@@ -75,13 +77,10 @@ def _outstanding_emi(loan, plan: list[dict], as_of: date) -> dict:
                 left -= take
                 if left <= 0:
                     break
-        else:
-            hit = False
-            for i in insts:
-                if i["date"] < when and i["balance"] > 0.005:
-                    i["balance"] *= (1 + rate)
-                    hit = True
-            charges += 1 if hit else 0
+        elif insts[idx]["balance"] > 0.005:
+            insts[idx]["balance"] *= (1 + rate)
+            charged[idx] += 1
+    charges = max(charged) if charged else 0
 
     total_due = max(round(sum(i["balance"] for i in insts), 2), 0.0)
     remaining_principal = max(round(principal - paid_total, 2), 0.0)
