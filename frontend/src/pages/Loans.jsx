@@ -102,13 +102,6 @@ export default function Loans() {
     run(() => repayLoan(l.id, { amount: amt }))
   }
 
-  const repayInstallment = (l, i) => {
-    const raw = window.prompt(`Amount paid for this EMI (outstanding ${INR(i.balance)}):`, String(i.balance))
-    const amt = parseFloat(raw)
-    if (!raw || isNaN(amt) || amt <= 0) return
-    run(() => repayLoan(l.id, { amount: amt }))
-  }
-
   const repayBillMember = (billId, member, due) => {
     const raw = window.prompt(`Amount paid back by ${member} (outstanding ${INR(due)}):`, String(due))
     const amt = parseFloat(raw)
@@ -328,18 +321,10 @@ export default function Loans() {
                 {l.installments?.length > 0 && (
                   <div className="mt-2 space-y-1">
                     {l.installments.map((i, k) => (
-                      <div key={k} className="flex items-center justify-between text-[11px] gap-2">
+                      <div key={k} className="flex items-center justify-between text-[11px]">
                         <span className="text-gray-500">EMI {k + 1} · {i.pct}% · {i.date}</span>
-                        <span className="flex items-center gap-2">
-                          <span className={i.paid ? 'text-green-600 font-bold' : i.overdue ? 'text-red-600 font-bold' : 'text-gray-700 font-bold'}>
-                            {i.paid ? 'Paid ✓' : `${INR(i.balance)}${i.overdue ? ' overdue' : ''}`}
-                          </span>
-                          {!i.paid && (
-                            <button onClick={() => repayInstallment(l, i)}
-                              className="px-2 py-0.5 font-bold border rounded bg-amber-50 text-amber-800 border-amber-300">
-                              Record EMI
-                            </button>
-                          )}
+                        <span className={i.paid ? 'text-green-600 font-bold' : i.overdue ? 'text-red-600 font-bold' : 'text-gray-700 font-bold'}>
+                          {i.paid ? 'Paid ✓' : `${INR(i.balance)}${i.overdue ? ' overdue' : ''}`}
                         </span>
                       </div>
                     ))}
