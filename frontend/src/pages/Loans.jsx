@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   getLoans, createLoan, repayLoan, deleteLoan,
-  createBill, stopBill, repayBill, getFriends,
+  createBill, stopBill, repayBill, updateBillDay, getFriends,
 } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PeoplePicker from '../components/PeoplePicker'
@@ -107,6 +107,13 @@ export default function Loans() {
     const amt = parseFloat(raw)
     if (!raw || isNaN(amt) || amt <= 0) return
     run(() => repayBill(billId, { member, amount: amt }))
+  }
+
+  const editBillDay = (bill) => {
+    const raw = window.prompt('Bill on which day of the month? (1-28)', String(bill.day_of_month))
+    const day = parseInt(raw, 10)
+    if (!raw || isNaN(day) || day < 1 || day > 28) return
+    run(() => updateBillDay(bill.id, { day_of_month: day }))
   }
 
   if (!data) return <LoadingSpinner />
@@ -361,7 +368,14 @@ export default function Loans() {
               <div key={b.id} className="space-y-2">
                 <div className="flex items-center justify-between px-1">
                   <p className="text-xs font-bold text-gray-500">
-                    {b.title} · {INR(share)} each · billed on the {b.day_of_month}{b.day_of_month === 1 ? 'st' : 'th'}
+                    {b.title} · {INR(share)} each · billed on the{' '}
+                    {iPay ? (
+                      <button onClick={() => editBillDay(b)} className="underline decoration-dotted">
+                        {b.day_of_month}{b.day_of_month === 1 ? 'st' : 'th'}
+                      </button>
+                    ) : (
+                      <>{b.day_of_month}{b.day_of_month === 1 ? 'st' : 'th'}</>
+                    )}
                   </p>
                   {iPay && (
                     <button onClick={() => confirm('Stop billing this every month?') && run(() => stopBill(b.id))}

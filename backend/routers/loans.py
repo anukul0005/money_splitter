@@ -127,6 +127,17 @@ class BillRepayIn(BaseModel):
         return round(v, 2)
 
 
+class BillDayIn(BaseModel):
+    day_of_month: int
+
+    @field_validator("day_of_month")
+    @classmethod
+    def in_range(cls, v):
+        if not 1 <= v <= 28:
+            raise ValueError("Day of month must be 1-28")
+        return v
+
+
 def _iso(s: str, what: str) -> str:
     try:
         return date.fromisoformat(s).isoformat()
@@ -323,6 +334,22 @@ def repay_bill(bill_id: int, payload: BillRepayIn, db: Session = Depends(get_db)
         c.paid = True
         c.paid_on = today
         remaining -= c.share
+    db.commit()
+    db.refresh(bill)
+    return _bill_out(bill)
+
+
+@router.patch("/bills/{bill_id}", response_model=dict)
+def update_bill_day(bill_id: int, payload: BillDayIn, db: Session = Depends(get_db),
+                    caller: User = Depends(current_user)):
+    """Move a bill's billing day - e.g. to match when the subscription
+    actually renews, so run_bills (see loan_jobs.py) fires the monthly
+    charge, and the notice email/push that comes with it, on the right
+    day instead of whatever day it was first set up on."""
+    bill = db.query(RecurringBill).filter(RecurringBill.id == bill_id).first()
+    if not bill or not _same(bill.payer, caller.name):
+        raise HTTPException(404, "Bill not found")
+    bill.day_of_month = payload.day_of_month
     db.commit()
     db.refresh(bill)
     return _bill_out(bill)
