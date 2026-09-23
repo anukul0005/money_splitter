@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   getLoans, createLoan, repayLoan, deleteLoan,
-  createBill, markChargePaid, stopBill, getFriends,
+  createBill, stopBill, repayBill, getFriends,
 } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PeoplePicker from '../components/PeoplePicker'
@@ -100,6 +100,13 @@ export default function Loans() {
     const amt = parseFloat(raw)
     if (!raw || isNaN(amt) || amt <= 0) return
     run(() => repayLoan(l.id, { amount: amt }))
+  }
+
+  const repayBillMember = (billId, member, due) => {
+    const raw = window.prompt(`Amount paid back by ${member} (outstanding ${INR(due)}):`, String(due))
+    const amt = parseFloat(raw)
+    if (!raw || isNaN(amt) || amt <= 0) return
+    run(() => repayBill(billId, { member, amount: amt }))
   }
 
   if (!data) return <LoadingSpinner />
@@ -345,44 +352,62 @@ export default function Loans() {
           ) : data.bills.map((b) => {
             const iPay = same(b.payer, me)
             const share = b.amount / b.members.length
+            // One card per debtor (like a loan card) - each owes their own
+            // running total across every unpaid period of this bill.
+            const debtors = iPay
+              ? [...new Set(b.charges.map((c) => c.member))]
+              : [me]
             return (
-              <div key={b.id} className="card">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-bold text-gray-900">{b.title}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      {INR(b.amount)} split {b.members.length} ways = {INR(share)} each ·
-                      billed on the {b.day_of_month}{b.day_of_month === 1 ? 'st' : 'th'} · paid by {iPay ? 'you' : b.payer}
-                    </p>
-                    <p className="text-[11px] text-gray-400">{b.members.join(', ')}</p>
-                  </div>
+              <div key={b.id} className="space-y-2">
+                <div className="flex items-center justify-between px-1">
+                  <p className="text-xs font-bold text-gray-500">
+                    {b.title} · {INR(share)} each · billed on the {b.day_of_month}{b.day_of_month === 1 ? 'st' : 'th'}
+                  </p>
                   {iPay && (
                     <button onClick={() => confirm('Stop billing this every month?') && run(() => stopBill(b.id))}
                       className="text-xs font-bold text-gray-400 hover:text-red-500 shrink-0">Stop</button>
                   )}
                 </div>
-                {b.charges.length > 0 && (
-                  <div className="mt-3 space-y-1.5 border-t border-amber-100 pt-2">
-                    {b.charges.slice(0, 12).map((c) => (
-                      <div key={c.id} className="flex items-center justify-between text-xs gap-2">
-                        <span className="text-gray-600">{c.period} · {c.member}</span>
-                        <span className="flex items-center gap-2">
-                          <span className="font-bold text-gray-800">{INR(c.share)}</span>
-                          {iPay ? (
-                            <button onClick={() => run(() => markChargePaid(c.id))}
-                              className={`px-2 py-0.5 font-bold border rounded ${c.paid ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-800 border-amber-300'}`}>
-                              {c.paid ? 'Paid ✓' : 'Mark paid'}
-                            </button>
-                          ) : (
-                            <span className={c.paid ? 'text-green-600 font-bold' : 'text-red-500 font-bold'}>
-                              {c.paid ? 'Paid' : 'Due'}
-                            </span>
-                          )}
-                        </span>
+                {debtors.map((m) => {
+                  const charges = b.charges.filter((c) => same(c.member, m))
+                  const due = charges.filter((c) => !c.paid).reduce((s, c) => s + c.share, 0)
+                  const paidOff = due <= 0.01
+                  return (
+                    <div key={m} className={`card ${paidOff ? 'opacity-60' : ''}`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-bold text-gray-900">
+                            {iPay ? `${m} owes you` : `You owe ${b.payer}`}
+                          </p>
+                          <p className="text-xs text-gray-400 mt-0.5">{b.title} · {INR(share)}/month</p>
+                        </div>
+                        <p className={`text-base font-black shrink-0 ${paidOff ? 'text-gray-400' : iPay ? 'text-green-600' : 'text-red-600'}`}>
+                          {paidOff ? 'Paid' : INR(due)}
+                        </p>
                       </div>
-                    ))}
-                  </div>
-                )}
+                      {charges.length > 0 && (
+                        <div className="mt-2 space-y-1">
+                          {charges.slice(0, 12).map((c) => (
+                            <div key={c.id} className="flex items-center justify-between text-[11px]">
+                              <span className="text-gray-500">{c.period}</span>
+                              <span className={c.paid ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}>
+                                {c.paid ? 'Paid ✓' : `${INR(c.share)} due`}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {iPay && !paidOff && (
+                        <div className="flex gap-2 mt-3">
+                          <button onClick={() => repayBillMember(b.id, m, due)}
+                            className="flex-1 py-2 text-xs font-bold bg-amber-100 border border-amber-300 text-amber-800 rounded-md">
+                            Record repayment
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             )
           })

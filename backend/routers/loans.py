@@ -115,6 +115,18 @@ class BillCreate(BaseModel):
         return round(v, 2)
 
 
+class BillRepayIn(BaseModel):
+    member: str
+    amount: float
+
+    @field_validator("amount")
+    @classmethod
+    def positive(cls, v):
+        if v <= 0:
+            raise ValueError("amount must be positive")
+        return round(v, 2)
+
+
 def _iso(s: str, what: str) -> str:
     try:
         return date.fromisoformat(s).isoformat()
@@ -287,6 +299,33 @@ def mark_charge_paid(charge_id: int, db: Session = Depends(get_db),
     c.paid_on = date.today().isoformat() if c.paid else None
     db.commit()
     return {"id": c.id, "paid": c.paid, "paid_on": c.paid_on}
+
+
+@router.post("/bills/{bill_id}/repay", response_model=dict)
+def repay_bill(bill_id: int, payload: BillRepayIn, db: Session = Depends(get_db),
+               caller: User = Depends(current_user)):
+    """A single lump repayment from one debtor - like Loans' "Record
+    repayment", clearing their oldest unpaid periods first rather than
+    ticking each one by hand. Only the payer can record it, same rule as
+    marking a single charge paid."""
+    bill = db.query(RecurringBill).filter(RecurringBill.id == bill_id).first()
+    if not bill or not _same(bill.payer, caller.name):
+        raise HTTPException(404, "Bill not found")
+    charges = sorted(
+        (c for c in bill.charges if _same(c.member, payload.member) and not c.paid),
+        key=lambda c: c.period,
+    )
+    remaining = payload.amount
+    today = date.today().isoformat()
+    for c in charges:
+        if remaining + 0.01 < c.share:
+            break
+        c.paid = True
+        c.paid_on = today
+        remaining -= c.share
+    db.commit()
+    db.refresh(bill)
+    return _bill_out(bill)
 
 
 @router.delete("/bills/{bill_id}", status_code=204)

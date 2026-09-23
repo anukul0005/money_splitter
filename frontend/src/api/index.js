@@ -87,6 +87,7 @@ export const repayLoan         = (id, data)  => api.post(`/loans/${id}/payments`
 export const deleteLoan        = (id)        => api.delete(`/loans/${id}`)
 export const createBill        = (data)      => api.post('/loans/bills', data)
 export const markChargePaid    = (id)        => api.post(`/loans/bills/charges/${id}/paid`)
+export const repayBill         = (id, data)  => api.post(`/loans/bills/${id}/repay`, data)
 export const stopBill          = (id)        => api.delete(`/loans/bills/${id}`)
 // ── Push notifications ───────────────────────────────────────────────────────
 export const getVapidPublicKey  = ()         => api.get('/push/vapid-public-key')
