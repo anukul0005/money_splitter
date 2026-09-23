@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from auth import current_user, is_member
 from database import get_db
+from emailer import send_notice
 from loan_calc import emi_plan, outstanding
 from models import Group, Loan, LoanPayment, RecurringBill, RecurringCharge, User
 
@@ -258,12 +259,26 @@ def _loan_for(db: Session, loan_id: int, caller: User) -> Loan:
 @router.post("/{loan_id}/payments", response_model=dict)
 def repay(loan_id: int, payload: RepayIn, db: Session = Depends(get_db),
           caller: User = Depends(current_user)):
+    """Either side can record a repayment (whoever noticed it happened) -
+    clears the oldest open EMI first, see loan_calc.outstanding. The other
+    party is told, the same way a recurring bill's charge tells its
+    members - a repayment isn't visible to them otherwise."""
     loan = _loan_for(db, loan_id, caller)
     when = _iso(payload.date or date.today().isoformat(), "Date")
     db.add(LoanPayment(loan_id=loan.id, amount=payload.amount, date=when))
     db.commit()
     db.refresh(loan)
-    return _loan_out(loan)
+    row = _loan_out(loan)
+    other = loan.lender if _same(loan.borrower, caller.name) else loan.borrower
+    left = row["total_due"]
+    send_notice(
+        db, other, f"{caller.name} recorded a ₹{payload.amount:,.2f} repayment",
+        [f"{caller.name} marked ₹{payload.amount:,.2f} as repaid on the loan between "
+         f"{loan.lender} and {loan.borrower}. "
+         + (f"₹{left:,.2f} is still owed." if left > 0.01 else "It's fully paid off.")],
+        f"₹{payload.amount:,.2f} repaid — {'fully paid off' if left <= 0.01 else f'₹{left:,.2f} left'}",
+    )
+    return row
 
 
 @router.delete("/{loan_id}", status_code=204)
