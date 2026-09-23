@@ -332,10 +332,15 @@ def repay_bill(bill_id: int, payload: BillRepayIn, db: Session = Depends(get_db)
                caller: User = Depends(current_user)):
     """A single lump repayment from one debtor - like Loans' "Record
     repayment", clearing their oldest unpaid periods first rather than
-    ticking each one by hand. Only the payer can record it, same rule as
-    marking a single charge paid."""
+    ticking each one by hand. Either the payer (recording someone else's
+    payment) or the debtor themselves (clearing their own dues) can do
+    this - like a loan, either side of the debt can report it. Every
+    member of the bill is then told, not just the two people involved,
+    the same way a loan repayment tells the other party."""
     bill = db.query(RecurringBill).filter(RecurringBill.id == bill_id).first()
-    if not bill or not _same(bill.payer, caller.name):
+    if not bill:
+        raise HTTPException(404, "Bill not found")
+    if not (_same(bill.payer, caller.name) or _same(payload.member, caller.name)):
         raise HTTPException(404, "Bill not found")
     charges = sorted(
         (c for c in bill.charges if _same(c.member, payload.member) and not c.paid),
@@ -343,14 +348,25 @@ def repay_bill(bill_id: int, payload: BillRepayIn, db: Session = Depends(get_db)
     )
     remaining = payload.amount
     today = date.today().isoformat()
+    cleared = 0.0
     for c in charges:
         if remaining + 0.01 < c.share:
             break
         c.paid = True
         c.paid_on = today
         remaining -= c.share
+        cleared += c.share
     db.commit()
     db.refresh(bill)
+    if cleared > 0:
+        row = _bill_out(bill)
+        for m in [x for x in row["members"] if not _same(x, caller.name)]:
+            send_notice(
+                db, m, f"{payload.member} paid ₹{cleared:,.2f} on {bill.title}",
+                [f"{payload.member} paid back ₹{cleared:,.2f} of {bill.title} "
+                 f"(recorded by {caller.name})."],
+                f"{payload.member} paid ₹{cleared:,.2f} on {bill.title}",
+            )
     return _bill_out(bill)
 
 

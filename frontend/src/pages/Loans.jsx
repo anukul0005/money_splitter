@@ -414,7 +414,7 @@ export default function Loans() {
                           ))}
                         </div>
                       )}
-                      {iPay && !notBilledYet && !paidOff && (
+                      {!notBilledYet && !paidOff && (
                         <div className="flex gap-2 mt-3">
                           <button onClick={() => repayBillMember(b.id, m, due)}
                             className="flex-1 py-2 text-xs font-bold bg-amber-100 border border-amber-300 text-amber-800 rounded-md">
