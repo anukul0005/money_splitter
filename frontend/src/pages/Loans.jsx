@@ -360,9 +360,11 @@ export default function Loans() {
             const iPay = same(b.payer, me)
             const share = b.amount / b.members.length
             // One card per debtor (like a loan card) - each owes their own
-            // running total across every unpaid period of this bill.
+            // running total across every unpaid period of this bill. Every
+            // other member gets a card even before their first charge
+            // exists (e.g. a bill day that hasn't come around yet).
             const debtors = iPay
-              ? [...new Set(b.charges.map((c) => c.member))]
+              ? [...new Set([...b.members.filter((m) => !same(m, me)), ...b.charges.map((c) => c.member)])]
               : [me]
             return (
               <div key={b.id} className="space-y-2">
@@ -385,7 +387,8 @@ export default function Loans() {
                 {debtors.map((m) => {
                   const charges = b.charges.filter((c) => same(c.member, m))
                   const due = charges.filter((c) => !c.paid).reduce((s, c) => s + c.share, 0)
-                  const paidOff = due <= 0.01
+                  const notBilledYet = charges.length === 0
+                  const paidOff = !notBilledYet && due <= 0.01
                   return (
                     <div key={m} className={`card ${paidOff ? 'opacity-60' : ''}`}>
                       <div className="flex items-start justify-between gap-2">
@@ -395,8 +398,8 @@ export default function Loans() {
                           </p>
                           <p className="text-xs text-gray-400 mt-0.5">{b.title} · {INR(share)}/month</p>
                         </div>
-                        <p className={`text-base font-black shrink-0 ${paidOff ? 'text-gray-400' : iPay ? 'text-green-600' : 'text-red-600'}`}>
-                          {paidOff ? 'Paid' : INR(due)}
+                        <p className={`text-base font-black shrink-0 ${notBilledYet ? 'text-gray-400' : paidOff ? 'text-gray-400' : iPay ? 'text-green-600' : 'text-red-600'}`}>
+                          {notBilledYet ? 'Not billed yet' : paidOff ? 'Paid' : INR(due)}
                         </p>
                       </div>
                       {charges.length > 0 && (
@@ -411,7 +414,7 @@ export default function Loans() {
                           ))}
                         </div>
                       )}
-                      {iPay && !paidOff && (
+                      {iPay && !notBilledYet && !paidOff && (
                         <div className="flex gap-2 mt-3">
                           <button onClick={() => repayBillMember(b.id, m, due)}
                             className="flex-1 py-2 text-xs font-bold bg-amber-100 border border-amber-300 text-amber-800 rounded-md">
