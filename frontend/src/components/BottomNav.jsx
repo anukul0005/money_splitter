@@ -27,7 +27,14 @@ export default function BottomNav({ user, onLogout }) {
   }
 
   return (
-    <nav className="sticky bottom-0 w-full bg-field-950 border-t border-field-800 pb-safe z-50 md:hidden">
+    // will-change-transform + a translateZ(0) force this onto its own
+    // compositing layer - without it, iOS Safari's sticky repaint lags
+    // behind fast/elastic scrolling on long pages, so the bar visibly
+    // detaches and floats mid-screen until scrolling settles.
+    <nav
+      className="sticky bottom-0 w-full bg-field-950 border-t border-field-800 pb-safe z-50 md:hidden will-change-transform"
+      style={{ transform: 'translateZ(0)' }}
+    >
       <div className="flex items-center justify-around h-16 px-2">
         {items.map(({ to, label, icon: Icon, highlight }) => (
           <NavLink
