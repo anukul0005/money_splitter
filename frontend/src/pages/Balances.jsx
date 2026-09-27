@@ -34,7 +34,7 @@ function loanContributions(loansData, me) {
     const iOwe = same(l.borrower, me)
     const other = iOwe ? l.lender : l.borrower
     add(other, iOwe ? -l.total_due : l.total_due, {
-      key: `loan${l.id}`, label: iOwe ? `You owe ${other} (loan)` : `${other} owes you (loan)`,
+      key: `loan${l.id}`, tag: 'Loan', label: iOwe ? `You owe ${other}` : `${other} owes you`,
       amount: l.total_due, positive: !iOwe,
     })
   }
@@ -45,11 +45,11 @@ function loanContributions(loansData, me) {
       const debtors = [...new Set(b.charges.map((c) => c.member))]
       for (const m of debtors) {
         const due = b.charges.filter((c) => same(c.member, m) && !c.paid).reduce((s, c) => s + c.share, 0)
-        if (due > 0.01) add(m, due, { key: `bill${b.id}`, label: `${b.title} (bill)`, amount: due, positive: true })
+        if (due > 0.01) add(m, due, { key: `bill${b.id}`, tag: 'Bill', label: b.title, amount: due, positive: true })
       }
     } else {
       const due = b.charges.filter((c) => same(c.member, me) && !c.paid).reduce((s, c) => s + c.share, 0)
-      if (due > 0.01) add(b.payer, -due, { key: `bill${b.id}`, label: `${b.title} (bill)`, amount: due, positive: false })
+      if (due > 0.01) add(b.payer, -due, { key: `bill${b.id}`, tag: 'Bill', label: b.title, amount: due, positive: false })
     }
   }
   return byPerson
@@ -148,7 +148,7 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates }) {
           {row.loanItems.map((it) => (
             <button key={it.key} onClick={() => nav('/loans')}
               className="w-full text-left flex items-center gap-2 rounded-md px-3 py-2 border-2 border-dashed border-orange-200 bg-orange-50 hover:bg-orange-100 transition-colors">
-              <span className="text-[9px] font-bold uppercase tracking-widest text-orange-600 flex-shrink-0">Loan</span>
+              <span className="text-[9px] font-bold uppercase tracking-widest text-orange-600 flex-shrink-0">{it.tag}</span>
               <span className="text-xs font-semibold text-gray-700 flex-1 min-w-0 truncate">{it.label}</span>
               <span className={`text-xs font-black flex-shrink-0 ${it.positive ? 'text-green-700' : 'text-red-700'}`}>
                 {INR(it.amount)}
