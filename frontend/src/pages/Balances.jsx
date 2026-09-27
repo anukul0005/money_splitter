@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { getFriends, getLoans, paymentsBetween } from '../api'
+import { getFriends, getGroups, getLoans, paymentsBetween } from '../api'
 import { useUser } from '../UserContext'
 import { owes, owed } from '../utils/money'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -55,8 +55,9 @@ function loanContributions(loansData, me) {
   return byPerson
 }
 
-function PersonCard({ row, owing, expanded, onToggle, nav, me }) {
+function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates }) {
   const [payments, setPayments] = useState(null)
+  const loanOnly = row.groups.length === 0 && row.loanItems.length > 0
 
   useEffect(() => {
     if (expanded && payments === null) {
@@ -67,8 +68,19 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me }) {
   const same_ = row.groups.filter((g) => (owing ? g.net < 0 : g.net > 0))
   const opposite = row.groups.filter((g) => (owing ? g.net > 0 : g.net < 0))
 
+  // One dated timeline for the groups pushing the balance this way and the
+  // payments that clawed it back - interleaved in the order they actually
+  // happened, the same way FriendDetail tells this story, so it's visible
+  // which payment offset which group instead of the two feeling unrelated.
+  const timeline = [
+    ...same_.map((g) => ({ kind: 'group', key: `g${g.group_id}`, at: groupDates[g.group_id] || '', data: g })),
+    ...(payments || []).map((p) => ({
+      kind: 'payment', key: `p${p.id}`, at: (p.recorded_at || p.date || '').slice(0, 10), data: p,
+    })),
+  ].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
+
   return (
-    <div className="card">
+    <div className={`card ${loanOnly ? 'border-l-4 border-l-purple-300' : ''}`}>
       <button onClick={onToggle} className="w-full flex items-center justify-between gap-3">
         <span className="flex items-center gap-2 min-w-0">
           <svg className={`w-3.5 h-3.5 text-gray-300 flex-shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
@@ -81,6 +93,11 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me }) {
           >
             {row.name} →
           </span>
+          {loanOnly && (
+            <span className="text-[9px] font-bold uppercase tracking-widest text-purple-500 bg-purple-50 border border-purple-200 rounded px-1.5 py-0.5 flex-shrink-0">
+              Loan only
+            </span>
+          )}
         </span>
         <span className={`text-lg font-black flex-shrink-0 ${owing ? 'text-red-600' : 'text-green-600'}`}>
           {INR(Math.abs(row.net))}
@@ -89,23 +106,42 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me }) {
 
       {expanded && (
         <div className="space-y-1.5 mt-3">
-          {same_.map((g) => (
-            <button key={g.group_id} onClick={() => nav(`/groups/${g.group_id}`)}
-              className={`w-full text-left flex items-center gap-2 rounded-md px-3 py-2 border transition-colors ${
-                owing ? 'bg-red-50 border-red-100 hover:bg-red-100' : 'bg-green-50 border-green-200 hover:bg-green-100'
-              }`}>
-              <span className="text-xs font-semibold text-gray-700 flex-1 min-w-0 truncate">{g.name}</span>
-              <span className={`text-xs font-black flex-shrink-0 ${owing ? 'text-red-700' : 'text-green-700'}`}>
-                {INR(Math.abs(g.net))}
-              </span>
-            </button>
-          ))}
+          {timeline.map((row2) =>
+            row2.kind === 'group' ? (
+              <button key={row2.key} onClick={() => nav(`/groups/${row2.data.group_id}`)}
+                className={`w-full text-left flex items-center gap-2 rounded-md px-3 py-2 border transition-colors ${
+                  owing ? 'bg-red-50 border-red-100 hover:bg-red-100' : 'bg-green-50 border-green-200 hover:bg-green-100'
+                }`}>
+                <span className="text-xs font-semibold text-gray-700 flex-1 min-w-0 truncate">{row2.data.name}</span>
+                <span className={`text-xs font-black flex-shrink-0 ${owing ? 'text-red-700' : 'text-green-700'}`}>
+                  {INR(Math.abs(row2.data.net))}
+                </span>
+              </button>
+            ) : (
+              // A settlement - a thin rule with the amount on it, not a boxed
+              // row, so it reads as "this is what reduced the total above"
+              // rather than another debt of its own.
+              <div key={row2.key} className="w-full flex items-center gap-2 py-0.5">
+                <span className="h-px flex-1 bg-green-200" />
+                <span className="flex items-center gap-1.5 text-[11px] font-bold text-green-700 whitespace-nowrap">
+                  <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                  {row2.data.from_member} paid {row2.data.to_member} {INR(row2.data.amount)}
+                  <span className="font-normal text-gray-400">· {stamp(row2.data.recorded_at || row2.data.date)}</span>
+                </span>
+                <span className="h-px flex-1 bg-green-200" />
+              </div>
+            )
+          )}
 
+          {/* Loans & recurring bills are a different kind of debt (no group,
+              no expense split) - a dashed purple outline keeps them visually
+              apart from group rows instead of blending in as green/red boxes. */}
           {row.loanItems.map((it) => (
             <button key={it.key} onClick={() => nav('/loans')}
-              className={`w-full text-left flex items-center gap-2 rounded-md px-3 py-2 border transition-colors ${
-                it.positive ? 'bg-green-50 border-green-200 hover:bg-green-100' : 'bg-red-50 border-red-100 hover:bg-red-100'
-              }`}>
+              className="w-full text-left flex items-center gap-2 rounded-md px-3 py-2 border-2 border-dashed border-purple-200 bg-purple-50 hover:bg-purple-100 transition-colors">
+              <span className="text-[9px] font-bold uppercase tracking-widest text-purple-500 flex-shrink-0">Loan</span>
               <span className="text-xs font-semibold text-gray-700 flex-1 min-w-0 truncate">{it.label}</span>
               <span className={`text-xs font-black flex-shrink-0 ${it.positive ? 'text-green-700' : 'text-red-700'}`}>
                 {INR(it.amount)}
@@ -126,27 +162,9 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me }) {
             </>
           )}
 
-          {payments === null ? (
-            <p className="text-[11px] text-gray-300 pt-2">Loading payment history…</p>
-          ) : payments.length > 0 && (
-            <>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pt-2">Payment record</p>
-              {payments.map((p) => (
-                <div key={p.id} className="flex items-center gap-2 rounded-md px-3 py-2 border border-green-100 bg-green-50/60">
-                  <svg className="w-3 h-3 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                  <span className="text-xs font-semibold text-gray-700 flex-1 min-w-0 truncate">
-                    {p.from_member} paid {p.to_member}
-                  </span>
-                  <span className="text-[10px] text-gray-400 flex-shrink-0">{stamp(p.recorded_at || p.date)}</span>
-                  <span className="text-xs font-black text-green-700 flex-shrink-0">{INR(p.amount)}</span>
-                </div>
-              ))}
-            </>
-          )}
+          {payments === null && <p className="text-[11px] text-gray-300 pt-2">Loading payment history…</p>}
 
-          {same_.length === 0 && opposite.length === 0 && row.loanItems.length === 0 && payments?.length === 0 && (
+          {timeline.length === 0 && opposite.length === 0 && row.loanItems.length === 0 && payments?.length === 0 && (
             <p className="text-xs text-gray-400 text-center py-2">No shared groups — only Loans & bills</p>
           )}
         </div>
@@ -172,13 +190,18 @@ export default function Balances() {
 
   const [friends, setFriends] = useState([])
   const [loansData, setLoansData] = useState(null)
+  const [groupDates, setGroupDates] = useState({})
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState(new Set())
 
   useEffect(() => {
     if (!user?.name) { setLoading(false); return }
-    Promise.all([getFriends(user.name), getLoans()])
-      .then(([f, l]) => { setFriends(f.data); setLoansData(l.data) })
+    Promise.all([getFriends(user.name), getLoans(), getGroups()])
+      .then(([f, l, g]) => {
+        setFriends(f.data)
+        setLoansData(l.data)
+        setGroupDates(Object.fromEntries(g.data.map((x) => [x.id, x.last_activity])))
+      })
       .catch(() => { setFriends([]); setLoansData({ loans: [], bills: [] }) })
       .finally(() => setLoading(false))
   }, [user?.name])
@@ -250,6 +273,7 @@ export default function Balances() {
             onToggle={() => toggle(row.name)}
             nav={nav}
             me={me}
+            groupDates={groupDates}
           />
         ))}
       </div>
