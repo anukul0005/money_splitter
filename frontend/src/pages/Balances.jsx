@@ -96,17 +96,17 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates }) {
           </svg>
           <span
             onClick={(e) => { e.stopPropagation(); nav(`/friends/${encodeURIComponent(row.name)}`) }}
-            className="text-sm font-bold text-gray-900 hover:text-brand-600 truncate"
+            className="text-[0.862rem] font-bold text-gray-900 hover:text-brand-600 truncate"
           >
             {row.name} →
           </span>
           {loanOnly && (
-            <span className="text-[9px] font-bold uppercase tracking-widest text-orange-600 bg-orange-50 border border-orange-200 rounded px-1.5 py-0.5 flex-shrink-0">
+            <span className="text-[8.87px] font-bold uppercase tracking-widest text-orange-600 bg-orange-50 border border-orange-200 rounded px-1.5 py-0.5 flex-shrink-0">
               Loan only
             </span>
           )}
         </span>
-        <span className={`text-lg font-black flex-shrink-0 ${owing ? 'text-red-600' : 'text-green-600'}`}>
+        <span className={`text-[1.108rem] font-black flex-shrink-0 ${owing ? 'text-red-600' : 'text-green-600'}`}>
           {INR(Math.abs(row.net))}
         </span>
       </button>
@@ -119,8 +119,8 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates }) {
                 className={`w-full text-left flex items-center gap-2 rounded-md px-3 py-2 border transition-colors ${
                   owing ? 'bg-red-50 border-red-100 hover:bg-red-100' : 'bg-green-50 border-green-200 hover:bg-green-100'
                 }`}>
-                <span className="text-xs font-semibold text-gray-700 flex-1 min-w-0 truncate">{row2.data.name}</span>
-                <span className={`text-xs font-black flex-shrink-0 ${owing ? 'text-red-700' : 'text-green-700'}`}>
+                <span className="text-[0.739rem] font-semibold text-gray-700 flex-1 min-w-0 truncate">{row2.data.name}</span>
+                <span className={`text-[0.739rem] font-black flex-shrink-0 ${owing ? 'text-red-700' : 'text-green-700'}`}>
                   {INR(Math.abs(row2.data.net))}
                 </span>
               </button>
@@ -130,7 +130,7 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates }) {
               // rather than another debt of its own.
               <div key={row2.key} className="w-full flex items-center gap-2 py-0.5">
                 <span className="h-px flex-1 bg-green-200" />
-                <span className="flex items-center gap-1.5 text-[11px] font-bold text-green-700 whitespace-nowrap">
+                <span className="flex items-center gap-1.5 text-[10.84px] font-bold text-green-700 whitespace-nowrap">
                   <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
@@ -148,9 +148,9 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates }) {
           {row.loanItems.map((it) => (
             <button key={it.key} onClick={() => nav('/loans')}
               className="w-full text-left flex items-center gap-2 rounded-md px-3 py-2 border-2 border-dashed border-orange-200 bg-orange-50 hover:bg-orange-100 transition-colors">
-              <span className="text-[9px] font-bold uppercase tracking-widest text-orange-600 flex-shrink-0">{it.tag}</span>
-              <span className="text-xs font-semibold text-gray-700 flex-1 min-w-0 truncate">{it.label}</span>
-              <span className={`text-xs font-black flex-shrink-0 ${it.positive ? 'text-green-700' : 'text-red-700'}`}>
+              <span className="text-[8.87px] font-bold uppercase tracking-widest text-orange-600 flex-shrink-0">{it.tag}</span>
+              <span className="text-[0.739rem] font-semibold text-gray-700 flex-1 min-w-0 truncate">{it.label}</span>
+              <span className={`text-[0.739rem] font-black flex-shrink-0 ${it.positive ? 'text-green-700' : 'text-red-700'}`}>
                 {INR(it.amount)}
               </span>
             </button>
@@ -158,21 +158,21 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates }) {
 
           {opposite.length > 0 && (
             <>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pt-2">Cancelled out by</p>
+              <p className="text-[9.85px] font-bold text-gray-400 uppercase tracking-widest pt-2">Cancelled out by</p>
               {opposite.map((g) => (
                 <button key={g.group_id} onClick={() => nav(`/groups/${g.group_id}`)}
                   className="w-full text-left flex items-center gap-2 rounded-md px-3 py-2 border border-amber-200 bg-amber-50 hover:bg-amber-100 transition-colors">
-                  <span className="text-xs font-semibold text-gray-600 flex-1 min-w-0 truncate">{g.name}</span>
-                  <span className="text-xs font-bold text-gray-500 flex-shrink-0">−{INR(Math.abs(g.net))}</span>
+                  <span className="text-[0.739rem] font-semibold text-gray-600 flex-1 min-w-0 truncate">{g.name}</span>
+                  <span className="text-[0.739rem] font-bold text-gray-500 flex-shrink-0">−{INR(Math.abs(g.net))}</span>
                 </button>
               ))}
             </>
           )}
 
-          {payments === null && <p className="text-[11px] text-gray-300 pt-2">Loading payment history…</p>}
+          {payments === null && <p className="text-[10.84px] text-gray-300 pt-2">Loading payment history…</p>}
 
           {timeline.length === 0 && opposite.length === 0 && row.loanItems.length === 0 && payments?.length === 0 && (
-            <p className="text-xs text-gray-400 text-center py-2">No shared groups — only Loans & bills</p>
+            <p className="text-[0.739rem] text-gray-400 text-center py-2">No shared groups — only Loans & bills</p>
           )}
         </div>
       )}
@@ -251,12 +251,12 @@ export default function Balances() {
             : 'bg-gradient-to-br from-green-700 to-field-950 border-green-900'
         }`}
       >
-        <button onClick={() => nav('/')} className="text-xs font-bold text-white/50 mb-2">← Home</button>
-        <p className="text-white/60 text-xs font-bold uppercase tracking-widest">
+        <button onClick={() => nav('/')} className="text-[0.739rem] font-bold text-white/50 mb-2">← Home</button>
+        <p className="text-white/60 text-[0.739rem] font-bold uppercase tracking-widest">
           {owing ? 'You owe' : 'Owed to you'}
         </p>
-        <h1 className="text-4xl font-black mt-1 tracking-tight">{INR(total)}</h1>
-        <p className="text-white/50 text-xs mt-1 font-medium">
+        <h1 className="text-[2.216rem] font-black mt-1 tracking-tight">{INR(total)}</h1>
+        <p className="text-white/50 text-[0.739rem] mt-1 font-medium">
           across {rows.length} {rows.length === 1 ? 'person' : 'people'} · groups + loans & bills
         </p>
       </div>
@@ -265,7 +265,7 @@ export default function Balances() {
         {rows.length === 0 && (
           <div className="text-center py-20">
             <p className="text-3xl mb-2">✅</p>
-            <p className="text-sm text-gray-400">
+            <p className="text-[0.862rem] text-gray-400">
               {owing ? "You don't owe anyone right now." : 'Nobody owes you right now.'}
             </p>
           </div>
