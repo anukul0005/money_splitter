@@ -4,6 +4,7 @@ import { getFriends, getGroups, getLoans, paymentsBetween } from '../api'
 import { useUser } from '../UserContext'
 import { owes, owed } from '../utils/money'
 import LoadingSpinner from '../components/LoadingSpinner'
+import RecordPaymentModal from '../components/RecordPaymentModal'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 const same = (a, b) => (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase()
@@ -200,10 +201,11 @@ export default function Balances() {
   const [groupDates, setGroupDates] = useState({})
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState(new Set())
+  const [payOpen, setPayOpen] = useState(false)
 
-  useEffect(() => {
+  const load = () => {
     if (!user?.name) { setLoading(false); return }
-    Promise.all([getFriends(user.name), getLoans(), getGroups()])
+    return Promise.all([getFriends(user.name), getLoans(), getGroups()])
       .then(([f, l, g]) => {
         setFriends(f.data)
         setLoansData(l.data)
@@ -211,7 +213,9 @@ export default function Balances() {
       })
       .catch(() => { setFriends([]); setLoansData({ loans: [], bills: [] }) })
       .finally(() => setLoading(false))
-  }, [user?.name])
+  }
+
+  useEffect(() => { load() }, [user?.name])
 
   if (loading || !loansData) return <LoadingSpinner />
 
@@ -251,7 +255,17 @@ export default function Balances() {
             : 'bg-gradient-to-br from-green-700 to-field-950 border-green-900'
         }`}
       >
-        <button onClick={() => nav('/')} className="text-[0.739rem] font-bold text-white/50 mb-2">← Home</button>
+        <div className="flex items-center justify-between mb-2">
+          <button onClick={() => nav('/')} className="text-[0.739rem] font-bold text-white/50">← Home</button>
+          <button
+            onClick={() => setPayOpen(true)}
+            title="Record a payment"
+            aria-label="Record a payment"
+            className="flex items-center justify-center w-7 h-7 rounded-md bg-white/10 hover:bg-white/20 text-white font-black text-sm active:scale-95 transition-all"
+          >
+            ₹
+          </button>
+        </div>
         <p className="text-white/60 text-[0.739rem] font-bold uppercase tracking-widest">
           {owing ? 'You owe' : 'Owed to you'}
         </p>
@@ -284,6 +298,10 @@ export default function Balances() {
           />
         ))}
       </div>
+
+      {payOpen && (
+        <RecordPaymentModal onClose={() => setPayOpen(false)} onSaved={load} />
+      )}
     </div>
   )
 }
