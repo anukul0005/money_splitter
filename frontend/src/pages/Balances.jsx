@@ -97,17 +97,17 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates }) {
           </svg>
           <span
             onClick={(e) => { e.stopPropagation(); nav(`/friends/${encodeURIComponent(row.name)}`) }}
-            className="text-[0.862rem] font-bold text-gray-900 hover:text-brand-600 truncate"
+            className="text-[0.849rem] font-bold text-gray-900 hover:text-brand-600 truncate"
           >
             {row.name} →
           </span>
           {loanOnly && (
-            <span className="text-[8.87px] font-bold uppercase tracking-widest text-orange-600 bg-orange-50 border border-orange-200 rounded px-1.5 py-0.5 flex-shrink-0">
+            <span className="text-[8.74px] font-bold uppercase tracking-widest text-orange-600 bg-orange-50 border border-orange-200 rounded px-1.5 py-0.5 flex-shrink-0">
               Loan only
             </span>
           )}
         </span>
-        <span className={`text-[1.108rem] font-black flex-shrink-0 ${owing ? 'text-red-600' : 'text-green-600'}`}>
+        <span className={`text-[1.091rem] font-black flex-shrink-0 ${owing ? 'text-red-600' : 'text-green-600'}`}>
           {INR(Math.abs(row.net))}
         </span>
       </button>
