@@ -76,6 +76,20 @@ def payments_between(b: str, db: Session = Depends(get_db),
     return out
 
 
+def _busiest_group(groups: list[Group]) -> Group:
+    """Which of these shared groups a payment with no debt to disambiguate
+    by should land in - the one with the most recent expense activity
+    (falling back to when it was created), same "last activity" notion
+    routers/groups.py sorts the group list by."""
+    def sort_key(g: Group) -> str:
+        dates = [e.date for e in g.expenses if e.date]
+        if dates:
+            return max(dates)
+        return g.created_at.date().isoformat() if g.created_at else "1970-01-01"
+
+    return max(groups, key=sort_key)
+
+
 def _resolve_group(db: Session, frm: str, to: str, ignore_payment_id: int | None = None) -> Group:
     """The group a transfer between these two should be attached to.
 
@@ -84,6 +98,12 @@ def _resolve_group(db: Session, frm: str, to: str, ignore_payment_id: int | None
     where `frm` owes `to` the most. `ignore_payment_id` exists for edits: the
     payment being changed must not count towards the debt it is itself paying
     down, or a correction would keep chasing its own tail.
+
+    A real transfer can happen with nothing owed at all - paying someone back
+    in advance, or overpaying - so having no debt to point at is never a
+    reason to refuse the payment; it just means picking the busiest shared
+    group instead of the indebted one, and the balance there goes negative
+    (shown as "-" / owed the other way) rather than to zero.
     """
     from routers.stats import _pairwise_group_debts
 
@@ -119,13 +139,7 @@ def _resolve_group(db: Session, frm: str, to: str, ignore_payment_id: int | None
         raise HTTPException(400, f"{frm} and {to} have no active group in common")
     if best is not None:
         return best[0]
-    if len(shared) == 1:
-        return shared[0]
-    raise HTTPException(
-        400,
-        f"{frm} doesn't owe {to} anything right now, and they share "
-        f"{len(shared)} groups — open the group to record this one.",
-    )
+    return _busiest_group(shared)
 
 
 @router.post("/auto", response_model=PaymentOut, status_code=201)
