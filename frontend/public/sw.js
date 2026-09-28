@@ -16,12 +16,11 @@ self.addEventListener('push', (event) => {
     if (event.data) data.body = event.data.text()
   }
 
-  // No icon/badge set - there's no app icon asset in this project yet
-  // (public/ was empty before this feature); the browser's own default
-  // is used until one exists.
   event.waitUntil(
     self.registration.showNotification(data.title, {
       body: data.body,
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
       data: { url: data.url || '/' },
     })
   )
