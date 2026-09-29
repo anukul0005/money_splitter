@@ -14,6 +14,26 @@ import { useUser } from '../UserContext'
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
 const same = (a, b) => (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase()
 
+// Each bank bills on its own predictable few days of the month - searching
+// just that window (with a couple of days' cushion either side, since the
+// email doesn't always land the same day the bill was cut) finds a bill
+// far faster than scanning everything back 9 months.
+const bankDatePresets = () => {
+  const now = new Date()
+  const y = now.getFullYear(), m = now.getMonth()
+  const pad = (n) => String(n).padStart(2, '0')
+  const fmt = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  const range = (startDay, endDay, cushion = 2) => ({
+    from: fmt(new Date(y, m, startDay - cushion)),
+    to: fmt(new Date(y, m, endDay + cushion)),
+  })
+  return [
+    { label: 'ICICI (~6th)', ...range(6, 6) },
+    { label: 'Kotak / SBI / Axis (20-22)', ...range(20, 22) },
+    { label: 'Jupiter (15-16)', ...range(15, 16) },
+  ]
+}
+
 /**
  * /loans — money lent and borrowed outside any group, and shared bills
  * (Netflix, rent...) billed to everyone on the same day every month.
@@ -38,6 +58,8 @@ export default function Loans() {
   const [bankPw, setBankPw]         = useState('')
   const [cardBusy, setCardBusy]     = useState(false)
   const [cardProgress, setCardProgress] = useState(null)   // { status, total, done, found, skipped, failed, error }
+  const [cardFrom, setCardFrom]     = useState('')
+  const [cardTo, setCardTo]         = useState('')
   const [cardError, setCardError]   = useState('')
   const [cardMsg, setCardMsg]       = useState(
     params.get('gmail') === 'connected' ? 'Gmail connected.'
@@ -100,7 +122,7 @@ export default function Loans() {
   const doScan = async () => {
     setCardError(''); setCardMsg(''); setCardBusy(true); setCardProgress(null)
     try {
-      await scanCardStatements()
+      await scanCardStatements(cardFrom, cardTo)
     } catch (e) {
       setCardError(e.response?.data?.detail || 'Could not scan Gmail.')
       setCardBusy(false)
@@ -593,9 +615,45 @@ export default function Loans() {
 
             {/* Scan + statements */}
             {gmail?.connected && (
-              <button onClick={doScan} disabled={cardBusy || banks.length === 0} className="btn-primary py-2.5 text-xs w-full">
-                {cardBusy ? 'Scanning…' : 'Scan for new statements'}
-              </button>
+              <div className="card space-y-2">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Search window</p>
+                <p className="text-[11px] text-gray-400">
+                  Leave blank to check the last 9 months, or narrow it to when a bank actually bills.
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {bankDatePresets().map((p) => (
+                    <button
+                      key={p.label} type="button"
+                      onClick={() => { setCardFrom(p.from); setCardTo(p.to) }}
+                      className="text-[11px] px-2 py-1 rounded-full border border-gray-200 text-gray-600 hover:border-orange-300 hover:text-orange-600"
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                  {(cardFrom || cardTo) && (
+                    <button
+                      type="button"
+                      onClick={() => { setCardFrom(''); setCardTo('') }}
+                      className="text-[11px] px-2 py-1 rounded-full text-gray-400 hover:text-red-500"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="date" className="input text-sm flex-1"
+                    value={cardFrom} onChange={(e) => setCardFrom(e.target.value)}
+                  />
+                  <input
+                    type="date" className="input text-sm flex-1"
+                    value={cardTo} onChange={(e) => setCardTo(e.target.value)}
+                  />
+                </div>
+                <button onClick={doScan} disabled={cardBusy || banks.length === 0} className="btn-primary py-2.5 text-xs w-full">
+                  {cardBusy ? 'Scanning…' : 'Scan for new statements'}
+                </button>
+              </div>
             )}
             {cardProgress?.status === 'running' && (
               <div className="space-y-1">

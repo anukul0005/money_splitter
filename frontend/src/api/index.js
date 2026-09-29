@@ -99,7 +99,8 @@ export const listCardBanks      = ()          => api.get('/credit-cards/banks')
 export const setCardBankPassword = (data)     => api.post('/credit-cards/banks', data)
 export const deleteCardBank     = (bank)      => api.delete(`/credit-cards/banks/${encodeURIComponent(bank)}`)
 export const listCardStatements = ()          => api.get('/credit-cards/statements')
-export const scanCardStatements = ()          => api.post('/credit-cards/scan')
+export const scanCardStatements = (after, before) =>
+  api.post('/credit-cards/scan', null, { params: { after: after || undefined, before: before || undefined } })
 export const getScanProgress    = ()          => api.get('/credit-cards/scan/progress')
 // ── Push notifications ───────────────────────────────────────────────────────
 export const getVapidPublicKey  = ()         => api.get('/push/vapid-public-key')

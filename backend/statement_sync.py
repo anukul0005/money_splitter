@@ -43,7 +43,7 @@ def _set_progress(user_id: int, **fields) -> None:
         _progress.setdefault(user_id, {}).update(fields)
 
 
-def start_sync(user_id: int) -> None:
+def start_sync(user_id: int, after: str | None = None, before: str | None = None) -> None:
     """Runs sync_for_user in a background thread against its own DB session
     and returns immediately - see routers/credit_cards.py's /scan endpoint,
     which used to block on the whole scan for one request/response cycle."""
@@ -58,7 +58,7 @@ def start_sync(user_id: int) -> None:
     def _run():
         db = session_factory()
         try:
-            sync_for_user(db, user_id)
+            sync_for_user(db, user_id, after=after, before=before)
             _set_progress(user_id, status="done")
         except Exception as e:
             print(f"[statement_sync] scan failed for user {user_id}: {e}")
@@ -68,13 +68,26 @@ def start_sync(user_id: int) -> None:
 
     threading.Thread(target=_run, daemon=True).start()
 
+
 # Broad on purpose: real statement subjects vary a lot bank to bank
 # ("Your Credit Card Statement", "e-Statement for card ending 1234",
 # "Monthly Statement"...), so this narrows by attachment + a couple of
 # near-universal words rather than trying to enumerate every bank's exact
 # subject line - the LLM extraction step is the real filter for whether a
 # match was actually useful.
-SEARCH_QUERY = 'has:attachment filename:pdf (statement OR "credit card") newer_than:9m'
+def _search_query(after: str | None, before: str | None) -> str:
+    base = 'has:attachment filename:pdf (statement OR "credit card")'
+    if not after and not before:
+        return f"{base} newer_than:9m"
+    parts = [base]
+    # Gmail wants YYYY/MM/DD - the frontend sends <input type="date">'s
+    # YYYY-MM-DD, so just swap the separator rather than round-tripping
+    # through a date object.
+    if after:
+        parts.append(f"after:{after.replace('-', '/')}")
+    if before:
+        parts.append(f"before:{before.replace('-', '/')}")
+    return " ".join(parts)
 
 # A hard ceiling, not a page size - was 25 back when a scan had to finish
 # inside one HTTP request; now that it runs in a background thread (see
@@ -112,7 +125,7 @@ def _extract_pdf_text(pdf_bytes: bytes, passwords: list[str]) -> str | None:
     return None
 
 
-def sync_for_user(db: Session, user_id: int) -> dict:
+def sync_for_user(db: Session, user_id: int, after: str | None = None, before: str | None = None) -> dict:
     connection = db.query(GmailConnection).filter(GmailConnection.user_id == user_id).first()
     if not connection:
         raise RuntimeError("Gmail isn't connected for this account")
@@ -123,12 +136,13 @@ def sync_for_user(db: Session, user_id: int) -> dict:
     ]
     passwords = [p for p in passwords if p]
 
+    query = _search_query(after, before)
     service = _gmail_service(connection)
     message_ids: list[str] = []
     page_token = None
     while len(message_ids) < MAX_MESSAGES_PER_SYNC:
         resp = service.users().messages().list(
-            userId="me", q=SEARCH_QUERY, maxResults=100, pageToken=page_token,
+            userId="me", q=query, maxResults=100, pageToken=page_token,
         ).execute()
         message_ids += [m["id"] for m in resp.get("messages", [])]
         page_token = resp.get("nextPageToken")
