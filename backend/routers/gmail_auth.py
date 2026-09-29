@@ -74,24 +74,24 @@ def callback(code: str | None = None, state: str | None = None, error: str | Non
     frontend = settings.frontend_url.rstrip("/")
 
     if error:
-        return RedirectResponse(f"{frontend}/account?gmail=error&reason={error}")
+        return RedirectResponse(f"{frontend}/loans?tab=cards&gmail=error&reason={error}")
     if not code or not state:
-        return RedirectResponse(f"{frontend}/account?gmail=error&reason=missing_code")
+        return RedirectResponse(f"{frontend}/loans?tab=cards&gmail=error&reason=missing_code")
 
     user_id_str = secret_box.decrypt(state, ttl=STATE_TTL_SECONDS)
     if not user_id_str:
-        return RedirectResponse(f"{frontend}/account?gmail=error&reason=expired")
+        return RedirectResponse(f"{frontend}/loans?tab=cards&gmail=error&reason=expired")
 
     user = db.query(User).filter(User.id == int(user_id_str)).first()
     if not user:
-        return RedirectResponse(f"{frontend}/account?gmail=error&reason=unknown_user")
+        return RedirectResponse(f"{frontend}/loans?tab=cards&gmail=error&reason=unknown_user")
 
     flow = _flow()
     try:
         flow.fetch_token(code=code)
     except Exception as e:
         print(f"[gmail] token exchange failed: {e}")
-        return RedirectResponse(f"{frontend}/account?gmail=error&reason=token_exchange")
+        return RedirectResponse(f"{frontend}/loans?tab=cards&gmail=error&reason=token_exchange")
 
     creds = flow.credentials
     if not creds.refresh_token:
@@ -101,7 +101,7 @@ def callback(code: str | None = None, state: str | None = None, error: str | Non
         # this isn't fatal unless there was no connection before at all.
         existing = db.query(GmailConnection).filter(GmailConnection.user_id == user.id).first()
         if not existing:
-            return RedirectResponse(f"{frontend}/account?gmail=error&reason=no_refresh_token")
+            return RedirectResponse(f"{frontend}/loans?tab=cards&gmail=error&reason=no_refresh_token")
     else:
         gmail_address = _fetch_gmail_address(creds)
         row = db.query(GmailConnection).filter(GmailConnection.user_id == user.id).first()
@@ -114,7 +114,7 @@ def callback(code: str | None = None, state: str | None = None, error: str | Non
             row.refresh_token_encrypted = secret_box.encrypt(creds.refresh_token)
         db.commit()
 
-    return RedirectResponse(f"{frontend}/account?gmail=connected")
+    return RedirectResponse(f"{frontend}/loans?tab=cards&gmail=connected")
 
 
 def _fetch_gmail_address(creds) -> str:

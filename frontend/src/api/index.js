@@ -90,6 +90,16 @@ export const markChargePaid    = (id)        => api.post(`/loans/bills/charges/$
 export const repayBill         = (id, data)  => api.post(`/loans/bills/${id}/repay`, data)
 export const updateBillDay     = (id, data)  => api.patch(`/loans/bills/${id}`, data)
 export const stopBill          = (id)        => api.delete(`/loans/bills/${id}`)
+
+// ── Credit Cards (Gmail-connected statement scanning) ──────────────────────────
+export const getGmailStatus     = ()          => api.get('/gmail/status')
+export const getGmailConnectUrl = ()          => api.get('/gmail/connect')
+export const disconnectGmail    = ()          => api.delete('/gmail/disconnect')
+export const listCardBanks      = ()          => api.get('/credit-cards/banks')
+export const setCardBankPassword = (data)     => api.post('/credit-cards/banks', data)
+export const deleteCardBank     = (bank)      => api.delete(`/credit-cards/banks/${encodeURIComponent(bank)}`)
+export const listCardStatements = ()          => api.get('/credit-cards/statements')
+export const scanCardStatements = ()          => api.post('/credit-cards/scan')
 // ── Push notifications ───────────────────────────────────────────────────────
 export const getVapidPublicKey  = ()         => api.get('/push/vapid-public-key')
 export const subscribePush      = (data)     => api.post('/push/subscribe', data)
