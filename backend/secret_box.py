@@ -44,10 +44,16 @@ def encrypt(plaintext: str) -> str:
     return _fernet().encrypt(plaintext.encode()).decode()
 
 
-def decrypt(ciphertext: str) -> str | None:
+def decrypt(ciphertext: str, ttl: int | None = None) -> str | None:
     """None rather than raising - a row encrypted under a since-rotated key
-    should read as "gone", not crash whatever asked for it."""
+    should read as "gone", not crash whatever asked for it.
+
+    `ttl` (seconds) rejects a token older than that, on top of the normal
+    integrity check - used for the Gmail OAuth "state" param, which is a
+    short-lived, signed handoff rather than a row this app stores.
+    """
     try:
-        return _fernet().decrypt(ciphertext.encode()).decode()
+        kwargs = {"ttl": ttl} if ttl is not None else {}
+        return _fernet().decrypt(ciphertext.encode(), **kwargs).decode()
     except (InvalidToken, ValueError):
         return None

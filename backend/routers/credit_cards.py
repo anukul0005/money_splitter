@@ -1,0 +1,103 @@
+"""Credit Cards: bank statement passwords, and the extracted bills those
+passwords unlock. Lives alongside /loans as its own section of the same
+page - see statement_sync.py for the actual Gmail scan + extraction.
+"""
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+import secret_box
+import statement_sync
+from auth import current_user
+from database import get_db
+from models import BankPassword, CreditCardStatement, User
+
+router = APIRouter(prefix="/credit-cards", tags=["credit-cards"])
+
+
+class SetBankPassword(BaseModel):
+    bank: str
+    password: str
+
+
+@router.get("/banks", response_model=list[dict])
+def list_banks(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Bank names only - the password itself is never sent back once set."""
+    rows = db.query(BankPassword).filter(BankPassword.user_id == caller.id).all()
+    return [{"bank": r.bank, "updated_at": r.updated_at} for r in rows]
+
+
+@router.post("/banks", response_model=dict, status_code=201)
+def set_bank_password(payload: SetBankPassword, db: Session = Depends(get_db),
+                      caller: User = Depends(current_user)):
+    bank = payload.bank.strip()
+    if not bank or not payload.password:
+        raise HTTPException(400, "Bank name and password are required")
+
+    row = (
+        db.query(BankPassword)
+        .filter(BankPassword.user_id == caller.id, BankPassword.bank.ilike(bank))
+        .first()
+    )
+    encrypted = secret_box.encrypt(payload.password)
+    if row:
+        row.password_encrypted = encrypted
+    else:
+        db.add(BankPassword(user_id=caller.id, bank=bank, password_encrypted=encrypted))
+    db.commit()
+    return {"bank": bank, "saved": True}
+
+
+@router.delete("/banks/{bank}", status_code=204)
+def delete_bank_password(bank: str, db: Session = Depends(get_db),
+                         caller: User = Depends(current_user)):
+    row = (
+        db.query(BankPassword)
+        .filter(BankPassword.user_id == caller.id, BankPassword.bank.ilike(bank))
+        .first()
+    )
+    if row:
+        db.delete(row)
+        db.commit()
+
+
+@router.get("/statements", response_model=list[dict])
+def list_statements(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    rows = (
+        db.query(CreditCardStatement)
+        .filter(CreditCardStatement.user_id == caller.id)
+        .order_by(CreditCardStatement.due_date.desc().nullslast(),
+                  CreditCardStatement.extracted_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": r.id,
+            "bank": r.bank,
+            "card_last4": r.card_last4,
+            "statement_date": r.statement_date,
+            "due_date": r.due_date,
+            "total_due": r.total_due,
+            "minimum_due": r.minimum_due,
+            "extracted_at": r.extracted_at,
+        }
+        for r in rows
+    ]
+
+
+@router.post("/scan", response_model=dict)
+def scan(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Look for new statement emails right now, rather than on a schedule -
+    see statement_sync.sync_for_user. Raises with a plain-English reason
+    (not connected, no bank passwords, Gmail rejected the request) rather
+    than a bare 500, since each of those is something the person can fix
+    from this same page."""
+    try:
+        return statement_sync.sync_for_user(db, caller.id)
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        print(f"[credit_cards] scan failed for user {caller.id}: {e}")
+        raise HTTPException(502, "Couldn't reach Gmail - try again in a moment")

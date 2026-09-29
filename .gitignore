@@ -29,3 +29,9 @@ backend/groq_gpt.txt
 
 # Personal payment statements used to test the CSV import - never commit
 PhonePe_Transaction_Statement*.csv
+
+# Google Cloud Console's own download for an OAuth client (Gmail
+# read-only, for the Credit Cards feature) - same reasoning as brevo.txt
+# and groq_gpt.txt above. The real values live in .env / Render's
+# environment as GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET.
+client_secret_*.json

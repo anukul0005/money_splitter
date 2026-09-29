@@ -30,8 +30,20 @@ class Settings(BaseSettings):
     google_vision_api_key: str = ""
     # Structured extraction of a scanned receipt's fields (GPT-OSS-120B via
     # Groq) - see llm_receipt_parser.py. Falls back to the regex extractor
-    # in receipt_parser.py when this is blank.
+    # in receipt_parser.py when this is blank. statement_extractor.py (the
+    # credit card feature) reuses this same key and model.
     groq_api_key: str = ""
+
+    # Gmail OAuth (routers/gmail_auth.py) - a Google Cloud OAuth client,
+    # read-only Gmail scope, used to find and download credit card
+    # statement emails. Blank means the "Connect Gmail" flow 400s rather
+    # than starting with a client id Google will reject.
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    # This server's own public URL - needed because the OAuth redirect has
+    # to point back at the backend's /gmail/callback, not the frontend, and
+    # nothing else in this app has previously needed to know its own address.
+    api_base_url: str = "https://money-splitter-api.onrender.com"
 
     # Web push (push.py / routers/push.py) - a VAPID keypair identifies this
     # server to every browser push service. Both blank means push is simply
