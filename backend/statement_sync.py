@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import io
+import threading
 from datetime import datetime, timezone
 
 import pdfplumber
@@ -22,6 +23,50 @@ import secret_box
 import statement_extractor
 from database import get_settings
 from models import BankPassword, CreditCardStatement, GmailConnection
+
+# In-memory scan progress, keyed by user id, so the frontend can poll
+# /credit-cards/scan/progress instead of one request blocking for however
+# long a whole inbox scan + LLM extraction takes. Fine to lose on a
+# restart/redeploy - it's only ever "how's the scan that's running right
+# now going", never data anyone needs kept.
+_progress: dict[int, dict] = {}
+_progress_lock = threading.Lock()
+
+
+def get_progress(user_id: int) -> dict:
+    with _progress_lock:
+        return dict(_progress.get(user_id, {"status": "idle"}))
+
+
+def _set_progress(user_id: int, **fields) -> None:
+    with _progress_lock:
+        _progress.setdefault(user_id, {}).update(fields)
+
+
+def start_sync(user_id: int) -> None:
+    """Runs sync_for_user in a background thread against its own DB session
+    and returns immediately - see routers/credit_cards.py's /scan endpoint,
+    which used to block on the whole scan for one request/response cycle."""
+    if get_progress(user_id).get("status") == "running":
+        raise RuntimeError("A scan is already running")
+
+    from database import get_session_factory
+    session_factory = get_session_factory()
+    _set_progress(user_id, status="running", total=0, done=0, found=0,
+                  skipped=0, failed=0, error=None)
+
+    def _run():
+        db = session_factory()
+        try:
+            sync_for_user(db, user_id)
+            _set_progress(user_id, status="done")
+        except Exception as e:
+            print(f"[statement_sync] scan failed for user {user_id}: {e}")
+            _set_progress(user_id, status="error", error=str(e))
+        finally:
+            db.close()
+
+    threading.Thread(target=_run, daemon=True).start()
 
 # Broad on purpose: real statement subjects vary a lot bank to bank
 # ("Your Credit Card Statement", "e-Statement for card ending 1234",
@@ -87,25 +132,27 @@ def sync_for_user(db: Session, user_id: int) -> dict:
     }
 
     found, skipped, failed = 0, 0, 0
+    _set_progress(user_id, status="running", total=len(message_ids), done=0,
+                  found=0, skipped=0, failed=0, error=None)
     # mininterval=0 + a plain ASCII bar: Render's log viewer isn't a real
     # terminal, so the default throttled/carriage-return redraw would just
     # sit silent until the loop finished - this instead prints one line per
     # message, which is what actually shows up as progress while it runs.
     bar = tqdm(message_ids, desc=f"[statement_sync] user {user_id}", mininterval=0, ascii=True)
-    for mid in bar:
+    for i, mid in enumerate(bar, start=1):
         if mid in already:
             skipped += 1
-            bar.set_postfix(found=found, skipped=skipped, failed=failed)
-            continue
-        try:
-            if _process_message(db, service, user_id, mid, passwords):
-                found += 1
-            else:
+        else:
+            try:
+                if _process_message(db, service, user_id, mid, passwords):
+                    found += 1
+                else:
+                    failed += 1
+            except Exception as e:
+                print(f"[statement_sync] message {mid} failed: {e}")
                 failed += 1
-        except Exception as e:
-            print(f"[statement_sync] message {mid} failed: {e}")
-            failed += 1
         bar.set_postfix(found=found, skipped=skipped, failed=failed)
+        _set_progress(user_id, done=i, found=found, skipped=skipped, failed=failed)
 
     connection.last_synced_at = datetime.now(timezone.utc)
     db.commit()

@@ -100,6 +100,7 @@ export const setCardBankPassword = (data)     => api.post('/credit-cards/banks',
 export const deleteCardBank     = (bank)      => api.delete(`/credit-cards/banks/${encodeURIComponent(bank)}`)
 export const listCardStatements = ()          => api.get('/credit-cards/statements')
 export const scanCardStatements = ()          => api.post('/credit-cards/scan')
+export const getScanProgress    = ()          => api.get('/credit-cards/scan/progress')
 // ── Push notifications ───────────────────────────────────────────────────────
 export const getVapidPublicKey  = ()         => api.get('/push/vapid-public-key')
 export const subscribePush      = (data)     => api.post('/push/subscribe', data)

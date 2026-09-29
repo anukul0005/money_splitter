@@ -12,7 +12,7 @@ import secret_box
 import statement_sync
 from auth import current_user
 from database import get_db
-from models import BankPassword, CreditCardStatement, User
+from models import BankPassword, CreditCardStatement, GmailConnection, User
 
 router = APIRouter(prefix="/credit-cards", tags=["credit-cards"])
 
@@ -87,17 +87,27 @@ def list_statements(db: Session = Depends(get_db), caller: User = Depends(curren
     ]
 
 
-@router.post("/scan", response_model=dict)
+@router.post("/scan", response_model=dict, status_code=202)
 def scan(db: Session = Depends(get_db), caller: User = Depends(current_user)):
-    """Look for new statement emails right now, rather than on a schedule -
-    see statement_sync.sync_for_user. Raises with a plain-English reason
-    (not connected, no bank passwords, Gmail rejected the request) rather
-    than a bare 500, since each of those is something the person can fix
-    from this same page."""
+    """Kicks off a scan in the background and returns immediately - a real
+    scan (Gmail search + PDF unlock + an LLM call per email) can take well
+    over the length of one HTTP request. The frontend polls /scan/progress
+    for what's happening instead of blocking on this call.
+
+    The obvious, immediate failures (not connected, no bank passwords) are
+    still checked synchronously here so they show up as a normal error
+    right away rather than only in the progress poll."""
+    if not db.query(GmailConnection).filter(GmailConnection.user_id == caller.id).first():
+        raise HTTPException(400, "Gmail isn't connected for this account")
+    if not db.query(BankPassword).filter(BankPassword.user_id == caller.id).first():
+        raise HTTPException(400, "Add at least one bank's password before scanning")
     try:
-        return statement_sync.sync_for_user(db, caller.id)
+        statement_sync.start_sync(caller.id)
     except RuntimeError as e:
-        raise HTTPException(400, str(e))
-    except Exception as e:
-        print(f"[credit_cards] scan failed for user {caller.id}: {e}")
-        raise HTTPException(502, "Couldn't reach Gmail - try again in a moment")
+        raise HTTPException(409, str(e))
+    return {"started": True}
+
+
+@router.get("/scan/progress", response_model=dict)
+def scan_progress(caller: User = Depends(current_user)):
+    return statement_sync.get_progress(caller.id)

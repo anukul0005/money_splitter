@@ -5,7 +5,7 @@ import {
   createBill, stopBill, repayBill, updateBillDay, getFriends,
   getGmailStatus, getGmailConnectUrl, disconnectGmail,
   listCardBanks, setCardBankPassword, deleteCardBank,
-  listCardStatements, scanCardStatements,
+  listCardStatements, scanCardStatements, getScanProgress,
 } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PeoplePicker from '../components/PeoplePicker'
@@ -37,6 +37,7 @@ export default function Loans() {
   const [bankName, setBankName]     = useState('')
   const [bankPw, setBankPw]         = useState('')
   const [cardBusy, setCardBusy]     = useState(false)
+  const [cardProgress, setCardProgress] = useState(null)   // { status, total, done, found, skipped, failed, error }
   const [cardError, setCardError]   = useState('')
   const [cardMsg, setCardMsg]       = useState(
     params.get('gmail') === 'connected' ? 'Gmail connected.'
@@ -91,22 +92,42 @@ export default function Loans() {
     setBankName(''); setBankPw('')
   }
 
+  // A real scan (Gmail search + unlocking each PDF + an LLM call per email)
+  // can run well past a single request's lifetime, so /credit-cards/scan
+  // just starts it in the background and this polls /scan/progress for
+  // what's happening, instead of the button sitting on "Scanning…" with no
+  // sense of whether it's stuck or on email 1 of 20.
   const doScan = async () => {
-    setCardError(''); setCardMsg(''); setCardBusy(true)
+    setCardError(''); setCardMsg(''); setCardBusy(true); setCardProgress(null)
     try {
-      const r = await scanCardStatements()
-      const { scanned, found, skipped, failed } = r.data
-      setCardMsg(
-        found > 0
-          ? `Found ${found} new statement${found === 1 ? '' : 's'} (checked ${scanned} email${scanned === 1 ? '' : 's'}).`
-          : `No new statements (checked ${scanned}, ${skipped} already known, ${failed} couldn't be read).`
-      )
-      loadCards()
+      await scanCardStatements()
     } catch (e) {
       setCardError(e.response?.data?.detail || 'Could not scan Gmail.')
-    } finally {
       setCardBusy(false)
+      return
     }
+
+    let p
+    do {
+      await new Promise((r) => setTimeout(r, 900))
+      try { p = (await getScanProgress()).data }
+      catch { p = { status: 'error', error: 'Lost track of the scan - check again in a moment.' } }
+      setCardProgress(p)
+    } while (p.status === 'running')
+
+    if (p.status === 'error') {
+      setCardError(p.error || 'Could not scan Gmail.')
+    } else {
+      const { total = 0, found = 0, skipped = 0, failed = 0 } = p
+      setCardMsg(
+        found > 0
+          ? `Found ${found} new statement${found === 1 ? '' : 's'} (checked ${total} email${total === 1 ? '' : 's'}).`
+          : `No new statements (checked ${total}, ${skipped} already known, ${failed} couldn't be read).`
+      )
+    }
+    setCardProgress(null)
+    setCardBusy(false)
+    loadCards()
   }
 
   const run = async (fn) => {
@@ -575,6 +596,25 @@ export default function Loans() {
               <button onClick={doScan} disabled={cardBusy || banks.length === 0} className="btn-primary py-2.5 text-xs w-full">
                 {cardBusy ? 'Scanning…' : 'Scan for new statements'}
               </button>
+            )}
+            {cardProgress?.status === 'running' && (
+              <div className="space-y-1">
+                <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                  <div
+                    className="h-full bg-orange-500 transition-all duration-300"
+                    style={{
+                      width: cardProgress.total > 0
+                        ? `${Math.min(100, (cardProgress.done / cardProgress.total) * 100)}%`
+                        : '15%',
+                    }}
+                  />
+                </div>
+                <p className="text-[11px] text-gray-400 text-center">
+                  {cardProgress.total > 0
+                    ? `Scanning email ${cardProgress.done} of ${cardProgress.total} — ${cardProgress.found} found so far`
+                    : 'Searching Gmail…'}
+                </p>
+              </div>
             )}
             {gmail?.connected && banks.length === 0 && (
               <p className="text-[11px] text-gray-400 text-center">Add at least one bank's password before scanning.</p>
