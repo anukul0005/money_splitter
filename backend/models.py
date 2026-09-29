@@ -608,3 +608,71 @@ class RecurringCharge(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     bill = relationship("RecurringBill", back_populates="charges")
+
+
+class GmailConnection(Base):
+    """One user's consent to let this app read their inbox, read-only.
+
+    The refresh token is the only long-lived secret here - it is what lets
+    the server mint a fresh access token whenever it next needs to search
+    the inbox, without the person re-approving every time. Encrypted at
+    rest (see secret_box.py); revoking access on Google's own account
+    settings page invalidates it server-side too, so deleting this row is a
+    courtesy, not the only way to cut access off.
+    """
+
+    __tablename__ = "gmail_connections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"),
+                     nullable=False, unique=True, index=True)
+    gmail_address = Column(String(200), nullable=False)
+    refresh_token_encrypted = Column(Text, nullable=False)
+    connected_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_synced_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class BankPassword(Base):
+    """The PDF-opening password for one bank's statements, for one user.
+
+    Entered once - most Indian banks use a fixed formula (DOB, PAN, card
+    last-4...) that never changes month to month - and reused for every
+    statement PDF that bank sends after this. Encrypted at rest for the
+    same reason a bank password is never worth storing in the clear.
+    """
+
+    __tablename__ = "bank_passwords"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"),
+                     nullable=False, index=True)
+    bank = Column(String(100), nullable=False)
+    password_encrypted = Column(Text, nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (UniqueConstraint("user_id", "bank", name="uq_bank_password_user_bank"),)
+
+
+class CreditCardStatement(Base):
+    """One month's bill, extracted from one email's PDF attachment.
+
+    `raw_extract` keeps the LLM's full structured answer (not just the
+    handful of columns below) so a field this table doesn't have a column
+    for yet is not silently thrown away - see it once, decide whether it's
+    worth its own column later.
+    """
+
+    __tablename__ = "credit_card_statements"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"),
+                     nullable=False, index=True)
+    bank = Column(String(100), nullable=False)
+    card_last4 = Column(String(4), nullable=True)
+    statement_date = Column(String(10), nullable=True)   # YYYY-MM-DD
+    due_date = Column(String(10), nullable=True)
+    total_due = Column(Float, nullable=True)
+    minimum_due = Column(Float, nullable=True)
+    gmail_message_id = Column(String(100), nullable=False, unique=True, index=True)
+    raw_extract = Column(Text, nullable=True)   # the LLM's full JSON answer
+    extracted_at = Column(DateTime(timezone=True), server_default=func.now())
