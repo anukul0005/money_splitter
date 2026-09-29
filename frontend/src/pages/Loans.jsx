@@ -9,6 +9,8 @@ import {
 } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PeoplePicker from '../components/PeoplePicker'
+import Dropdown from '../components/Dropdown'
+import DatePicker from '../components/DatePicker'
 import { useUser } from '../UserContext'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
@@ -639,14 +641,14 @@ export default function Loans() {
                 <p className="text-[11px] text-gray-400">
                   Leave blank to check the last 9 months, or narrow it to when a bank actually bills.
                 </p>
-                <select
-                  className="input text-sm" value={cardMonth}
-                  onChange={(e) => setCardMonth(e.target.value)}
-                >
-                  {recentMonths().map((m, i) => (
-                    <option key={m.value} value={m.value}>{i === 0 ? `${m.label} (current)` : m.label}</option>
-                  ))}
-                </select>
+                <Dropdown
+                  value={cardMonth}
+                  onChange={setCardMonth}
+                  options={recentMonths().map((m, i) => ({
+                    value: m.value,
+                    label: i === 0 ? `${m.label} (current)` : m.label,
+                  }))}
+                />
                 <div className="flex flex-wrap gap-1.5">
                   {bankDatePresets(cardMonth).map((p) => (
                     <button
@@ -668,14 +670,8 @@ export default function Loans() {
                   )}
                 </div>
                 <div className="flex gap-2">
-                  <input
-                    type="date" className="input text-sm flex-1"
-                    value={cardFrom} onChange={(e) => setCardFrom(e.target.value)}
-                  />
-                  <input
-                    type="date" className="input text-sm flex-1"
-                    value={cardTo} onChange={(e) => setCardTo(e.target.value)}
-                  />
+                  <DatePicker value={cardFrom} onChange={setCardFrom} placeholder="From" className="flex-1" />
+                  <DatePicker value={cardTo} onChange={setCardTo} placeholder="To" className="flex-1" />
                 </div>
                 <button onClick={doScan} disabled={cardBusy || banks.length === 0} className="btn-primary py-2.5 text-xs w-full">
                   {cardBusy ? 'Scanning…' : 'Scan for new statements'}
