@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     # in receipt_parser.py when this is blank. statement_extractor.py (the
     # credit card feature) reuses this same key and model.
     groq_api_key: str = ""
+    # A second Groq key and an OpenRouter key (same GPT-OSS-120B model),
+    # tried in order after the first when a request 429s - statement_extractor.py
+    # scans several emails back-to-back and one free-tier Groq key's TPM
+    # limit (8000) is easy to blow through in a single scan.
+    groq_api_key_2: str = ""
+    openrouter_api_key: str = ""
 
     # Gmail OAuth (routers/gmail_auth.py) - a Google Cloud OAuth client,
     # read-only Gmail scope, used to find and download credit card

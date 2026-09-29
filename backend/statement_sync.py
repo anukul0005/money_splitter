@@ -16,6 +16,7 @@ import pdfplumber
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from sqlalchemy.orm import Session
+from tqdm import tqdm
 
 import secret_box
 import statement_extractor
@@ -86,9 +87,15 @@ def sync_for_user(db: Session, user_id: int) -> dict:
     }
 
     found, skipped, failed = 0, 0, 0
-    for mid in message_ids:
+    # mininterval=0 + a plain ASCII bar: Render's log viewer isn't a real
+    # terminal, so the default throttled/carriage-return redraw would just
+    # sit silent until the loop finished - this instead prints one line per
+    # message, which is what actually shows up as progress while it runs.
+    bar = tqdm(message_ids, desc=f"[statement_sync] user {user_id}", mininterval=0, ascii=True)
+    for mid in bar:
         if mid in already:
             skipped += 1
+            bar.set_postfix(found=found, skipped=skipped, failed=failed)
             continue
         try:
             if _process_message(db, service, user_id, mid, passwords):
@@ -98,6 +105,7 @@ def sync_for_user(db: Session, user_id: int) -> dict:
         except Exception as e:
             print(f"[statement_sync] message {mid} failed: {e}")
             failed += 1
+        bar.set_postfix(found=found, skipped=skipped, failed=failed)
 
     connection.last_synced_at = datetime.now(timezone.utc)
     db.commit()
