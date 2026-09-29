@@ -14,18 +14,36 @@ import { useUser } from '../UserContext'
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
 const same = (a, b) => (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase()
 
+const pad2 = (n) => String(n).padStart(2, '0')
+
+// "YYYY-MM" for the current month, and the 11 before it - current one
+// first, so the picker defaults to it.
+const recentMonths = (count = 12) => {
+  const now = new Date()
+  const out = []
+  for (let i = 0; i < count; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    out.push({
+      value: `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`,
+      label: d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }),
+    })
+  }
+  return out
+}
+
 // Each bank bills on its own predictable few days of the month - searching
 // just that window (with a couple of days' cushion either side, since the
-// email doesn't always land the same day the bill was cut) finds a bill
-// far faster than scanning everything back 9 months.
-const bankDatePresets = () => {
-  const now = new Date()
-  const y = now.getFullYear(), m = now.getMonth()
-  const pad = (n) => String(n).padStart(2, '0')
-  const fmt = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+// email doesn't always land the same day the bill was cut) finds a bill far
+// faster than scanning everything back 9 months. `monthValue` is "YYYY-MM",
+// so the same presets work for "last month's ICICI bill" too, not just this
+// month's.
+const bankDatePresets = (monthValue) => {
+  const [y, m1] = monthValue.split('-').map(Number)
+  const y0 = y, m = m1 - 1
+  const fmt = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
   const range = (startDay, endDay, cushion = 2) => ({
-    from: fmt(new Date(y, m, startDay - cushion)),
-    to: fmt(new Date(y, m, endDay + cushion)),
+    from: fmt(new Date(y0, m, startDay - cushion)),
+    to: fmt(new Date(y0, m, endDay + cushion)),
   })
   return [
     { label: 'ICICI (~6th)', ...range(6, 6) },
@@ -60,6 +78,7 @@ export default function Loans() {
   const [cardProgress, setCardProgress] = useState(null)   // { status, total, done, found, skipped, failed, error }
   const [cardFrom, setCardFrom]     = useState('')
   const [cardTo, setCardTo]         = useState('')
+  const [cardMonth, setCardMonth]   = useState(recentMonths(1)[0].value)
   const [cardError, setCardError]   = useState('')
   const [cardMsg, setCardMsg]       = useState(
     params.get('gmail') === 'connected' ? 'Gmail connected.'
@@ -620,8 +639,16 @@ export default function Loans() {
                 <p className="text-[11px] text-gray-400">
                   Leave blank to check the last 9 months, or narrow it to when a bank actually bills.
                 </p>
+                <select
+                  className="input text-sm" value={cardMonth}
+                  onChange={(e) => setCardMonth(e.target.value)}
+                >
+                  {recentMonths().map((m, i) => (
+                    <option key={m.value} value={m.value}>{i === 0 ? `${m.label} (current)` : m.label}</option>
+                  ))}
+                </select>
                 <div className="flex flex-wrap gap-1.5">
-                  {bankDatePresets().map((p) => (
+                  {bankDatePresets(cardMonth).map((p) => (
                     <button
                       key={p.label} type="button"
                       onClick={() => { setCardFrom(p.from); setCardTo(p.to) }}
