@@ -76,7 +76,11 @@ def start_sync(user_id: int) -> None:
 # match was actually useful.
 SEARCH_QUERY = 'has:attachment filename:pdf (statement OR "credit card") newer_than:9m'
 
-MAX_MESSAGES_PER_SYNC = 25
+# A hard ceiling, not a page size - was 25 back when a scan had to finish
+# inside one HTTP request; now that it runs in a background thread (see
+# start_sync) and skips messages already in the DB, this only exists to
+# stop one scan from running away on an inbox with hundreds of matches.
+MAX_MESSAGES_PER_SYNC = 200
 
 
 def _gmail_service(connection: GmailConnection):
@@ -120,10 +124,17 @@ def sync_for_user(db: Session, user_id: int) -> dict:
     passwords = [p for p in passwords if p]
 
     service = _gmail_service(connection)
-    resp = service.users().messages().list(
-        userId="me", q=SEARCH_QUERY, maxResults=MAX_MESSAGES_PER_SYNC,
-    ).execute()
-    message_ids = [m["id"] for m in resp.get("messages", [])]
+    message_ids: list[str] = []
+    page_token = None
+    while len(message_ids) < MAX_MESSAGES_PER_SYNC:
+        resp = service.users().messages().list(
+            userId="me", q=SEARCH_QUERY, maxResults=100, pageToken=page_token,
+        ).execute()
+        message_ids += [m["id"] for m in resp.get("messages", [])]
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+    message_ids = message_ids[:MAX_MESSAGES_PER_SYNC]
 
     already = {
         row.gmail_message_id for row in
