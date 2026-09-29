@@ -555,16 +555,18 @@ export default function Loans() {
                   ))}
                 </div>
               )}
-              <form onSubmit={addBank} className="flex gap-2 pt-1">
+              <form onSubmit={addBank} className="flex flex-col gap-2 pt-1">
                 <input
-                  className="input text-sm flex-1" placeholder="Bank name (e.g. HDFC)"
+                  className="input text-sm" placeholder="Bank name (e.g. HDFC)"
                   value={bankName} onChange={(e) => setBankName(e.target.value)}
+                  autoComplete="off" name="bank-name"
                 />
                 <input
-                  className="input text-sm flex-1" placeholder="PDF password" type="password"
+                  className="input text-sm" placeholder="PDF password" type="password"
                   value={bankPw} onChange={(e) => setBankPw(e.target.value)}
+                  autoComplete="current-password" name="bank-pdf-password"
                 />
-                <button type="submit" disabled={cardBusy} className="btn-primary px-4 text-xs shrink-0">Save</button>
+                <button type="submit" disabled={cardBusy} className="btn-primary py-2.5 text-xs w-full">Save</button>
               </form>
             </div>
 
