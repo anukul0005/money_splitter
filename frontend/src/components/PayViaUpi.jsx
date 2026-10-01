@@ -12,11 +12,22 @@ import { useState } from 'react'
  * to a shop counter, so there's nothing sensitive going out in that
  * request.
  *
- * `upi://pay?...` reliably pops Android's "open with" chooser across every
- * installed UPI app. iOS support is inconsistent - some apps only answer
- * their own scheme (phonepe://, paytmmp://) - so the button is still worth
- * having, but the QR is the part guaranteed to work everywhere.
+ * The generic `upi://pay?...` scheme reliably pops Android's "open with"
+ * chooser across every installed UPI app - but on iOS there's no chooser:
+ * whichever app registered that same scheme first just gets it, and apps
+ * with their own UPI payment feature (WhatsApp included) often do too, so
+ * a bare upi:// link can silently open the wrong one. Each app's own
+ * scheme (phonepe://, tez://, paytmmp://) is unambiguous instead, so the
+ * primary button targets PhonePe directly and the row below offers the
+ * others + a generic fallback for anything else.
  */
+const APP_SCHEMES = [
+  { key: 'phonepe', label: 'PhonePe', scheme: 'phonepe://pay' },
+  { key: 'gpay', label: 'Google Pay', scheme: 'tez://upi/pay' },
+  { key: 'paytm', label: 'Paytm', scheme: 'paytmmp://pay' },
+  { key: 'other', label: 'Other UPI app', scheme: 'upi://pay' },
+]
+
 export default function PayViaUpi({ upiId, payeeName, amount, note = '', className = '' }) {
   const [copied, setCopied] = useState(false)
 
@@ -27,7 +38,9 @@ export default function PayViaUpi({ upiId, payeeName, amount, note = '', classNa
     ...(amount ? { am: String(amount) } : {}),
     ...(note ? { tn: note } : {}),
   })
-  const upiLink = `upi://pay?${params.toString()}`
+  const qs = params.toString()
+  const linkFor = (scheme) => `${scheme}?${qs}`
+  const upiLink = linkFor('upi://pay')   // what the QR encodes - scanning app decides itself, no ambiguity there
   const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=10&data=${encodeURIComponent(upiLink)}`
 
   const copy = async () => {
@@ -66,9 +79,20 @@ export default function PayViaUpi({ upiId, payeeName, amount, note = '', classNa
         </button>
       </div>
 
-      <a href={upiLink} className="btn-primary block py-2.5 text-sm">
-        Pay{amount ? ` ₹${Number(amount).toLocaleString('en-IN')}` : ''} via UPI App
+      <a href={linkFor(APP_SCHEMES[0].scheme)} className="btn-primary block py-2.5 text-sm">
+        Pay{amount ? ` ₹${Number(amount).toLocaleString('en-IN')}` : ''} via {APP_SCHEMES[0].label}
       </a>
+
+      <div className="flex flex-wrap justify-center gap-1.5">
+        {APP_SCHEMES.slice(1).map((app) => (
+          <a
+            key={app.key} href={linkFor(app.scheme)}
+            className="text-[11px] px-2.5 py-1.5 rounded-full border border-amber-300 text-gray-600 hover:border-brand-300 hover:text-brand-600"
+          >
+            {app.label}
+          </a>
+        ))}
+      </div>
     </div>
   )
 }
