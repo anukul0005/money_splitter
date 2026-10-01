@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { getFriends, getGroups, getLoans, paymentsBetween, listUpiIdsFor, listMyUpiIds } from '../api'
+import { getFriends, getGroups, getLoans, paymentsBetween, listUpiIdsFor, listMyUpiIds, createPaymentClaim } from '../api'
+import { MONEY_CHANGED } from '../components/PaymentClaimsInbox'
 import { useUser } from '../UserContext'
 import { owes, owed } from '../utils/money'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -159,6 +160,9 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates }) {
               amount={Math.abs(row.net)}
               note={owing ? `Settling up with ${row.name}` : `${row.name} paying ${me}`}
               showAppButtons={owing}
+              onClaim={owing
+                ? (amt) => createPaymentClaim({ payee: row.name, amount: amt, kind: 'balance', note: `Settling up with ${row.name}` })
+                : undefined}
             />
           )}
         </div>
@@ -268,6 +272,12 @@ export default function Balances() {
   }
 
   useEffect(() => { load() }, [user?.name])
+
+  useEffect(() => {
+    const onChanged = () => load()
+    window.addEventListener(MONEY_CHANGED, onChanged)
+    return () => window.removeEventListener(MONEY_CHANGED, onChanged)
+  }, [user?.name])
 
   if (loading || !loansData) return <LoadingSpinner />
 

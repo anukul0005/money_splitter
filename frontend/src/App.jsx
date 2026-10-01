@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import BottomNav  from './components/BottomNav'
 import Sidebar    from './components/Sidebar'
+import PaymentClaimsInbox from './components/PaymentClaimsInbox'
 import Home        from './pages/Home'
 import Groups      from './pages/Groups'
 import GroupDetail from './pages/GroupDetail'
@@ -75,6 +76,9 @@ export default function App() {
           {/* Main content — offset by sidebar width on desktop */}
           <div className="flex-1 min-w-0 md:ml-56 flex flex-col min-h-dvh">
             <div className="max-w-4xl mx-auto w-full flex-1">
+              {/* Above every page, so "did this payment arrive?" can't be
+                  missed whichever screen the payee happens to be on. */}
+              <PaymentClaimsInbox />
               <Routes>
                 <Route path="/"           element={<Home />} />
                 <Route path="/groups"     element={<Groups />} />

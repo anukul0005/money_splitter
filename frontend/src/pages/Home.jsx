@@ -8,6 +8,7 @@ import { owes, owed } from '../utils/money'
 import MasterGroupCard from '../components/MasterGroupCard'
 import GroupCard from '../components/GroupCard'
 import NotificationBell from '../components/NotificationBell'
+import { MONEY_CHANGED } from '../components/PaymentClaimsInbox'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 
@@ -115,6 +116,12 @@ export default function Home() {
   }
 
   useEffect(() => { load() }, [])
+
+  useEffect(() => {
+    const onChanged = () => load()
+    window.addEventListener(MONEY_CHANGED, onChanged)
+    return () => window.removeEventListener(MONEY_CHANGED, onChanged)
+  }, [])
 
   const myGroups = admin
     ? groups

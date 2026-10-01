@@ -87,6 +87,14 @@ export const deleteUpiId        = (id)       => api.delete(`/users/me/upi/${id}`
 // Anyone's saved UPI IDs, by username - used to build a "pay them" button
 // for someone you owe, the same way reading a UPI ID off their QR code would.
 export const listUpiIdsFor      = (name)     => api.get(`/users/${encodeURIComponent(name)}/upi`)
+// ── Payment claims: payer says "I've paid", payee confirms or rejects ─────────
+// data: { payee, amount, kind: 'loan' | 'bill' | 'balance', ref_id?, note? }
+export const createPaymentClaim = (data)     => api.post('/payment-claims/', data)
+export const listIncomingClaims = ()         => api.get('/payment-claims/incoming')
+export const listOutgoingClaims = ()         => api.get('/payment-claims/outgoing')
+export const confirmClaim       = (id)       => api.post(`/payment-claims/${id}/confirm`)
+export const rejectClaim        = (id)       => api.post(`/payment-claims/${id}/reject`)
+export const cancelClaim        = (id)       => api.post(`/payment-claims/${id}/cancel`)
 // ── Loans, borrowings and recurring shared bills ─────────────────────────────
 export const getLoans          = ()          => api.get('/loans/')
 export const createLoan        = (data)      => api.post('/loans/', data)

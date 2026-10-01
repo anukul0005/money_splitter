@@ -6,8 +6,9 @@ import {
   getGmailStatus, getGmailConnectUrl, disconnectGmail,
   listCardBanks, setCardBankPassword, deleteCardBank,
   listCardStatements, scanCardStatements, getScanProgress,
-  listUpiIdsFor,
+  listUpiIdsFor, createPaymentClaim,
 } from '../api'
+import { MONEY_CHANGED } from '../components/PaymentClaimsInbox'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PeoplePicker from '../components/PeoplePicker'
 import Dropdown from '../components/Dropdown'
@@ -111,6 +112,12 @@ export default function Loans() {
     // clearing it keeps a later manual refresh from re-showing "Gmail
     // connected." as if it had just happened again.
     if (params.get('gmail')) setParams({ tab: 'cards' }, { replace: true })
+  }, [])
+
+  useEffect(() => {
+    const onChanged = () => load()
+    window.addEventListener(MONEY_CHANGED, onChanged)
+    return () => window.removeEventListener(MONEY_CHANGED, onChanged)
   }, [])
 
   const connectGmail = async () => {
@@ -259,14 +266,17 @@ export default function Loans() {
     }
   }
 
-  const PayPanel = ({ personName, amount, note }) => {
+  const PayPanel = ({ personName, amount, note, kind, refId }) => {
     const entry = upiCache[personName]
     if (entry === 'loading') return <p className="text-xs text-gray-400 text-center py-3">Loading…</p>
     if (entry === 'none' || !entry) {
       return <p className="text-xs text-gray-400 text-center py-3">{personName} hasn't added a UPI ID yet.</p>
     }
     return (
-      <PayViaUpi upiId={entry[0].upi_id} payeeName={personName} amount={amount} note={note} className="mt-3" />
+      <PayViaUpi
+        upiId={entry[0].upi_id} payeeName={personName} amount={amount} note={note} className="mt-3"
+        onClaim={(amt) => createPaymentClaim({ payee: personName, amount: amt, kind, ref_id: refId, note })}
+      />
     )
   }
 
@@ -523,7 +533,7 @@ export default function Loans() {
                   </button>
                 </div>
                 {openPayKey === `loan-${l.id}` && (
-                  <PayPanel personName={other} amount={l.total_due} note={`Loan repayment to ${other}`} />
+                  <PayPanel personName={other} amount={l.total_due} note={`Loan repayment to ${other}`} kind="loan" refId={l.id} />
                 )}
               </div>
             )
@@ -606,7 +616,7 @@ export default function Loans() {
                         </div>
                       )}
                       {openPayKey === `bill-${b.id}-${m}` && (
-                        <PayPanel personName={b.payer} amount={due} note={`${b.title} - ${m}`} />
+                        <PayPanel personName={b.payer} amount={due} note={`${b.title} - ${m}`} kind="bill" refId={b.id} />
                       )}
                     </div>
                   )

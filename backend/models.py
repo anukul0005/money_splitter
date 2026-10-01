@@ -674,6 +674,30 @@ class UpiId(Base):
     __table_args__ = (UniqueConstraint("user_id", "upi_id", name="uq_upi_user_upi"),)
 
 
+class PaymentClaim(Base):
+    """A payer saying "I've paid you" - not a payment yet.
+
+    A UPI deep link never reports back whether the transfer went through, so
+    the payer's word alone isn't enough to move a balance. The claim sits
+    here, pending, until the payee confirms (which records the real payment
+    against the loan / bill / group balance it names) or rejects it (which
+    records nothing).
+    """
+
+    __tablename__ = "payment_claims"
+
+    id = Column(Integer, primary_key=True, index=True)
+    payer = Column(String(100), nullable=False, index=True)
+    payee = Column(String(100), nullable=False, index=True)
+    amount = Column(Float, nullable=False)
+    kind = Column(String(20), nullable=False)       # "loan" | "bill" | "balance"
+    ref_id = Column(Integer, nullable=True)         # loan id / bill id; null for "balance"
+    note = Column(String(200), nullable=True)
+    status = Column(String(20), nullable=False, default="pending", index=True)  # pending | confirmed | rejected | cancelled
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class CreditCardStatement(Base):
     """One month's bill, extracted from one email's PDF attachment.
 

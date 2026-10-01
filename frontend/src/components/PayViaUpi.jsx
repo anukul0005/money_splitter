@@ -32,8 +32,24 @@ const APP_SCHEMES = [
   { key: 'other', label: 'Other UPI app', scheme: 'upi://pay' },
 ]
 
-export default function PayViaUpi({ upiId, payeeName, amount, note = '', className = '', showAppButtons = true }) {
+export default function PayViaUpi({ upiId, payeeName, amount, note = '', className = '', showAppButtons = true, onClaim }) {
   const [copied, setCopied] = useState(false)
+  // The UPI app never tells us whether the money went - `onClaim` files a
+  // "I've paid" claim that the payee then confirms or rejects (see
+  // PaymentClaimsInbox). Nothing is recorded until they do.
+  const [claim, setClaim] = useState({ state: 'idle', error: '' })   // idle | sending | sent | error
+
+  const sendClaim = async () => {
+    const amt = parseFloat(effectiveAmount)
+    if (!amt || amt <= 0) return setClaim({ state: 'error', error: 'Enter the amount you paid first.' })
+    setClaim({ state: 'sending', error: '' })
+    try {
+      await onClaim(Math.round(amt * 100) / 100)
+      setClaim({ state: 'sent', error: '' })
+    } catch (e) {
+      setClaim({ state: 'error', error: e.response?.data?.detail || 'Could not send that - try again.' })
+    }
+  }
   // "Pay a different amount" - leaving the custom field blank omits `am`
   // entirely, which every UPI app treats as "ask the payer what to send"
   // rather than refusing to open.
@@ -133,6 +149,31 @@ export default function PayViaUpi({ upiId, payeeName, amount, note = '', classNa
               </a>
             ))}
           </div>
+
+          {onClaim && (
+            <div className="border-t border-amber-200 pt-3 space-y-1.5">
+              {claim.state === 'sent' ? (
+                <p className="text-xs font-bold text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2">
+                  Sent - waiting for {payeeName} to confirm. Your balance updates once they tap Yes.
+                </p>
+              ) : (
+                <>
+                  <p className="text-[11px] text-gray-400">Paid already? Let {payeeName} confirm it arrived.</p>
+                  <button
+                    type="button" onClick={sendClaim} disabled={claim.state === 'sending'}
+                    className="w-full py-2 text-xs font-bold bg-green-50 border border-green-300 text-green-800 rounded-md hover:bg-green-100 disabled:opacity-50"
+                  >
+                    {claim.state === 'sending'
+                      ? 'Sending…'
+                      : `I've paid${effectiveAmount ? ` ₹${Number(effectiveAmount).toLocaleString('en-IN')}` : ''} - ask ${payeeName} to confirm`}
+                  </button>
+                  {claim.state === 'error' && (
+                    <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{claim.error}</p>
+                  )}
+                </>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>
