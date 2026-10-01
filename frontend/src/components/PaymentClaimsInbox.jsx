@@ -18,17 +18,20 @@ const when = (iso) => {
 export const MONEY_CHANGED = 'splitter:money-changed'
 
 /**
- * "Did ₹X from Y arrive?" - one card per pending claim on you, pinned above
- * every page until you answer. Yes records the payment (against the loan,
- * bill or group balance the payer picked); No records nothing.
+ * "Did ₹X from Y arrive?" - a full-screen prompt that blocks the whole app
+ * until every pending claim on you has its own Yes or No. Two claims means
+ * two answers, oldest first; there is no close button and no tapping the
+ * backdrop away, on purpose - a payer's balance can't move until the payee
+ * answers, so the payee isn't allowed to put it off.
  *
  * Polls rather than waiting on a push: push is opt-in per device, and this
- * card has to show up whether or not it's on.
+ * has to show up whether or not it's on.
  */
 export default function PaymentClaimsInbox() {
   const [claims, setClaims] = useState([])
-  const [busy, setBusy] = useState(null)       // claim id being answered
-  const [errors, setErrors] = useState({})     // claim id -> message
+  const [answered, setAnswered] = useState(0)   // answered this session - for "2 of 3"
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
 
   const load = () => listIncomingClaims().then((r) => setClaims(r.data)).catch(() => {})
 
@@ -40,59 +43,98 @@ export default function PaymentClaimsInbox() {
     return () => { clearInterval(timer); document.removeEventListener('visibilitychange', onVisible) }
   }, [])
 
-  const answer = async (c, yes) => {
-    setBusy(c.id)
-    setErrors((e) => ({ ...e, [c.id]: '' }))
+  const blocking = claims.length > 0
+
+  // The page behind must not scroll (or be scrolled to) while this is up.
+  useEffect(() => {
+    if (!blocking) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [blocking])
+
+  useEffect(() => { if (!blocking) setAnswered(0) }, [blocking])
+
+  if (!blocking) return null
+
+  const c = claims[0]
+  const total = answered + claims.length
+
+  const answer = async (yes) => {
+    setBusy(true)
+    setError('')
     try {
       await (yes ? confirmClaim(c.id) : rejectClaim(c.id))
       setClaims((list) => list.filter((x) => x.id !== c.id))
+      setAnswered((n) => n + 1)
       if (yes) window.dispatchEvent(new Event(MONEY_CHANGED))
     } catch (e) {
-      setErrors((x) => ({ ...x, [c.id]: e.response?.data?.detail || 'Something went wrong - try again.' }))
+      // Already answered elsewhere (another device) - just drop it.
+      if (e.response?.status === 409 || e.response?.status === 404) {
+        setClaims((list) => list.filter((x) => x.id !== c.id))
+      } else {
+        setError(e.response?.data?.detail || 'Something went wrong - try again.')
+      }
     } finally {
-      setBusy(null)
+      setBusy(false)
     }
   }
 
-  if (claims.length === 0) return null
-
   return (
-    <div className="px-5 pt-10 md:pt-4 space-y-2 max-w-2xl">
-      {claims.map((c) => (
-        <div key={c.id} className="card border-2 border-green-300 bg-green-50/60 space-y-2">
-          <p className="text-[10px] font-bold text-green-700 uppercase tracking-widest">Confirm payment</p>
-          <p className="text-sm text-gray-800">
-            <span className="font-bold">{c.payer}</span> says they paid you{' '}
-            <span className="font-black">{INR(c.amount)}</span>
-            <span className="text-gray-500"> · {c.what}</span>
+    <div
+      className="fixed inset-0 z-[1000] bg-field-950/80 backdrop-blur-sm flex items-center justify-center p-5"
+      role="dialog" aria-modal="true" aria-labelledby="claim-title"
+    >
+      <div className="card w-full max-w-sm space-y-3 border-2 border-green-300">
+        <div className="flex items-center justify-between">
+          <p id="claim-title" className="text-[10px] font-bold text-green-700 uppercase tracking-widest">
+            Confirm payment
           </p>
-          {when(c.created_at) && (
-            <p className="text-xs text-gray-700">
-              Marked paid: <span className="font-bold tabular-nums">{when(c.created_at)}</span>
+          {total > 1 && (
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest tabular-nums">
+              {answered + 1} of {total}
             </p>
           )}
-          <p className="text-[11px] text-gray-500">
-            Look for a payment around that time in your UPI app first. Yes records it and updates your balances; No records nothing.
-          </p>
-          {errors[c.id] && (
-            <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{errors[c.id]}</p>
-          )}
-          <div className="flex gap-2">
-            <button
-              onClick={() => answer(c, true)} disabled={busy === c.id}
-              className="flex-1 py-2 text-xs font-bold rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
-            >
-              {busy === c.id ? 'Saving…' : 'Yes, received'}
-            </button>
-            <button
-              onClick={() => answer(c, false)} disabled={busy === c.id}
-              className="flex-1 py-2 text-xs font-bold rounded-md bg-white border border-amber-300 text-gray-700 hover:bg-amber-50 disabled:opacity-50"
-            >
-              No, not received
-            </button>
-          </div>
         </div>
-      ))}
+
+        <p className="text-base text-gray-800 leading-snug">
+          <span className="font-bold">{c.payer}</span> says they paid you
+        </p>
+        <p className="text-3xl font-black text-gray-900 tabular-nums">{INR(c.amount)}</p>
+        <p className="text-xs text-gray-500">{c.what}</p>
+
+        {when(c.created_at) && (
+          <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2">
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Marked paid</p>
+            <p className="text-sm font-bold text-gray-800 tabular-nums">{when(c.created_at)}</p>
+          </div>
+        )}
+
+        <p className="text-[11px] text-gray-500 leading-relaxed">
+          Look for a payment around that time in your UPI app. <b>Yes</b> records it and updates
+          balances; <b>No</b> records nothing and tells {c.payer}. The app opens once you've
+          answered{total > 1 ? ' every payment' : ''}.
+        </p>
+
+        {error && (
+          <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{error}</p>
+        )}
+
+        <div className="flex gap-2 pt-1">
+          <button
+            onClick={() => answer(false)} disabled={busy}
+            className="flex-1 py-3 text-sm font-bold rounded-md bg-white border border-amber-300 text-gray-700 hover:bg-amber-50 disabled:opacity-50"
+          >
+            No, not received
+          </button>
+          <button
+            onClick={() => answer(true)} disabled={busy}
+            className="flex-1 py-3 text-sm font-bold rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+          >
+            {busy ? 'Saving…' : 'Yes, received'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

@@ -690,7 +690,7 @@ def notify_added_to_group_bg(group_id: int, actor_name: str, added_names: list[s
 
 
 def send_notice(db, name: str, subject: str, lines: list[str], push_body: str,
-                url: str = "/loans") -> None:
+                url: str = "/loans", button_label: str = "Open in SplitEasy") -> None:
     """One plain notification to one person - email if they have one, push
     if they've enabled it, independently, the same rule the group
     notifications follow. `lines` are plain text; escaped here for the HTML
@@ -700,9 +700,9 @@ def send_notice(db, name: str, subject: str, lines: list[str], push_body: str,
         link = f"{get_settings().frontend_url}{url}"
         try:
             _send(
-                email, subject, "\n\n".join(lines) + f"\n\nOpen SplitEasy: {link}",
+                email, subject, "\n\n".join(lines) + f"\n\n{button_label}: {link}",
                 _layout(subject, [escape(l) for l in lines],
-                        button_url=link, button_label="Open in SplitEasy",
+                        button_url=link, button_label=button_label,
                         footer="Sent automatically by SplitEasy."),
             )
         except Exception as e:
