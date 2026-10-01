@@ -11,7 +11,7 @@ activity and notifications behave the same as if the payee had typed it in.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -60,7 +60,23 @@ def _out(c: PaymentClaim) -> dict:
         "id": c.id, "payer": c.payer, "payee": c.payee, "amount": c.amount,
         "kind": c.kind, "ref_id": c.ref_id, "note": c.note, "status": c.status,
         "created_at": c.created_at.isoformat() if c.created_at else None,
+        "when": _when(c),
     }
+
+
+_IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def _when(c: PaymentClaim) -> str:
+    """When the payer said they paid, in IST - "2 Oct 2026, 3:12 PM" - so the
+    payee can find the matching entry in their own UPI app's history. A
+    fixed offset rather than zoneinfo: India has no DST, and this doesn't
+    then depend on the server having a tz database installed."""
+    if not c.created_at:
+        return "just now"
+    t = c.created_at.astimezone(_IST)
+    hour = t.hour % 12 or 12
+    return f"{t.day} {t:%b %Y}, {hour}:{t:%M} {'AM' if t.hour < 12 else 'PM'} IST"
 
 
 def _what(c: PaymentClaim, db: Session) -> str:
@@ -106,9 +122,10 @@ def create_claim(payload: ClaimCreate, db: Session = Depends(get_db),
     send_notice(
         db, payee_user.name, f"{caller.name} says they paid you ₹{claim.amount:,.2f}",
         [f"{caller.name} says they sent you ₹{claim.amount:,.2f} by UPI ({what}).",
-         "Check your UPI app, then open SplitEasy and tap Yes if it arrived or No if it didn't. "
+         f"Marked as paid: {_when(claim)} - look for a payment around then in your UPI app's history.",
+         "Then open SplitEasy and tap Yes if it arrived or No if it didn't. "
          "Nothing is recorded until you do."],
-        f"Did ₹{claim.amount:,.0f} from {caller.name} arrive? Tap to confirm",
+        f"Did ₹{claim.amount:,.0f} from {caller.name} arrive? Paid {_when(claim)}",
         url="/",
     )
     return _out(claim)
@@ -220,7 +237,8 @@ def confirm(claim_id: int, background_tasks: BackgroundTasks,
     if notify_payer:
         send_notice(
             db, c.payer, f"{caller.name} confirmed your ₹{c.amount:,.2f}",
-            [f"{caller.name} confirmed receiving ₹{c.amount:,.2f} ({_what(c, db)}). It's now recorded."],
+            [f"{caller.name} confirmed receiving ₹{c.amount:,.2f} ({_what(c, db)}), "
+             f"marked paid {_when(c)}. It's now recorded."],
             f"{caller.name} confirmed ₹{c.amount:,.0f} - recorded",
             url="/",
         )
@@ -235,8 +253,9 @@ def reject(claim_id: int, db: Session = Depends(get_db), caller: User = Depends(
     db.commit()
     send_notice(
         db, c.payer, f"{caller.name} didn't receive your ₹{c.amount:,.2f}",
-        [f"{caller.name} says the ₹{c.amount:,.2f} you marked as paid ({_what(c, db)}) hasn't arrived, "
-         "so nothing was recorded. Check your UPI app's history before trying again."],
+        [f"{caller.name} says the ₹{c.amount:,.2f} you marked as paid on {_when(c)} "
+         f"({_what(c, db)}) hasn't arrived, so nothing was recorded. "
+         "Check your UPI app's history around that time before trying again."],
         f"{caller.name} didn't receive ₹{c.amount:,.0f} - not recorded",
         url="/",
     )

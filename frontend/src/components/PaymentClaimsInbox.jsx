@@ -3,6 +3,16 @@ import { listIncomingClaims, confirmClaim, rejectClaim } from '../api'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
 
+// "2 Oct 2026, 3:12 pm" in this phone's own time zone - the same clock the
+// payee's UPI app history is shown in, so the two can be lined up.
+const when = (iso) => {
+  const d = iso ? new Date(iso) : null
+  if (!d || Number.isNaN(d.getTime())) return ''
+  return d.toLocaleString('en-IN', {
+    day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
+  })
+}
+
 // Fired after a confirm so any page showing balances can reload itself
 // instead of the person refreshing by hand - see Loans / Balances / Home.
 export const MONEY_CHANGED = 'splitter:money-changed'
@@ -56,8 +66,13 @@ export default function PaymentClaimsInbox() {
             <span className="font-black">{INR(c.amount)}</span>
             <span className="text-gray-500"> · {c.what}</span>
           </p>
+          {when(c.created_at) && (
+            <p className="text-xs text-gray-700">
+              Marked paid: <span className="font-bold tabular-nums">{when(c.created_at)}</span>
+            </p>
+          )}
           <p className="text-[11px] text-gray-500">
-            Check your UPI app first. Yes records it and updates your balances; No records nothing.
+            Look for a payment around that time in your UPI app first. Yes records it and updates your balances; No records nothing.
           </p>
           {errors[c.id] && (
             <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{errors[c.id]}</p>
