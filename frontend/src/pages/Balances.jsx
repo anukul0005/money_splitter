@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { getFriends, getGroups, getLoans, paymentsBetween } from '../api'
+import { getFriends, getGroups, getLoans, paymentsBetween, listUpiIdsFor, listMyUpiIds } from '../api'
 import { useUser } from '../UserContext'
 import { owes, owed } from '../utils/money'
 import LoadingSpinner from '../components/LoadingSpinner'
 import RecordPaymentModal from '../components/RecordPaymentModal'
+import PayViaUpi from '../components/PayViaUpi'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 const same = (a, b) => (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase()
@@ -60,6 +61,26 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates }) {
   const [payments, setPayments] = useState(null)
   const loanOnly = row.groups.length === 0 && row.loanItems.length > 0
 
+  // "Pay via UPI" - on a "you owe" row this is their saved UPI ID, to
+  // actually pay them; on an "owed to you" row there's nothing of theirs to
+  // pay into, so it shows your own saved UPI ID/QR instead, to hand to them
+  // so they can pay you. Fetched once per card, on first expand.
+  const [upiOpen, setUpiOpen] = useState(false)
+  const [upiEntry, setUpiEntry] = useState(null)   // null (not fetched) | 'loading' | 'none' | [{upi_id, ...}]
+
+  const toggleUpi = async (e) => {
+    e.stopPropagation()
+    setUpiOpen((o) => !o)
+    if (upiEntry) return
+    setUpiEntry('loading')
+    try {
+      const r = owing ? await listUpiIdsFor(row.name) : await listMyUpiIds()
+      setUpiEntry(r.data.length > 0 ? r.data : 'none')
+    } catch {
+      setUpiEntry('none')
+    }
+  }
+
   useEffect(() => {
     if (expanded && payments === null) {
       // paymentsBetween also returns payments elsewhere in a shared group
@@ -89,8 +110,8 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates }) {
 
   return (
     <div className={`card ${loanOnly ? 'border-l-4 border-l-orange-400' : ''}`}>
-      <button onClick={onToggle} className="w-full flex items-center justify-between gap-3">
-        <span className="flex items-center gap-2 min-w-0">
+      <div className="w-full flex items-center justify-between gap-3">
+        <button onClick={onToggle} className="flex items-center gap-2 min-w-0 flex-1 text-left">
           <svg className={`w-3.5 h-3.5 text-gray-300 flex-shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
             fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
@@ -106,11 +127,42 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates }) {
               Loan only
             </span>
           )}
-        </span>
-        <span className={`text-[0.982rem] font-black flex-shrink-0 ${owing ? 'text-red-600' : 'text-green-600'}`}>
-          {INR(Math.abs(row.net))}
-        </span>
-      </button>
+        </button>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <button
+            onClick={toggleUpi}
+            title="Pay via UPI" aria-label="Pay via UPI"
+            className={`flex items-center justify-center w-6 h-6 rounded-md border text-[10px] font-black transition-all active:scale-95 ${
+              upiOpen ? 'bg-brand-400 border-brand-400 text-white' : 'bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100'
+            }`}
+          >
+            ₹
+          </button>
+          <span className={`text-[0.982rem] font-black ${owing ? 'text-red-600' : 'text-green-600'}`}>
+            {INR(Math.abs(row.net))}
+          </span>
+        </div>
+      </div>
+
+      {upiOpen && (
+        <div className="mt-3">
+          {upiEntry === 'loading' && <p className="text-xs text-gray-400 text-center py-2">Loading…</p>}
+          {upiEntry === 'none' && (
+            <p className="text-xs text-gray-400 text-center py-2">
+              {owing ? `${row.name} hasn't added a UPI ID yet.` : "You haven't added a UPI ID yet - add one in Account."}
+            </p>
+          )}
+          {Array.isArray(upiEntry) && (
+            <PayViaUpi
+              upiId={upiEntry[0].upi_id}
+              payeeName={owing ? row.name : me}
+              amount={Math.abs(row.net)}
+              note={owing ? `Settling up with ${row.name}` : `${row.name} paying ${me}`}
+              showAppButtons={owing}
+            />
+          )}
+        </div>
+      )}
 
       {expanded && (
         <div className="space-y-1.5 mt-3">

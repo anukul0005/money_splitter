@@ -32,7 +32,7 @@ const APP_SCHEMES = [
   { key: 'other', label: 'Other UPI app', scheme: 'upi://pay' },
 ]
 
-export default function PayViaUpi({ upiId, payeeName, amount, note = '', className = '' }) {
+export default function PayViaUpi({ upiId, payeeName, amount, note = '', className = '', showAppButtons = true }) {
   const [copied, setCopied] = useState(false)
   // "Pay a different amount" - leaving the custom field blank omits `am`
   // entirely, which every UPI app treats as "ask the payer what to send"
@@ -117,20 +117,24 @@ export default function PayViaUpi({ upiId, payeeName, amount, note = '', classNa
         )
       )}
 
-      <a href={linkFor(APP_SCHEMES[0].scheme)} className="btn-primary block py-2.5 text-sm">
-        Pay{effectiveAmount ? ` ₹${Number(effectiveAmount).toLocaleString('en-IN')}` : ''} via {APP_SCHEMES[0].label}
-      </a>
-
-      <div className="flex flex-wrap justify-center gap-1.5">
-        {APP_SCHEMES.slice(1).map((app) => (
-          <a
-            key={app.key} href={linkFor(app.scheme)}
-            className="text-[11px] px-2.5 py-1.5 rounded-full border border-amber-300 text-gray-600 hover:border-brand-300 hover:text-brand-600"
-          >
-            {app.label}
+      {showAppButtons && (
+        <>
+          <a href={linkFor(APP_SCHEMES[0].scheme)} className="btn-primary block py-2.5 text-sm">
+            Pay{effectiveAmount ? ` ₹${Number(effectiveAmount).toLocaleString('en-IN')}` : ''} via {APP_SCHEMES[0].label}
           </a>
-        ))}
-      </div>
+
+          <div className="flex flex-wrap justify-center gap-1.5">
+            {APP_SCHEMES.slice(1).map((app) => (
+              <a
+                key={app.key} href={linkFor(app.scheme)}
+                className="text-[11px] px-2.5 py-1.5 rounded-full border border-amber-300 text-gray-600 hover:border-brand-300 hover:text-brand-600"
+              >
+                {app.label}
+              </a>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   )
 }
