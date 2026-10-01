@@ -21,10 +21,14 @@ import { useState } from 'react'
  * primary button targets PhonePe directly and the row below offers the
  * others + a generic fallback for anything else.
  */
+// gpay:// and paytmmp://upi/pay are each app's current iOS scheme - tez://
+// was Google Pay's old (pre-rebrand, Android-only) scheme and paytmmp://pay
+// was missing the /upi/ segment Paytm's own iOS docs use, so both were
+// silently doing nothing on iPhone even when the app was installed.
 const APP_SCHEMES = [
   { key: 'phonepe', label: 'PhonePe', scheme: 'phonepe://pay' },
-  { key: 'gpay', label: 'Google Pay', scheme: 'tez://upi/pay' },
-  { key: 'paytm', label: 'Paytm', scheme: 'paytmmp://pay' },
+  { key: 'gpay', label: 'Google Pay', scheme: 'gpay://upi/pay' },
+  { key: 'paytm', label: 'Paytm', scheme: 'paytmmp://upi/pay' },
   { key: 'other', label: 'Other UPI app', scheme: 'upi://pay' },
 ]
 
