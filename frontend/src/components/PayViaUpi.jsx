@@ -30,12 +30,19 @@ const APP_SCHEMES = [
 
 export default function PayViaUpi({ upiId, payeeName, amount, note = '', className = '' }) {
   const [copied, setCopied] = useState(false)
+  // "Pay a different amount" - leaving the custom field blank omits `am`
+  // entirely, which every UPI app treats as "ask the payer what to send"
+  // rather than refusing to open.
+  const [editingAmount, setEditingAmount] = useState(false)
+  const [customAmount, setCustomAmount] = useState(amount ? String(amount) : '')
+
+  const effectiveAmount = editingAmount ? customAmount : amount
 
   const params = new URLSearchParams({
     pa: upiId,
     pn: payeeName || '',
     cu: 'INR',
-    ...(amount ? { am: String(amount) } : {}),
+    ...(effectiveAmount ? { am: String(effectiveAmount) } : {}),
     ...(note ? { tn: note } : {}),
   })
   const qs = params.toString()
@@ -54,7 +61,7 @@ export default function PayViaUpi({ upiId, payeeName, amount, note = '', classNa
   return (
     <div className={`card space-y-3 text-center ${className}`}>
       <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">
-        {amount ? `Scan & Pay ₹${Number(amount).toLocaleString('en-IN')}` : 'Scan to pay'}
+        {effectiveAmount ? `Scan & Pay ₹${Number(effectiveAmount).toLocaleString('en-IN')}` : 'Scan to pay'}
       </p>
 
       <div className="flex justify-center">
@@ -79,8 +86,35 @@ export default function PayViaUpi({ upiId, payeeName, amount, note = '', classNa
         </button>
       </div>
 
+      {editingAmount ? (
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-bold text-gray-500">₹</span>
+          <input
+            type="number" inputMode="decimal" min="0" step="0.01"
+            className="input text-sm flex-1" placeholder="Leave blank to enter it in the app"
+            value={customAmount} onChange={(e) => setCustomAmount(e.target.value)}
+            autoFocus
+          />
+          <button
+            type="button" onClick={() => { setEditingAmount(false); setCustomAmount(amount ? String(amount) : '') }}
+            className="text-[11px] font-bold text-gray-400 hover:text-red-500 shrink-0"
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
+        amount != null && (
+          <button
+            type="button" onClick={() => setEditingAmount(true)}
+            className="text-[11px] text-gray-400 underline decoration-dotted hover:text-brand-600"
+          >
+            Pay a different amount
+          </button>
+        )
+      )}
+
       <a href={linkFor(APP_SCHEMES[0].scheme)} className="btn-primary block py-2.5 text-sm">
-        Pay{amount ? ` ₹${Number(amount).toLocaleString('en-IN')}` : ''} via {APP_SCHEMES[0].label}
+        Pay{effectiveAmount ? ` ₹${Number(effectiveAmount).toLocaleString('en-IN')}` : ''} via {APP_SCHEMES[0].label}
       </a>
 
       <div className="flex flex-wrap justify-center gap-1.5">
