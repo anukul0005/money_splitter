@@ -653,6 +653,27 @@ class BankPassword(Base):
     __table_args__ = (UniqueConstraint("user_id", "bank", name="uq_bank_password_user_bank"),)
 
 
+class UpiId(Base):
+    """A UPI ID (VPA) this user can be paid at. Not a secret - a UPI ID is
+    exactly the thing you hand out so someone can pay you, so unlike
+    BankPassword/GmailConnection above this is stored in plain text and is
+    readable by anyone who knows the person's username (see GET
+    /users/{name}/upi), not just the owner. Someone can have more than one
+    (different banks, different apps), so this is its own table rather than
+    a single column on User."""
+
+    __tablename__ = "upi_ids"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"),
+                     nullable=False, index=True)
+    upi_id = Column(String(100), nullable=False)
+    label = Column(String(50), nullable=True)   # e.g. "PhonePe", "SBI"
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("user_id", "upi_id", name="uq_upi_user_upi"),)
+
+
 class CreditCardStatement(Base):
     """One month's bill, extracted from one email's PDF attachment.
 

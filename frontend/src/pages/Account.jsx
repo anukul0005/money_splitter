@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { changePassword, setRecovery, getRecoveryQuestion, getMe, setMyEmail, setMyBirthday } from '../api'
+import {
+  changePassword, setRecovery, getRecoveryQuestion, getMe, setMyEmail, setMyBirthday,
+  listMyUpiIds, addUpiId, deleteUpiId,
+} from '../api'
 import { useUser, isAdmin } from '../UserContext'
 import { ALL_QUESTIONS, RECOVERY_QUESTIONS, KEY_QUESTION, generateKey } from '../utils/security'
 import { pushSupported, getExistingSubscription, enablePush, disablePush } from '../push'
@@ -60,6 +63,15 @@ export default function Account() {
   const [pushBusy, setPushBusy]   = useState(false)
   const [pushError, setPushError] = useState('')
 
+  // ── UPI IDs (where someone paying you off a loan/bill actually sends it) ──
+  const [upiIds, setUpiIds]       = useState([])
+  const [upiInput, setUpiInput]   = useState('')
+  const [upiLabel, setUpiLabel]   = useState('')
+  const [upiError, setUpiError]   = useState('')
+  const [upiBusy, setUpiBusy]     = useState(false)
+
+  const loadUpi = () => listMyUpiIds().then((r) => setUpiIds(r.data)).catch(() => {})
+
   useEffect(() => {
     if (!user?.name) return
     getRecoveryQuestion(user.name)
@@ -85,7 +97,31 @@ export default function Account() {
     if (pushSupported()) {
       getExistingSubscription().then((sub) => setPushOn(!!sub)).catch(() => {})
     }
+    loadUpi()
   }, [user?.name])
+
+  const handleAddUpi = async (e) => {
+    e.preventDefault()
+    setUpiError('')
+    const vpa = upiInput.trim()
+    if (!vpa) return setUpiError('Enter a UPI ID.')
+    setUpiBusy(true)
+    try {
+      await addUpiId({ upi_id: vpa, label: upiLabel.trim() || undefined })
+      setUpiInput(''); setUpiLabel('')
+      loadUpi()
+    } catch (err) {
+      setUpiError(err.response?.data?.detail || 'Could not save that UPI ID.')
+    } finally {
+      setUpiBusy(false)
+    }
+  }
+
+  const handleDeleteUpi = async (id) => {
+    setUpiBusy(true)
+    try { await deleteUpiId(id); loadUpi() }
+    finally { setUpiBusy(false) }
+  }
 
   const handleTogglePush = async () => {
     setPushError(''); setPushBusy(true)
@@ -366,6 +402,53 @@ export default function Account() {
 
             <button type="submit" className="btn-primary" disabled={emailBusy}>
               {emailBusy ? 'Saving…' : email ? 'Update email' : 'Save email'}
+            </button>
+          </form>
+        </div>
+
+        {/* ── UPI IDs ── */}
+        <div className="card">
+          <h2 className="text-sm font-bold text-gray-800">UPI IDs</h2>
+          <p className="text-xs text-gray-500 leading-relaxed mt-1 mb-3">
+            Where someone settling up with you actually sends the money - shown as
+            a QR code and a "Pay via UPI" button wherever someone owes you. Not a
+            secret; it's the same thing you'd hand out on a QR code anyway, so add
+            as many as you use (PhonePe, your bank's own app...).
+          </p>
+
+          {upiIds.length > 0 && (
+            <div className="space-y-1.5 mb-3">
+              {upiIds.map((u) => (
+                <div key={u.id} className="flex items-center justify-between text-xs bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                  <div>
+                    <span className="font-bold text-gray-700">{u.upi_id}</span>
+                    {u.label && <span className="text-gray-400 ml-2">{u.label}</span>}
+                  </div>
+                  <button
+                    onClick={() => handleDeleteUpi(u.id)}
+                    disabled={upiBusy}
+                    className="text-gray-400 hover:text-red-500 font-bold"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <form onSubmit={handleAddUpi} className="space-y-2">
+            <input
+              className="input text-sm" placeholder="yourname@bank"
+              value={upiInput} onChange={(e) => setUpiInput(e.target.value)}
+              autoCapitalize="none" autoCorrect="off" spellCheck={false}
+            />
+            <input
+              className="input text-sm" placeholder="Label (optional, e.g. PhonePe)"
+              value={upiLabel} onChange={(e) => setUpiLabel(e.target.value)}
+            />
+            {upiError && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{upiError}</p>}
+            <button type="submit" className="btn-primary" disabled={upiBusy}>
+              {upiBusy ? 'Saving…' : 'Add UPI ID'}
             </button>
           </form>
         </div>

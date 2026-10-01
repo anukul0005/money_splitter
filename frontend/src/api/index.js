@@ -80,6 +80,13 @@ export const importStatement    = (file)     => {
   return api.post('/expenses/import-csv', fd)
 }
 export const getMe              = ()         => api.get('/users/me')
+// ── UPI IDs (for "pay via UPI" QR / deep link) ──────────────────────────────────
+export const listMyUpiIds       = ()         => api.get('/users/me/upi')
+export const addUpiId           = (data)     => api.post('/users/me/upi', data)
+export const deleteUpiId        = (id)       => api.delete(`/users/me/upi/${id}`)
+// Anyone's saved UPI IDs, by username - used to build a "pay them" button
+// for someone you owe, the same way reading a UPI ID off their QR code would.
+export const listUpiIdsFor      = (name)     => api.get(`/users/${encodeURIComponent(name)}/upi`)
 // ── Loans, borrowings and recurring shared bills ─────────────────────────────
 export const getLoans          = ()          => api.get('/loans/')
 export const createLoan        = (data)      => api.post('/loans/', data)

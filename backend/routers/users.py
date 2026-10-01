@@ -1,17 +1,26 @@
 import hashlib
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from auth import create_token, current_user, require_admin
 from database import get_db
-from models import User
+from models import User, UpiId
 from schemas import (
     UserSignup, UserLogin, UserOut, LoginOut, SetRecovery, ResetPassword,
     AdminReset, AdminSetRecovery, AdminIssueCode, RedeemCode,
     SetEmail, SetBirthday, RequestLoginCode, VerifyLoginCode, UserMeOut,
 )
 from emailer import send_login_code
+
+# A VPA is "<handle>@<psp>" - letters/digits/.-_ on the left, letters only
+# (ybl, oksbi, paytm...) on the right. Loose on purpose: NPCI doesn't
+# publish one canonical regex, and rejecting a real UPI ID because it uses
+# a character this didn't anticipate is worse than accepting a slightly too
+# permissive one.
+_UPI_RE = re.compile(r"^[a-zA-Z0-9.\-_]{2,255}@[a-zA-Z]{2,64}$")
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -432,6 +441,58 @@ def set_my_birthday(payload: SetBirthday, db: Session = Depends(get_db),
     db.commit()
     db.refresh(caller)
     return caller
+
+
+class AddUpiId(BaseModel):
+    upi_id: str
+    label: str | None = None
+
+
+@router.get("/me/upi", response_model=list[dict])
+def list_my_upi_ids(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    rows = db.query(UpiId).filter(UpiId.user_id == caller.id).order_by(UpiId.created_at).all()
+    return [{"id": r.id, "upi_id": r.upi_id, "label": r.label} for r in rows]
+
+
+@router.post("/me/upi", response_model=dict, status_code=201)
+def add_my_upi_id(payload: AddUpiId, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Self-service only, same reasoning as email/birthday above - a UPI ID
+    is where money you're owed actually lands, so only the account holder
+    adds their own."""
+    vpa = payload.upi_id.strip()
+    if not _UPI_RE.match(vpa):
+        raise HTTPException(400, "That doesn't look like a UPI ID (should be like name@bank)")
+
+    existing = db.query(UpiId).filter(UpiId.user_id == caller.id, UpiId.upi_id.ilike(vpa)).first()
+    if existing:
+        raise HTTPException(409, "You've already added that UPI ID")
+
+    row = UpiId(user_id=caller.id, upi_id=vpa, label=(payload.label or "").strip() or None)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {"id": row.id, "upi_id": row.upi_id, "label": row.label}
+
+
+@router.delete("/me/upi/{upi_row_id}", status_code=204)
+def delete_my_upi_id(upi_row_id: int, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    row = db.query(UpiId).filter(UpiId.id == upi_row_id, UpiId.user_id == caller.id).first()
+    if row:
+        db.delete(row)
+        db.commit()
+
+
+@router.get("/{name}/upi", response_model=list[dict])
+def list_upi_ids_for(name: str, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Anyone signed in can look up anyone else's saved UPI IDs - the whole
+    point of a UPI ID is that it's handed out to be paid, same as it would
+    be read off a QR code taped to a shop counter. Used to build a "pay
+    them" button/QR for someone you owe, not to protect anything."""
+    target = db.query(User).filter(User.name.ilike(name.strip())).first()
+    if not target:
+        raise HTTPException(404, "No such user")
+    rows = db.query(UpiId).filter(UpiId.user_id == target.id).order_by(UpiId.created_at).all()
+    return [{"id": r.id, "upi_id": r.upi_id, "label": r.label} for r in rows]
 
 
 @router.get("/email-diagnostics", response_model=dict)
