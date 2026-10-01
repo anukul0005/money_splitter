@@ -6,11 +6,13 @@ import {
   getGmailStatus, getGmailConnectUrl, disconnectGmail,
   listCardBanks, setCardBankPassword, deleteCardBank,
   listCardStatements, scanCardStatements, getScanProgress,
+  listUpiIdsFor,
 } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PeoplePicker from '../components/PeoplePicker'
 import Dropdown from '../components/Dropdown'
 import DatePicker from '../components/DatePicker'
+import PayViaUpi from '../components/PayViaUpi'
 import { useUser } from '../UserContext'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
@@ -235,6 +237,37 @@ export default function Loans() {
     const amt = parseFloat(raw)
     if (!raw || isNaN(amt) || amt <= 0) return
     run(() => repayLoan(l.id, { amount: amt }))
+  }
+
+  // "Pay via UPI" panel, toggled open per loan/bill-debtor row - keyed by a
+  // string unique to that row so a loan and a bill owed to the same person
+  // don't fight over one open/closed state. UPI IDs are fetched once per
+  // person and cached, since the same friend can show up in several rows.
+  const [openPayKey, setOpenPayKey] = useState(null)
+  const [upiCache, setUpiCache] = useState({})   // { [personName]: 'loading' | 'none' | [{id, upi_id, label}] }
+
+  const togglePay = async (key, personName) => {
+    if (openPayKey === key) { setOpenPayKey(null); return }
+    setOpenPayKey(key)
+    if (upiCache[personName]) return
+    setUpiCache((c) => ({ ...c, [personName]: 'loading' }))
+    try {
+      const r = await listUpiIdsFor(personName)
+      setUpiCache((c) => ({ ...c, [personName]: r.data.length > 0 ? r.data : 'none' }))
+    } catch {
+      setUpiCache((c) => ({ ...c, [personName]: 'none' }))
+    }
+  }
+
+  const PayPanel = ({ personName, amount, note }) => {
+    const entry = upiCache[personName]
+    if (entry === 'loading') return <p className="text-xs text-gray-400 text-center py-3">Loading…</p>
+    if (entry === 'none' || !entry) {
+      return <p className="text-xs text-gray-400 text-center py-3">{personName} hasn't added a UPI ID yet.</p>
+    }
+    return (
+      <PayViaUpi upiId={entry[0].upi_id} payeeName={personName} amount={amount} note={note} className="mt-3" />
+    )
   }
 
   const repayBillMember = (billId, member, due) => {
@@ -478,12 +511,20 @@ export default function Loans() {
                       Record repayment
                     </button>
                   )}
+                  {!l.paid && iOwe && (
+                    <button onClick={() => togglePay(`loan-${l.id}`, other)} className="flex-1 py-2 text-xs font-bold bg-brand-50 border border-brand-300 text-brand-700 rounded-md">
+                      {openPayKey === `loan-${l.id}` ? 'Hide UPI' : 'Pay via UPI'}
+                    </button>
+                  )}
                   <button
                     onClick={() => confirm('Delete this loan?') && run(() => deleteLoan(l.id))}
                     className="px-3 py-2 text-xs font-bold text-gray-400 hover:text-red-500">
                     Delete
                   </button>
                 </div>
+                {openPayKey === `loan-${l.id}` && (
+                  <PayPanel personName={other} amount={l.total_due} note={`Loan repayment to ${other}`} />
+                )}
               </div>
             )
           })
@@ -557,7 +598,15 @@ export default function Loans() {
                             className="flex-1 py-2 text-xs font-bold bg-amber-100 border border-amber-300 text-amber-800 rounded-md">
                             Record repayment
                           </button>
+                          {!iPay && (
+                            <button onClick={() => togglePay(`bill-${b.id}-${m}`, b.payer)} className="flex-1 py-2 text-xs font-bold bg-brand-50 border border-brand-300 text-brand-700 rounded-md">
+                              {openPayKey === `bill-${b.id}-${m}` ? 'Hide UPI' : 'Pay via UPI'}
+                            </button>
+                          )}
                         </div>
+                      )}
+                      {openPayKey === `bill-${b.id}-${m}` && (
+                        <PayPanel personName={b.payer} amount={due} note={`${b.title} - ${m}`} />
                       )}
                     </div>
                   )
