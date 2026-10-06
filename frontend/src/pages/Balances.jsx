@@ -4,6 +4,7 @@ import { getFriends, getGroups, getLoans, paymentsBetween, listUpiIdsFor, listMy
 import { MONEY_CHANGED } from '../components/PaymentClaimsInbox'
 import { useUser } from '../UserContext'
 import { owes, owed } from '../utils/money'
+import { combinedBalances } from '../utils/balances'
 import LoadingSpinner from '../components/LoadingSpinner'
 import RecordPaymentModal from '../components/RecordPaymentModal'
 import PayViaUpi from '../components/PayViaUpi'
@@ -19,44 +20,6 @@ function stamp(iso) {
   return d.toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-// Loans and recurring bills also make up what two people owe each other -
-// folded into the same per-person net as group balances, so "Vikram" (who
-// shares no group, only a loan) shows up here too, and the number matches
-// what Loans & bills shows.
-function loanContributions(loansData, me) {
-  const byPerson = {}
-  const add = (name, signed, item) => {
-    const row = byPerson[name] || { net: 0, items: [] }
-    row.net += signed
-    row.items.push(item)
-    byPerson[name] = row
-  }
-
-  for (const l of loansData.loans) {
-    if (l.total_due <= 0.01) continue
-    const iOwe = same(l.borrower, me)
-    const other = iOwe ? l.lender : l.borrower
-    add(other, iOwe ? -l.total_due : l.total_due, {
-      key: `loan${l.id}`, tag: 'Loan', label: iOwe ? `You owe ${other}` : `${other} owes you`,
-      amount: l.total_due, positive: !iOwe,
-    })
-  }
-
-  for (const b of loansData.bills) {
-    const iPay = same(b.payer, me)
-    if (iPay) {
-      const debtors = [...new Set(b.charges.map((c) => c.member))]
-      for (const m of debtors) {
-        const due = b.charges.filter((c) => same(c.member, m) && !c.paid).reduce((s, c) => s + c.share, 0)
-        if (due > 0.01) add(m, due, { key: `bill${b.id}`, tag: 'Bill', label: b.title, amount: due, positive: true })
-      }
-    } else {
-      const due = b.charges.filter((c) => same(c.member, me) && !c.paid).reduce((s, c) => s + c.share, 0)
-      if (due > 0.01) add(b.payer, -due, { key: `bill${b.id}`, tag: 'Bill', label: b.title, amount: due, positive: false })
-    }
-  }
-  return byPerson
-}
 
 function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates }) {
   const [payments, setPayments] = useState(null)
@@ -282,21 +245,8 @@ export default function Balances() {
   if (loading || !loansData) return <LoadingSpinner />
 
   const me = user?.name
-  const loanNet = loanContributions(loansData, me)
-  const names = new Set([...friends.map((f) => f.name), ...Object.keys(loanNet)])
-
-  const combined = [...names].map((name) => {
-    const f = friends.find((x) => x.name === name)
-    const l = loanNet[name]
-    return {
-      name,
-      net: (f?.net ?? 0) + (l?.net ?? 0),
-      groups: f?.groups ?? [],
-      loanItems: l?.items ?? [],
-    }
-  })
-
-  const rows = combined
+  // Same helper Home's headline uses - see utils/balances.js.
+  const rows = combinedBalances(friends, loansData, me)
     .filter((r) => (owing ? owes(r.net) : owed(r.net)))
     .sort((a, b) => Math.abs(b.net) - Math.abs(a.net))
 

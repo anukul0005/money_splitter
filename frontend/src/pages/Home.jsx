@@ -5,6 +5,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser, isAdmin } from '../UserContext'
 import { buildMasterGroups } from '../utils/masterGroups'
 import { owes, owed } from '../utils/money'
+import { combinedBalances } from '../utils/balances'
 import MasterGroupCard from '../components/MasterGroupCard'
 import GroupCard from '../components/GroupCard'
 import NotificationBell from '../components/NotificationBell'
@@ -143,20 +144,19 @@ export default function Home() {
     </div>
   )
 
-  // Netted per person across every group: what you'd actually settle up.
-  // Summing groups in isolation double-counts debts that cancel each other —
-  // owing Divyank in one group while he owes you more in two others.
-  // Same threshold as the Friends list, so the headline total and the rows
-  // that explain it can never disagree.
-  // Loans and shared-bill dues are added on top: they never pass through a
-  // group, so the friends list above can't see them. People are unioned by
-  // name so someone owed through both a group and a loan counts once.
-  const lt = loans?.totals
-  const totalOwe  = friends.filter((f) => owes(f.net)).reduce((s, f) => s + Math.abs(f.net), 0) + (lt?.owe ?? 0)
-  const totalOwed = friends.filter((f) => owed(f.net)).reduce((s, f) => s + f.net, 0) + (lt?.owed ?? 0)
-  const namesUnion = (a, b) => new Set([...a, ...b].map((n) => n.toLowerCase())).size
-  const owePeople  = namesUnion(friends.filter((f) => owes(f.net)).map((f) => f.name), lt?.owe_people ?? [])
-  const owedPeople = namesUnion(friends.filter((f) => owed(f.net)).map((f) => f.name), lt?.owed_people ?? [])
+  // One net per person - every shared group AND every loan / bill share with
+  // them, netted together before deciding which column they're in - using
+  // the exact helper /balances/owe and /balances/owed list from, so the
+  // headline always equals the sum of the rows behind it. Adding loan totals
+  // on top of group totals (as this used to) counted anyone with both - e.g.
+  // a loan you owe Anjali vs. what she owes you in groups - in both columns.
+  const people    = combinedBalances(friends, loans, user?.name)
+  const oweRows   = people.filter((p) => owes(p.net))
+  const owedRows  = people.filter((p) => owed(p.net))
+  const totalOwe  = oweRows.reduce((s, p) => s + Math.abs(p.net), 0)
+  const totalOwed = owedRows.reduce((s, p) => s + p.net, 0)
+  const owePeople  = oweRows.length
+  const owedPeople = owedRows.length
 
   // Every group is linked to a master group named after its members — even
   // a single-member one, so every one of a person's own personal trackers
