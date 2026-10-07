@@ -40,6 +40,15 @@ def run_bills(db, today: date) -> dict:
                      f"Please pay {bill.payer}."],
                     f"Your share of {bill.title}: ₹{share:,.2f} to {bill.payer}",
                 )
+            # Tell the payer it was billed too, not just the debtors - otherwise
+            # the only place this shows up for them is opening the app.
+            if debtors:
+                send_notice(
+                    db, bill.payer, f"{bill.title}: billed {', '.join(debtors)} ₹{share:,.2f} each",
+                    [f"This month's {bill.title} (₹{bill.amount:,.2f}) was split {len(members)} ways. "
+                     f"{', '.join(debtors)} now owe you ₹{share:,.2f} each."],
+                    f"{bill.title}: {', '.join(debtors)} now owe you ₹{share:,.2f} each",
+                )
         except Exception as e:  # pragma: no cover - one bad bill must not sink the run
             db.rollback()
             failed.append(f"{bill.title}: {e}")
