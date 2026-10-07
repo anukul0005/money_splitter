@@ -6,7 +6,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 
 const MONTH_NAMES = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
 const MONTH_FULL  = ['January','February','March','April','May','June','July','August','September','October','November','December']
-const START_YEAR  = 2020
+const START_YEAR  = 2018
 
 const getTargetName = (my) => {
   if (!my) return ''

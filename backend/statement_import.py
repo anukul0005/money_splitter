@@ -19,6 +19,32 @@ class StatementTxn:
     txn_id: str
     kind: str          # "Debit" | "Credit"
     amount: float
+    # The masked account/card the money moved from or to, e.g. "XXXX585552" -
+    # what lets a payment to one of your own accounts be told from spending.
+    instrument: str = ""
+
+
+def own_accounts(txns: list[StatementTxn]) -> set[str]:
+    """Trailing digits of every account and card this statement's owner
+    pays from or receives into."""
+    out = set()
+    for t in txns:
+        digits = t.instrument.lstrip("0123456789").lstrip("X*")
+        if digits.isdigit() and len(digits) >= 4:
+            out.add(digits)
+    return out
+
+
+def is_self_transfer(t: StatementTxn, own: set[str]) -> bool:
+    """Money moved between the owner's own pockets, not spent: a wallet
+    top-up, or a payment to a bare masked account number ("XXXX585552")
+    that is one of their own instruments. A masked number that ISN'T one
+    of theirs ("******0491") is someone else, so stays spending."""
+    if t.merchant.lower().startswith("wallet top-up"):
+        return True
+    m = t.merchant.strip()
+    digits = m.lstrip("X*")
+    return bool(digits) and digits.isdigit() and m[:1] in "X*" and digits in own
 
 
 def time_bucket(hhmm: str | None) -> str | None:
@@ -81,5 +107,6 @@ def parse_phonepe_csv(raw: bytes) -> list[StatementTxn]:
         txns.append(StatementTxn(
             date=date, time=hhmm, merchant=_merchant(r[2]),
             txn_id=r[3].strip(), kind=r[5].strip().title(), amount=round(amount, 2),
+            instrument=r[6].strip(),
         ))
     return txns

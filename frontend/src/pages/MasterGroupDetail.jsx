@@ -8,6 +8,62 @@ import { buildMasterGroups } from '../utils/masterGroups'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 
+const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
+// "MONTHLY EXPENSES SEP 2026" -> 202609, for newest-first ordering; null for
+// any other group, which keeps its place in the plain list below the months.
+const monthKey = (name) => {
+  const m = /^MONTHLY EXPENSES ([A-Z]{3}) (\d{4})$/.exec((name ?? '').trim().toUpperCase())
+  const i = m ? MONTHS.indexOf(m[1]) : -1
+  return i < 0 ? null : Number(m[2]) * 100 + i + 1
+}
+const RECENT_SHOWN = 6    // visible straight away
+const RECENT_WINDOW = 12  // "Show more" reaches this far; older is by year
+
+// Years of statement imports make one monthly group per month - 100+ cards
+// in one list. The last 6 months show; the rest of the last 12 sit behind
+// "Show more"; anything older is reached through the year picker.
+function MonthlyGroups({ groups }) {
+  const [year, setYear]       = useState('recent')
+  const [showMore, setShowMore] = useState(false)
+
+  const sorted = [...groups].sort((a, b) => monthKey(b.name) - monthKey(a.name))
+  const years  = [...new Set(sorted.map((g) => String(Math.floor(monthKey(g.name) / 100))))]
+  const shown = year === 'recent'
+    ? sorted.slice(0, showMore ? RECENT_WINDOW : RECENT_SHOWN)
+    : sorted.filter((g) => String(Math.floor(monthKey(g.name) / 100)) === year)
+  const moreCount = Math.min(sorted.length, RECENT_WINDOW) - RECENT_SHOWN
+
+  return (
+    <div className="px-5 mt-4">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">
+          {year === 'recent' ? 'Recent months' : year}
+        </p>
+        <select
+          value={year}
+          onChange={(e) => { setYear(e.target.value); setShowMore(false) }}
+          aria-label="Year"
+          className="border border-amber-200 rounded-md bg-cream text-gray-700 font-bold text-xs px-2 py-1 focus:outline-none focus:border-brand-400"
+        >
+          <option value="recent">Last 12 months</option>
+          {years.map((y) => <option key={y} value={y}>{y}</option>)}
+        </select>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {shown.map((g) => <GroupCard key={g.id} group={g} />)}
+      </div>
+      {year === 'recent' && moreCount > 0 && (
+        <button
+          onClick={() => setShowMore((v) => !v)}
+          className="mt-3 text-xs font-bold text-brand-500"
+        >
+          {showMore ? 'Show fewer' : `Show ${moreCount} more`}
+        </button>
+      )}
+    </div>
+  )
+}
+
 export default function MasterGroupDetail() {
   const { key } = useParams()
   const location = useLocation()
@@ -52,6 +108,9 @@ export default function MasterGroupDetail() {
       </div>
     )
   }
+
+  const monthly = master.groups.filter((g) => monthKey(g.name) !== null)
+  const others  = master.groups.filter((g) => monthKey(g.name) === null)
 
   return (
     <div className="pb-24 md:pb-8">
@@ -103,9 +162,14 @@ export default function MasterGroupDetail() {
           />
         )
       ) : (
-        <div className="px-5 mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-          {master.groups.map((g) => <GroupCard key={g.id} group={g} />)}
-        </div>
+        <>
+          {monthly.length > 0 && <MonthlyGroups groups={monthly} />}
+          {others.length > 0 && (
+            <div className="px-5 mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+              {others.map((g) => <GroupCard key={g.id} group={g} />)}
+            </div>
+          )}
+        </>
       )}
     </div>
   )

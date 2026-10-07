@@ -3,11 +3,11 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Up
 from sqlalchemy.orm import Session
 from auth import current_user, is_member, member_group
 from database import get_db
-from models import Group, Expense, Member, User
+from models import Group, Expense, Loan, Member, User
 from schemas import ExpenseCreate, ExpenseOut
 from emailer import notify_group_activity_bg
 from activity import record_activity
-from statement_import import parse_phonepe_csv, time_bucket
+from statement_import import is_self_transfer, own_accounts, parse_phonepe_csv, time_bucket
 
 router = APIRouter(prefix="/expenses", tags=["expenses"])
 
@@ -211,6 +211,114 @@ def delete_expense(expense_id: int, background_tasks: BackgroundTasks,
 _MONTH_ABBR = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
 
 
+def _days_apart(a: str, b: str | None) -> int | None:
+    """Whole days between two ISO dates, or None when either can't be read
+    (expense dates are free-form strings, not every one is ISO)."""
+    from datetime import date
+    try:
+        return abs((date.fromisoformat(a) - date.fromisoformat((b or "")[:10])).days)
+    except ValueError:
+        return None
+
+
+def _closest(pool: list, t, date_of, amount_of):
+    """The entry of `pool` that is this statement line: within ₹1 of its
+    amount (a hand-entered 407 for a 407.42 payment) and dated the same day
+    or one either side (entered the next morning), nearest date first.
+
+    Matching on amount, not on the date alone, is the point - a shared
+    dinner on the 20th says nothing about the Airbnb and fuel paid that same
+    day, and the old date-level skip silently dropped both."""
+    best, best_gap = None, None
+    for item in pool:
+        if abs(amount_of(item) - t.amount) > 1.0:
+            continue
+        gap = _days_apart(t.date, date_of(item))
+        if gap is None or gap > 1:
+            continue
+        if best is None or gap < best_gap:
+            best, best_gap = item, gap
+    return best
+
+
+# Payees whose debits aren't spending, so never a monthly expense: money
+# put away, and repayments of credit already taken (the spending happened
+# when the credit was used). Matched on the merchant name with spaces and
+# dashes removed - PhonePe spells iLoan four different ways in one month.
+_INVESTMENT_PAYEES = (
+    "indmoney", "groww", "angelone", "indstocks", "wintwealth",
+    "iponse", "indianclearingcorporation",
+)
+# Credit card bills (paid directly or through CRED/MobiKwik), pay-later and
+# BNPL apps, and loan EMIs.
+_CREDIT_REPAYMENT_PAYEES = (
+    "iloancredit", "credclub", "credccbp", "ccbp", "billpaidcreditcard",
+    "snapmint", "simpl", "paytmpostpaid", "flipkartpaylater", "slicepay",
+    "zipcash", "olafinancialservices", "axisecoll", "shriramtransportfina",
+)
+# Too short to match as a substring ("cred" is inside "credit").
+_CREDIT_REPAYMENT_EXACT = {"cred"}
+
+
+def _norm(name: str) -> str:
+    """A payee name with case, spaces and punctuation dropped - PhonePe
+    writes "DIVYANK  CHAUDHARY" and "Divyank Chaudhary" for one person."""
+    return "".join(ch for ch in (name or "").lower() if ch.isalnum())
+
+
+def _payee_in(merchant: str, payees: tuple[str, ...]) -> bool:
+    key = _norm(merchant)
+    return any(p in key for p in payees)
+
+
+def is_investment(merchant: str) -> bool:
+    return _payee_in(merchant, _INVESTMENT_PAYEES)
+
+
+def is_credit_repayment(merchant: str) -> bool:
+    return _norm(merchant) in _CREDIT_REPAYMENT_EXACT or _payee_in(merchant, _CREDIT_REPAYMENT_PAYEES)
+
+
+def _refs(txn_ref: str | None) -> list[str]:
+    """An expense paid in parts carries every part's transaction id,
+    comma-joined - see _split_matches."""
+    return [r for r in (txn_ref or "").split(",") if r]
+
+
+def _split_matches(leftover: list, pool: list):
+    """One expense paid to the same payee in 2-3 UPI payments on one day -
+    ₹1,000 then ₹1,500 for a ₹2,500 bill, because of a per-payment limit or
+    a payment that failed halfway. No single payment matches the expense, so
+    without this both parts get added on top of the shared expense.
+
+    Same payee and same day only: summing any payments of the day would
+    find some combination for almost every amount and pair unrelated
+    spending. Yields (parts, expense); everything it yields is removed from
+    `leftover` and `pool`."""
+    from itertools import combinations
+    from types import SimpleNamespace
+
+    by_payee: dict[tuple, list] = {}
+    for t in leftover:
+        by_payee.setdefault((t.date, t.merchant.lower()), []).append(t)
+
+    for (day, _), same in by_payee.items():
+        if len(same) < 2 or len(same) > 8:
+            continue
+        for size in (2, 3):
+            for parts in combinations(same, size):
+                if any(p not in leftover for p in parts):
+                    continue
+                whole = SimpleNamespace(date=day, amount=round(sum(p.amount for p in parts), 2))
+                exp = _closest(pool, whole, lambda e: e.date, lambda e: e.amount)
+                if exp is None:
+                    continue
+                pool.remove(exp)
+                for p in parts:
+                    leftover.remove(p)
+                yield list(parts), exp
+
+
 def _index_many_bg(expense_ids: list[int]) -> None:
     """_index_bg over a whole import, one session, one after another - a
     statement can add hundreds of rows and each food/drink one is a remote
@@ -227,17 +335,31 @@ async def import_statement(background_tasks: BackgroundTasks,
     """Fill the caller's month-wise "MONTHLY EXPENSES <MON> <YEAR>" groups
     from a PhonePe statement CSV.
 
-    Per debit line, in this order:
-      1. already imported (same transaction id anywhere the caller is a
-         member) -> skipped, so uploading the same file twice is harmless;
-      2. same date and same amount as an expense already in that month's
-         monthly group -> MERGED into it: time, payment mode, and the
-         merchant name fill whatever was left blank, nothing entered by
-         hand is overwritten;
-      3. the date already has expenses in ANY of the caller's groups ->
-         skipped, that day is treated as already accounted for;
-      4. otherwise -> created in that month's monthly group (made if it
-         doesn't exist yet).
+    Per debit line:
+      1. already imported (its transaction id is on an expense anywhere the
+         caller is a member) -> skipped, so uploading the same file twice
+         is harmless;
+      2. not spending at all -> skipped: an investment (INDmoney, Groww...),
+         a credit repayment (card bills, CRED, BNPL/pay-later, loan EMIs -
+         the spending happened when the credit was used), money moved to one of the
+         caller's own accounts or wallet (see is_self_transfer), or a payee
+         on the caller's excluded_payees list (friends paid back or lent to);
+      3. the same payment already in the app - same amount (to ₹1), same
+         day or one either side, each entry matched at most once:
+         a. an expense in a monthly group -> MERGED into it: time, payment
+            mode, and the merchant name fill whatever was left blank,
+            nothing entered by hand is overwritten;
+         b. an expense the caller paid in a shared group -> LINKED (it takes
+            the transaction id, nothing else changes), not added again;
+         c. a settle-up Payment the caller made, money the caller lent, or
+            a repayment of a loan the caller took -> skipped, moving money
+            to a friend isn't spending it;
+      4. still unmatched, 2-3 payments to one payee on one day that add up
+         to such an expense -> treated as that expense paid in parts (see
+         _split_matches), merged/linked like 3a/3b;
+      5. otherwise -> created in that month's monthly group (made if it
+         doesn't exist yet). A date already having other expenses doesn't
+         hide the rest of that day's payments - only the ones that match.
     Credits ("Received from ...") are ignored - this fills expenses.
     """
     raw = await file.read()
@@ -247,57 +369,122 @@ async def import_statement(background_tasks: BackgroundTasks,
         raise HTTPException(400, str(e))
 
     mine = [g for g in db.query(Group).all() if is_member(g, caller)]
-    existing_dates = {e.date for g in mine for e in g.expenses if e.date}
-    existing_refs = {e.txn_ref for g in mine for e in g.expenses if e.txn_ref}
+    existing_refs = {r for g in mine for e in g.expenses for r in _refs(e.txn_ref)}
     monthly = {
         g.name.upper(): g for g in mine
         if g.name.upper().startswith("MONTHLY EXPENSES")
         and len(g.members) == 1
     }
+    me = caller.name.lower()
 
-    created, merged, dup, skipped_dates, credits = [], 0, 0, set(), 0
-    groups_created: list[str] = []
-    skipped_by_date = 0
+    # What each statement line may already be. Lists, so a match can be
+    # removed - two ₹60 payments on one day need two ₹60 entries, not one.
+    monthly_pool = [e for g in monthly.values() for e in g.expenses if not e.txn_ref]
+    shared_pool = [
+        e for g in mine if g not in monthly.values() for e in g.expenses
+        if not e.txn_ref and (e.paid_by or "").lower() == me
+    ]
+    transfer_pool = [
+        (p.date, p.amount, f"settle-up to {p.to_member} ({g.name})")
+        for g in mine for p in g.payments if (p.from_member or "").lower() == me
+    ]
+    for loan in db.query(Loan).all():
+        if (loan.lender or "").lower() == me:
+            transfer_pool.append((loan.start_date, loan.principal, f"loan to {loan.borrower}"))
+        elif (loan.borrower or "").lower() == me:
+            transfer_pool += [(lp.date, lp.amount, f"loan repayment to {loan.lender}")
+                              for lp in loan.payments]
 
-    for t in sorted((x for x in txns), key=lambda x: (x.date, x.time or "")):
+    merged, linked, transfers, investments, repayments, dup, credits = 0, [], [], [], [], 0, 0
+    self_transfers, friends = [], []
+    own = own_accounts(txns)
+    try:
+        excluded = {_norm(n) for n in json.loads(caller.excluded_payees or "[]")}
+    except (ValueError, TypeError):
+        excluded = set()
+    leftover = []
+
+    def merge(exp, parts) -> None:
+        """Fill an existing monthly-group entry's blanks from its payment(s)."""
+        first = parts[0]
+        exp.txn_ref = ",".join(p.txn_id for p in parts if p.txn_id) or None
+        if first.time and not exp.txn_time:
+            exp.txn_time = first.time
+            exp.time_bucket = time_bucket(first.time)
+        if not exp.payment_mode:
+            exp.payment_mode = "upi"
+        if not exp.title:
+            exp.title = first.merchant
+        elif first.merchant.lower() not in (exp.title or "").lower() \
+                and first.merchant.lower() not in (exp.notes or "").lower():
+            exp.notes = (f"{exp.notes} · " if exp.notes else "") + f"PhonePe: {first.merchant}"
+
+    def link(exp, parts) -> None:
+        exp.txn_ref = ",".join(p.txn_id for p in parts if p.txn_id) or None
+        how = f" - paid in {len(parts)} parts" if len(parts) > 1 else ""
+        for p in parts:
+            linked.append({"date": p.date, "merchant": p.merchant, "amount": p.amount,
+                           "matched": f"{exp.title or exp.category or 'Expense'} "
+                                      f"(₹{exp.amount:,.2f}, {exp.group.name}{how})"})
+
+    for t in sorted(txns, key=lambda x: (x.date, x.time or "")):
         if t.kind != "Debit":
             credits += 1
             continue
         if t.txn_id and t.txn_id in existing_refs:
             dup += 1
             continue
+        if t.txn_id:
+            existing_refs.add(t.txn_id)   # a debit repeated within the file counts once
+        if is_investment(t.merchant):
+            investments.append({"date": t.date, "merchant": t.merchant, "amount": t.amount})
+            continue
+        if is_credit_repayment(t.merchant):
+            repayments.append({"date": t.date, "merchant": t.merchant, "amount": t.amount})
+            continue
+        if is_self_transfer(t, own):
+            self_transfers.append({"date": t.date, "merchant": t.merchant, "amount": t.amount})
+            continue
+        if _norm(t.merchant) in excluded:
+            friends.append({"date": t.date, "merchant": t.merchant, "amount": t.amount})
+            continue
 
-        y, m = t.date[:4], int(t.date[5:7])
-        gname = f"MONTHLY EXPENSES {_MONTH_ABBR[m - 1]} {y}"
-        group = monthly.get(gname)
-
-        candidate = None
-        if group is not None:
-            candidate = next(
-                (e for e in group.expenses
-                 if e.date == t.date and abs(e.amount - t.amount) < 0.01 and not e.txn_ref),
-                None,
-            )
+        candidate = _closest(monthly_pool, t, lambda e: e.date, lambda e: e.amount)
         if candidate is not None:
-            candidate.txn_ref = t.txn_id
-            if t.time and not candidate.txn_time:
-                candidate.txn_time = t.time
-                candidate.time_bucket = time_bucket(t.time)
-            if not candidate.payment_mode:
-                candidate.payment_mode = "upi"
-            if not candidate.title:
-                candidate.title = t.merchant
-            elif t.merchant.lower() not in (candidate.title or "").lower()                     and t.merchant.lower() not in (candidate.notes or "").lower():
-                candidate.notes = (f"{candidate.notes} · " if candidate.notes else "") + f"PhonePe: {t.merchant}"
-            existing_refs.add(t.txn_id)
+            monthly_pool.remove(candidate)
+            merge(candidate, [t])
             merged += 1
             continue
 
-        if t.date in existing_dates:
-            skipped_dates.add(t.date)
-            skipped_by_date += 1
+        shared = _closest(shared_pool, t, lambda e: e.date, lambda e: e.amount)
+        if shared is not None:
+            shared_pool.remove(shared)
+            link(shared, [t])
             continue
 
+        transfer = _closest(transfer_pool, t, lambda x: x[0], lambda x: x[1])
+        if transfer is not None:
+            transfer_pool.remove(transfer)
+            transfers.append({"date": t.date, "merchant": t.merchant, "amount": t.amount,
+                              "matched": transfer[2]})
+            continue
+
+        leftover.append(t)
+
+    # Only after every single payment has had its chance: a part must not
+    # take an expense some other payment matches exactly.
+    for parts, exp in list(_split_matches(leftover, monthly_pool)):
+        merge(exp, parts)
+        merged += 1
+    for parts, exp in list(_split_matches(leftover, shared_pool)):
+        link(exp, parts)
+
+    created: list[Expense] = []
+    groups_created: list[str] = []
+    for t in leftover:
+        y, m = t.date[:4], int(t.date[5:7])
+        gname = f"MONTHLY EXPENSES {_MONTH_ABBR[m - 1]} {y}"
+        group = monthly.get(gname)
         if group is None:
             group = Group(name=gname, description="", emoji="💰", category="personal")
             db.add(group)
@@ -316,7 +503,6 @@ async def import_statement(background_tasks: BackgroundTasks,
         )
         db.add(exp)
         created.append(exp)
-        existing_refs.add(t.txn_id)
 
     db.commit()
     if created:
@@ -326,8 +512,14 @@ async def import_statement(background_tasks: BackgroundTasks,
         "created": len(created),
         "merged": merged,
         "skipped_already_imported": dup,
-        "skipped_transactions_on_accounted_dates": skipped_by_date,
-        "accounted_dates": sorted(skipped_dates),
+        # Each one names what it matched, so a wrong pairing can be spotted
+        # rather than an amount just going missing.
+        "linked_to_shared": linked,
+        "skipped_as_transfers": transfers,
+        "skipped_investments": investments,
+        "skipped_credit_repayments": repayments,
+        "skipped_self_transfers": self_transfers,
+        "skipped_excluded_payees": friends,
         "credits_ignored": credits,
         "groups_created": groups_created,
     }

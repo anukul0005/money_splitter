@@ -243,6 +243,7 @@ def _run_migrations(conn, text) -> None:
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_expenses_txn_ref ON expenses (txn_ref)"))
     conn.execute(text("ALTER TABLE loans ADD COLUMN IF NOT EXISTS emi_plan TEXT"))
     conn.execute(text("ALTER TABLE loans ADD COLUMN IF NOT EXISTS interest_day INTEGER"))
+    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS excluded_payees TEXT"))
     conn.commit()
 
     # `payments`, `activities` and `activity_seen` are created by create_all
