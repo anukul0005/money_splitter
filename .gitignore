@@ -29,6 +29,8 @@ backend/groq_gpt.txt
 
 # Personal payment statements used to test the CSV import - never commit
 PhonePe_Transaction_Statement*.csv
+# Spending dataset exported from them (export_ml_dataset.py) - same reason
+ml_data/
 
 # Google Cloud Console's own download for an OAuth client (Gmail
 # read-only, for the Credit Cards feature) - same reasoning as brevo.txt
