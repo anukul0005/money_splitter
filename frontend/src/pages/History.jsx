@@ -8,7 +8,7 @@ import {
   Tooltip, Legend,
 } from 'chart.js'
 import { Line, Bar } from 'react-chartjs-2'
-import { getGroups, getOverview, getGroupStats } from '../api/index.js'
+import { getGroups, getOverview, getStatsByGroup } from '../api/index.js'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser, isAdmin } from '../UserContext'
 
@@ -71,17 +71,12 @@ export default function History() {
     setLoading(true)
     setError('')
     try {
-      const [gRes, oRes] = await Promise.all([getGroups(), getOverview()])
-      const allGroups   = gRes.data
-      const allOverview = oRes.data
-      setGroups(allGroups)
-      setOverview(allOverview)
-
-      const visible = filterForUser(allGroups)
-      if (visible.length > 0) {
-        const statsResults = await Promise.all(visible.map((g) => getGroupStats(g.id)))
-        setGroupStats(statsResults.map((r) => r.data))
-      }
+      // One request for every group's stats - one per group meant 100+
+      // requests at once, which ran the server out of database connections.
+      const [gRes, oRes, sRes] = await Promise.all([getGroups(), getOverview(), getStatsByGroup()])
+      setGroups(gRes.data)
+      setOverview(oRes.data)
+      setGroupStats(sRes.data)
     } catch {
       setError('Could not reach server. The API may be waking up — please try again in 30 seconds.')
     } finally {

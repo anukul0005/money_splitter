@@ -396,6 +396,43 @@ def get_overview(db: Session = Depends(get_db), caller: User = Depends(current_u
     ]
 
 
+@router.get("/by-group", response_model=list[dict])
+def get_stats_by_group(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """get_group_stats' totals, by category and by month, for every one of
+    the caller's groups in one aggregate query. History used to fetch
+    /stats/{id} once per group, all at once - with ~100 monthly groups that
+    was 100+ simultaneous requests, each holding a pooled connection while
+    it loaded a whole group, which drained the pool (15) and failed the rest."""
+    ids = [g.id for g in caller_groups(db, caller, history=False)]
+    if not ids:
+        return []
+    month = func.substr(Expense.date, 1, 7)
+    rows = (db.query(Expense.group_id, Expense.category, month, func.sum(Expense.amount))
+            .filter(Expense.group_id.in_(ids))
+            .group_by(Expense.group_id, Expense.category, month).all())
+
+    out = {gid: {"total": 0.0, "cat": defaultdict(float), "cat_display": {}, "date": defaultdict(float)}
+           for gid in ids}
+    for gid, category, ym, amount in rows:
+        s, amount = out[gid], float(amount or 0)
+        s["total"] += amount
+        raw = (category or "Other").strip()
+        s["cat_display"].setdefault(raw.lower(), raw)
+        s["cat"][raw.lower()] += amount
+        if ym and len(ym) >= 7:
+            s["date"][ym] += amount
+    return [
+        {
+            "group_id": gid,
+            "total": round(s["total"], 2),
+            "by_category": [{"category": s["cat_display"][k], "total": round(v, 2)}
+                            for k, v in sorted(s["cat"].items(), key=lambda x: -x[1])],
+            "by_date": [{"date": k, "total": round(v, 2)} for k, v in sorted(s["date"].items())],
+        }
+        for gid, s in out.items()
+    ]
+
+
 # NOTE: /{group_id} must stay LAST — literal routes above must be registered first
 # so FastAPI matches them before the catch-all int parameter route.
 @router.get("/{group_id}", response_model=GroupStats)
