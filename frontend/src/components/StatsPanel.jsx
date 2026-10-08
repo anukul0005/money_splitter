@@ -245,7 +245,21 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
       monthlyMap[key] = (monthlyMap[key] || 0) + e.amount
     }
   })
-  const monthsWithData = Object.keys(monthlyMap).sort()
+  // History usually starts thin - a single payment in a year the app wasn't
+  // really used yet - and a near-empty first year drags the average down
+  // and dwarfs nothing. Leading years with fewer than 12 days of spending
+  // (under one a month) are left out of these charts and their averages.
+  const spendDaysByYear = {}
+  Object.entries(dailyMap).forEach(([d, v]) => {
+    if (v > 0) spendDaysByYear[d.slice(0, 4)] = (spendDaysByYear[d.slice(0, 4)] || 0) + 1
+  })
+  const yearsWithData = Object.keys(spendDaysByYear).sort()
+  const firstRealYear = yearsWithData.find((y) => spendDaysByYear[y] >= 12) || yearsWithData[0]
+  const droppedYears = []
+  if (yearsWithData.length && firstRealYear) {
+    for (let y = Number(yearsWithData[0]); y < Number(firstRealYear); y++) droppedYears.push(String(y))
+  }
+  const monthsWithData = Object.keys(monthlyMap).filter((k) => !firstRealYear || k >= firstRealYear).sort()
   // Every calendar month from the first to the last, empty ones as ₹0, so
   // a gap reads as a gap instead of two far-apart months sitting side by side.
   const allMonthKeys = []
@@ -422,6 +436,8 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
           Dashed line: average per {periodWord}, {INR(periodAvg)}
           {periods.some(([, , partial]) => partial) && ` · the lighter bar is the ${periodWord} so far`}
           {monthView === 'years' && ' · tap a year for its months'}
+          {monthView === 'years' && droppedYears.length > 0 &&
+            ` · ${droppedYears.length > 1 ? `${droppedYears[0]}–${droppedYears[droppedYears.length - 1]} left out` : `${droppedYears[0]} left out`} (too few payments to count as a year)`}
           {monthView !== 'recent' && monthView !== 'years' && (
             <button type="button" className="ml-2 font-bold text-brand-600" onClick={() => setMonthView('years')}>← All years</button>
           )}
