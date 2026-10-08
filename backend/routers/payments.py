@@ -2,7 +2,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from activity import record_activity
-from auth import current_user, is_member, member_group
+from auth import caller_groups, current_user, is_member, member_group
 from database import get_db
 from emailer import notify_group_activity_bg
 from models import Group, Payment, User
@@ -45,20 +45,16 @@ def payments_between(b: str, db: Session = Depends(get_db),
     bl = b.strip().lower()
     watcher = caller.name.lower()
 
-    all_groups = db.query(Group).all()
-    groups = {g.id: g.name for g in all_groups}
     # Groups the viewer is actually in — everything else is none of their business
-    visible = {
-        g.id for g in all_groups
-        if watcher in {m.name.lower() for m in g.members}
-    }
+    mine = caller_groups(db, caller, history=False)
+    groups = {g.id: g.name for g in mine}
+    visible = set(groups)
 
     # Every payment this friend is party to, inside groups the caller shares —
     # not just the caller's own half of it.
     rows = [
-        p for p in db.query(Payment).all()
-        if p.group_id in visible
-        and bl in (p.from_member.lower(), p.to_member.lower())
+        p for p in db.query(Payment).filter(Payment.group_id.in_(visible)).all()
+        if bl in (p.from_member.lower(), p.to_member.lower())
     ]
 
     out = [{

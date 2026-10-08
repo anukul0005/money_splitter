@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
-from auth import current_user, is_member
+from auth import caller_groups, current_user, is_member
 from database import get_db
 from emailer import send_notice
 from loan_calc import emi_plan, outstanding
@@ -28,10 +28,9 @@ def _known_people(db: Session, caller: User) -> dict[str, str]:
     """lower-name -> display name of everyone who shares a group with the
     caller (and the caller). See _resolve_person for who else is allowed."""
     people = {caller.name.lower(): caller.name}
-    for g in db.query(Group).all():
-        if is_member(g, caller):
-            for m in g.members:
-                people.setdefault(m.name.lower(), m.name)
+    for g in caller_groups(db, caller, history=False):
+        for m in g.members:
+            people.setdefault(m.name.lower(), m.name)
     return people
 
 

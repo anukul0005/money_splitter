@@ -1,7 +1,7 @@
 import json
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
-from auth import current_user, is_member, member_group
+from auth import caller_groups, current_user, expense_totals, is_member, member_group
 from database import get_db
 from models import Group, Member, Expense, User
 from schemas import GroupCreate, GroupOut, GroupSummary, GroupUpdate
@@ -50,13 +50,13 @@ def _settle_all_expenses(group: Group, db: Session):
 def list_groups(db: Session = Depends(get_db), caller: User = Depends(current_user)):
     """Only the caller's own groups — the client used to receive all of them
     and filter in React, which meant the data had already left the server."""
-    groups = [g for g in db.query(Group).all() if is_member(g, caller)]
+    groups = caller_groups(db, caller, history=False)
+    totals = expense_totals(db, [g.id for g in groups])
     rows = []
     for g in groups:
-        total = sum(e.amount for e in g.expenses)
-        dates = [e.date for e in g.expenses if e.date]
+        count, total, latest = totals.get(g.id, (0, 0.0, None))
         # Sort key: latest expense date if available, else group creation date
-        sort_key = max(dates) if dates else (g.created_at.date().isoformat() if g.created_at else "1970-01-01")
+        sort_key = latest or (g.created_at.date().isoformat() if g.created_at else "1970-01-01")
         rows.append((sort_key, GroupSummary(
             id=g.id,
             name=g.name,
@@ -64,7 +64,7 @@ def list_groups(db: Session = Depends(get_db), caller: User = Depends(current_us
             is_historical=g.is_historical,
             category=g.category,
             member_count=len(g.members),
-            expense_count=len(g.expenses),
+            expense_count=count,
             total_amount=round(total, 2),
             member_names=[m.name for m in g.members],
             created_at=g.created_at,

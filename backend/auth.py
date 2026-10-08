@@ -171,4 +171,52 @@ def member_group(group_id: int, user: User, db: Session, *,
 
 def visible_groups(db: Session, user: User) -> list[Group]:
     """Every group the caller belongs to."""
-    return [g for g in db.query(Group).all() if is_member(g, user)]
+    return caller_groups(db, user)
+
+
+def caller_groups(db: Session, user: User, *, history: bool = True,
+                  shared_only: bool = False, active_only: bool = False) -> list[Group]:
+    """The caller's groups, picked in SQL rather than by loading every group
+    in the database and filtering in Python - which, with Group.expenses and
+    Group.payments eager, meant pulling every user's entire expense history
+    on each call. Years of imported statements put thousands of rows in one
+    person's monthly groups, and Home made seven such calls per load.
+
+    history=False skips the expense/payment eager loads, for callers that
+    only need names and members (pair it with expense_totals for sums).
+    shared_only drops single-member groups - personal trackers, which can
+    never hold a balance, so balance code never needs their expenses.
+    """
+    from sqlalchemy import func, select
+    from models import Member
+
+    mine = select(Member.group_id).where(func.lower(Member.name) == user.name.lower())
+    query = db.query(Group).filter(Group.id.in_(mine))
+    if shared_only:
+        shared = select(Member.group_id).group_by(Member.group_id).having(func.count() > 1)
+        query = query.filter(Group.id.in_(shared))
+    if active_only:
+        query = query.filter(Group.is_historical == False)  # noqa: E712
+    if not history:
+        query = query.options(noload(Group.expenses), noload(Group.payments))
+    else:
+        # The session hands back the same Group objects a history=False call
+        # already loaded - with expenses and payments left empty, which eager
+        # loading won't fill in for an object it considers already loaded.
+        query = query.populate_existing()
+    return query.order_by(Group.id).all()
+
+
+def expense_totals(db: Session, group_ids: list[int]) -> dict[int, tuple[int, float, str | None]]:
+    """group_id -> (expense count, total amount, latest expense date), in
+    one aggregate query instead of loading every expense row."""
+    from sqlalchemy import func
+    from models import Expense
+
+    if not group_ids:
+        return {}
+    rows = (db.query(Expense.group_id, func.count(Expense.id), func.coalesce(func.sum(Expense.amount), 0.0),
+                     func.max(Expense.date))
+            .filter(Expense.group_id.in_(group_ids))
+            .group_by(Expense.group_id).all())
+    return {gid: (n, float(total), latest) for gid, n, total, latest in rows}

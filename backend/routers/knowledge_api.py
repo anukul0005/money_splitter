@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from auth import current_user, is_member
+from auth import caller_groups, current_user, is_member
 from database import get_db
 from knowledge import DRINK, FOOD, reindex_all, search, stats
 from models import Group, User
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
 
 def _my_group_ids(db: Session, caller: User) -> list[int]:
-    return [g.id for g in db.query(Group).all() if is_member(g, caller)]
+    return [g.id for g in caller_groups(db, caller, history=False)]
 
 
 @router.get("/stats", response_model=dict)

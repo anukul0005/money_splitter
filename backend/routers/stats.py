@@ -3,10 +3,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from collections import defaultdict
+from types import SimpleNamespace
 import json as _json
-from auth import current_user, is_member, member_group
+from sqlalchemy import case, func
+from auth import caller_groups, current_user, expense_totals, is_member, member_group
 from database import get_db
-from models import Group, User
+from models import Expense, Group, User
 from schemas import GroupStats, CategoryStat, MemberStat, TimelineStat
 
 router = APIRouter(prefix="/stats", tags=["stats"])
@@ -18,20 +20,23 @@ def get_user_summary(db: Session = Depends(get_db), caller: User = Depends(curre
     name = caller.name
     from routers.settlements import _calculate
 
-    groups = db.query(Group).all()
-    total_paid  = 0.0
-    total_share = 0.0
-    groups_count = 0
+    # Personal (single-member) groups can't owe anyone, so they're summed in
+    # SQL - they hold most of the rows, and only their totals matter here.
+    # In a group of one the caller pays and owns every expense in full.
+    all_mine = caller_groups(db, caller, history=False, active_only=True)
+    solo_ids = [g.id for g in all_mine if len(g.members) == 1]
+    groups_count = len(all_mine)
+    total_paid = total_share = 0.0
+    if solo_ids:
+        paid, share = db.query(
+            func.coalesce(func.sum(case((func.lower(Expense.paid_by) == name.lower(), Expense.amount), else_=0.0)), 0.0),
+            func.coalesce(func.sum(func.coalesce(Expense.individual_amount,
+                                                 Expense.amount / func.greatest(Expense.divider, 1))), 0.0),
+        ).filter(Expense.group_id.in_(solo_ids)).one()
+        total_paid, total_share = float(paid), float(share)
     pending_net = 0.0
 
-    for g in groups:
-        if g.is_historical:
-            continue
-        member_names_lower = [m.name.lower() for m in g.members]
-        if name.lower() not in member_names_lower:
-            continue
-        groups_count += 1
-
+    for g in caller_groups(db, caller, shared_only=True, active_only=True):
         for e in g.expenses:
             payer = e.paid_by.lower()
             settled_members = [s.lower() for s in (_json.loads(e.settled_by) if e.settled_by else [])]
@@ -84,16 +89,10 @@ def get_user_group_balances(db: Session = Depends(get_db), caller: User = Depend
     name = caller.name
     from routers.settlements import _calculate
 
-    groups = db.query(Group).all()
     result = []
 
-    for g in groups:
-        if g.is_historical:
-            continue
-        member_names_lower = [m.name.lower() for m in g.members]
-        if name.lower() not in member_names_lower:
-            continue
-
+    # A group of one has no one to owe - only shared groups can hold a balance.
+    for g in caller_groups(db, caller, shared_only=True, active_only=True):
         settlement = _calculate(g)
         # Use pending transactions rather than raw paid-share net.
         # Raw net stays positive for the creditor even after all debtors settle,
@@ -185,7 +184,9 @@ def compute_friend_balances(db: Session, name: str) -> list[dict]:
     where the overall net actually comes from.
     """
     name_l = name.strip().lower()
-    groups = db.query(Group).filter(Group.is_historical == False).all()  # noqa: E712
+    # Only groups `name` shares with someone - a group of one has no friends
+    # in it - and picked in SQL, not by loading every group in the database.
+    groups = caller_groups(db, SimpleNamespace(name=name.strip()), shared_only=True, active_only=True)
 
     net: dict[str, float] = {}
     display: dict[str, str] = {}
@@ -270,30 +271,30 @@ def get_global_analytics(db: Session = Depends(get_db), caller: User = Depends(c
     database when no name was passed.
     """
     name = caller.name
-    groups = [g for g in db.query(Group).all() if is_member(g, caller)]
 
     by_category: dict[str, float] = defaultdict(float)
     by_category_count: dict[str, int] = defaultdict(int)
     by_category_display: dict[str, str] = {}
     by_person_category: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
 
-    for g in groups:
-        if g.is_historical:
-            continue
-        if name:
-            member_names_lower = [m.name.lower() for m in g.members]
-            if name.lower() not in member_names_lower:
-                continue
+    # Category totals over every active group, summed in SQL: personal
+    # groups hold thousands of imported rows and only their sums matter here.
+    ids = [g.id for g in caller_groups(db, caller, history=False, active_only=True)]
+    if ids:
+        cat = func.trim(func.coalesce(Expense.category, "Other"))
+        for raw_cat, total, n in (db.query(cat, func.sum(Expense.amount), func.count(Expense.id))
+                                  .filter(Expense.group_id.in_(ids)).group_by(cat).all()):
+            key = (raw_cat or "Other").lower()
+            by_category_display.setdefault(key, raw_cat or "Other")
+            by_category[key] += float(total or 0)
+            by_category_count[key] += n
 
+    # Per-person splits only exist where there are other people.
+    for g in caller_groups(db, caller, shared_only=True, active_only=True):
         group_member_names = [m.name for m in g.members]
 
         for e in g.expenses:
             raw_cat = (e.category or "Other").strip()
-            key = raw_cat.lower()
-            if key not in by_category_display:
-                by_category_display[key] = raw_cat
-            by_category[key] += e.amount
-            by_category_count[key] += 1
 
             if name:
                 member_share = _member_share(e, name)
@@ -381,13 +382,14 @@ def get_aggregate_stats(ids: str, db: Session = Depends(get_db),
 @router.get("/overview/all", response_model=list[dict])
 def get_overview(db: Session = Depends(get_db), caller: User = Depends(current_user)):
     """Per-group totals for the homepage chart, for the caller's groups only."""
-    groups = [g for g in db.query(Group).all() if is_member(g, caller)]
+    groups = caller_groups(db, caller, history=False)
+    totals = expense_totals(db, [g.id for g in groups])
     return [
         {
             "id": g.id,
             "name": g.name,
             "emoji": g.emoji,
-            "total": round(sum(e.amount for e in g.expenses), 2),
+            "total": round(totals.get(g.id, (0, 0.0, None))[1], 2),
             "is_historical": g.is_historical,
         }
         for g in groups
@@ -449,13 +451,13 @@ def top_transaction_partners(db: Session, user: User, limit: int = 3) -> list[tu
     quietly favour whoever's newest.
     """
     totals: dict[str, float] = defaultdict(float)
-    for g in db.query(Group).all():
-        if not is_member(g, user):
-            continue
+    groups = caller_groups(db, user, history=False, shared_only=True)
+    sums = expense_totals(db, [g.id for g in groups])
+    for g in groups:
         other_names = [m.name for m in g.members if m.name.lower() != user.name.lower()]
         if not other_names:
             continue
-        group_total = sum(e.amount for e in g.expenses)
+        group_total = sums.get(g.id, (0, 0.0, None))[1]
         if group_total <= 0:
             continue
         for name in other_names:
