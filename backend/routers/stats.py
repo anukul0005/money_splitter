@@ -396,41 +396,94 @@ def get_overview(db: Session = Depends(get_db), caller: User = Depends(current_u
     ]
 
 
-@router.get("/by-group", response_model=list[dict])
-def get_stats_by_group(db: Session = Depends(get_db), caller: User = Depends(current_user)):
-    """get_group_stats' totals, by category and by month, for every one of
-    the caller's groups in one aggregate query. History used to fetch
-    /stats/{id} once per group, all at once - with ~100 monthly groups that
-    was 100+ simultaneous requests, each holding a pooled connection while
-    it loaded a whole group, which drained the pool (15) and failed the rest."""
-    ids = [g.id for g in caller_groups(db, caller, history=False)]
-    if not ids:
-        return []
-    month = func.substr(Expense.date, 1, 7)
-    rows = (db.query(Expense.group_id, Expense.category, month, func.sum(Expense.amount))
-            .filter(Expense.group_id.in_(ids))
-            .group_by(Expense.group_id, Expense.category, month).all())
+# Older hand-entered categories folded into the TAXONOMY names imports use,
+# so History doesn't show "Food" and "Food & Dining" (or "taxi", "ola" and
+# "Transport") as separate slices.
+_CATEGORY_ALIASES = {
+    "food": "Food & Dining", "snacks": "Food & Dining", "tea": "Food & Dining",
+    "dinner": "Food & Dining", "eat sure": "Food & Dining", "swiggy": "Food & Dining",
+    "murthal": "Food & Dining", "zepto(snacks)": "Food & Dining",
+    "drinks": "Alcohol", "whiskey": "Alcohol",
+    "taxi": "Transport", "ola": "Transport", "auto": "Transport", "petrol": "Transport",
+    "parking": "Transport", "driver": "Transport",
+    "travel - cab": "Travel", "travel - train": "Travel", "train": "Travel",
+    "hotel": "Travel", "airbnb": "Travel",
+    "movie": "Entertainment",
+    # Places on trips, entered as the category.
+    "kufri": "Travel", "mall road": "Travel", "sukhna lake": "Travel", "rock garden": "Travel",
+    "haveli en-route del": "Travel", "en-route chd": "Travel",
+}
 
-    out = {gid: {"total": 0.0, "cat": defaultdict(float), "cat_display": {}, "date": defaultdict(float)}
-           for gid in ids}
-    for gid, category, ym, amount in rows:
-        s, amount = out[gid], float(amount or 0)
-        s["total"] += amount
-        raw = (category or "Other").strip()
-        s["cat_display"].setdefault(raw.lower(), raw)
-        s["cat"][raw.lower()] += amount
-        if ym and len(ym) >= 7:
-            s["date"][ym] += amount
-    return [
-        {
-            "group_id": gid,
-            "total": round(s["total"], 2),
-            "by_category": [{"category": s["cat_display"][k], "total": round(v, 2)}
-                            for k, v in sorted(s["cat"].items(), key=lambda x: -x[1])],
-            "by_date": [{"date": k, "total": round(v, 2)} for k, v in sorted(s["date"].items())],
-        }
-        for gid, s in out.items()
-    ]
+
+def _history_category(raw: str | None) -> str:
+    from spend_categories import TAXONOMY
+    name = (raw or "").strip()
+    key = name.lower()
+    if key in _CATEGORY_ALIASES:
+        return _CATEGORY_ALIASES[key]
+    if key.startswith("toll"):
+        return "Transport"
+    for t in TAXONOMY:
+        if t.lower() == key:
+            return t
+    return "Other"
+
+
+@router.get("/history", response_model=dict)
+def get_history(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Everything the History page charts, in one request: the caller's
+    groups (with members, so the page can fold them into supergroups) and
+    their spending as (group, month, expense category) rows carrying both
+    the group's total and the caller's own share of it - a shared trip's
+    total is everyone's spend, the share is what the caller actually spent.
+
+    Single-member groups are summed in SQL (the share is the whole amount);
+    only shared groups' expenses are loaded, to read each one's split.
+    `days` is the number of distinct days per year the caller spent
+    anything, which the page uses to drop thin leading years.
+    """
+    groups = caller_groups(db, caller, history=False)
+    if not groups:
+        return {"groups": [], "rows": [], "days": {}}
+    me = caller.name.lower()
+    solo = [g.id for g in groups if len(g.members) == 1]
+    shared = {g.id: [m.name for m in g.members] for g in groups if len(g.members) > 1}
+
+    acc: dict[tuple, list] = defaultdict(lambda: [0.0, 0.0, 0])
+    days: dict[str, set] = defaultdict(set)
+    month = func.substr(Expense.date, 1, 7)
+    if solo:
+        for gid, cat, ym, total, n in (
+                db.query(Expense.group_id, Expense.category, month, func.sum(Expense.amount), func.count())
+                .filter(Expense.group_id.in_(solo))
+                .group_by(Expense.group_id, Expense.category, month)):
+            a = acc[(gid, ym or "", _history_category(cat))]
+            a[0] += float(total or 0); a[1] += float(total or 0); a[2] += n
+        for (d,) in (db.query(Expense.date).filter(Expense.group_id.in_(solo), Expense.date.isnot(None))
+                     .distinct()):
+            days[d[:4]].add(d[:10])
+    if shared:
+        for e in (db.query(Expense.group_id, Expense.date, Expense.category, Expense.amount,
+                           Expense.split_json, Expense.participants, Expense.individual_amount,
+                           Expense.divider)
+                  .filter(Expense.group_id.in_(list(shared)))):
+            share = _member_share(e, me) or 0.0
+            a = acc[(e.group_id, (e.date or "")[:7], _history_category(e.category))]
+            a[0] += e.amount; a[1] += share; a[2] += 1
+            if share > 0 and e.date:
+                days[e.date[:4]].add(e.date[:10])
+
+    return {
+        "groups": [
+            {"id": g.id, "name": g.name, "emoji": g.emoji, "category": g.category,
+             "is_historical": g.is_historical, "members": [m.name for m in g.members]}
+            for g in groups
+        ],
+        # [group_id, "YYYY-MM", category, group total, caller's share, expense count]
+        "rows": [[gid, ym, cat, round(t, 2), round(s, 2), n]
+                 for (gid, ym, cat), (t, s, n) in acc.items() if len(ym) == 7],
+        "days": {y: len(ds) for y, ds in sorted(days.items())},
+    }
 
 
 # NOTE: /{group_id} must stay LAST — literal routes above must be registered first
