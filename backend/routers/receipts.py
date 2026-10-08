@@ -28,8 +28,11 @@ PROVIDERS: list[OCRProvider] = [OCRSpaceProvider(), AzureVisionProvider(), Googl
 
 
 @router.post("/scan", response_model=dict)
-async def scan_receipt(file: UploadFile = File(...), caller: User = Depends(current_user)):
-    image_bytes = await file.read()
+def scan_receipt(file: UploadFile = File(...), caller: User = Depends(current_user)):
+    # A plain def, so the OCR and LLM calls below - blocking HTTP requests,
+    # several seconds each - run in a worker thread. As an async def they
+    # froze the event loop, and with it every other request in flight.
+    image_bytes = file.file.read()
     if not image_bytes:
         raise HTTPException(400, "Empty file")
 

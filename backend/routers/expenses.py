@@ -4,7 +4,6 @@ from collections import defaultdict
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-from starlette.concurrency import run_in_threadpool
 from auth import caller_groups, current_user, is_member, member_group
 from database import get_db
 from models import Group, Expense, Loan, Member, PayeeLabel, User
@@ -352,10 +351,10 @@ def _index_many_bg(expense_ids: list[int]) -> None:
 
 
 @router.post("/import-csv", response_model=dict)
-async def import_statement(background_tasks: BackgroundTasks,
-                           file: UploadFile = File(...),
-                           db: Session = Depends(get_db),
-                           caller: User = Depends(current_user)):
+def import_statement(background_tasks: BackgroundTasks,
+                     file: UploadFile = File(...),
+                     db: Session = Depends(get_db),
+                     caller: User = Depends(current_user)):
     """Fill the caller's month-wise "MONTHLY EXPENSES <MON> <YEAR>" groups
     from a PhonePe statement CSV.
 
@@ -392,7 +391,12 @@ async def import_statement(background_tasks: BackgroundTasks,
          expenses doesn't hide the rest of that day's payments.
     Credits ("Received from ...") are ignored - this fills expenses.
     """
-    raw = await file.read()
+    # A plain def, so FastAPI runs all of this in a worker thread. It was
+    # async, which ran every query below - hundreds of round trips to the
+    # database on a big statement - on the event loop itself. While it ran,
+    # no other request could finish and give its connection back, so the
+    # pool (15) filled and everything else timed out after 30s.
+    raw = file.file.read()
     try:
         txns = parse_phonepe_csv(raw)
     except ValueError as e:
@@ -527,7 +531,7 @@ async def import_statement(background_tasks: BackgroundTasks,
     llm = {"asked": len(unknown), "answered": 0, "error": None}
     if unknown and payee_classifier.available():
         try:
-            answers = await run_in_threadpool(payee_classifier.classify, [_payee_facts(k, ts) for k, ts in unknown.items()])
+            answers = payee_classifier.classify([_payee_facts(k, ts) for k, ts in unknown.items()])
         except Exception as e:  # the LLM is a help, never a reason an import fails
             answers, llm["error"] = {}, str(e)[:200]
         for key, a in answers.items():
@@ -584,9 +588,13 @@ async def import_statement(background_tasks: BackgroundTasks,
         db.add(exp)
         created.append(exp)
 
+    # Ids read before the commit: afterwards each expense is expired, and
+    # reading .id would cost one SELECT per row.
+    db.flush()
+    created_ids = [e.id for e in created]
     db.commit()
-    if created:
-        background_tasks.add_task(_index_many_bg, [e.id for e in created])
+    if created_ids:
+        background_tasks.add_task(_index_many_bg, created_ids)
 
     return {
         "created": len(created),
