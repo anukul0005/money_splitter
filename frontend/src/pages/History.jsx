@@ -44,6 +44,29 @@ const currentYM = () => {
 }
 const change = (now, before) => (before > 0 ? Math.round(((now - before) / before) * 100) : null)
 
+// "+12%" / "−8%" above each bar of the year-on-year chart (red = spent
+// more, green = less). Only charts that pass options.plugins.changeLabels
+// get them.
+const changeLabels = {
+  id: 'changeLabels',
+  afterDatasetsDraw(chart, _, opts) {
+    const labels = opts?.labels
+    if (!labels) return
+    const { ctx } = chart
+    const bars = chart.getDatasetMeta(0).data
+    labels.forEach((v, i) => {
+      if (v == null || !bars[i]) return
+      ctx.save()
+      ctx.font = "bold 10px 'Space Grotesk', system-ui, sans-serif"
+      ctx.fillStyle = v > 0 ? '#ef4444' : v < 0 ? '#16a34a' : '#94a3b8'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'bottom'
+      ctx.fillText(`${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v) > 999 ? '999+' : Math.abs(v)}%`, bars[i].x, bars[i].y - 3)
+      ctx.restore()
+    })
+  },
+}
+
 const SOLO   = '#f97316'
 const SHARED = '#3b82f6'
 const AVG    = '#64748b'
@@ -73,6 +96,8 @@ export default function History() {
   const [picked,  setPicked]  = useState(null)      // a month tapped on the chart
   const [allSupers, setAllSupers] = useState(false)
   const [allCats,   setAllCats]   = useState(false)
+  const [yoyMonth,  setYoyMonth]  = useState(null)     // 1-12; null = the latest complete month
+  const [yoyYtd,    setYoyYtd]    = useState(false)    // Jan..yoyMonth summed, instead of the one month
 
   const load = async () => {
     setLoading(true)
@@ -268,8 +293,15 @@ export default function History() {
       }
     }
 
+    // Every month's total under the current filter, whatever the period -
+    // the year-on-year and month-to-month charts reach outside it.
+    const monthTotals = {}
+    rows.filter((r) => bySide(r) && byCat(r)).forEach((r) => {
+      monthTotals[r.ym] = (monthTotals[r.ym] || 0) + val(r)
+    })
+
     return {
-      cur, curYear, isAll, isYear, total, buckets, avg, peak, compare,
+      cur, curYear, isAll, isYear, total, buckets, avg, peak, compare, monthTotals, complete,
       completeCount: complete.length,
       soloTotal, sharedTotal, superList, catTotal, catList, topGroups, spread, pick,
       years: Array.from({ length: +curYear - +firstYear + 1 }, (_, i) => String(+curYear - i)),
@@ -369,6 +401,117 @@ export default function History() {
     },
     onHover: (evt, els) => {
       if (evt.native) evt.native.target.style.cursor = els.length ? 'pointer' : 'default'
+    },
+  }
+
+  // ── Year on year: one month (or Jan..that month) in every year ──
+  const mt = view.monthTotals
+  const lastComplete = addMonths(view.cur, -1)
+  const yMonth = yoyMonth || +lastComplete.slice(5, 7)
+  const yoy = []
+  for (let y = +base.firstYear; y <= +view.curYear; y++) {
+    const key = `${y}-${pad(yMonth)}`
+    if (key > view.cur) continue
+    const keys = yoyYtd ? monthRange(`${y}-01`, key) : [key]
+    yoy.push({ year: String(y), value: keys.reduce((s, k) => s + (mt[k] || 0), 0), partial: key === view.cur })
+  }
+  yoy.forEach((b, i) => { b.change = i > 0 && !b.partial ? change(b.value, yoy[i - 1].value) : null })
+  const yoyLast = [...yoy].reverse().find((b) => b.change != null)
+  const yoyTitle = yoyYtd ? `Jan–${MON[yMonth - 1]}` : MON[yMonth - 1]
+  const yoyData = {
+    labels: yoy.map((b) => b.year),
+    datasets: [{
+      label: yoyTitle,
+      data: yoy.map((b) => b.value),
+      backgroundColor: yoy.map((b) => (b.partial ? shade(SOLO, 0.35) : SOLO)),
+      borderRadius: 0, borderSkipped: false,
+    }],
+  }
+  const yoyOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    layout: { padding: { top: 18 } },
+    plugins: {
+      legend: { display: false },
+      changeLabels: { labels: yoy.map((b) => b.change) },
+      tooltip: {
+        callbacks: {
+          title: (items) => `${yoyTitle} ${yoy[items[0].dataIndex].year}${yoy[items[0].dataIndex].partial ? ' (so far)' : ''}`,
+          label: (c) => ` ${INR(c.raw)}`,
+          afterLabel: (c) => {
+            const b = yoy[c.dataIndex]
+            return b.change == null ? '' : ` ${b.change > 0 ? '+' : ''}${b.change}% vs ${+b.year - 1}`
+          },
+        },
+      },
+    },
+    scales: {
+      x: { grid: { display: false }, ticks: { font: TICK_FONT } },
+      y: { beginAtZero: true, ticks: { font: TICK_FONT, maxTicksLimit: 5, callback: (v) => compactINR(v) }, grid: { color: '#f1f5f9' }, border: { display: false } },
+    },
+  }
+
+  // ── Month to month: the change from the month before, in ₹ (a % off a
+  // ₹130 month would dwarf everything). Complete months only. ──
+  const momMonths = isAll ? monthRange(addMonths(view.cur, -12), lastComplete) : view.complete
+  const mom = momMonths
+    .filter((m) => addMonths(m, -1) >= `${base.firstYear}-01`)
+    .map((m) => {
+      const now = mt[m] || 0, before = mt[addMonths(m, -1)] || 0
+      return { m, now, before, diff: now - before, pct: change(now, before) }
+    })
+  const momUp = mom.filter((x) => x.diff > 0).length
+  const momMax = mom.reduce((a, x) => (!a || x.diff > a.diff ? x : a), null)
+  const momMin = mom.reduce((a, x) => (!a || x.diff < a.diff ? x : a), null)
+  const momData = {
+    labels: mom.map((x) => ymLabel(x.m)),
+    datasets: [{
+      label: 'Change',
+      data: mom.map((x) => x.diff),
+      backgroundColor: mom.map((x) => (x.diff > 0 ? '#ef4444' : '#16a34a')),
+      borderRadius: 0, borderSkipped: false,
+    }],
+  }
+  const momOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          title: (items) => {
+            const x = mom[items[0].dataIndex]
+            return `${ymLabel(x.m)} vs ${ymLabel(addMonths(x.m, -1))}`
+          },
+          label: (c) => {
+            const x = mom[c.dataIndex]
+            return ` ${x.diff >= 0 ? '+' : '−'}${INR(Math.abs(x.diff))}${x.pct != null ? ` (${x.pct > 0 ? '+' : ''}${x.pct}%)` : ''}`
+          },
+          afterLabel: (c) => {
+            const x = mom[c.dataIndex]
+            return ` ${INR(x.before)} → ${INR(x.now)}`
+          },
+        },
+      },
+    },
+    scales: {
+      x: {
+        grid: { display: false },
+        ticks: {
+          font: TICK_FONT, maxRotation: 0, autoSkip: false,
+          callback: (_, i) => {
+            const x = mom[i]
+            if (!x) return ''
+            const mo = +x.m.slice(5, 7)
+            return mo === 1 || i === 0 ? [MON[mo - 1], x.m.slice(0, 4)] : MON[mo - 1]
+          },
+        },
+      },
+      y: {
+        ticks: { font: TICK_FONT, maxTicksLimit: 5, callback: (v) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${compactINR(Math.abs(v))}` },
+        grid: { color: (c) => (c.tick?.value === 0 ? '#94a3b8' : '#f1f5f9') },
+        border: { display: false },
+      },
     },
   }
 
@@ -562,6 +705,80 @@ export default function History() {
             </div>
           )}
         </div>
+
+        {/* ── Year on year: the same month in every year ── */}
+        {yoy.length > 1 && (
+          <div className="card">
+            <div className="flex items-center justify-between mb-2 gap-2">
+              <h2 className="text-xs font-black text-gray-500 uppercase tracking-widest">Same month, every year</h2>
+              <div className="flex shrink-0 border border-amber-200">
+                {[[false, 'Month'], [true, 'Year to date']].map(([v, lbl]) => (
+                  <button
+                    key={lbl}
+                    onClick={() => setYoyYtd(v)}
+                    className={`px-2 py-1 text-[10px] font-bold rounded-none ${yoyYtd === v ? 'bg-gray-800 text-white' : 'text-gray-400'}`}
+                  >
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex gap-1 overflow-x-auto pb-1 mb-2 -mx-1 px-1">
+              {MON.map((name, i) => (
+                <button
+                  key={name}
+                  onClick={() => setYoyMonth(i + 1)}
+                  className={`shrink-0 px-2 py-1 text-[10px] font-bold border ${
+                    yMonth === i + 1 ? 'bg-brand-400 text-white border-brand-400' : 'bg-cream text-gray-400 border-amber-200'
+                  }`}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-gray-600 mb-2">
+              {yoyYtd ? `January to ${MON[yMonth - 1]}` : MON[yMonth - 1]} of each year
+              {yoyLast && (
+                <> · {yoyLast.year} was{' '}
+                  <span className={`font-bold ${yoyLast.change > 0 ? 'text-red-500' : 'text-green-600'}`}>
+                    {Math.abs(yoyLast.change)}% {yoyLast.change > 0 ? 'higher' : 'lower'}
+                  </span>{' '}than {+yoyLast.year - 1}
+                </>
+              )}
+            </p>
+            <div className="relative h-56">
+              <Bar data={yoyData} options={yoyOptions} plugins={[changeLabels]} />
+            </div>
+            {yoy.some((b) => b.partial) && (
+              <p className="text-[10px] text-gray-300 mt-2 text-center">{view.curYear} is lighter: {MON[yMonth - 1]} is still under way</p>
+            )}
+          </div>
+        )}
+
+        {/* ── Month to month: how much each month moved ── */}
+        {mom.length > 1 && (
+          <div className="card">
+            <h2 className="text-xs font-black text-gray-500 uppercase tracking-widest mb-1">Month to month</h2>
+            <p className="text-[11px] text-gray-600 mb-3">
+              Change from the month before{isAll ? ', last 12 months' : ''} ·{' '}
+              up in <span className="font-bold">{momUp}</span> of {mom.length}
+              {momMax && momMax.diff > 0 && (
+                <> · biggest jump <span className="font-bold text-red-500">{ymLabel(momMax.m)} +{compactINR(momMax.diff)}</span></>
+              )}
+              {momMin && momMin.diff < 0 && (
+                <> · biggest drop <span className="font-bold text-green-600">{ymLabel(momMin.m)} −{compactINR(-momMin.diff)}</span></>
+              )}
+            </p>
+            <div className="relative h-52">
+              <Bar data={momData} options={momOptions} />
+            </div>
+            <div className="flex items-center justify-center gap-3 mt-2 text-[10px] text-gray-500">
+              <Legend color="#ef4444" label="Spent more" />
+              <Legend color="#16a34a" label="Spent less" />
+              <span className="text-gray-300">month in progress left out</span>
+            </div>
+          </div>
+        )}
 
         {/* ── 2. Supergroups: who the spending was with ── */}
         {sideTotal > 0 && (
