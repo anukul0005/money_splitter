@@ -4,7 +4,7 @@ import {
   ArcElement, DoughnutController, BarController,
   LineElement, PointElement, LineController, Filler,
 } from 'chart.js'
-import { Bar, Doughnut, Line } from 'react-chartjs-2'
+import { Bar, Doughnut } from 'react-chartjs-2'
 
 Chart.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend, ArcElement, DoughnutController, BarController, LineElement, PointElement, LineController, Filler)
 Chart.defaults.font.family = "'Space Grotesk', system-ui, sans-serif"
@@ -190,34 +190,21 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
   }
   const dayColors = dayKeys.map((k) => (isWeekend(k) ? '#f97316' : '#22c55e'))
 
-  // A line through every day of the window - ₹0 days sit on the baseline -
-  // scaled to the biggest day in it, so no amount is cut off.
-  const dailyLineData = {
+  // A bar for every day of the window - ₹0 days as gaps - on an axis that
+  // runs to the biggest day in it, so no amount is cut off.
+  const dailyBarData = {
     labels: dayKeys.map(fmtDayLabel),
     datasets: [{
       label: 'Daily Spend',
       data: dayVals,
-      borderColor: '#22c55e',
-      backgroundColor: (context) => {
-        const { ctx, chartArea } = context.chart
-        if (!chartArea) return 'rgba(34,197,94,0.15)'
-        const gradient = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom)
-        gradient.addColorStop(0, 'rgba(34,197,94,0.30)')
-        gradient.addColorStop(1, 'rgba(34,197,94,0.00)')
-        return gradient
-      },
-      borderWidth: 2,
-      pointRadius: dayKeys.map((k) => (windowDays > 45 ? 1.5 : isWeekend(k) ? 3.5 : 2.5)),
-      pointHoverRadius: 5,
-      pointHitRadius: 8,
-      pointBackgroundColor: dayColors,
-      pointBorderColor: dayColors,
-      pointBorderWidth: 0,
-      tension: 0.25,
-      fill: true,
+      backgroundColor: dayColors,
+      borderRadius: 2,
+      borderSkipped: false,
+      barPercentage: 0.9,
+      categoryPercentage: 0.95,
     }],
   }
-  const dailyLineOptions = {
+  const dailyBarOptions = {
     responsive: true,
     maintainAspectRatio: false,
     interaction: { mode: 'index', intersect: false },
@@ -405,11 +392,11 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
           )}
         </div>
         <div className="relative h-56 md:h-72">
-          <Line data={dailyLineData} options={dailyLineOptions} />
+          <Bar data={dailyBarData} options={dailyBarOptions} />
         </div>
         {longSpan && (
           <p className="text-[10px] text-gray-400 mt-2">
-            Green points are weekdays, orange weekends. Tap a point for its day; month and year totals are below.
+            Green bars are weekdays, orange weekends. Tap a bar for its day; month and year totals are below.
           </p>
         )}
       </div>
