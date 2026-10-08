@@ -223,12 +223,22 @@ export default function History() {
     const perMonth = {}
     main.forEach((r) => { perMonth[r.ym] = (perMonth[r.ym] || 0) + val(r) })
     const spent = complete.filter((m) => perMonth[m] > 0).map((m) => ({ m, v: perMonth[m] }))
+    // Only the middle half (P25-P75) is used: the near-empty months and the
+    // one-off huge ones would otherwise set the scale for every other month.
     let spread = null
-    if (spent.length >= 3) {
-      const sorted = [...spent].sort((a, b) => a.v - b.v)
-      const n = sorted.length
-      const median = n % 2 ? sorted[(n - 1) / 2].v : (sorted[n / 2 - 1].v + sorted[n / 2].v) / 2
-      spread = { n, low: sorted[0], high: sorted[n - 1], median, latest: spent[spent.length - 1] }
+    if (spent.length >= 4) {
+      const vals = spent.map((x) => x.v).sort((a, b) => a - b)
+      const q = (p) => {
+        const i = p * (vals.length - 1), lo = Math.floor(i), hi = Math.ceil(i)
+        return vals[lo] + (vals[hi] - vals[lo]) * (i - lo)
+      }
+      const p25 = q(0.25), p75 = q(0.75)
+      spread = {
+        n: spent.length,
+        inRange: spent.filter((x) => x.v >= p25 && x.v <= p75).length,
+        p25, median: q(0.5), p75,
+        latest: spent[spent.length - 1],
+      }
     }
 
     // ── A month (or, in "All", a year) tapped on the chart ──
@@ -670,14 +680,16 @@ export default function History() {
         {/* ── 5. How the months compare ── */}
         {view.spread && (
           <div className="card">
-            <h2 className="text-xs font-black text-gray-500 uppercase tracking-widest mb-3">
-              How your months compare <span className="text-gray-300 normal-case tracking-normal font-bold">({view.spread.n} months)</span>
-            </h2>
+            <h2 className="text-xs font-black text-gray-500 uppercase tracking-widest mb-1">Your usual month</h2>
+            <p className="text-[10px] text-gray-400 mb-3">
+              The middle half of your months (25th–75th percentile): {view.spread.inRange} of {view.spread.n} months.
+              The cheapest and costliest quarter are left out.
+            </p>
             <div className="grid grid-cols-3 gap-2 text-center">
               <div>
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Lowest</p>
-                <p className="text-sm font-black text-gray-900 mt-0.5">{INR(Math.round(view.spread.low.v))}</p>
-                <p className="text-[10px] text-gray-400">{ymLabel(view.spread.low.m)}</p>
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Lower end</p>
+                <p className="text-sm font-black text-gray-900 mt-0.5">{INR(Math.round(view.spread.p25))}</p>
+                <p className="text-[10px] text-gray-400">25th pct</p>
               </div>
               <div>
                 <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Typical</p>
@@ -685,9 +697,9 @@ export default function History() {
                 <p className="text-[10px] text-gray-400">median</p>
               </div>
               <div>
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Highest</p>
-                <p className="text-sm font-black text-gray-900 mt-0.5">{INR(Math.round(view.spread.high.v))}</p>
-                <p className="text-[10px] text-gray-400">{ymLabel(view.spread.high.m)}</p>
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Upper end</p>
+                <p className="text-sm font-black text-gray-900 mt-0.5">{INR(Math.round(view.spread.p75))}</p>
+                <p className="text-[10px] text-gray-400">75th pct</p>
               </div>
             </div>
             <SpreadBar spread={view.spread} />
@@ -761,25 +773,31 @@ function Row({ label, sub, value, pctOf, width, color, change, active, dim, onCl
   )
 }
 
-// Lowest to highest month on one line: the typical month and the latest
-// complete one marked where they fall.
+// The usual range (P25-P75) as a band, the median marked in it, and the
+// latest complete month - pinned to the nearer edge when it falls outside,
+// since the scale only covers the usual range.
 function SpreadBar({ spread }) {
-  const { low, high, median, latest } = spread
-  const span = high.v - low.v || 1
-  const at = (v) => `${((v - low.v) / span) * 100}%`
-  const vsTypical = median > 0 ? Math.round(((latest.v - median) / median) * 100) : 0
+  const { p25, p75, median, latest } = spread
+  const span = p75 - p25 || 1
+  const pos = (v) => Math.min(Math.max((v - p25) / span, 0), 1) * 100
+  const outside = latest.v > p75 ? 'above' : latest.v < p25 ? 'below' : null
+  const edge = outside === 'above' ? p75 : p25
+  const by = outside && edge > 0 ? Math.round((Math.abs(latest.v - edge) / edge) * 100) : 0
   return (
     <div className="mt-4">
-      <div className="relative h-2 bg-amber-100">
-        <div className="absolute top-[-3px] h-[14px] w-0.5 bg-brand-500" style={{ left: at(median) }} />
-        <div className="absolute top-[-4px] h-4 w-1.5 bg-gray-900" style={{ left: `calc(${at(latest.v)} - 3px)` }} />
+      <div className="relative h-2 bg-brand-100">
+        <div className="absolute top-[-3px] h-[14px] w-0.5 bg-brand-500" style={{ left: `${pos(median)}%` }} />
+        <div
+          className={`absolute top-[-4px] h-4 w-1.5 ${outside ? 'bg-red-500' : 'bg-gray-900'}`}
+          style={{ left: `calc(${pos(latest.v)}% - 3px)` }}
+        />
       </div>
       <p className="text-[11px] text-gray-600 mt-3">
         <span className="font-bold">{ymLabel(latest.m)}</span>, your latest complete month, was{' '}
         <span className="font-bold">{INR(Math.round(latest.v))}</span> —{' '}
-        {Math.abs(vsTypical) < 5
-          ? 'about a typical month.'
-          : <><span className={`font-bold ${vsTypical > 0 ? 'text-red-500' : 'text-green-600'}`}>{Math.abs(vsTypical)}% {vsTypical > 0 ? 'above' : 'below'}</span> a typical month.</>}
+        {outside
+          ? <><span className={`font-bold ${outside === 'above' ? 'text-red-500' : 'text-green-600'}`}>{by}% {outside}</span> your usual range.</>
+          : 'within your usual range.'}
       </p>
     </div>
   )
