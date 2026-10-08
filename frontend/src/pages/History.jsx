@@ -231,17 +231,26 @@ export default function History() {
       spread = { n, low: sorted[0], high: sorted[n - 1], median, latest: spent[spent.length - 1] }
     }
 
-    // ── A month tapped on the chart ──
+    // ── A month (or, in "All", a year) tapped on the chart ──
     let pick = null
-    if (picked && !isAll) {
-      const rs = main.filter((r) => r.ym === picked)
+    const pickedBucket = picked && buckets.find((b) => b.key === picked)
+    if (pickedBucket) {
+      const rs = main.filter((r) => bucketOf(r.ym) === picked)
       const byC = {}, byG = {}
       rs.forEach((r) => {
         byC[r.cat] = (byC[r.cat] || 0) + val(r)
         byG[r.gid] = (byG[r.gid] || 0) + val(r)
       })
+      const spentMonths = new Set(rs.map((r) => r.ym)).size
       pick = {
-        ym: picked,
+        key: picked,
+        isYear: isAll,
+        partial: pickedBucket.partial,
+        solo: pickedBucket.solo,
+        shared: pickedBucket.shared,
+        vsAvg: avg ? change(pickedBucket.total, avg) : null,
+        perMonth: isAll && spentMonths ? pickedBucket.total / spentMonths : null,
+        spentMonths,
         total: sum(rs),
         cats: Object.entries(byC).filter(([, v]) => v >= 1).sort((a, b) => b[1] - a[1]).slice(0, 6),
         groups: Object.entries(byG).filter(([, v]) => v >= 1).sort((a, b) => b[1] - a[1]).slice(0, 5)
@@ -343,9 +352,10 @@ export default function History() {
     },
     onClick: (_, els) => {
       if (!els.length) return
+      // A tap shows that bar's breakdown - for a year too, so its own
+      // numbers are readable; "See months" in the panel opens the year.
       const b = buckets[els[0].index]
-      if (isAll) setPeriod(b.key)
-      else setPicked((p) => (p === b.key ? null : b.key))
+      setPicked((p) => (p === b.key ? null : b.key))
     },
     onHover: (evt, els) => {
       if (evt.native) evt.native.target.style.cursor = els.length ? 'pointer' : 'default'
@@ -467,17 +477,53 @@ export default function History() {
             <Bar data={chartData} options={chartOptions} />
           </div>
           <p className="text-[10px] text-gray-300 mt-2 text-center">
-            {isAll ? 'tap a year to see its months' : 'tap a month to see where it went'}
+            {isAll ? 'tap a year for its numbers' : 'tap a month to see where it went'}
           </p>
 
           {view.pick && (
             <div className="mt-3 pt-3 border-t border-amber-100">
               <div className="flex items-center justify-between mb-2">
                 <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
-                  {ymLabel(view.pick.ym)} · {INR(view.pick.total)}
+                  {view.pick.isYear ? view.pick.key : ymLabel(view.pick.key)}
+                  {view.pick.partial ? ' (so far)' : ''} · {INR(view.pick.total)}
                 </p>
                 <button onClick={() => setPicked(null)} className="text-gray-300 hover:text-gray-500 text-sm leading-none">✕</button>
               </div>
+              <div className="grid grid-cols-3 gap-2 mb-3 text-center">
+                <div className="bg-amber-50 py-1.5">
+                  <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Just you</p>
+                  <p className="text-xs font-black text-gray-900">{INR(view.pick.solo)}</p>
+                </div>
+                <div className="bg-amber-50 py-1.5">
+                  <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Shared</p>
+                  <p className="text-xs font-black text-gray-900">{INR(view.pick.shared)}</p>
+                </div>
+                <div className="bg-amber-50 py-1.5">
+                  {view.pick.isYear ? (
+                    <>
+                      <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Per month</p>
+                      <p className="text-xs font-black text-gray-900">{view.pick.perMonth ? INR(Math.round(view.pick.perMonth)) : '—'}</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">vs average</p>
+                      <p className={`text-xs font-black ${view.pick.vsAvg > 0 ? 'text-red-500' : 'text-green-600'}`}>
+                        {view.pick.vsAvg == null ? '—' : `${view.pick.vsAvg > 0 ? '+' : ''}${view.pick.vsAvg}%`}
+                      </p>
+                    </>
+                  )}
+                </div>
+              </div>
+              {view.pick.isYear && (
+                <p className="text-[10px] text-gray-500 mb-2">
+                  {view.pick.spentMonths} month{view.pick.spentMonths === 1 ? '' : 's'} with spending
+                  {view.pick.vsAvg != null && !view.pick.partial && (
+                    <> · <span className={`font-bold ${view.pick.vsAvg > 0 ? 'text-red-500' : 'text-green-600'}`}>
+                      {Math.abs(view.pick.vsAvg)}% {view.pick.vsAvg > 0 ? 'above' : 'below'}
+                    </span> the average year</>
+                  )}
+                </p>
+              )}
               <div className="flex flex-wrap gap-1.5 mb-2">
                 {view.pick.cats.map(([c, v]) => (
                   <span key={c} className="text-[10px] font-bold bg-amber-50 border border-amber-200 px-2 py-0.5 text-gray-600">
@@ -495,6 +541,14 @@ export default function History() {
                   <span className="text-xs font-black text-gray-900 shrink-0">{INR(g.value)} ›</span>
                 </button>
               ))}
+              {view.pick.isYear && (
+                <button
+                  onClick={() => setPeriod(view.pick.key)}
+                  className="w-full mt-2 bg-brand-400 text-white text-xs font-bold py-2"
+                >
+                  See {view.pick.key} month by month ›
+                </button>
+              )}
             </div>
           )}
         </div>
