@@ -373,7 +373,7 @@ export default function History() {
       label: 'Total Spent',
       data: topGroups.map((g) => g.yearTotal),
       backgroundColor: PALETTE,
-      borderRadius: 2,
+      borderRadius: 0,
       borderSkipped: false,
     }],
   }
