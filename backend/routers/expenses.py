@@ -1,13 +1,19 @@
 import json
+import statistics
+from collections import defaultdict
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from sqlalchemy import func
 from sqlalchemy.orm import Session
-from auth import current_user, is_member, member_group
+from starlette.concurrency import run_in_threadpool
+from auth import caller_groups, current_user, is_member, member_group
 from database import get_db
-from models import Group, Expense, Loan, Member, User
+from models import Group, Expense, Loan, Member, PayeeLabel, User
 from schemas import ExpenseCreate, ExpenseOut
 from emailer import notify_group_activity_bg
 from activity import record_activity
+from spend_categories import categorize
 from statement_import import is_self_transfer, own_accounts, parse_phonepe_csv, time_bucket
+import payee_classifier
 
 router = APIRouter(prefix="/expenses", tags=["expenses"])
 
@@ -280,6 +286,23 @@ def is_credit_repayment(merchant: str) -> bool:
     return _norm(merchant) in _CREDIT_REPAYMENT_EXACT or _payee_in(merchant, _CREDIT_REPAYMENT_PAYEES)
 
 
+# Categories that say "the rules couldn't place this payee" - the ones the
+# LLM is asked about.
+_UNPLACED = ("Small vendors", "One-off payments", "Other")
+
+
+def _payee_facts(key: str, ts: list) -> dict:
+    """One payee's pattern in this upload, as payee_classifier takes it."""
+    from datetime import date as _date
+    amounts = [t.amount for t in ts]
+    hours = [int(t.time[:2]) for t in ts if t.time] or [12]
+    return {"key": key, "name": ts[0].merchant, "count": len(ts), "total": sum(amounts),
+            "median": statistics.median(amounts), "min": min(amounts), "max": max(amounts),
+            "hour": int(statistics.median(hours)),
+            "fridays": sum(_date.fromisoformat(t.date).weekday() == 4 for t in ts),
+            "first": min(t.date for t in ts), "last": max(t.date for t in ts)}
+
+
 def _refs(txn_ref: str | None) -> list[str]:
     """An expense paid in parts carries every part's transaction id,
     comma-joined - see _split_matches."""
@@ -358,9 +381,15 @@ async def import_statement(background_tasks: BackgroundTasks,
       4. still unmatched, 2-3 payments to one payee on one day that add up
          to such an expense -> treated as that expense paid in parts (see
          _split_matches), merged/linked like 3a/3b;
-      5. otherwise -> created in that month's monthly group (made if it
-         doesn't exist yet). A date already having other expenses doesn't
-         hide the rest of that day's payments - only the ones that match.
+      5. what's left is checked against the caller's payee labels, then the
+         keyword rules (spend_categories), then - for payees neither places
+         - the LLM (payee_classifier), whose answers become labels. Anything
+         labelled p2p, gambling, investment, repayment or self-transfer is
+         skipped with its reason, as is a one-off payment to a person the
+         LLM couldn't decide (the user's rule: that's P2P);
+      6. otherwise -> created in that month's monthly group (made if it
+         doesn't exist yet) with its category. A date already having other
+         expenses doesn't hide the rest of that day's payments.
     Credits ("Received from ...") are ignored - this fills expenses.
     """
     raw = await file.read()
@@ -369,7 +398,7 @@ async def import_statement(background_tasks: BackgroundTasks,
     except ValueError as e:
         raise HTTPException(400, str(e))
 
-    mine = [g for g in db.query(Group).all() if is_member(g, caller)]
+    mine = caller_groups(db, caller)
     existing_refs = {r for g in mine for e in g.expenses for r in _refs(e.txn_ref)}
     monthly = {
         g.name.upper(): g for g in mine
@@ -485,9 +514,54 @@ async def import_statement(background_tasks: BackgroundTasks,
     for parts, exp in list(_split_matches(leftover, shared_pool)):
         link(exp, parts)
 
+    # What each remaining payee is: the caller's own labels first, then the
+    # keyword rules, then - only for payees neither can place - the LLM,
+    # whose answers are saved as labels so a payee is asked about once.
+    labels = {lab.payee_key: lab for lab in
+              db.query(PayeeLabel).filter(func.lower(PayeeLabel.user_name) == me).all()}
+    unknown: dict[str, list] = defaultdict(list)
+    for t in leftover:
+        key = _norm(t.merchant)
+        if key and key not in labels and categorize(t.merchant, t.amount)[0] in _UNPLACED:
+            unknown[key].append(t)
+    llm = {"asked": len(unknown), "answered": 0, "error": None}
+    if unknown and payee_classifier.available():
+        try:
+            answers = await run_in_threadpool(payee_classifier.classify, [_payee_facts(k, ts) for k, ts in unknown.items()])
+        except Exception as e:  # the LLM is a help, never a reason an import fails
+            answers, llm["error"] = {}, str(e)[:200]
+        for key, a in answers.items():
+            lab = PayeeLabel(user_name=caller.name, payee_key=key, payee=unknown[key][0].merchant,
+                             decision=a["decision"], category=a["category"], subcategory=a["subcategory"],
+                             source="llm", note=a["reason"])
+            db.add(lab)
+            labels[key] = lab
+        llm["answered"] = len(answers)
+    elif unknown:
+        llm["error"] = "No LLM key configured"
+
+    not_spending, keep = [], []
+    for t in leftover:
+        lab = labels.get(_norm(t.merchant))
+        line = {"date": t.date, "merchant": t.merchant, "amount": t.amount}
+        if lab is not None and lab.decision != "spending":
+            why = lab.decision.replace("_", " ") + (f" - {lab.note}" if lab.source == "llm" and lab.note else "")
+            not_spending.append({**line, "reason": why, "by": lab.source})
+            continue
+        if lab is not None:
+            keep.append((t, lab.category))
+            continue
+        cat, _ = categorize(t.merchant, t.amount)
+        if cat == "One-off payments":
+            # The user's rule: a one-off payment to a person or masked number
+            # is P2P unless something says otherwise.
+            not_spending.append({**line, "reason": "p2p - one-off payment to a person", "by": "rules"})
+            continue
+        keep.append((t, cat))
+
     created: list[Expense] = []
     groups_created: list[str] = []
-    for t in leftover:
+    for t, category in keep:
         y, m = t.date[:4], int(t.date[5:7])
         gname = f"MONTHLY EXPENSES {_MONTH_ABBR[m - 1]} {y}"
         group = monthly.get(gname)
@@ -502,7 +576,7 @@ async def import_statement(background_tasks: BackgroundTasks,
             groups_created.append(gname)
 
         exp = Expense(
-            group_id=group.id, date=t.date, category=None, title=t.merchant,
+            group_id=group.id, date=t.date, category=category, title=t.merchant,
             amount=t.amount, paid_by=caller.name, participants=None, divider=1,
             individual_amount=t.amount, payment_mode="upi", notes=None,
             txn_time=t.time, time_bucket=time_bucket(t.time), txn_ref=t.txn_id or None,
@@ -526,6 +600,10 @@ async def import_statement(background_tasks: BackgroundTasks,
         "skipped_credit_repayments": repayments,
         "skipped_self_transfers": self_transfers,
         "skipped_excluded_payees": friends,
+        # Each with the reason: the caller's label, the LLM's ("by": "llm"),
+        # or the one-off-payment rule.
+        "skipped_not_spending": not_spending,
+        "llm": llm,
         "credits_ignored": credits,
         "groups_created": groups_created,
     }

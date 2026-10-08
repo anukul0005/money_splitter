@@ -680,6 +680,34 @@ class UpiId(Base):
     __table_args__ = (UniqueConstraint("user_id", "upi_id", name="uq_upi_user_upi"),)
 
 
+class PayeeLabel(Base):
+    """What one person's payments to one payee are - decided once, then
+    reused by every statement import.
+
+    `decision` is "spending" (imported, under category/subcategory) or a
+    reason it isn't spending - "p2p", "gambling", "investment",
+    "repayment", "self_transfer" - in which case imports skip it. Labels
+    come from the person's own answers (source "user") or the LLM
+    classifier (source "llm", see payee_classifier.py); a user label is
+    never overwritten by the LLM. `payee_key` is the payee name normalised
+    the way the import compares names (routers/expenses._norm).
+    """
+
+    __tablename__ = "payee_labels"
+    __table_args__ = (UniqueConstraint("user_name", "payee_key", name="uq_payee_labels_user_payee"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_name = Column(String(100), nullable=False, index=True)
+    payee_key = Column(String(200), nullable=False)
+    payee = Column(String(200), nullable=False)
+    decision = Column(String(20), nullable=False)
+    category = Column(String(100), nullable=True)
+    subcategory = Column(String(100), nullable=True)
+    source = Column(String(10), nullable=False)
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class PaymentClaim(Base):
     """A payer saying "I've paid you" - not a payment yet.
 

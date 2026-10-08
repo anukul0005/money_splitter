@@ -558,6 +558,30 @@ export default function AddExpense() {
                         </ul>
                       </details>
                     )}
+                    {/* P2P, gambling and the like, each with who decided and
+                        why - the LLM's calls included, so a wrong one is
+                        visible and can be corrected. */}
+                    {csvResult.skipped_not_spending?.length > 0 && (
+                      <details className="text-gray-600">
+                        <summary className="cursor-pointer">
+                          Not counted as spending ({csvResult.skipped_not_spending.length}, ₹{csvResult.skipped_not_spending
+                            .reduce((s, x) => s + x.amount, 0).toLocaleString('en-IN')})
+                        </summary>
+                        <ul className="mt-1 space-y-0.5">
+                          {csvResult.skipped_not_spending.map((x, i) => (
+                            <li key={i}>
+                              {x.date} · {x.merchant} ₹{x.amount.toLocaleString('en-IN')} → {x.reason}
+                              {x.by === 'llm' && <span className="text-gray-400"> (AI)</span>}
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    )}
+                    {csvResult.llm?.error && csvResult.llm.asked > 0 && (
+                      <p className="text-amber-700">
+                        AI categorising was unavailable for {csvResult.llm.asked} new payee{csvResult.llm.asked > 1 ? 's' : ''}, so the built-in rules were used.
+                      </p>
+                    )}
                     {csvResult.groups_created?.length > 0 && (
                       <p className="text-gray-500">New groups: {csvResult.groups_created.join(', ')}</p>
                     )}

@@ -306,7 +306,9 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
           <div>
             <label className="label">Category</label>
             <div className="flex flex-wrap gap-2">
-              {CATEGORIES.map((c) => (
+              {/* A category set by a statement import ("Food & Dining") isn't
+                  one of the presets - show it as a chip too so it stays visible. */}
+              {[...CATEGORIES, ...(category && !CATEGORIES.includes(category) ? [category] : [])].map((c) => (
                 <button
                   key={c}
                   type="button"

@@ -12,6 +12,31 @@ from __future__ import annotations
 
 import re
 
+# Every category and subcategory a spending payment can get - the rules
+# below, the LLM classifier and the questionnaire all draw from this list.
+TAXONOMY: dict[str, list[str]] = {
+    "Food & Dining": ["Restaurants", "Street food & snacks", "Office canteen", "Food delivery", "Tea & coffee",
+                      "Juice & beverages", "Sweets & bakery"],
+    "Groceries": ["Kirana & supermarket", "Fruits & vegetables", "Quick commerce", "Dairy & milk"],
+    "Alcohol": ["Liquor store", "Bar"],
+    "Tobacco & Paan": ["Paan & cigarettes"],
+    "Transport": ["Fuel", "Cab & auto", "Metro", "Train", "Bus", "Parking & tolls", "Vehicle purchase & service"],
+    "Travel": ["Stays", "Flights", "Tours & bookings"],
+    "Housing": ["Rent", "Deposit", "Maintenance & repairs", "Household help", "Furniture & appliances"],
+    "Bills & Utilities": ["Mobile & internet", "Electricity", "Bank charges", "Other bills"],
+    "Shopping": ["Online shopping", "Clothing & footwear", "Electronics & mobile", "Books & stationery",
+                 "Home & garden", "Sports", "Gift cards & vouchers", "Malls"],
+    "Health": ["Pharmacy", "Doctor & hospital", "Supplements", "Insurance"],
+    "Personal Care": ["Salon & beauty", "Gym & fitness"],
+    "Entertainment": ["Movies & events", "Subscriptions", "Gaming & fantasy", "Sports & games",
+                      "Museums & attractions"],
+    "Education": ["Courses & exams", "Library & coworking"],
+    "Services": ["Professional services", "Repairs", "Courier", "Laundry", "Astrology"],
+    "Donations": ["Religious & charity", "Gifts"],
+    "Small vendors": ["Unspecified"],
+    "Other": ["Unclassified merchant"],
+}
+
 # (category, subcategory, regex on the lower-cased payee name)
 _RULES: list[tuple[str, str, str]] = [
     # Food & dining

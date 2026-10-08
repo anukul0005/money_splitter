@@ -23,8 +23,10 @@ import csv
 import json
 import os
 
+from sqlalchemy import func
+
 from database import get_session_factory
-from models import Expense
+from models import Expense, PayeeLabel
 from routers.expenses import _norm
 from spend_categories import categorize
 from statement_import import parse_phonepe_csv
@@ -44,6 +46,10 @@ def main() -> None:
     try:
         db.connection().exec_driver_sql("SET TRANSACTION READ ONLY")
         me = args.user.lower()
+        # Labels saved by imports (the user's answers, the LLM's calls).
+        db_labels = {lab.payee_key: [lab.category, lab.subcategory, lab.source]
+                     for lab in db.query(PayeeLabel).filter(func.lower(PayeeLabel.user_name) == me).all()
+                     if lab.decision == "spending" and lab.category}
         title_by_ref: dict[str, str] = {}
         for e in db.query(Expense).filter(Expense.txn_ref.isnot(None)).all():
             if (e.paid_by or "").lower() != me:
@@ -57,11 +63,11 @@ def main() -> None:
     # Per-payee labels (Claude's classifications and questionnaire answers),
     # kept next to the dataset since they name real people. They win over
     # the keyword rules.
-    labels: dict[str, list[str]] = {}
+    labels: dict[str, list[str]] = dict(db_labels)
     labels_path = os.path.join(os.path.dirname(os.path.abspath(args.out)), "payee_labels.json")
     if os.path.exists(labels_path):
         with open(labels_path, encoding="utf-8") as f:
-            labels = {k: v for k, v in json.load(f).items() if not k.startswith("_")}
+            labels.update({k: v for k, v in json.load(f).items() if not k.startswith("_")})
 
     with open(args.statement, "rb") as f:
         txns = parse_phonepe_csv(f.read())
