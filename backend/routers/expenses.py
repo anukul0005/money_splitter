@@ -246,7 +246,8 @@ def _closest(pool: list, t, date_of, amount_of):
 # when the credit was used). Matched on the merchant name with spaces and
 # dashes removed - PhonePe spells iLoan four different ways in one month.
 _INVESTMENT_PAYEES = (
-    "indmoney", "groww", "angelone", "indstocks", "wintwealth",
+    # nextbillion: Nextbillion Technology, the company behind Groww
+    "indmoney", "groww", "nextbillion", "angelone", "indstocks", "wintwealth",
     "iponse", "indianclearingcorporation",
 )
 # Credit card bills (paid directly or through CRED/MobiKwik), pay-later and
@@ -399,9 +400,14 @@ async def import_statement(background_tasks: BackgroundTasks,
     self_transfers, friends = [], []
     own = own_accounts(txns)
     try:
-        excluded = {_norm(n) for n in json.loads(caller.excluded_payees or "[]")}
+        entries = json.loads(caller.excluded_payees or "[]")
     except (ValueError, TypeError):
-        excluded = set()
+        entries = []
+    # "txn:<id>" entries exclude one payment rather than a whole payee - for
+    # a payee who is also paid for real spending (a bike dealer that later
+    # does the servicing).
+    excluded_txns = {e[4:] for e in entries if e.startswith("txn:")}
+    excluded = {_norm(e) for e in entries if not e.startswith("txn:")}
     leftover = []
 
     def merge(exp, parts) -> None:
@@ -445,7 +451,7 @@ async def import_statement(background_tasks: BackgroundTasks,
         if is_self_transfer(t, own):
             self_transfers.append({"date": t.date, "merchant": t.merchant, "amount": t.amount})
             continue
-        if _norm(t.merchant) in excluded:
+        if _norm(t.merchant) in excluded or t.txn_id in excluded_txns:
             friends.append({"date": t.date, "merchant": t.merchant, "amount": t.amount})
             continue
 

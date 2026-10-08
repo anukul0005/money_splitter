@@ -65,7 +65,8 @@ class User(Base):
     # JSON list of payee names whose statement debits are never monthly
     # spending for this user - friends paid back or lent to, where no
     # settle-up was recorded. Exact names, not first names: "Ajay Singh"
-    # is a friend, "Ajay kiryana store" is groceries. See import_statement.
+    # is a friend, "Ajay kiryana store" is groceries. An entry "txn:<id>"
+    # excludes that one payment instead of the payee. See import_statement.
     excluded_payees = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

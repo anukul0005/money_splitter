@@ -20,10 +20,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
 
 from database import get_session_factory
 from models import Expense
+from routers.expenses import _norm
 from spend_categories import categorize
 from statement_import import parse_phonepe_csv
 
@@ -52,6 +54,15 @@ def main() -> None:
         db.rollback()
         db.close()
 
+    # Per-payee labels (Claude's classifications and questionnaire answers),
+    # kept next to the dataset since they name real people. They win over
+    # the keyword rules.
+    labels: dict[str, list[str]] = {}
+    labels_path = os.path.join(os.path.dirname(os.path.abspath(args.out)), "payee_labels.json")
+    if os.path.exists(labels_path):
+        with open(labels_path, encoding="utf-8") as f:
+            labels = {k: v for k, v in json.load(f).items() if not k.startswith("_")}
+
     with open(args.statement, "rb") as f:
         txns = parse_phonepe_csv(f.read())
     rows, seen = [], set()
@@ -59,7 +70,8 @@ def main() -> None:
         if t.kind != "Debit" or t.txn_id not in title_by_ref or t.txn_id in seen or t.date > args.until:
             continue
         seen.add(t.txn_id)
-        cat, sub = categorize(t.merchant, t.amount, title_by_ref[t.txn_id])
+        label = labels.get(_norm(t.merchant))
+        cat, sub = (label[0], label[1]) if label else categorize(t.merchant, t.amount, title_by_ref[t.txn_id])
         rows.append([t.date, t.time or "", f"{t.amount:.2f}", t.txn_id, t.merchant, cat, sub])
 
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)

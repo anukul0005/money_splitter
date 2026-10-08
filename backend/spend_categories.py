@@ -18,6 +18,7 @@ _RULES: list[tuple[str, str, str]] = [
     ("Food & Dining", "Office canteen", r"smartq|coriander|tapri kpmg|canteen|indiyeah|anmol catering|grubox|vendiman|culinary brands|bird catering"),
     ("Food & Dining", "Food delivery", r"swiggy(?! ?instamart)|zomato|eternal limited|bundl tech|dominos|jubilant food"),
     ("Groceries", "Quick commerce", r"blinkit|zepto|instamart|bigbasket|commodum|^pincode$"),
+    ("Tobacco & Paan", "Paan & cigarettes", r"\bpaa?n\b|pan bhandar|pan corner|pan shop|bidi|khoka|cigarette"),
     ("Food & Dining", "Restaurants", r"restaurant|dhaba|kitchen|district|haldiram|mcdonald|connaught plaza|kfc|subway|burger king|taco bell|biryani|"
                                       r"zensho|postman|tandoori|spice king|bikaner|sagar ratna|wow momo|theobroma|cafe|caf[eé]|bistro|dining|"
                                       r"food ?court|lounge|diner|hospitality|barbeque|punjab|chaap|kebab|kawab|kababi|desi nookad|paa g|"
@@ -41,7 +42,7 @@ _RULES: list[tuple[str, str, str]] = [
     ("Transport", "Fuel", r"service station|service stn|fuels?\b|filling|fill point|petrol|pateolium|petrolium|hpcl|iocl|\bbp\b|coco bp|"
                           r"diesel|super service|shiva gaurav"),
     ("Transport", "Metro", r"metro|dmrc|mmrda|ncmc|bill paid - metro"),
-    ("Transport", "Cab & auto", r"rapido|roppen|\bola\b|olamoney|ola money|uber|cariot|garage on call"),
+    ("Transport", "Cab & auto", r"^auto\b|\bauto (to|back)\b|rapido|roppen|\bola\b|olamoney|ola money|uber|cariot|garage on call"),
     ("Transport", "Train", r"irctc|indian railways|rail ahar|\brail\b"),
     ("Transport", "Bus", r"redbus|bus\b"),
     ("Transport", "Parking & tolls", r"parking|parkplus|fastag|\(t-\d\)"),
@@ -58,7 +59,7 @@ _RULES: list[tuple[str, str, str]] = [
     ("Shopping", "Books & stationery", r"stationer|book|wheeler"),
     ("Shopping", "Home & garden", r"plywood|timber|nursery|flowers"),
     # Health
-    ("Health", "Pharmacy", r"pharma|chemist|medical|medicine|1mg|janaushadhi"),
+    ("Health", "Pharmacy", r"pharm|chemist|medical|medicine|1mg|janaushadhi"),
     ("Health", "Doctor & hospital", r"hospital|clinic|diagnostic|dental|homoeo|homeo|\bdr\b"),
     # Bills
     ("Bills & Utilities", "Mobile & internet", r"airtel|\bjio\b|jio platforms|jio postpaid|recharge|vodafone|\bvi\b"),
@@ -109,8 +110,9 @@ def categorize(payee: str, amount: float, linked_title: str | None = None) -> tu
     if _BUSINESS.search(payee or ""):
         return "Other", "Unclassified merchant"
     if _ANONYMOUS.search((payee or "").strip()):
-        return "Individual", "Unknown payee"
+        return "One-off payments", "Unknown payee"
     # A person's name. Small amounts to a named person are overwhelmingly
-    # street vendors and kiosks paid by their personal UPI; larger ones are
-    # rent, help, repairs, or money to people - kept apart, not guessed.
-    return ("Individual", "Small vendor (likely)") if amount <= 200 else ("Individual", "Person-to-person")
+    # street vendors and kiosks paid by their personal UPI (tea, snacks,
+    # autos - the statement can't tell which, so no guess is made); larger
+    # ones are one-off payments to people, still counted as spending.
+    return ("Small vendors", "Unspecified") if amount <= 200 else ("One-off payments", "To a person")
