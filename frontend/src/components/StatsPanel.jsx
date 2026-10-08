@@ -4,7 +4,7 @@ import {
   ArcElement, DoughnutController, BarController,
   LineElement, PointElement, LineController, Filler,
 } from 'chart.js'
-import { Bar, Doughnut, Line } from 'react-chartjs-2'
+import { Bar, Doughnut } from 'react-chartjs-2'
 
 Chart.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend, ArcElement, DoughnutController, BarController, LineElement, PointElement, LineController, Filler)
 Chart.defaults.font.family = "'Space Grotesk', system-ui, sans-serif"
@@ -52,12 +52,38 @@ Chart.register(donutPctPlugin)
  *   isSolo   — single-person scope: leads with the daily line instead of by-person
  */
 const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-const DEFAULT_MONTHS_SHOWN = 3
+// A daily view only reads as days up to about three months; past that the
+// bars are thinner than a pixel and only the spikes show.
+const MAX_DAILY_SPAN = 90
+const RECENT_MONTHS = 12
+
+// Date arithmetic on "YYYY-MM-DD" strings, in UTC so no timezone can shift a day.
+const addDays = (iso, n) => {
+  const d = new Date(iso + 'T00:00:00Z')
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+const daysBetween = (a, b) => Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000)
+const nextMonth = (key) => {
+  const [y, m] = key.split('-').map(Number)
+  return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`
+}
+// ₹2.5L / ₹40k / ₹600 - axis labels that stay short at any scale.
+const compactINR = (v) =>
+  v >= 100000 ? `₹${(v / 100000).toFixed(v % 100000 ? 1 : 0)}L`
+    : v >= 1000 ? `₹${Math.round(v / 1000)}k`
+    : `₹${Math.round(v)}`
+const shade = (hex, alpha) => {
+  const n = parseInt(hex.slice(1), 16)
+  return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${alpha})`
+}
 
 export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
   const [chartView, setChartView] = useState('member')
   const [hoveredDayIdx, setHoveredDayIdx] = useState(null)
-  const [showAllMonths, setShowAllMonths] = useState(false)
+  const [dayRange, setDayRange] = useState(30)
+  // 'recent' (last 12 months), 'years', or a year ("2024") drilled into from 'years'.
+  const [monthView, setMonthView] = useState('recent')
 
   if (!stats) return null
 
@@ -134,124 +160,60 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
     return { mean, median, mode, p10: pct(10), p25: pct(25), p75: pct(75), p90: pct(90), min: expAmounts[0], max: expAmounts[n - 1] }
   })()
 
-  // Daily spend line chart
+  // ── Daily spend ────────────────────────────────────────────────────────
   const dailyMap = {}
   expenses.forEach((e) => {
-    if (e.date) dailyMap[e.date] = (dailyMap[e.date] || 0) + e.amount
+    const d = (e.date || '').slice(0, 10)
+    if (d.length === 10) dailyMap[d] = (dailyMap[d] || 0) + e.amount
   })
   const dailyEntries = Object.entries(dailyMap).sort(([a], [b]) => a.localeCompare(b))
-  const dailyLabels  = dailyEntries.map(([d]) => d)
-  const dailyValues  = dailyEntries.map(([, v]) => v)
+  const firstDay = dailyEntries[0]?.[0]
+  const lastDay  = dailyEntries[dailyEntries.length - 1]?.[0]
+  const spanDays = firstDay ? daysBetween(firstDay, lastDay) + 1 : 0
+  // Years of history: a recent window, picked with chips. A trip: all of it.
+  const longSpan   = spanDays > MAX_DAILY_SPAN
+  const windowDays = longSpan ? dayRange : spanDays
+  // Every day in the window, ₹0 ones included - a day without spending is
+  // information, and leaving it out made busy weeks look evenly spread.
+  const dayKeys = lastDay ? Array.from({ length: windowDays }, (_, i) => addDays(lastDay, i - windowDays + 1)) : []
+  const dayVals = dayKeys.map((k) => dailyMap[k] || 0)
+  const windowTotal = dayVals.reduce((s, v) => s + v, 0)
+  const activeDays  = dayVals.filter((v) => v > 0).length
 
-  // Month-on-month spend - a daily line across many months of a master
-  // group's combined history is mostly flat gaps between a handful of
-  // spikes, which reads as noise rather than a trend. Bucketed by
-  // calendar month instead whenever the data actually spans more than
-  // one, with only the most recent DEFAULT_MONTHS_SHOWN shown until asked
-  // to expand - a "last 3 months" default is the useful comparison for
-  // recent spending; the full history is one tap away, not the default.
-  const monthlyMap = {}
-  expenses.forEach((e) => {
-    if (e.date && e.date.length >= 7) {
-      const key = e.date.slice(0, 7)   // "YYYY-MM"
-      monthlyMap[key] = (monthlyMap[key] || 0) + e.amount
-    }
-  })
-  const monthlyEntriesAll = Object.entries(monthlyMap).sort(([a], [b]) => a.localeCompare(b))
-  const monthlyEntries = showAllMonths
-    ? monthlyEntriesAll
-    : monthlyEntriesAll.slice(-DEFAULT_MONTHS_SHOWN)
-  const fmtMonthLabel = (key) => {
-    const [y, m] = key.split('-')
-    return `${MONTH_ABBR[parseInt(m) - 1]} ${y}`
-  }
-  const monthlyBarData = {
-    labels: monthlyEntries.map(([k]) => fmtMonthLabel(k)),
-    datasets: [{
-      label: 'Monthly Spend',
-      data: monthlyEntries.map(([, v]) => v),
-      backgroundColor: '#f97316',
-      borderRadius: 0,
-      borderSkipped: false,
-    }],
-  }
-  const monthlyBarOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: { display: false },
-      tooltip: { callbacks: { label: (c) => ` ${INR(c.parsed.y)}` } },
-    },
-    scales: {
-      x: { ticks: { font: { size: 11, family: "'Space Grotesk'" } }, grid: { display: false } },
-      // stepSize 4000 rather than Chart.js's own auto-picked ticks, which
-      // defaulted to every ₹1k - a cramped, cluttered axis next to bars
-      // that are routinely in the tens of thousands.
-      y: {
-        ticks: {
-          stepSize: 4000,
-          callback: (v) => `₹${(v/1000).toFixed(0)}k`,
-          font: { size: 11, family: "'Space Grotesk'" },
-        },
-        grid: { color: '#f1f5f9' },
-      },
-    },
-  }
+  // Scale to an ordinary day, not the biggest one: one ₹60k day otherwise
+  // flattens every ₹300 day into the baseline. Days above the cap are drawn
+  // to the top, darker, and the tooltip still gives their real amount.
+  const spendDays = dayVals.filter((v) => v > 0).sort((a, b) => a - b)
+  const p90Day = spendDays.length ? spendDays[Math.floor(0.9 * (spendDays.length - 1))] : 0
+  const dayCap = spendDays.length >= 8 && spendDays[spendDays.length - 1] > p90Day * 2 ? Math.ceil(p90Day * 1.6) : undefined
+  const cappedDays = dayCap ? dayVals.filter((v) => v > dayCap).length : 0
 
   const isWeekend = (dateStr) => {
-    if (!dateStr) return false
-    const d = new Date(dateStr + 'T00:00:00')
-    return d.getDay() === 0 || d.getDay() === 6
+    const d = new Date(dateStr + 'T00:00:00Z').getUTCDay()
+    return d === 0 || d === 6
   }
   const fmtDayLabel = (dateStr) => {
     const [, m, d] = dateStr.split('-')
-    const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m) - 1]
-    return `${mon} ${parseInt(d)}`
+    return `${MONTH_ABBR[parseInt(m) - 1]} ${parseInt(d)}`
+  }
+  const dayColor = (k, v) => {
+    const base = isWeekend(k) ? '#f97316' : '#22c55e'
+    return dayCap && v > dayCap ? (isWeekend(k) ? '#c2410c' : '#15803d') : base
   }
 
-  const calcMeanWO = (values) => {
-    if (values.length < 3) return values.reduce((s, v) => s + v, 0) / Math.max(values.length, 1)
-    const sorted = [...values].sort((a, b) => a - b)
-    const n  = sorted.length
-    const q1 = sorted[Math.floor(n * 0.25)]
-    const q3 = sorted[Math.floor(n * 0.75)]
-    const iqr = q3 - q1
-    const filtered = sorted.filter((v) => v >= q1 - 1.5 * iqr && v <= q3 + 1.5 * iqr)
-    return filtered.length > 0 ? filtered.reduce((s, v) => s + v, 0) / filtered.length : 0
-  }
-  const dailyMeanWO = calcMeanWO(dailyValues)
-
-  const dailyPointColors = dailyLabels.map((d) => isWeekend(d) ? '#f97316' : '#22c55e')
-  const dailyPointSizes  = dailyLabels.map((d) => isWeekend(d) ? 3.5 : 2.5)
-
-  const dailyLineData = {
-    labels: dailyLabels.map(fmtDayLabel),
+  const dailyBarData = {
+    labels: dayKeys.map(fmtDayLabel),
     datasets: [{
       label: 'Daily Spend',
-      data: dailyValues,
-      borderColor: '#22c55e',
-      backgroundColor: (context) => {
-        const chart = context.chart
-        const { ctx, chartArea } = chart
-        if (!chartArea) return 'rgba(34,197,94,0.15)'
-        const gradient = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom)
-        gradient.addColorStop(0, 'rgba(34,197,94,0.30)')
-        gradient.addColorStop(1, 'rgba(34,197,94,0.00)')
-        return gradient
-      },
-      borderWidth: 2.5,
-      pointRadius: dailyPointSizes,
-      pointHoverRadius: dailyPointSizes.map((r) => r + 2.5),
-      pointHitRadius: 8,
-      pointBackgroundColor: dailyPointColors,
-      pointBorderColor: dailyPointColors,
-      pointBorderWidth: 0,
-      tension: 0,
-      fill: true,
+      data: dayVals,
+      backgroundColor: dayKeys.map((k, i) => dayColor(k, dayVals[i])),
+      borderRadius: 2,
+      borderSkipped: false,
+      barPercentage: 0.9,
+      categoryPercentage: 0.95,
     }],
   }
-
-  const dailyLineOptions = {
+  const dailyBarOptions = {
     responsive: true,
     maintainAspectRatio: false,
     interaction: { mode: 'index', intersect: false },
@@ -261,89 +223,227 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
         displayColors: false,
         callbacks: {
           title: (items) => {
-            const i = items[0].dataIndex
-            return fmtDayLabel(dailyLabels[i]) + (isWeekend(dailyLabels[i]) ? ' · Weekend' : '')
+            const k = dayKeys[items[0].dataIndex]
+            return fmtDayLabel(k) + (isWeekend(k) ? ' · Weekend' : '')
           },
-          label: () => '',
+          label: (c) => ` ${INR(dayVals[c.dataIndex])}`,
         },
       },
     },
     onHover: (evt, elements) => {
-      if (evt.native) evt.native.target.style.cursor = elements.length ? 'crosshair' : 'default'
       setHoveredDayIdx(elements.length > 0 ? elements[0].index : null)
     },
     scales: {
       x: {
-        ticks: {
-          font: { size: 11, family: "'Space Grotesk'" },
-          maxRotation: 0,
-          autoSkip: true,
-          maxTicksLimit: 6,
-        },
+        ticks: { font: { size: 11, family: "'Space Grotesk'" }, maxRotation: 0, autoSkip: true, maxTicksLimit: 6 },
         grid: { display: false },
       },
-      y: { display: false },
+      y: {
+        max: dayCap,
+        beginAtZero: true,
+        ticks: { maxTicksLimit: 4, callback: compactINR, font: { size: 10, family: "'Space Grotesk'" } },
+        grid: { color: '#f1f5f9' },
+      },
     },
   }
 
-  const DailyCard = ({ title }) => (
-    <div className="card">
-      {(() => {
-        const ai = hoveredDayIdx !== null ? hoveredDayIdx : dailyLabels.length - 1
-        const av = dailyValues[ai] ?? 0
-        return (
-          <div className="flex items-stretch mb-4 pb-4 border-b border-amber-100">
-            <div className="flex-1 pr-4">
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{title}</p>
-              <p className="text-2xl font-black text-gray-900 mt-1 tracking-tight">{INR(av)}</p>
-              <p className="text-[11px] text-gray-300 mt-0.5">
-                {hoveredDayIdx === null ? 'slide chart to explore' : fmtDayLabel(dailyLabels[ai])}
-              </p>
-            </div>
-            <div className="w-px bg-amber-100" />
-            <div className="flex-1 pl-4">
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Mean (WO)</p>
-              <p className="text-2xl font-black text-brand-600 mt-1 tracking-tight">{INR(Math.round(dailyMeanWO))}</p>
-              <p className="text-[11px] text-gray-300 mt-0.5">avg excl. outliers</p>
-            </div>
-          </div>
-        )
-      })()}
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-xs font-bold text-gray-500">{isSolo ? 'Daily Spend' : 'Spend by Day'}</h3>
-        <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1.5 text-[10px] text-gray-400">
-            <span className="w-2 h-2 rounded-full bg-green-500 inline-block" /> Weekday
-          </span>
-          <span className="flex items-center gap-1.5 text-[10px] text-gray-400">
-            <span className="w-2 h-2 rounded-full bg-orange-500 inline-block" /> Weekend
-          </span>
-        </div>
-      </div>
-      <div className="relative h-56 md:h-72">
-        <Line data={dailyLineData} options={dailyLineOptions} />
-      </div>
-    </div>
+  // ── Monthly / yearly spend ─────────────────────────────────────────────
+  const monthlyMap = {}
+  expenses.forEach((e) => {
+    if (e.date && e.date.length >= 7) {
+      const key = e.date.slice(0, 7)
+      monthlyMap[key] = (monthlyMap[key] || 0) + e.amount
+    }
+  })
+  const monthsWithData = Object.keys(monthlyMap).sort()
+  // Every calendar month from the first to the last, empty ones as ₹0, so
+  // a gap reads as a gap instead of two far-apart months sitting side by side.
+  const allMonthKeys = []
+  if (monthsWithData.length) {
+    for (let k = monthsWithData[0]; k <= monthsWithData[monthsWithData.length - 1]; k = nextMonth(k)) allMonthKeys.push(k)
+  }
+  const years = [...new Set(allMonthKeys.map((k) => k.slice(0, 4)))]
+  const today = new Date()
+  const thisMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
+  const thisYear = String(today.getFullYear())
+
+  // [label, total, partial?, key] for whatever the chips select.
+  let periods
+  if (monthView === 'years') {
+    periods = years.map((y) => [y, allMonthKeys.filter((k) => k.startsWith(y)).reduce((s, k) => s + (monthlyMap[k] || 0), 0), y === thisYear, y])
+  } else {
+    const keys = monthView === 'recent'
+      ? allMonthKeys.slice(-RECENT_MONTHS)
+      : allMonthKeys.filter((k) => k.startsWith(monthView))
+    const withYear = monthView === 'recent' && new Set(keys.map((k) => k.slice(0, 4))).size > 1
+    periods = keys.map((k) => {
+      const [y, m] = k.split('-')
+      return [`${MONTH_ABBR[parseInt(m) - 1]}${withYear ? ` '${y.slice(2)}` : ''}`, monthlyMap[k] || 0, k === thisMonth, k]
+    })
+  }
+  // The period still under way would drag the average down - leave it out.
+  const complete = periods.filter(([, , partial]) => !partial)
+  const periodAvg = complete.length ? complete.reduce((s, [, v]) => s + v, 0) / complete.length : 0
+  const periodWord = monthView === 'years' ? 'year' : 'month'
+
+  const monthlyBarData = {
+    labels: periods.map(([l]) => l),
+    datasets: [
+      {
+        type: 'line',
+        label: `Average per ${periodWord}`,
+        data: periods.map(() => periodAvg),
+        borderColor: '#64748b',
+        borderWidth: 1.5,
+        borderDash: [5, 4],
+        pointRadius: 0,
+        pointHitRadius: 0,
+        fill: false,
+        order: 0,
+      },
+      {
+        label: 'Spend',
+        data: periods.map(([, v]) => v),
+        backgroundColor: periods.map(([, , partial]) => (partial ? shade('#f97316', 0.35) : '#f97316')),
+        borderRadius: 2,
+        borderSkipped: false,
+        order: 1,
+      },
+    ],
+  }
+  const monthlyBarOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        filter: (item) => item.dataset.type !== 'line',
+        callbacks: {
+          title: (items) => {
+            const p = periods[items[0].dataIndex]
+            return monthView === 'years' ? p[0] : `${MONTH_ABBR[parseInt(p[3].slice(5)) - 1]} ${p[3].slice(0, 4)}`
+          },
+          label: (c) => {
+            const [, v, partial] = periods[c.dataIndex]
+            return ` ${INR(v)}${partial ? ' so far' : ''}`
+          },
+          footer: () => (monthView === 'years' ? 'Tap to see its months' : `Average ${INR(periodAvg)}`),
+        },
+      },
+    },
+    // In the yearly view a bar opens that year's months.
+    onClick: (evt, elements) => {
+      if (monthView === 'years' && elements.length) setMonthView(periods[elements[0].index][3])
+    },
+    scales: {
+      x: { ticks: { font: { size: 11, family: "'Space Grotesk'" }, maxRotation: 0, autoSkip: true }, grid: { display: false } },
+      y: {
+        beginAtZero: true,
+        ticks: { maxTicksLimit: 5, callback: compactINR, font: { size: 11, family: "'Space Grotesk'" } },
+        grid: { color: '#f1f5f9' },
+      },
+    },
+  }
+
+  const Chip = ({ active, onClick, children }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`px-2 py-0.5 text-[11px] font-bold border transition-colors ${
+        active ? 'bg-brand-400 text-white border-brand-400' : 'bg-amber-50 border-amber-200 text-gray-500'
+      }`}
+    >
+      {children}
+    </button>
   )
 
-  const MonthlyCard = () => (
-    <div className="card">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-xs font-bold text-gray-500">Spend by Month</h3>
-        {monthlyEntriesAll.length > DEFAULT_MONTHS_SHOWN && (
-          <button
-            onClick={() => setShowAllMonths((v) => !v)}
-            className="text-[11px] font-bold text-brand-600 hover:text-brand-700"
-          >
-            {showAllMonths ? 'Show last 3 months' : `Show all ${monthlyEntriesAll.length} months`}
-          </button>
+  const DailyCard = ({ title }) => {
+    const hovered = hoveredDayIdx !== null && hoveredDayIdx < dayKeys.length ? hoveredDayIdx : null
+    return (
+      <div className="card">
+        <div className="flex items-stretch mb-4 pb-4 border-b border-amber-100">
+          <div className="flex-1 pr-4">
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+              {hovered === null ? 'Average per day' : fmtDayLabel(dayKeys[hovered])}
+            </p>
+            <p className="text-2xl font-black text-gray-900 mt-1 tracking-tight">
+              {INR(hovered === null ? windowTotal / Math.max(windowDays, 1) : dayVals[hovered])}
+            </p>
+            <p className="text-[11px] text-gray-400 mt-0.5">
+              {hovered === null ? `over ${windowDays} days, ₹0 days included` : 'tap a bar for its day'}
+            </p>
+          </div>
+          <div className="w-px bg-amber-100" />
+          <div className="flex-1 pl-4">
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Days with spending</p>
+            <p className="text-2xl font-black text-brand-600 mt-1 tracking-tight">{activeDays} / {windowDays}</p>
+            <p className="text-[11px] text-gray-400 mt-0.5">{INR(windowTotal)} in total</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <h3 className="text-xs font-bold text-gray-500">
+            {title}{longSpan ? ` · last ${windowDays} days` : ''}
+          </h3>
+          {longSpan ? (
+            <div className="flex gap-1">
+              {[30, 90].map((n) => (
+                <Chip key={n} active={dayRange === n} onClick={() => { setDayRange(n); setHoveredDayIdx(null) }}>{n}D</Chip>
+              ))}
+            </div>
+          ) : (
+            <div className="flex items-center gap-3">
+              <span className="flex items-center gap-1.5 text-[10px] text-gray-400">
+                <span className="w-2 h-2 rounded-full bg-green-500 inline-block" /> Weekday
+              </span>
+              <span className="flex items-center gap-1.5 text-[10px] text-gray-400">
+                <span className="w-2 h-2 rounded-full bg-orange-500 inline-block" /> Weekend
+              </span>
+            </div>
+          )}
+        </div>
+        <div className="relative h-56 md:h-72">
+          <Bar data={dailyBarData} options={dailyBarOptions} />
+        </div>
+        {(longSpan || cappedDays > 0) && (
+          <p className="text-[10px] text-gray-400 mt-2">
+            {longSpan && 'Green weekdays, orange weekends. '}
+            {cappedDays > 0 && `${cappedDays} bigger day${cappedDays > 1 ? 's are' : ' is'} cut off at ${compactINR(dayCap)} (darker bar${cappedDays > 1 ? 's' : ''}) - tap for the amount.`}
+            {longSpan && ' The month and year totals are below.'}
+          </p>
         )}
       </div>
-      <div className="relative h-56 md:h-72">
-        <Bar data={monthlyBarData} options={monthlyBarOptions} />
+    )
+  }
+
+  const MonthlyCard = () => {
+    const manyMonths = allMonthKeys.length > RECENT_MONTHS
+    return (
+      <div className="card">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+          <h3 className="text-xs font-bold text-gray-500">
+            {monthView === 'years' ? 'Spend by year' : monthView === 'recent' ? 'Spend by month' : `Spend by month · ${monthView}`}
+          </h3>
+          {manyMonths && (
+            <div className="flex gap-1">
+              <Chip active={monthView === 'recent'} onClick={() => setMonthView('recent')}>12 months</Chip>
+              <Chip active={monthView !== 'recent'} onClick={() => setMonthView('years')}>By year</Chip>
+            </div>
+          )}
+        </div>
+        <p className="text-[11px] text-gray-400 mb-3">
+          Dashed line: average per {periodWord}, {INR(periodAvg)}
+          {periods.some(([, , partial]) => partial) && ` · the lighter bar is the ${periodWord} so far`}
+          {monthView === 'years' && ' · tap a year for its months'}
+          {monthView !== 'recent' && monthView !== 'years' && (
+            <button type="button" className="ml-2 font-bold text-brand-600" onClick={() => setMonthView('years')}>← All years</button>
+          )}
+        </p>
+        <div className="relative h-56 md:h-72">
+          <Bar data={monthlyBarData} options={monthlyBarOptions} />
+        </div>
       </div>
-    </div>
-  )
+    )
+  }
 
   const CategoryCard = () => (
     <div className="card">
@@ -370,7 +470,7 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
   // than a daily line stretched thin across mostly-empty gaps. A single
   // month's worth (one trip, one personal-tracker month) stays daily,
   // where day-to-day is still the useful resolution.
-  const hasMultipleMonths = monthlyEntriesAll.length > 1
+  const hasMultipleMonths = allMonthKeys.length > 1
 
   return (
     <div className="px-5 space-y-4 mt-2">
