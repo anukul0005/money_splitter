@@ -123,128 +123,136 @@ def create_tables():
     # commits, then runs through a table already migrated - every statement
     # below is IF NOT EXISTS, so that second pass is a genuine no-op, not a
     # second race.
+    #
+    # The advisory lock doesn't stop a migration colliding with the OLD
+    # instance's live queries, though, and that is what deadlocked a deploy:
+    # every statement below used to run in one transaction, so the
+    # exclusive lock an ALTER took on `expenses` was still held while the
+    # next one waited on `groups` - which an old-instance request held while
+    # it waited on `expenses`. Hence _run_migrations: it only issues DDL for
+    # what is actually missing (ADD COLUMN IF NOT EXISTS takes the exclusive
+    # lock even when the column is already there), one short transaction per
+    # change, with a lock timeout and retries.
     with get_engine().connect() as conn:
         conn.execute(text("SELECT pg_advisory_lock(:id)"), {"id": MIGRATION_LOCK_ID})
+        conn.commit()
         try:
             _run_migrations(conn, text)
         finally:
+            # A failed statement leaves the transaction aborted, and the
+            # unlock would fail on top of it and hide the real error.
+            conn.rollback()
             conn.execute(text("SELECT pg_advisory_unlock(:id)"), {"id": MIGRATION_LOCK_ID})
             conn.commit()
 
 
-def _run_migrations(conn, text) -> None:
-    """Every ALTER TABLE this app has ever needed after create_all(), which
-    only builds tables it has never seen and never touches an existing one's
-    columns. Called with the migration lock already held - see create_tables.
-    """
-    conn.execute(text(
-        "ALTER TABLE expenses ADD COLUMN IF NOT EXISTS split_json TEXT"
-    ))
-    conn.execute(text(
-        "ALTER TABLE expenses ADD COLUMN IF NOT EXISTS payment_mode VARCHAR(50)"
-    ))
-    conn.execute(text(
-        "ALTER TABLE groups ADD COLUMN IF NOT EXISTS category VARCHAR(50)"
-    ))
-    conn.execute(text(
-        "ALTER TABLE expenses ADD COLUMN IF NOT EXISTS settled_by TEXT"
-    ))
-    conn.execute(text(
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS recovery_question VARCHAR(200)"
-    ))
-    conn.execute(text(
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS recovery_answer_hash VARCHAR(128)"
-    ))
-    conn.execute(text(
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS recovery_salt VARCHAR(64)"
-    ))
-    conn.execute(text(
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_fail_count INTEGER DEFAULT 0"
-    ))
-    conn.execute(text(
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_locked_until TIMESTAMPTZ"
-    ))
-    conn.execute(text(
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS otc_hash VARCHAR(128)"
-    ))
-    conn.execute(text(
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS otc_salt VARCHAR(64)"
-    ))
-    conn.execute(text(
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS otc_expires_at TIMESTAMPTZ"
-    ))
-    conn.execute(text(
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(200)"
-    ))
-    conn.execute(text(
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS login_code_hash VARCHAR(128)"
-    ))
-    conn.execute(text(
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS login_code_salt VARCHAR(64)"
-    ))
-    conn.execute(text(
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS login_code_expires_at TIMESTAMPTZ"
-    ))
+# Every column this app has ever added after create_all(), which only builds
+# tables it has never seen and never touches an existing one's columns.
+# (table, column, type/definition)
+_ADDED_COLUMNS = [
+    ("expenses", "split_json", "TEXT"),
+    ("expenses", "payment_mode", "VARCHAR(50)"),
+    ("groups", "category", "VARCHAR(50)"),
+    ("expenses", "settled_by", "TEXT"),
+    ("users", "recovery_question", "VARCHAR(200)"),
+    ("users", "recovery_answer_hash", "VARCHAR(128)"),
+    ("users", "recovery_salt", "VARCHAR(64)"),
+    ("users", "reset_fail_count", "INTEGER DEFAULT 0"),
+    ("users", "reset_locked_until", "TIMESTAMPTZ"),
+    ("users", "otc_hash", "VARCHAR(128)"),
+    ("users", "otc_salt", "VARCHAR(64)"),
+    ("users", "otc_expires_at", "TIMESTAMPTZ"),
+    ("users", "email", "VARCHAR(200)"),
+    ("users", "login_code_hash", "VARCHAR(128)"),
+    ("users", "login_code_salt", "VARCHAR(64)"),
+    ("users", "login_code_expires_at", "TIMESTAMPTZ"),
+    # Strength on a hand-entered price.
+    ("price_overrides", "abv", "DOUBLE PRECISION"),
+    # Community reviews' aggregate, added to Product after it already existed.
+    ("products", "community_rating", "DOUBLE PRECISION"),
+    ("products", "community_review_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("users", "birthday", "VARCHAR(5)"),
+    ("users", "last_birthday_wish_sent", "VARCHAR(10)"),
+    ("users", "birth_year", "INTEGER"),
+    ("groups", "last_memory_sent", "VARCHAR(10)"),
+    ("users", "last_debt_reminder_sent", "VARCHAR(10)"),
+    ("expenses", "txn_time", "VARCHAR(5)"),
+    ("expenses", "time_bucket", "VARCHAR(20)"),
+    ("expenses", "txn_ref", "VARCHAR(100)"),
+    ("loans", "emi_plan", "TEXT"),
+    ("loans", "interest_day", "INTEGER"),
+    ("users", "excluded_payees", "TEXT"),
+]
+
+# (index name, statement)
+_ADDED_INDEXES = [
     # Case-insensitive and NULL-safe: a plain UNIQUE constraint on email
     # would reject a second account with no email at all, since two NULLs
     # would collide under most people's mental model of "unique" even
     # though SQL itself treats them as distinct. A partial index only
     # constrains the rows that actually have one set.
-    conn.execute(text(
-        "CREATE UNIQUE INDEX IF NOT EXISTS ux_users_email "
-        "ON users (lower(email)) WHERE email IS NOT NULL"
-    ))
-    # Strength on a hand-entered price. create_all() only builds tables it
-    # has never seen, so an existing price_overrides table needs this added
-    # explicitly or every read of the column fails.
-    conn.execute(text(
-        "ALTER TABLE price_overrides ADD COLUMN IF NOT EXISTS abv DOUBLE PRECISION"
-    ))
+    ("ux_users_email", "CREATE UNIQUE INDEX IF NOT EXISTS ux_users_email "
+                       "ON users (lower(email)) WHERE email IS NOT NULL"),
+    ("ix_expenses_txn_ref", "CREATE INDEX IF NOT EXISTS ix_expenses_txn_ref ON expenses (txn_ref)"),
+]
+
+
+def _ddl(conn, text, sql: str, attempts: int = 5) -> None:
+    """One DDL statement in its own short transaction. lock_timeout makes a
+    statement stuck behind live traffic give up and retry instead of
+    queueing - and, while queued, blocking every request behind it."""
+    import time
+    from sqlalchemy.exc import OperationalError
+
+    for i in range(attempts):
+        try:
+            conn.execute(text("SET LOCAL lock_timeout = '5s'"))
+            conn.execute(text(sql))
+            conn.commit()
+            return
+        except OperationalError as e:  # lock timeout or deadlock - both transient
+            conn.rollback()
+            if i == attempts - 1:
+                raise
+            print(f"[migrate] retrying after {type(e.orig).__name__}: {sql}")
+            time.sleep(2 * (i + 1))
+
+
+def _run_migrations(conn, text) -> None:
+    """Bring existing tables up to the models. Called with the migration
+    lock already held - see create_tables. A database that is already up to
+    date gets only catalog reads: no DDL, so no table locks at all."""
+    have = {
+        (r[0], r[1]) for r in conn.execute(text(
+            "SELECT table_name, column_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema()"
+        ))
+    }
+    tables = {t for t, _ in have}
+    indexes = {r[0] for r in conn.execute(text(
+        "SELECT indexname FROM pg_indexes WHERE schemaname = current_schema()"
+    ))}
+    conn.commit()
+
+    for table, column, ddl in _ADDED_COLUMNS:
+        if table in tables and (table, column) not in have:
+            _ddl(conn, text, f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {ddl}")
+    for name, sql in _ADDED_INDEXES:
+        if name not in indexes:
+            _ddl(conn, text, sql)
+
     # The knowledge base's vector column. pgvector has no SQLAlchemy type
     # here, so the column is added by hand after create_all() has built
     # the rest of the table. Wrapped because a database without the
     # extension should still start - the app degrades to no retrieval
     # rather than refusing to boot.
-    try:
-        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        conn.execute(text(
-            "ALTER TABLE knowledge_items "
-            "ADD COLUMN IF NOT EXISTS embedding vector(2048)"
-        ))
-    except Exception as e:  # pragma: no cover - depends on the server
-        print(f"[warn] pgvector unavailable, retrieval disabled: {e}")
-    # Community reviews' aggregate, added to Product after it already
-    # existed - create_all() never touches an existing table's columns.
-    conn.execute(text(
-        "ALTER TABLE products ADD COLUMN IF NOT EXISTS community_rating DOUBLE PRECISION"
-    ))
-    conn.execute(text(
-        "ALTER TABLE products ADD COLUMN IF NOT EXISTS "
-        "community_review_count INTEGER NOT NULL DEFAULT 0"
-    ))
-    conn.execute(text(
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS birthday VARCHAR(5)"
-    ))
-    conn.execute(text(
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_birthday_wish_sent VARCHAR(10)"
-    ))
-    conn.execute(text(
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS birth_year INTEGER"
-    ))
-    conn.execute(text(
-        "ALTER TABLE groups ADD COLUMN IF NOT EXISTS last_memory_sent VARCHAR(10)"
-    ))
-    conn.execute(text(
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_debt_reminder_sent VARCHAR(10)"
-    ))
-    conn.execute(text("ALTER TABLE expenses ADD COLUMN IF NOT EXISTS txn_time VARCHAR(5)"))
-    conn.execute(text("ALTER TABLE expenses ADD COLUMN IF NOT EXISTS time_bucket VARCHAR(20)"))
-    conn.execute(text("ALTER TABLE expenses ADD COLUMN IF NOT EXISTS txn_ref VARCHAR(100)"))
-    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_expenses_txn_ref ON expenses (txn_ref)"))
-    conn.execute(text("ALTER TABLE loans ADD COLUMN IF NOT EXISTS emi_plan TEXT"))
-    conn.execute(text("ALTER TABLE loans ADD COLUMN IF NOT EXISTS interest_day INTEGER"))
-    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS excluded_payees TEXT"))
-    conn.commit()
+    if "knowledge_items" in tables and ("knowledge_items", "embedding") not in have:
+        try:
+            _ddl(conn, text, "CREATE EXTENSION IF NOT EXISTS vector")
+            _ddl(conn, text, "ALTER TABLE knowledge_items ADD COLUMN IF NOT EXISTS embedding vector(2048)")
+        except Exception as e:  # pragma: no cover - depends on the server
+            conn.rollback()
+            print(f"[warn] pgvector unavailable, retrieval disabled: {e}")
 
     # `payments`, `activities` and `activity_seen` are created by create_all
     # above; nothing to backfill since they start empty.
