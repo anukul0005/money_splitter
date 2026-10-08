@@ -4,7 +4,7 @@ import {
   ArcElement, DoughnutController, BarController,
   LineElement, PointElement, LineController, Filler,
 } from 'chart.js'
-import { Bar, Doughnut } from 'react-chartjs-2'
+import { Bar, Doughnut, Line } from 'react-chartjs-2'
 
 Chart.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend, ArcElement, DoughnutController, BarController, LineElement, PointElement, LineController, Filler)
 Chart.defaults.font.family = "'Space Grotesk', system-ui, sans-serif"
@@ -180,14 +180,6 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
   const windowTotal = dayVals.reduce((s, v) => s + v, 0)
   const activeDays  = dayVals.filter((v) => v > 0).length
 
-  // Scale to an ordinary day, not the biggest one: one ₹60k day otherwise
-  // flattens every ₹300 day into the baseline. Days above the cap are drawn
-  // to the top, darker, and the tooltip still gives their real amount.
-  const spendDays = dayVals.filter((v) => v > 0).sort((a, b) => a - b)
-  const p90Day = spendDays.length ? spendDays[Math.floor(0.9 * (spendDays.length - 1))] : 0
-  const dayCap = spendDays.length >= 8 && spendDays[spendDays.length - 1] > p90Day * 2 ? Math.ceil(p90Day * 1.6) : undefined
-  const cappedDays = dayCap ? dayVals.filter((v) => v > dayCap).length : 0
-
   const isWeekend = (dateStr) => {
     const d = new Date(dateStr + 'T00:00:00Z').getUTCDay()
     return d === 0 || d === 6
@@ -196,24 +188,36 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
     const [, m, d] = dateStr.split('-')
     return `${MONTH_ABBR[parseInt(m) - 1]} ${parseInt(d)}`
   }
-  const dayColor = (k, v) => {
-    const base = isWeekend(k) ? '#f97316' : '#22c55e'
-    return dayCap && v > dayCap ? (isWeekend(k) ? '#c2410c' : '#15803d') : base
-  }
+  const dayColors = dayKeys.map((k) => (isWeekend(k) ? '#f97316' : '#22c55e'))
 
-  const dailyBarData = {
+  // A line through every day of the window - ₹0 days sit on the baseline -
+  // scaled to the biggest day in it, so no amount is cut off.
+  const dailyLineData = {
     labels: dayKeys.map(fmtDayLabel),
     datasets: [{
       label: 'Daily Spend',
       data: dayVals,
-      backgroundColor: dayKeys.map((k, i) => dayColor(k, dayVals[i])),
-      borderRadius: 2,
-      borderSkipped: false,
-      barPercentage: 0.9,
-      categoryPercentage: 0.95,
+      borderColor: '#22c55e',
+      backgroundColor: (context) => {
+        const { ctx, chartArea } = context.chart
+        if (!chartArea) return 'rgba(34,197,94,0.15)'
+        const gradient = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom)
+        gradient.addColorStop(0, 'rgba(34,197,94,0.30)')
+        gradient.addColorStop(1, 'rgba(34,197,94,0.00)')
+        return gradient
+      },
+      borderWidth: 2,
+      pointRadius: dayKeys.map((k) => (windowDays > 45 ? 1.5 : isWeekend(k) ? 3.5 : 2.5)),
+      pointHoverRadius: 5,
+      pointHitRadius: 8,
+      pointBackgroundColor: dayColors,
+      pointBorderColor: dayColors,
+      pointBorderWidth: 0,
+      tension: 0.25,
+      fill: true,
     }],
   }
-  const dailyBarOptions = {
+  const dailyLineOptions = {
     responsive: true,
     maintainAspectRatio: false,
     interaction: { mode: 'index', intersect: false },
@@ -239,9 +243,8 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
         grid: { display: false },
       },
       y: {
-        max: dayCap,
         beginAtZero: true,
-        ticks: { maxTicksLimit: 4, callback: compactINR, font: { size: 10, family: "'Space Grotesk'" } },
+        ticks: { maxTicksLimit: 5, callback: compactINR, font: { size: 10, family: "'Space Grotesk'" } },
         grid: { color: '#f1f5f9' },
       },
     },
@@ -370,7 +373,7 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
               {INR(hovered === null ? windowTotal / Math.max(windowDays, 1) : dayVals[hovered])}
             </p>
             <p className="text-[11px] text-gray-400 mt-0.5">
-              {hovered === null ? `over ${windowDays} days, ₹0 days included` : 'tap a bar for its day'}
+              {hovered === null ? `over ${windowDays} days, ₹0 days included` : isWeekend(dayKeys[hovered]) ? 'Weekend' : 'Weekday'}
             </p>
           </div>
           <div className="w-px bg-amber-100" />
@@ -402,13 +405,11 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
           )}
         </div>
         <div className="relative h-56 md:h-72">
-          <Bar data={dailyBarData} options={dailyBarOptions} />
+          <Line data={dailyLineData} options={dailyLineOptions} />
         </div>
-        {(longSpan || cappedDays > 0) && (
+        {longSpan && (
           <p className="text-[10px] text-gray-400 mt-2">
-            {longSpan && 'Green weekdays, orange weekends. '}
-            {cappedDays > 0 && `${cappedDays} bigger day${cappedDays > 1 ? 's are' : ' is'} cut off at ${compactINR(dayCap)} (darker bar${cappedDays > 1 ? 's' : ''}) - tap for the amount.`}
-            {longSpan && ' The month and year totals are below.'}
+            Green points are weekdays, orange weekends. Tap a point for its day; month and year totals are below.
           </p>
         )}
       </div>
