@@ -466,6 +466,80 @@ def send_debt_reminder(db, to_email: str | None, name: str, debts: list[tuple[st
     _push.send_push_to_user(db, name, "💰 Your dues this month", push_body, url="/balances/owe")
 
 
+def send_daily_summary(db, to_email: str | None, name: str, s: dict) -> None:
+    """Yesterday's spending, sent just after midnight by the daily cron to
+    anyone who turned it on in Account (User.daily_summary). `s` is
+    daily_summary.summarise's result. Sent on a no-spend day too, saying
+    so - a statement uploaded later fills the day in, and silence would
+    read as the summary having broken."""
+    day = s["day"]
+    label = f"{day.strftime('%a')} {day.day} {day.strftime('%b')}"
+    month = day.strftime("%B")
+    inr = lambda v: f"₹{v:,.0f}"
+
+    plain: list[str] = []
+    html: list[str] = []
+    if s["items"]:
+        n = len(s["items"])
+        head = f"You spent {inr(s['total'])} on {label} ({n} expense{'s' if n > 1 else ''})."
+        if s["avg"] > 0:
+            pct = round((s["total"] - s["avg"]) / s["avg"] * 100)
+            if abs(pct) >= 5:
+                head += f" That's {abs(pct)}% {'above' if pct > 0 else 'below'} your 30-day daily average of {inr(s['avg'])}."
+            else:
+                head += f" About your 30-day daily average of {inr(s['avg'])}."
+        plain.append(head)
+        html.append(escape(head).replace(escape(inr(s["total"])), f"<strong>{escape(inr(s['total']))}</strong>", 1))
+
+        shown = s["items"][:10]
+        item_lines = [
+            f"{r['title']} - {inr(r['share'])}" + (f" (your share, with {r['with']})" if r["shared"] else "")
+            for r in shown
+        ]
+        if n > len(shown):
+            item_lines.append(f"…and {n - len(shown)} more")
+        plain.append("\n".join(item_lines))
+        html.append("<br>".join(escape(l) for l in item_lines))
+
+        if len(s["categories"]) > 1:
+            cats = " · ".join(f"{c} {inr(v)}" for c, v in s["categories"][:5])
+            plain.append(f"By category: {cats}")
+            html.append(f"By category: {escape(cats)}")
+    else:
+        line = (f"No spending recorded on {label}. If you paid for something, "
+                f"it'll show up once it's added or your statement is uploaded.")
+        plain.append(line)
+        html.append(escape(line))
+
+    mtd = f"{month} {'total' if s['month_done'] else 'so far'}: {inr(s['mtd'])}"
+    if s["prev_mtd"] > 0:
+        pct = round((s["mtd"] - s["prev_mtd"]) / s["prev_mtd"] * 100)
+        mtd += f", {abs(pct)}% {'more' if pct > 0 else 'less'} than at this point last month."
+    else:
+        mtd += "."
+    plain.append(mtd)
+    html.append(escape(mtd))
+
+    subject = f"Yesterday: {inr(s['total'])} spent" if s["items"] else "Yesterday: nothing spent"
+    link = f"{get_settings().frontend_url}/history"
+    if to_email:
+        try:
+            _send(
+                to_email, subject,
+                "\n\n".join(plain) + f"\n\nSee History: {link}",
+                _layout(
+                    f"Your spending on {escape(label)}", html,
+                    button_url=link, button_label="See History",
+                    footer="Sent by SplitEasy every night because you turned on the daily summary in Account settings.",
+                ),
+            )
+        except Exception as e:
+            print(f"[email] daily summary error: {e}")
+    push = (f"{inr(s['total'])} on {len(s['items'])} thing{'s' if len(s['items']) > 1 else ''}"
+            if s["items"] else "Nothing recorded") + f" · {month} {inr(s['mtd'])}"
+    _push.send_push_to_user(db, name, subject, push, url="/history")
+
+
 def _describe_participants(expense, member_names: list[str]) -> str:
     """"with everyone" when an expense has no explicit participants (null
     means every group member, same convention ExpenseBase.participants

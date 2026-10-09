@@ -62,6 +62,10 @@ class User(Base):
     # routers/cron.py) - the ISO date it last actually went out, not the
     # 1st-of-the-month trigger itself, which recurs every month.
     last_debt_reminder_sent = Column(String(10), nullable=True)
+    # Opt-in nightly email/push of yesterday's spending (see daily_summary.py),
+    # and the date it last went out - same idempotency as above.
+    daily_summary = Column(Boolean, nullable=False, default=False, server_default="false")
+    last_daily_summary_sent = Column(String(10), nullable=True)
     # JSON list of payee names whose statement debits are never monthly
     # spending for this user - friends paid back or lent to, where no
     # settle-up was recorded. Exact names, not first names: "Ajay Singh"

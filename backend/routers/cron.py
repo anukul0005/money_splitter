@@ -15,16 +15,19 @@ an environment nobody has set one up for yet.
 from __future__ import annotations
 
 import calendar
-from datetime import date
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db, get_settings
-from emailer import send_birthday_wish, notify_group_memory, send_debt_reminder
+from emailer import send_birthday_wish, notify_group_memory, send_debt_reminder, send_daily_summary
 from models import Expense, Group, User
 
 router = APIRouter(prefix="/cron", tags=["cron"])
+
+# India has no daylight saving, so a fixed offset is exact.
+IST = timezone(timedelta(hours=5, minutes=30))
 
 
 def _check_key(key: str) -> None:
@@ -52,7 +55,10 @@ def run_daily(key: str = "", db: Session = Depends(get_db)):
     _check_key(key)
     from routers.stats import top_transaction_partners
 
-    today = date.today()
+    # India's date, not the server's: Render runs on UTC, and the pinger
+    # fires at 00:30 IST - 19:00 UTC the day before - so date.today() would
+    # still be yesterday, and every birthday and memory would land a day late.
+    today = datetime.now(IST).date()
     mmdd = today.strftime("%m-%d")
     iso_today = today.isoformat()
 
@@ -153,7 +159,23 @@ def run_daily(key: str = "", db: Session = Depends(get_db)):
     from loan_jobs import run_bills, run_loan_reminders
     loan_summary = {**run_bills(db, today), **run_loan_reminders(db, today)}
 
+    # Yesterday's spending, for whoever turned it on (User.daily_summary).
+    from daily_summary import summarise
+    summaries_sent, summaries_failed = [], []
+    for user in db.query(User).filter(User.daily_summary == True).all():  # noqa: E712
+        if user.last_daily_summary_sent == iso_today:
+            continue
+        try:
+            send_daily_summary(db, user.email, user.name, summarise(db, user, today - timedelta(days=1)))
+            user.last_daily_summary_sent = iso_today
+            db.commit()
+            summaries_sent.append(user.name)
+        except Exception as e:  # pragma: no cover - one bad row must not sink the run
+            db.rollback()
+            summaries_failed.append(f"{user.name}: {e}")
+
     return {"date": iso_today, "birthdays_today": sent, **loan_summary,
+            "daily_summaries_sent": summaries_sent, "daily_summaries_failed": summaries_failed,
             "skipped_no_email": skipped_no_email, "failed": failed,
             "memories_sent": memory_groups, "memories_failed": memory_failed,
             "debt_reminders_sent": debt_reminders_sent,

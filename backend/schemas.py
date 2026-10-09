@@ -37,6 +37,8 @@ class UserMeOut(UserOut):
     birthday: Optional[str] = None
     # Optional - see models.User.birth_year.
     birth_year: Optional[int] = None
+    # Opt-in nightly summary of yesterday's spending - see models.User.
+    daily_summary: bool = False
 
 
 class LoginOut(UserMeOut):
@@ -105,6 +107,10 @@ class SetBirthday(BaseModel):
     the "you turn X today" line in the birthday email; see models.User)."""
     birthday: str
     birth_year: Optional[int] = None
+
+
+class SetDailySummary(BaseModel):
+    enabled: bool
 
 
 class RequestLoginCode(BaseModel):

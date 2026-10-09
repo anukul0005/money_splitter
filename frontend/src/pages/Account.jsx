@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   changePassword, setRecovery, getRecoveryQuestion, getMe, setMyEmail, setMyBirthday,
-  listMyUpiIds, addUpiId, deleteUpiId,
+  setMyDailySummary, listMyUpiIds, addUpiId, deleteUpiId,
 } from '../api'
 import { useUser, isAdmin } from '../UserContext'
 import { ALL_QUESTIONS, RECOVERY_QUESTIONS, KEY_QUESTION, generateKey } from '../utils/security'
@@ -58,6 +58,11 @@ export default function Account() {
   const [bdayDone, setBdayDone]         = useState('')
   const [bdayBusy, setBdayBusy]         = useState(false)
 
+  // ── Nightly summary of yesterday's spending ──
+  const [summaryOn, setSummaryOn]       = useState(false)
+  const [summaryBusy, setSummaryBusy]   = useState(false)
+  const [summaryError, setSummaryError] = useState('')
+
   // ── Push notifications ──
   const [pushOn, setPushOn]       = useState(false)
   const [pushBusy, setPushBusy]   = useState(false)
@@ -92,6 +97,7 @@ export default function Account() {
         }
         setBirthYear(r.data.birth_year ? String(r.data.birth_year) : '')
         setBdayYearInput(r.data.birth_year ? String(r.data.birth_year) : '')
+        setSummaryOn(!!r.data.daily_summary)
       })
       .catch(() => {})
     if (pushSupported()) {
@@ -121,6 +127,18 @@ export default function Account() {
     setUpiBusy(true)
     try { await deleteUpiId(id); loadUpi() }
     finally { setUpiBusy(false) }
+  }
+
+  const handleToggleSummary = async () => {
+    setSummaryError(''); setSummaryBusy(true)
+    try {
+      const res = await setMyDailySummary(!summaryOn)
+      setSummaryOn(!!res.data.daily_summary)
+    } catch (err) {
+      setSummaryError(err.response?.data?.detail || 'Could not change the daily summary.')
+    } finally {
+      setSummaryBusy(false)
+    }
   }
 
   const handleTogglePush = async () => {
@@ -486,6 +504,31 @@ export default function Account() {
               {pushError && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2 mt-2">{pushError}</p>}
             </>
           )}
+        </div>
+
+        {/* ── Daily spending summary ── */}
+        <div className="card">
+          <h2 className="text-sm font-bold text-gray-800">Daily spending summary</h2>
+          <p className="text-xs text-gray-500 leading-relaxed mt-1 mb-3">
+            Just after midnight, get yesterday's spending — your share of
+            every expense, what it went on, how it compares with your
+            30-day average, and the month so far. Sent by email
+            {email ? '' : ' (add an email above)'} and as a notification
+            if they're on for this device.
+          </p>
+          <button
+            type="button"
+            onClick={handleToggleSummary}
+            disabled={summaryBusy}
+            className={`w-full py-2.5 text-xs font-bold rounded-md transition-all active:scale-[0.98] disabled:opacity-50 ${
+              summaryOn
+                ? 'bg-amber-100 border border-amber-300 text-amber-800 hover:bg-amber-200'
+                : 'btn-primary'
+            }`}
+          >
+            {summaryBusy ? 'Working…' : summaryOn ? 'Turn off the daily summary' : 'Send me a daily summary'}
+          </button>
+          {summaryError && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2 mt-2">{summaryError}</p>}
         </div>
 
         {/* ── Birthday ── */}

@@ -12,6 +12,7 @@ from schemas import (
     UserSignup, UserLogin, UserOut, LoginOut, SetRecovery, ResetPassword,
     AdminReset, AdminSetRecovery, AdminIssueCode, RedeemCode,
     SetEmail, SetBirthday, RequestLoginCode, VerifyLoginCode, UserMeOut,
+    SetDailySummary,
 )
 from emailer import send_login_code
 
@@ -438,6 +439,17 @@ def set_my_birthday(payload: SetBirthday, db: Session = Depends(get_db),
         caller.birth_year = payload.birth_year
 
     caller.birthday = birthday
+    db.commit()
+    db.refresh(caller)
+    return caller
+
+
+@router.post("/me/daily-summary", response_model=UserMeOut)
+def set_my_daily_summary(payload: SetDailySummary, db: Session = Depends(get_db),
+                         caller: User = Depends(current_user)):
+    """Turn the nightly "yesterday's spending" email/push on or off - your
+    own account only, like the settings above."""
+    caller.daily_summary = payload.enabled
     db.commit()
     db.refresh(caller)
     return caller

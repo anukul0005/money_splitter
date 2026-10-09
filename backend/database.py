@@ -182,6 +182,8 @@ _ADDED_COLUMNS = [
     ("loans", "emi_plan", "TEXT"),
     ("loans", "interest_day", "INTEGER"),
     ("users", "excluded_payees", "TEXT"),
+    ("users", "daily_summary", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("users", "last_daily_summary_sent", "VARCHAR(10)"),
 ]
 
 # (index name, statement)
