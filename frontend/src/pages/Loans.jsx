@@ -357,16 +357,16 @@ export default function Loans() {
               </div>
               <div className="flex-1">
                 <label className="label">Loan taken on (optional)</label>
-                <input className="input" type="date" value={loan.start_date}
-                  onChange={(e) => setLoan((f) => ({ ...f, start_date: e.target.value }))} />
+                <DatePicker clearable value={loan.start_date} placeholder="Not set"
+                  onChange={(v) => setLoan((f) => ({ ...f, start_date: v }))} />
               </div>
             </div>
 
             {!loan.emi && (
               <div>
                 <label className="label">Due date *</label>
-                <input className="input" type="date" value={loan.due_date}
-                  onChange={(e) => setLoan((f) => ({ ...f, due_date: e.target.value }))} />
+                <DatePicker value={loan.due_date}
+                  onChange={(v) => setLoan((f) => ({ ...f, due_date: v }))} />
               </div>
             )}
 
@@ -386,8 +386,8 @@ export default function Loans() {
                   </div>
                   <div className="flex-1">
                     <label className="label">First EMI date</label>
-                    <input className="input" type="date" value={loan.emiFirst}
-                      onChange={(e) => setLoan((f) => ({ ...f, emiFirst: e.target.value, emiRows: buildRows(f.emiCount, e.target.value) }))} />
+                    <DatePicker value={loan.emiFirst}
+                      onChange={(v) => setLoan((f) => ({ ...f, emiFirst: v, emiRows: buildRows(f.emiCount, v) }))} />
                   </div>
                 </div>
                 {loan.emiRows.map((r, i) => (
@@ -398,8 +398,8 @@ export default function Loans() {
                         onChange={(e) => setLoan((f) => ({ ...f, emiRows: f.emiRows.map((x, j) => j === i ? { ...x, pct: e.target.value } : x) }))} />
                       <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">%</span>
                     </div>
-                    <input className="input flex-1" type="date" value={r.date}
-                      onChange={(e) => setLoan((f) => ({ ...f, emiRows: f.emiRows.map((x, j) => j === i ? { ...x, date: e.target.value } : x) }))} />
+                    <DatePicker className="flex-1" value={r.date}
+                      onChange={(v) => setLoan((f) => ({ ...f, emiRows: f.emiRows.map((x, j) => j === i ? { ...x, date: v } : x) }))} />
                   </div>
                 ))}
                 <p className={`text-xs font-bold ${Math.abs(emiSum - 100) <= 0.01 ? 'text-green-700' : 'text-red-600'}`}>

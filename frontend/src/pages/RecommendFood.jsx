@@ -330,19 +330,19 @@ export default function RecommendFood({ tab, setTab }) {
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="label">Cuisine</label>
-              <select className="input text-xs py-1.5" value={cuisine} onChange={(e) => setCuisine(e.target.value)}>
-                <option value="any">Anything</option>
-                {cuisineList.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
+              <Dropdown
+                value={cuisine}
+                onChange={setCuisine}
+                options={[{ value: 'any', label: 'Anything' }, ...cuisineList.map((c) => ({ value: c, label: c }))]}
+              />
             </div>
             <div>
               <label className="label">Kind of place</label>
-              <select className="input text-xs py-1.5" value={kind} onChange={(e) => setKind(e.target.value)}>
-                <option value="any">Anywhere</option>
-                {(meta?.kinds ?? []).map((k) => (
-                  <option key={k.value} value={k.value}>{k.name}</option>
-                ))}
-              </select>
+              <Dropdown
+                value={kind}
+                onChange={setKind}
+                options={[{ value: 'any', label: 'Anywhere' }, ...(meta?.kinds ?? []).map((k) => ({ value: k.value, label: k.name }))]}
+              />
             </div>
           </div>
 

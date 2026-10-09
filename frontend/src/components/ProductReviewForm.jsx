@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getProductReviews, submitProductReview } from '../api'
+import Dropdown from './Dropdown'
 
 // 0-5 for every dimension, same scale the enrichment pipeline already uses -
 // so a submitted value sits on the same axis as the catalogue's own guess it
@@ -160,11 +161,12 @@ export default function ProductReviewForm({ productId, myName, onDone, onCancel 
             </div>
             <div>
               <label className="label">Body</label>
-              <select className="input text-xs" value={body}
-                      onChange={(e) => setBody(e.target.value)}>
-                <option value="">—</option>
-                {BODIES.map((b) => <option key={b} value={b}>{b}</option>)}
-              </select>
+              <Dropdown
+                value={body}
+                onChange={setBody}
+                placeholder="—"
+                options={[{ value: '', label: '—' }, ...BODIES.map((b) => ({ value: b, label: b }))]}
+              />
             </div>
           </div>
           <div>

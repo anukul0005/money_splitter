@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getRecoveryQuestion, resetPassword, redeemCode } from '../api'
 import { ALL_QUESTIONS, RECOVERY_QUESTIONS, KEY_QUESTION, generateKey } from '../utils/security'
+import Dropdown from '../components/Dropdown'
 
 /**
  * Standalone /reset-password route.
@@ -219,13 +220,11 @@ export default function ResetPassword() {
 
               <div className="border-t border-amber-200 pt-4">
                 <label className="label">Your security question</label>
-                <select
-                  className="input"
+                <Dropdown
                   value={newQ}
-                  onChange={(e) => { setNewQ(e.target.value); setNewA('') }}
-                >
-                  {ALL_QUESTIONS.map((q) => <option key={q} value={q}>{q}</option>)}
-                </select>
+                  onChange={(v) => { setNewQ(v); setNewA('') }}
+                  options={ALL_QUESTIONS.map((q) => ({ value: q, label: q }))}
+                />
                 <div className="flex gap-2 mt-2">
                   <input
                     className={`input flex-1 ${newQ === KEY_QUESTION ? 'tracking-[0.3em] font-bold' : ''}`}

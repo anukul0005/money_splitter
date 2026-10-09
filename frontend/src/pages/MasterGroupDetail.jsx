@@ -6,6 +6,7 @@ import GroupCard from '../components/GroupCard'
 import LoadingSpinner from '../components/LoadingSpinner'
 import StatsPanel from '../components/StatsPanel'
 import { buildMasterGroups } from '../utils/masterGroups'
+import Dropdown from '../components/Dropdown'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 
@@ -49,15 +50,12 @@ function MonthlyGroups({ groups }) {
         <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">
           {year === 'recent' ? 'Recent months' : year}
         </p>
-        <select
+        <Dropdown
+          size="sm"
           value={year}
-          onChange={(e) => { setYear(e.target.value); setShowMore(false) }}
-          aria-label="Year"
-          className="border border-amber-200 rounded-md bg-cream text-gray-700 font-bold text-xs px-2 py-1 focus:outline-none focus:border-brand-400"
-        >
-          <option value="recent">Last 12 months</option>
-          {years.map((y) => <option key={y} value={y}>{y}</option>)}
-        </select>
+          onChange={(v) => { setYear(v); setShowMore(false) }}
+          options={[{ value: 'recent', label: 'Last 12 months' }, ...years.map((y) => ({ value: y, label: y }))]}
+        />
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {shown.map((g) => <GroupCard key={g.id} group={g} />)}

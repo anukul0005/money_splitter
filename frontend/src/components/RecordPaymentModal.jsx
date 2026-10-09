@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getGroups, createPaymentAuto, updatePayment, deletePayment } from '../api'
 import { useUser } from '../UserContext'
+import Dropdown from './Dropdown'
+import DatePicker from './DatePicker'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
 
@@ -131,25 +133,21 @@ export default function RecordPaymentModal({ onClose, onSaved, prefillFriend, pa
           <div className="grid grid-cols-2 gap-2.5">
             <div>
               <label className="label text-[10px] mb-1">Who paid</label>
-              <select
-                className="input py-2.5"
+              <Dropdown
                 value={form.from_member}
-                onChange={(e) => setForm((f) => ({ ...f, from_member: e.target.value }))}
-              >
-                <option value="">{loading ? 'Loading…' : 'Select…'}</option>
-                {people.map((m) => <option key={m} value={m}>{m}</option>)}
-              </select>
+                onChange={(v) => setForm((f) => ({ ...f, from_member: v }))}
+                placeholder={loading ? 'Loading…' : 'Select…'}
+                options={people.map((m) => ({ value: m, label: m }))}
+              />
             </div>
             <div>
               <label className="label text-[10px] mb-1">Paid to</label>
-              <select
-                className="input py-2.5"
+              <Dropdown
                 value={form.to_member}
-                onChange={(e) => setForm((f) => ({ ...f, to_member: e.target.value }))}
-              >
-                <option value="">{loading ? 'Loading…' : 'Select…'}</option>
-                {people.map((m) => <option key={m} value={m}>{m}</option>)}
-              </select>
+                onChange={(v) => setForm((f) => ({ ...f, to_member: v }))}
+                placeholder={loading ? 'Loading…' : 'Select…'}
+                options={people.map((m) => ({ value: m, label: m }))}
+              />
             </div>
           </div>
 
@@ -168,12 +166,7 @@ export default function RecordPaymentModal({ onClose, onSaved, prefillFriend, pa
             </div>
             <div>
               <label className="label text-[10px] mb-1">Date</label>
-              <input
-                className="input py-2.5"
-                type="date"
-                value={form.date}
-                onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
-              />
+              <DatePicker value={form.date} onChange={(v) => setForm((f) => ({ ...f, date: v }))} />
             </div>
           </div>
 

@@ -6,6 +6,9 @@ import ReceiptCropper from '../components/ReceiptCropper'
 import { useUser } from '../UserContext'
 import { pairKey } from '../utils/masterGroups'
 import CategorySelect from '../components/CategorySelect'
+import Dropdown from '../components/Dropdown'
+import DatePicker from '../components/DatePicker'
+import TimePicker from '../components/TimePicker'
 
 const PAYMENT_MODES = [
   { value: 'cash',        label: 'Cash' },
@@ -466,12 +469,12 @@ export default function AddExpense() {
               + New group
             </button>
           </div>
-          <select className="input" value={form.group_id} onChange={set('group_id')}>
-            <option value="">Select a group…</option>
-            {userGroups.map((g) => (
-              <option key={g.id} value={g.id}>{g.name}</option>
-            ))}
-          </select>
+          <Dropdown
+            value={form.group_id}
+            onChange={(v) => setForm((f) => ({ ...f, group_id: v }))}
+            placeholder="Select a group…"
+            options={userGroups.map((g) => ({ value: String(g.id), label: g.name }))}
+          />
         </div>
 
         {/* Scan a receipt — pre-fills amount/title/date/category below,
@@ -877,7 +880,7 @@ export default function AddExpense() {
         {/* Date */}
         <div>
           <label className="label">Date</label>
-          <input className="input" type="date" value={form.date} onChange={set('date')} />
+          <DatePicker value={form.date} onChange={(v) => setForm((f) => ({ ...f, date: v }))} />
         </div>
 
         {/* Time of the transaction - monthly trackers only, optional. Kept
@@ -886,7 +889,7 @@ export default function AddExpense() {
         {isMonthly && (
           <div>
             <label className="label">Time (optional)</label>
-            <input className="input" type="time" value={form.txn_time} onChange={set('txn_time')} />
+            <TimePicker value={form.txn_time} onChange={(v) => setForm((f) => ({ ...f, txn_time: v }))} placeholder="Add a time" />
           </div>
         )}
 

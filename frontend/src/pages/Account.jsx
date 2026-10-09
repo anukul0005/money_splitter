@@ -7,6 +7,7 @@ import {
 import { useUser, isAdmin } from '../UserContext'
 import { ALL_QUESTIONS, RECOVERY_QUESTIONS, KEY_QUESTION, generateKey } from '../utils/security'
 import { pushSupported, getExistingSubscription, enablePush, disablePush } from '../push'
+import Dropdown from '../components/Dropdown'
 
 /**
  * /account — everything about your own login, in one place.
@@ -286,16 +287,14 @@ export default function Account() {
           <form onSubmit={handleSecurity} className="space-y-3">
             <div>
               <label className="label">Question</label>
-              <select
-                className="input"
+              <Dropdown
                 value={question}
-                onChange={(e) => { setQuestion(e.target.value); setAnswer('') }}
-              >
-                {ALL_QUESTIONS.map((q) => <option key={q} value={q}>{q}</option>)}
-                {existing && !ALL_QUESTIONS.includes(existing) && (
-                  <option value={existing}>{existing}</option>
-                )}
-              </select>
+                onChange={(v) => { setQuestion(v); setAnswer('') }}
+                options={[
+                  ...ALL_QUESTIONS.map((q) => ({ value: q, label: q })),
+                  ...(existing && !ALL_QUESTIONS.includes(existing) ? [{ value: existing, label: existing }] : []),
+                ]}
+              />
             </div>
 
             <div>
@@ -559,28 +558,24 @@ export default function Account() {
             <div className="flex gap-2">
               <div className="flex-[2]">
                 <label className="label">Month</label>
-                <select
-                  className="input"
+                <Dropdown
                   value={bdayMonth}
-                  onChange={(e) => { setBdayMonth(e.target.value); if (Number(bdayDay) > daysInMonth(e.target.value)) setBdayDay('') }}
-                >
-                  <option value="">Select…</option>
-                  {MONTHS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                </select>
+                  onChange={(v) => { setBdayMonth(v); if (Number(bdayDay) > daysInMonth(v)) setBdayDay('') }}
+                  options={MONTHS.map(([v, l]) => ({ value: v, label: l }))}
+                />
               </div>
               <div className="flex-1">
                 <label className="label">Day</label>
-                <select
-                  className="input"
+                <Dropdown
                   value={bdayDay}
                   disabled={!bdayMonth}
-                  onChange={(e) => setBdayDay(e.target.value)}
-                >
-                  <option value="">–</option>
-                  {bdayMonth && Array.from({ length: daysInMonth(bdayMonth) }, (_, i) =>
-                    String(i + 1).padStart(2, '0')
-                  ).map((d) => <option key={d} value={d}>{Number(d)}</option>)}
-                </select>
+                  onChange={setBdayDay}
+                  placeholder="–"
+                  options={bdayMonth ? Array.from({ length: daysInMonth(bdayMonth) }, (_, i) => {
+                    const d = String(i + 1).padStart(2, '0')
+                    return { value: d, label: String(i + 1) }
+                  }) : []}
+                />
               </div>
             </div>
 

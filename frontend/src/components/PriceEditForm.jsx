@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { listBrands, savePrice } from '../api'
+import Dropdown from './Dropdown'
 
 const KINDS = ['whisky', 'rum', 'vodka', 'gin', 'tequila', 'beer', 'wine',
                'brandy', 'liqueur', 'rtd']
@@ -130,11 +131,12 @@ export default function PriceEditForm({ state, states = [], initial = {}, onDone
       <div className="grid grid-cols-2 gap-2">
         <div>
           <label className="label">Type</label>
-          <select className="input text-xs" value={existing ? existing.kind : kind}
-                  disabled={!!existing}
-                  onChange={(e) => setKind(e.target.value)}>
-            {KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
-          </select>
+          <Dropdown
+            value={existing ? existing.kind : kind}
+            disabled={!!existing}
+            onChange={setKind}
+            options={KINDS.map((k) => ({ value: k, label: k }))}
+          />
           {existing && (
             <p className="text-[9px] text-gray-400 mt-1">Set by the existing entry</p>
           )}

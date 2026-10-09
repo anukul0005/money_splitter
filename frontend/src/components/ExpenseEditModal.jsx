@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { updateExpense } from '../api'
 import { useUser } from '../UserContext'
 import CategorySelect from './CategorySelect'
+import Dropdown from './Dropdown'
+import DatePicker from './DatePicker'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 const r2  = (n) => Math.round(n * 100) / 100
@@ -293,12 +295,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
           {/* Date */}
           <div>
             <label className="label">Date</label>
-            <input
-              className="input"
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-            />
+            <DatePicker value={date} onChange={setDate} />
           </div>
 
           {/* Category */}
@@ -315,9 +312,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
           {members.length > 1 && (
             <div>
               <label className="label">Paid By</label>
-              <select className="input" value={paidBy} onChange={(e) => setPaidBy(e.target.value)}>
-                {members.map((m) => <option key={m} value={m}>{m}</option>)}
-              </select>
+              <Dropdown value={paidBy} onChange={setPaidBy} options={members.map((m) => ({ value: m, label: m }))} />
             </div>
           )}
 

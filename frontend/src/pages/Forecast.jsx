@@ -633,12 +633,11 @@ export default function Forecast({ tab, setTab }) {
                   )}
                 </div>
                 <div className="flex gap-1.5 items-start">
-                  <select
-                    className="input flex-1" value={l.size_ml}
-                    onChange={(e) => setDrinkLine(i, { size_ml: e.target.value })}
-                  >
-                    {SIZES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
-                  </select>
+                  <Dropdown
+                    className="flex-1" value={l.size_ml}
+                    onChange={(v) => setDrinkLine(i, { size_ml: v })}
+                    options={SIZES.map(([v, label]) => ({ value: String(v), label }))}
+                  />
                   <input
                     className="input w-14 flex-shrink-0 text-center" type="number" min="1"
                     value={l.qty} onChange={(e) => setDrinkLine(i, { qty: e.target.value })}

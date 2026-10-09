@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { getGroups, createGroup } from '../api'
 import { useUser } from '../UserContext'
 import LoadingSpinner from '../components/LoadingSpinner'
+import Dropdown from '../components/Dropdown'
 
 const MONTH_NAMES = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
 const MONTH_FULL  = ['January','February','March','April','May','June','July','August','September','October','November','December']
@@ -97,27 +98,21 @@ export default function MonthlyGroup() {
         <div className="flex gap-3">
           <div className="flex-1">
             <label className="label">Month</label>
-            <select
+            <Dropdown
+              className="mt-2"
               value={monthMonth}
-              onChange={(e) => setMonthMonth(Number(e.target.value))}
-              className="mt-2 w-full border border-amber-200 rounded-md bg-cream text-gray-800 font-bold text-sm px-3 py-3 appearance-none focus:outline-none focus:border-brand-400"
-            >
-              {MONTH_FULL.map((name, i) => (
-                <option key={i} value={i + 1}>{name}</option>
-              ))}
-            </select>
+              onChange={(v) => setMonthMonth(Number(v))}
+              options={MONTH_FULL.map((name, i) => ({ value: i + 1, label: name }))}
+            />
           </div>
           <div className="flex-1">
             <label className="label">Year</label>
-            <select
+            <Dropdown
+              className="mt-2"
               value={monthYearNum}
-              onChange={(e) => setMonthYearNum(Number(e.target.value))}
-              className="mt-2 w-full border border-amber-200 rounded-md bg-cream text-gray-800 font-bold text-sm px-3 py-3 appearance-none focus:outline-none focus:border-brand-400"
-            >
-              {yearOptions.map((y) => (
-                <option key={y} value={y}>{y}</option>
-              ))}
-            </select>
+              onChange={(v) => setMonthYearNum(Number(v))}
+              options={yearOptions.map((y) => ({ value: y, label: String(y) }))}
+            />
           </div>
         </div>
 

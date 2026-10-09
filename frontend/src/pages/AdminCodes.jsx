@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { adminIssueCode, listUsersBasic, getRecoveryQuestion } from '../api'
 import { useUser, isAdmin } from '../UserContext'
 import { KEY_QUESTION } from '../utils/security'
+import Dropdown from '../components/Dropdown'
 
 /**
  * Admin-only: mint a one-time 6-digit code for another user.
@@ -105,14 +106,15 @@ export default function AdminCodes() {
           <form onSubmit={handleIssue} className="space-y-3">
             <div>
               <label className="label">Issue a code to</label>
-              <select className="input" value={target} onChange={(e) => setTarget(e.target.value)}>
-                <option value="">Select a user…</option>
-                {users.map((u) => (
-                  <option key={u.id} value={u.name}>
-                    {u.name}{needs[u.name] === false ? '  · no security question' : ''}
-                  </option>
-                ))}
-              </select>
+              <Dropdown
+                value={target}
+                onChange={setTarget}
+                placeholder="Select a user…"
+                options={users.map((u) => ({
+                  value: u.name,
+                  label: `${u.name}${needs[u.name] === false ? '  · no security question' : ''}`,
+                }))}
+              />
             </div>
 
             <div>

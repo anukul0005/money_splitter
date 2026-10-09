@@ -13,9 +13,10 @@ const fromValue = (v) => {
  * A styled stand-in for <input type="date"> - same reasoning as Dropdown:
  * the native control is Safari/iOS's own picker, not the app's UI. Value/
  * onChange both use the same "YYYY-MM-DD" string <input type="date"> does,
- * so this drops in wherever that did.
+ * so this drops in wherever that did. `clearable` adds a Clear button for
+ * an optional date (onChange('')).
  */
-export default function DatePicker({ value, onChange, placeholder = 'Select date', className = '' }) {
+export default function DatePicker({ value, onChange, placeholder = 'Select date', className = '', clearable = false }) {
   const [open, setOpen] = useState(false)
   const selected = fromValue(value)
   const [viewMonth, setViewMonth] = useState(selected || new Date())
@@ -25,7 +26,11 @@ export default function DatePicker({ value, onChange, placeholder = 'Select date
     if (!open) return
     const onClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
     document.addEventListener('mousedown', onClick)
-    return () => document.removeEventListener('mousedown', onClick)
+    document.addEventListener('touchstart', onClick, { passive: true })
+    return () => {
+      document.removeEventListener('mousedown', onClick)
+      document.removeEventListener('touchstart', onClick)
+    }
   }, [open])
 
   useEffect(() => {
@@ -51,7 +56,7 @@ export default function DatePicker({ value, onChange, placeholder = 'Select date
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="input text-sm flex items-center justify-between gap-2"
+        className="input text-sm flex items-center justify-between gap-2 text-left"
       >
         <span className={value ? 'text-gray-800' : 'text-amber-400'}>
           {selected ? selected.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : placeholder}
@@ -62,7 +67,7 @@ export default function DatePicker({ value, onChange, placeholder = 'Select date
         </svg>
       </button>
       {open && (
-        <div className="absolute left-0 top-full mt-1 z-20 bg-white border border-amber-200 rounded-md shadow-lg p-3 w-64">
+        <div className="absolute left-0 top-full mt-1 z-30 bg-white border border-amber-200 rounded-md shadow-lg p-3 w-64">
           <div className="flex items-center justify-between mb-2">
             <button
               type="button" onClick={() => setViewMonth(new Date(y, m - 1, 1))}
@@ -92,6 +97,18 @@ export default function DatePicker({ value, onChange, placeholder = 'Select date
                 {day}
               </button>
             ))}
+          </div>
+          <div className="flex justify-between mt-2 pt-2 border-t border-amber-100">
+            <button
+              type="button" onClick={() => { onChange(toValue(new Date())); setOpen(false) }}
+              className="text-xs font-bold text-brand-600 px-1"
+            >Today</button>
+            {clearable && value && (
+              <button
+                type="button" onClick={() => { onChange(''); setOpen(false) }}
+                className="text-xs font-bold text-gray-400 px-1"
+              >Clear</button>
+            )}
           </div>
         </div>
       )}

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { loginUser, signupUser, requestLoginCode, verifyLoginCode } from '../api'
 import { RECOVERY_QUESTIONS } from '../utils/security'
+import Dropdown from '../components/Dropdown'
 
 const SESSION_KEY = 'splitter_session_v2'
 
@@ -431,13 +432,11 @@ export default function Login({ onLogin }) {
                 {/* Recovery question — the only way to reset without an admin */}
                 <div className="border-t border-amber-200 pt-4">
                   <label className="label">Recovery question</label>
-                  <select
-                    className="input"
+                  <Dropdown
                     value={recQuestion}
-                    onChange={e => setRecQuestion(e.target.value)}
-                  >
-                    {RECOVERY_QUESTIONS.map(q => <option key={q} value={q}>{q}</option>)}
-                  </select>
+                    onChange={setRecQuestion}
+                    options={RECOVERY_QUESTIONS.map((q) => ({ value: q, label: q }))}
+                  />
                   <input
                     className="input mt-2"
                     placeholder="Type your answer"

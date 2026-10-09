@@ -4,6 +4,7 @@ import {
   getRecoveryQuestion, adminResetPassword, adminSetRecovery, listUsersBasic,
 } from '../api'
 import { KEY_QUESTION, generateKey } from '../utils/security'
+import Dropdown from '../components/Dropdown'
 
 
 /**
@@ -202,10 +203,10 @@ export default function AdminRecovery() {
                   </p>
                   <div>
                     <label className="label">Reset password for</label>
-                    <select className="input" value={target} onChange={(e) => setTarget(e.target.value)}>
-                      <option value="">Select a user…</option>
-                      {users.map((u) => <option key={u.id} value={u.name}>{u.name}</option>)}
-                    </select>
+                    <Dropdown
+                      value={target} onChange={setTarget} placeholder="Select a user…"
+                      options={users.map((u) => ({ value: u.name, label: u.name }))}
+                    />
                   </div>
                   <div>
                     <label className="label">New password</label>
@@ -232,10 +233,10 @@ export default function AdminRecovery() {
                   </p>
                   <div>
                     <label className="label">Security question for</label>
-                    <select className="input" value={qTarget} onChange={(e) => setQTarget(e.target.value)}>
-                      <option value="">Select a user…</option>
-                      {users.map((u) => <option key={u.id} value={u.name}>{u.name}</option>)}
-                    </select>
+                    <Dropdown
+                      value={qTarget} onChange={setQTarget} placeholder="Select a user…"
+                      options={users.map((u) => ({ value: u.name, label: u.name }))}
+                    />
                   </div>
                   <div>
                     <label className="label">Question</label>

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { savePlace } from '../api'
+import Dropdown from './Dropdown'
 
 /**
  * Add a restaurant, or correct one the published listings got wrong.
@@ -87,10 +88,12 @@ export default function PlaceEditForm({
       <div className="grid grid-cols-2 gap-2">
         <div>
           <label className="label">Kind of place</label>
-          <select className="input text-xs" value={kind} onChange={(e) => setKind(e.target.value)}>
-            {(kinds.length ? kinds : [{ value: 'dine-in', name: 'Sit-down meal' }])
-              .map((k) => <option key={k.value} value={k.value}>{k.name}</option>)}
-          </select>
+          <Dropdown
+            value={kind}
+            onChange={setKind}
+            options={(kinds.length ? kinds : [{ value: 'dine-in', name: 'Sit-down meal' }])
+              .map((k) => ({ value: k.value, label: k.name }))}
+          />
         </div>
         <div>
           <label className="label">Cost for two (₹)</label>
