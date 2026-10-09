@@ -55,9 +55,9 @@ def run_daily(key: str = "", db: Session = Depends(get_db)):
     _check_key(key)
     from routers.stats import top_transaction_partners
 
-    # India's date, not the server's: Render runs on UTC, and the pinger
-    # fires at 00:30 IST - 19:00 UTC the day before - so date.today() would
-    # still be yesterday, and every birthday and memory would land a day late.
+    # India's date, not the server's: Render runs on UTC, which is still the
+    # day before until 05:30 IST - a ping in that window would send every
+    # birthday and memory a day late. The pinger fires at 12:30 IST.
     today = datetime.now(IST).date()
     mmdd = today.strftime("%m-%d")
     iso_today = today.isoformat()

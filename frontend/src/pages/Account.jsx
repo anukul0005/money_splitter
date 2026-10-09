@@ -510,7 +510,7 @@ export default function Account() {
         <div className="card">
           <h2 className="text-sm font-bold text-gray-800">Daily spending summary</h2>
           <p className="text-xs text-gray-500 leading-relaxed mt-1 mb-3">
-            Just after midnight, get yesterday's spending — your share of
+            Every day around 12:30 PM, get yesterday's spending — your share of
             every expense, what it went on, how it compares with your
             30-day average, and the month so far. Sent by email
             {email ? '' : ' (add an email above)'} and as a notification

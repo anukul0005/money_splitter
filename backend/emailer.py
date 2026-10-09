@@ -467,7 +467,7 @@ def send_debt_reminder(db, to_email: str | None, name: str, debts: list[tuple[st
 
 
 def send_daily_summary(db, to_email: str | None, name: str, s: dict) -> None:
-    """Yesterday's spending, sent just after midnight by the daily cron to
+    """Yesterday's spending, sent by the daily cron (12:30 PM IST) to
     anyone who turned it on in Account (User.daily_summary). `s` is
     daily_summary.summarise's result. Sent on a no-spend day too, saying
     so - a statement uploaded later fills the day in, and silence would
@@ -530,7 +530,7 @@ def send_daily_summary(db, to_email: str | None, name: str, s: dict) -> None:
                 _layout(
                     f"Your spending on {escape(label)}", html,
                     button_url=link, button_label="See History",
-                    footer="Sent by SplitEasy every night because you turned on the daily summary in Account settings.",
+                    footer="Sent by SplitEasy every day because you turned on the daily summary in Account settings.",
                 ),
             )
         except Exception as e:
