@@ -10,7 +10,7 @@ from models import Group, Expense, Loan, Member, PayeeLabel, User
 from schemas import ExpenseCreate, ExpenseOut
 from emailer import notify_group_activity_bg
 from activity import record_activity
-from spend_categories import categorize
+from spend_categories import TAXONOMY, categorize
 from statement_import import is_self_transfer, own_accounts, parse_phonepe_csv, time_bucket
 import payee_classifier
 
@@ -90,6 +90,15 @@ def _summary(expense: Expense) -> str:
     return line
 
 
+@router.get("/categories", response_model=list[dict])
+def list_categories():
+    """The categories and subcategories the add/edit expense forms offer -
+    spend_categories.TAXONOMY, the same list statement imports and the
+    LLM classifier use, so a hand-entered expense and an imported one land
+    in the same buckets. Nothing personal in it, so no login needed."""
+    return [{"category": c, "subcategories": subs} for c, subs in TAXONOMY.items()]
+
+
 @router.get("/group/{group_id}", response_model=list[ExpenseOut])
 def list_expenses(group_id: int, db: Session = Depends(get_db),
                   caller: User = Depends(current_user)):
@@ -108,6 +117,7 @@ def create_expense(payload: ExpenseCreate, background_tasks: BackgroundTasks,
         group_id=payload.group_id,
         date=payload.date,
         category=payload.category,
+        subcategory=payload.subcategory,
         title=payload.title,
         amount=payload.amount,
         paid_by=payload.paid_by,
@@ -154,6 +164,12 @@ def update_expense(expense_id: int, payload: ExpenseCreate, background_tasks: Ba
 
     individual = payload.individual_amount or _compute_individual(payload.amount, payload.divider)
     expense.date = payload.date
+    # A caller that doesn't send a subcategory (any older edit path) keeps
+    # the stored one - unless the category changed, which makes it wrong.
+    if "subcategory" in payload.model_fields_set:
+        expense.subcategory = payload.subcategory
+    elif payload.category != expense.category:
+        expense.subcategory = None
     expense.category = payload.category
     expense.title = payload.title
     expense.amount = payload.amount
@@ -553,19 +569,19 @@ def import_statement(background_tasks: BackgroundTasks,
             not_spending.append({**line, "reason": why, "by": lab.source})
             continue
         if lab is not None:
-            keep.append((t, lab.category))
+            keep.append((t, lab.category, lab.subcategory))
             continue
-        cat, _ = categorize(t.merchant, t.amount)
+        cat, sub = categorize(t.merchant, t.amount)
         if cat == "One-off payments":
             # The user's rule: a one-off payment to a person or masked number
             # is P2P unless something says otherwise.
             not_spending.append({**line, "reason": "p2p - one-off payment to a person", "by": "rules"})
             continue
-        keep.append((t, cat))
+        keep.append((t, cat, sub))
 
     created: list[Expense] = []
     groups_created: list[str] = []
-    for t, category in keep:
+    for t, category, subcategory in keep:
         y, m = t.date[:4], int(t.date[5:7])
         gname = f"MONTHLY EXPENSES {_MONTH_ABBR[m - 1]} {y}"
         group = monthly.get(gname)
@@ -580,7 +596,7 @@ def import_statement(background_tasks: BackgroundTasks,
             groups_created.append(gname)
 
         exp = Expense(
-            group_id=group.id, date=t.date, category=category, title=t.merchant,
+            group_id=group.id, date=t.date, category=category, subcategory=subcategory, title=t.merchant,
             amount=t.amount, paid_by=caller.name, participants=None, divider=1,
             individual_amount=t.amount, payment_mode="upi", notes=None,
             txn_time=t.time, time_bucket=time_bucket(t.time), txn_ref=t.txn_id or None,

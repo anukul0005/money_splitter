@@ -28,16 +28,14 @@ from database import get_settings
 # retires it; nothing else in this file should need to change.
 GROQ_MODEL = "openai/gpt-oss-120b"
 
-# Kept identical to the CATEGORIES list in frontend/src/pages/AddExpense.jsx
-# - the two aren't shared code (separate frontend/backend projects), so
-# this needs updating by hand if that list ever changes. The LLM is asked
-# to pick one of these exactly rather than freeform text, because a
-# category the add-expense form doesn't offer as a button can't be
+# The categories the add-expense form offers (served to it by
+# GET /expenses/categories) - the LLM picks one exactly rather than
+# freeform text, because a category the form doesn't offer can't be
 # pre-selected anyway.
-_CATEGORIES = [
-    "Food", "Drinks", "Snacks", "Travel - Cab", "Travel - Train",
-    "Hotel", "Movie", "Shopping", "Groceries", "Other",
-]
+from spend_categories import TAXONOMY
+
+_CATEGORIES = list(TAXONOMY)
+_CATEGORY_LINES = "\n".join(f"  {c}: {', '.join(subs)}" for c, subs in TAXONOMY.items())
 
 _SYSTEM_PROMPT = f"""You read raw OCR text from a receipt. Line breaks may be noisy, spacing may be off, and some characters may be misread. Extract its structured content.
 
@@ -49,14 +47,18 @@ Respond with ONLY a JSON object, no other text, in exactly this shape:
   "subtotal": number or null,
   "tax": number or null (every tax/GST/CGST/SGST/VAT line summed together),
   "total": number or null (the final amount actually payable, not the subtotal),
-  "category": string or null, must be EXACTLY one of: {", ".join(_CATEGORIES)}
+  "category": string or null, EXACTLY one of the categories below,
+  "subcategory": string or null, EXACTLY one of that category's subcategories below
 }}
+
+Categories and their subcategories:
+{_CATEGORY_LINES}
 
 Rules:
 - "items" is every distinct line item with a price, EXCLUDING subtotal, tax, rounding, and total lines themselves.
 - Use null for anything you cannot confidently read - never guess or invent a value.
 - Numbers are plain numbers with no currency symbol or thousands separator.
-- "category" is what the receipt is actually FOR, judged from the merchant name and the items themselves - a restaurant or dish names (ramen, chicken, tea, coffee, etc.) means "Food" even if the merchant's name also contains a word like "store" or "mart"; a bar/liquor items means "Drinks"; a general merchandise/clothing/electronics store means "Shopping". Pick the single best fit, or null if genuinely unclear.
+- "category" is what the receipt is actually FOR, judged from the merchant name and the items themselves - a restaurant or dish names (ramen, chicken, tea, coffee, etc.) means "Food & Dining" even if the merchant's name also contains a word like "store" or "mart"; a bar or liquor items means "Alcohol"; a supermarket or kirana means "Groceries"; a general merchandise/clothing/electronics store means "Shopping". Pick the single best fit, or null if genuinely unclear. Pick a subcategory only when one clearly fits, else null.
 """
 
 
@@ -123,6 +125,9 @@ def extract(raw_text: str) -> dict:
     category = fields.get("category")
     if category not in _CATEGORIES:   # a hallucinated or malformed value is worth nothing
         category = None
+    subcategory = fields.get("subcategory")
+    if not category or subcategory not in TAXONOMY[category]:
+        subcategory = None
 
     return {
         "merchant": fields.get("merchant") or None,
@@ -132,4 +137,5 @@ def extract(raw_text: str) -> dict:
         "tax": _num(fields.get("tax")),
         "total": _num(fields.get("total")),
         "category": category,
+        "subcategory": subcategory,
     }

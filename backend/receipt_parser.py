@@ -236,9 +236,10 @@ def _validate_and_score(fields: dict) -> dict:
         "total": total,
         # None from _regex_extract, which has no way to judge what a
         # receipt is actually for - only the LLM path sets this (see
-        # llm_receipt_parser.py), constrained to AddExpense.jsx's own
-        # CATEGORIES list rather than freeform text.
+        # llm_receipt_parser.py), constrained to spend_categories.TAXONOMY
+        # - the list the add-expense form offers - rather than freeform text.
         "category": fields.get("category"),
+        "subcategory": fields.get("subcategory"),
         "confidence": score,
     }
 

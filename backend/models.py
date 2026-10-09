@@ -114,6 +114,9 @@ class Expense(Base):
     group_id = Column(Integer, ForeignKey("groups.id", ondelete="CASCADE"), nullable=False)
     date = Column(String(20), nullable=True)
     category = Column(String(100), nullable=True)
+    # Within `category`, from spend_categories.TAXONOMY ("Food & Dining" ->
+    # "Restaurants"). Optional; older expenses have none.
+    subcategory = Column(String(100), nullable=True)
     title = Column(String(200), nullable=True)
     amount = Column(Float, nullable=False)
     paid_by = Column(String(100), nullable=False)

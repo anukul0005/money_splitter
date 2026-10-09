@@ -184,6 +184,7 @@ _ADDED_COLUMNS = [
     ("users", "excluded_payees", "TEXT"),
     ("users", "daily_summary", "BOOLEAN NOT NULL DEFAULT FALSE"),
     ("users", "last_daily_summary_sent", "VARCHAR(10)"),
+    ("expenses", "subcategory", "VARCHAR(100)"),
 ]
 
 # (index name, statement)

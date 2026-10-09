@@ -141,6 +141,7 @@ class MemberOut(MemberBase):
 class ExpenseBase(BaseModel):
     date: Optional[str] = None
     category: Optional[str] = None
+    subcategory: Optional[str] = None   # within category - see spend_categories.TAXONOMY
     title: Optional[str] = None
     amount: float
     paid_by: str

@@ -5,11 +5,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import ReceiptCropper from '../components/ReceiptCropper'
 import { useUser } from '../UserContext'
 import { pairKey } from '../utils/masterGroups'
-
-const CATEGORIES = [
-  'Food','Drinks','Snacks','Travel - Cab','Travel - Train',
-  'Hotel','Movie','Shopping','Groceries','Other',
-]
+import CategorySelect from '../components/CategorySelect'
 
 const PAYMENT_MODES = [
   { value: 'cash',        label: 'Cash' },
@@ -62,6 +58,7 @@ export default function AddExpense() {
     group_id:     defaultGroup,
     date:         new Date().toISOString().split('T')[0],
     category:     '',
+    subcategory:  '',
     title:        '',
     amount:       '',
     paid_by:      '',
@@ -212,21 +209,27 @@ export default function AddExpense() {
   // otherwise-clear merchant name. Word-boundaried (\b...\b) for the same
   // reason: "store" and "mall" are short enough to turn up as a substring
   // of unrelated OCR noise if left unanchored.
+  // [pattern, category, subcategory] - names from the dropdown's list
+  // (spend_categories.TAXONOMY on the backend).
   const CATEGORY_RULES = [
-    [/\b(uber|ola|cab|taxi)\b/, 'Travel - Cab'],
-    [/\b(irctc|railway|train)\b/, 'Travel - Train'],
-    [/\b(hotel|resort|inn|lodge)\b/, 'Hotel'],
-    [/\b(cinema|pvr|inox|multiplex|movie)\b/, 'Movie'],
-    [/\b(mart|supermarket|grocery|grocer|bigbasket|dmart|kirana)\b/, 'Groceries'],
-    [/\b(bar|pub|wine|liquor|beer|brewery)\b/, 'Drinks'],
-    [/\b(mall|store|showroom|boutique|apparel)\b/, 'Shopping'],
-    [/\b(cafe|restaurant|grill|kitchen|dhaba|biryani|pizza|diner|food)\b/, 'Food'],
+    [/\b(uber|ola|rapido|cab|taxi|auto)\b/, 'Transport', 'Cab & auto'],
+    [/\b(irctc|railway|train)\b/, 'Transport', 'Train'],
+    [/\b(petrol|fuel|diesel|hpcl|bpcl|indian oil)\b/, 'Transport', 'Fuel'],
+    [/\b(hotel|resort|inn|lodge|airbnb|oyo)\b/, 'Travel', 'Stays'],
+    [/\b(cinema|pvr|inox|multiplex|movie)\b/, 'Entertainment', 'Movies & events'],
+    [/\b(pharmacy|chemist|medical|apollo|medplus)\b/, 'Health', 'Pharmacy'],
+    [/\b(blinkit|zepto|instamart)\b/, 'Groceries', 'Quick commerce'],
+    [/\b(mart|supermarket|grocery|grocer|bigbasket|dmart|kirana)\b/, 'Groceries', 'Kirana & supermarket'],
+    [/\b(bar|pub|wine|liquor|beer|brewery)\b/, 'Alcohol', 'Bar'],
+    [/\b(mall|store|showroom|boutique|apparel)\b/, 'Shopping', ''],
+    [/\b(cafe|coffee|chai|tea)\b/, 'Food & Dining', 'Tea & coffee'],
+    [/\b(restaurant|grill|kitchen|dhaba|biryani|pizza|diner|food)\b/, 'Food & Dining', 'Restaurants'],
   ]
   const guessCategory = (merchant, items) => {
     const fromText = (text) => {
       const lower = (text || '').toLowerCase()
       const hit = CATEGORY_RULES.find(([re]) => re.test(lower))
-      return hit ? hit[1] : ''
+      return hit ? { category: hit[1], subcategory: hit[2] } : null
     }
     return fromText(merchant) || fromText((items || []).map((i) => i.label).join(' '))
   }
@@ -297,7 +300,7 @@ export default function AddExpense() {
     try {
       const compressed = await compressImage(file)
       const res = await scanReceipt(compressed)
-      const { merchant, date, items, total, category: llmCategory, confidence, provider, raw_text, extraction_method } = res.data
+      const { merchant, date, items, total, category: llmCategory, subcategory: llmSub, confidence, provider, raw_text, extraction_method } = res.data
       // Below the threshold /receipts/scan itself uses to accept a read
       // (see CONFIDENCE_THRESHOLD in routers/receipts.py), the merchant
       // name is exactly as unreliable as everything else in the OCR text -
@@ -309,7 +312,9 @@ export default function AddExpense() {
       // a word like "store" in it, which the keyword-only guessCategory
       // below can't tell apart. Preferred over the keyword guess whenever
       // it's present.
-      const category = confidence < 85 ? '' : (llmCategory || guessCategory(merchant, items))
+      const guess = confidence < 85 ? null
+        : llmCategory ? { category: llmCategory, subcategory: llmSub || '' }
+        : guessCategory(merchant, items)
       // The title is just who the money went to - what was actually
       // bought reads better as a note alongside it than crowding the
       // same field.
@@ -319,7 +324,8 @@ export default function AddExpense() {
         title:    merchant || f.title,
         amount:   total != null ? String(total) : f.amount,
         date:     date || f.date,
-        category: category || f.category,
+        category:    guess ? guess.category : f.category,
+        subcategory: guess ? guess.subcategory : f.subcategory,
         notes:    itemNote || f.notes,
       }))
       setScanInfo({
@@ -339,6 +345,7 @@ export default function AddExpense() {
       group_id:     gid,
       date:         prev.date,          // persist the selected date
       category:     '',
+      subcategory:  '',
       title:        '',
       amount:       '',
       paid_by:      members.length === 1 ? members[0].name : '',
@@ -371,6 +378,7 @@ export default function AddExpense() {
         group_id:     Number(form.group_id),
         date:         form.date || null,
         category:     form.category || null,
+        subcategory:  form.subcategory || null,
         title:        form.title || null,
         amount:       parseFloat(form.amount),
         paid_by:      form.paid_by,
@@ -840,22 +848,11 @@ export default function AddExpense() {
         {/* Category */}
         <div>
           <label className="label">Category</label>
-          <div className="flex flex-wrap gap-2">
-            {CATEGORIES.map((c) => (
-              <button
-                type="button"
-                key={c}
-                onClick={() => setForm((f) => ({ ...f, category: f.category === c ? '' : c }))}
-                className={`px-3 py-1.5 text-xs font-bold transition-colors border ${
-                  form.category === c
-                    ? 'bg-brand-400 text-white border-brand-400'
-                    : 'bg-amber-50 text-gray-600 border-amber-200'
-                }`}
-              >
-                {c}
-              </button>
-            ))}
-          </div>
+          <CategorySelect
+            category={form.category}
+            subcategory={form.subcategory}
+            onChange={(v) => setForm((f) => ({ ...f, ...v }))}
+          />
         </div>
 
         {/* Title with autocomplete from existing group expenses */}

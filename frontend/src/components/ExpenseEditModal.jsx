@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { updateExpense } from '../api'
 import { useUser } from '../UserContext'
+import CategorySelect from './CategorySelect'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 const r2  = (n) => Math.round(n * 100) / 100
@@ -10,11 +11,6 @@ const PAYMENT_MODES = [
   { value: 'upi',         label: 'UPI' },
   { value: 'credit_card', label: 'Credit Card' },
   { value: 'debit_card',  label: 'Debit Card' },
-]
-
-const CATEGORIES = [
-  'Food','Drinks','Snacks','Travel - Cab','Travel - Train',
-  'Hotel','Movie','Shopping','Groceries','Other',
 ]
 
 /**
@@ -79,6 +75,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
   const [title,       setTitle]       = useState(expense.title || '')
   const [date,        setDate]        = useState(expense.date || '')
   const [category,    setCategory]    = useState(expense.category || '')
+  const [subcategory, setSubcategory] = useState(expense.subcategory || '')
   const [paidBy,      setPaidBy]      = useState(expense.paid_by)
   const [paymentMode, setPaymentMode] = useState(expense.payment_mode || 'cash')
   const [notes,       setNotes]       = useState(expense.notes || '')
@@ -195,6 +192,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
         group_id:          group.id,
         date:              date || null,
         category:          category || null,
+        subcategory:       subcategory || null,
         title:             title.trim() || null,
         amount:            r2(amtNum),
         paid_by:           paidBy,
@@ -214,6 +212,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
         group_id:          group.id,
         date:              date || null,
         category:          category || null,
+        subcategory:       subcategory || null,
         title:             title.trim() || null,
         amount:            r2(amtNum),
         paid_by:           paidBy,
@@ -305,24 +304,11 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
           {/* Category */}
           <div>
             <label className="label">Category</label>
-            <div className="flex flex-wrap gap-2">
-              {/* A category set by a statement import ("Food & Dining") isn't
-                  one of the presets - show it as a chip too so it stays visible. */}
-              {[...CATEGORIES, ...(category && !CATEGORIES.includes(category) ? [category] : [])].map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => setCategory((prev) => prev === c ? '' : c)}
-                  className={`px-3 py-1.5 text-xs font-bold transition-colors border ${
-                    category === c
-                      ? 'bg-brand-400 text-white border-brand-400'
-                      : 'bg-cream text-gray-400 border-amber-200 hover:text-gray-700'
-                  }`}
-                >
-                  {c}
-                </button>
-              ))}
-            </div>
+            <CategorySelect
+              category={category}
+              subcategory={subcategory}
+              onChange={(v) => { setCategory(v.category); setSubcategory(v.subcategory) }}
+            />
           </div>
 
           {/* Paid by — hidden for solo groups (only one possible payer) */}
