@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useLocation, useNavigate } from 'react-router-dom'
-import { getGroups, getAggregateStats } from '../api'
+import { getGroups, getAggregateStats, createGroup } from '../api'
+import { useUser } from '../UserContext'
 import GroupCard from '../components/GroupCard'
 import LoadingSpinner from '../components/LoadingSpinner'
 import StatsPanel from '../components/StatsPanel'
@@ -16,6 +17,15 @@ const monthKey = (name) => {
   const i = m ? MONTHS.indexOf(m[1]) : -1
   return i < 0 ? null : Number(m[2]) * 100 + i + 1
 }
+// Today as the day-groups are named: "09 oct 26".
+const todayName = () => {
+  const d = new Date()
+  return `${String(d.getDate()).padStart(2, '0')} ${MONTHS[d.getMonth()].toLowerCase()} ${String(d.getFullYear()).slice(2)}`
+}
+// The same day however it was typed ("9 Oct 26", "09 oct 26") - for
+// spotting that today's group already exists.
+const dayKey = (name) => (name ?? '').trim().toLowerCase().replace(/^0(\d)/, '$1')
+
 const RECENT_SHOWN = 6    // visible straight away
 const RECENT_WINDOW = 12  // "Show more" reaches this far; older is by year
 
@@ -74,6 +84,38 @@ export default function MasterGroupDetail() {
   const [showStats, setShowStats] = useState(false)
   const [stats, setStats]         = useState(null)
   const [statsLoading, setStatsLoading] = useState(false)
+  const [picking, setPicking]     = useState(false)
+  const [adding, setAdding]       = useState(false)
+  const [addError, setAddError]   = useState('')
+  const user = useUser()
+
+  // "+ Add" makes today's group with no form: the members are this
+  // master's own and the name is the date, so the only choice left is the
+  // category - one tap on a chip creates the group and opens it. If today's
+  // group already exists here, "+ Add" opens that one instead.
+  const todays = master?.groups.find((g) => dayKey(g.name) === dayKey(todayName()))
+  const usualCategory = (() => {
+    const counts = {}
+    master?.groups.forEach((g) => { if (g.category) counts[g.category] = (counts[g.category] || 0) + 1 })
+    return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || ''
+  })()
+  const onAdd = () => (todays ? nav(`/groups/${todays.id}`) : setPicking((v) => !v))
+
+  const addToday = async (category) => {
+    if (adding || !master) return
+    const name = todayName()
+    setAdding(true); setAddError('')
+    try {
+      const r = await createGroup({
+        name, description: '', emoji: '', category,
+        members: master.names ?? [], created_by: user?.name,
+      })
+      nav(`/groups/${r.data.id}`)
+    } catch (err) {
+      setAddError(err.response?.data?.detail || 'Could not create today\'s group.')
+      setAdding(false)
+    }
+  }
 
   // Stats are consolidated across every group in the master, so they're
   // fetched once the user actually asks for them rather than on page load.
@@ -118,18 +160,17 @@ export default function MasterGroupDetail() {
         <div className="flex items-start justify-between gap-3">
           <button onClick={() => nav(-1)} className="text-xs font-bold text-gray-400 mb-2">← Back</button>
           <div className="flex items-center gap-2">
-          {/* "+ Add" starts a new sub-group of this master: the members are
-              this master's own, pre-filled on the new-group screen, so all
-              that's left to type is the group's name. */}
+          {/* "+ Add" creates today's group in this master - see onAdd / addToday. */}
           <button
-            onClick={() => nav(`/groups/new?members=${encodeURIComponent((master.names ?? []).join(','))}`)}
-            title={`New group with ${master.name}`}
-            className="flex-shrink-0 flex items-center gap-1.5 bg-cream border border-amber-200 text-gray-500 hover:bg-amber-50 rounded-md px-3 py-1.5 text-xs font-bold active:scale-95 transition-all shadow-sm"
+            onClick={onAdd}
+            disabled={adding}
+            title={todays ? `Open today's group (${todays.name})` : `Today's group with ${master.name}`}
+            className="flex-shrink-0 flex items-center gap-1.5 bg-cream border border-amber-200 text-gray-500 hover:bg-amber-50 rounded-md px-3 py-1.5 text-xs font-bold active:scale-95 transition-all shadow-sm disabled:opacity-50"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
             </svg>
-            Add
+            {adding ? 'Adding…' : 'Add'}
           </button>
           <button
             onClick={() => setShowStats((v) => !v)}
@@ -151,6 +192,31 @@ export default function MasterGroupDetail() {
         </div>
         <h1 className="text-xl font-black tracking-tight">{master.name}</h1>
         <p className="text-xs text-gray-400 mt-1">{master.groups.length} groups · {INR(master.totalAmount)} total</p>
+        {picking && !todays && (
+          <div className="mt-3 border border-amber-200 bg-amber-50 px-3 py-2.5">
+            <p className="text-[11px] text-gray-600 mb-2">
+              New group <span className="font-bold">{todayName()}</span> — tap a category to create it:
+            </p>
+            <div className="flex gap-1.5 flex-wrap">
+              {['trip', 'outing', 'festival', 'personal', 'other'].map((c) => (
+                <button
+                  key={c}
+                  onClick={() => addToday(c)}
+                  disabled={adding}
+                  className={`px-3 py-1.5 text-xs font-bold border capitalize transition-colors disabled:opacity-50 ${
+                    c === usualCategory
+                      ? 'bg-brand-400 text-white border-brand-400'
+                      : 'bg-cream text-gray-600 border-amber-200 hover:text-gray-900'
+                  }`}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+            {usualCategory && <p className="text-[10px] text-gray-400 mt-1.5">Highlighted: what these groups usually are</p>}
+          </div>
+        )}
+        {addError && <p className="text-xs text-red-600 mt-1">{addError}</p>}
       </div>
 
       {showStats ? (
