@@ -1,12 +1,17 @@
 import { useState, useEffect } from 'react'
 import { updateExpense } from '../api'
 import { useUser } from '../UserContext'
-import CategorySelect from './CategorySelect'
 import Dropdown from './Dropdown'
 import DatePicker from './DatePicker'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 const r2  = (n) => Math.round(n * 100) / 100
+const SOURCE_LABEL = {
+  llm: 'Categorised by AI from the description and notes',
+  rules: 'Categorised from the description (AI was unavailable)',
+  import: 'From your bank statement',
+  user: 'Set by hand',
+}
 
 const PAYMENT_MODES = [
   { value: 'cash',        label: 'Cash' },
@@ -76,8 +81,6 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
   const [amount,      setAmount]      = useState(String(expense.amount))
   const [title,       setTitle]       = useState(expense.title || '')
   const [date,        setDate]        = useState(expense.date || '')
-  const [category,    setCategory]    = useState(expense.category || '')
-  const [subcategory, setSubcategory] = useState(expense.subcategory || '')
   const [paidBy,      setPaidBy]      = useState(expense.paid_by)
   const [paymentMode, setPaymentMode] = useState(expense.payment_mode || 'cash')
   const [notes,       setNotes]       = useState(expense.notes || '')
@@ -91,6 +94,8 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
     return Object.fromEntries(members.map((m) => [m, String(r2(base / members.length))]))
   })
   const [saving,      setSaving]      = useState(false)
+  const norm = (v) => (v || '').trim().toLowerCase()
+  const textChanged = norm(title) !== norm(expense.title) || norm(notes) !== norm(expense.notes)
   const [error,       setError]       = useState('')
   // Track which pct fields the user has explicitly typed (vs auto-filled)
   const [touchedPcts, setTouchedPcts] = useState(() =>
@@ -187,14 +192,16 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
       setError('Amount must be a positive number.')
       return
     }
+    if (!title.trim()) {
+      setError('Add a description - the category is worked out from it.')
+      return
+    }
 
     let payload
     if (splitMode === 'equal') {
       payload = {
         group_id:          group.id,
         date:              date || null,
-        category:          category || null,
-        subcategory:       subcategory || null,
         title:             title.trim() || null,
         amount:            r2(amtNum),
         paid_by:           paidBy,
@@ -213,8 +220,6 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
       payload = {
         group_id:          group.id,
         date:              date || null,
-        category:          category || null,
-        subcategory:       subcategory || null,
         title:             title.trim() || null,
         amount:            r2(amtNum),
         paid_by:           paidBy,
@@ -283,7 +288,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
 
           {/* Title */}
           <div>
-            <label className="label">Title</label>
+            <label className="label">Description *</label>
             <input
               className="input"
               value={title}
@@ -298,14 +303,30 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
             <DatePicker value={date} onChange={setDate} />
           </div>
 
-          {/* Category */}
+          {/* Category - set by the LLM from the description and notes
+              (backend expense_classifier), not picked here. Editing either
+              text field has it worked out again on save. */}
           <div>
             <label className="label">Category</label>
-            <CategorySelect
-              category={category}
-              subcategory={subcategory}
-              onChange={(v) => { setCategory(v.category); setSubcategory(v.subcategory) }}
-            />
+            <div className="border border-amber-200 rounded-md bg-amber-50/50 px-3 py-2.5">
+              {textChanged ? (
+                <p className="text-xs text-gray-600">Will be re-categorised by AI from the new text when you save.</p>
+              ) : expense.category_source === 'pending' ? (
+                <p className="text-xs text-gray-500">AI is categorising this… reopen in a moment.</p>
+              ) : expense.category ? (
+                <>
+                  <p className="text-sm font-bold text-gray-800">
+                    {expense.category}
+                    {expense.subcategory && <span className="text-gray-500 font-semibold"> › {expense.subcategory}</span>}
+                  </p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">
+                    {SOURCE_LABEL[expense.category_source] || 'Set earlier'} · changes if you edit the description or notes
+                  </p>
+                </>
+              ) : (
+                <p className="text-xs text-gray-500">Not categorised yet - saving will have AI categorise it.</p>
+              )}
+            </div>
           </div>
 
           {/* Paid by — hidden for solo groups (only one possible payer) */}
@@ -340,7 +361,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
           {/* Optional, and the only place an existing note can be read: the
               add form has always had one, but edit passed it through unseen. */}
           <div>
-            <label className="label">Description (optional)</label>
+            <label className="label">Notes (optional)</label>
             <textarea
               className="input resize-none"
               rows={2}

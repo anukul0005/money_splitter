@@ -117,6 +117,11 @@ class Expense(Base):
     # Within `category`, from spend_categories.TAXONOMY ("Food & Dining" ->
     # "Restaurants"). Optional; older expenses have none.
     subcategory = Column(String(100), nullable=True)
+    # Where category/subcategory came from: "llm" (expense_classifier, from
+    # the description and notes), "pending" (queued for it), "rules" (the
+    # keyword fallback), "import" (a statement import), "user", or NULL for
+    # rows from before this was tracked.
+    category_source = Column(String(20), nullable=True)
     title = Column(String(200), nullable=True)
     amount = Column(Float, nullable=False)
     paid_by = Column(String(100), nullable=False)

@@ -30,6 +30,13 @@ async def lifespan(app: FastAPI):
         _settle_existing_historical()
     except Exception as e:
         print(f"[warn] startup settle migration failed (non-fatal): {e}")
+    # Expenses a previous process queued for LLM categorising but never
+    # finished (a deploy or restart in between) - see expense_classifier.
+    try:
+        import expense_classifier
+        expense_classifier.sweep()
+    except Exception as e:
+        print(f"[warn] pending categorisation sweep failed (non-fatal): {e}")
     yield
 
 

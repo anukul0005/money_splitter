@@ -10,8 +10,9 @@ from models import Group, Expense, Loan, Member, PayeeLabel, User
 from schemas import ExpenseCreate, ExpenseOut
 from emailer import notify_group_activity_bg
 from activity import record_activity
-from spend_categories import TAXONOMY, categorize
+from spend_categories import categorize
 from statement_import import is_self_transfer, own_accounts, parse_phonepe_csv, time_bucket
+import expense_classifier
 import payee_classifier
 
 router = APIRouter(prefix="/expenses", tags=["expenses"])
@@ -90,15 +91,6 @@ def _summary(expense: Expense) -> str:
     return line
 
 
-@router.get("/categories", response_model=list[dict])
-def list_categories():
-    """The categories and subcategories the add/edit expense forms offer -
-    spend_categories.TAXONOMY, the same list statement imports and the
-    LLM classifier use, so a hand-entered expense and an imported one land
-    in the same buckets. Nothing personal in it, so no login needed."""
-    return [{"category": c, "subcategories": subs} for c, subs in TAXONOMY.items()]
-
-
 @router.get("/group/{group_id}", response_model=list[ExpenseOut])
 def list_expenses(group_id: int, db: Session = Depends(get_db),
                   caller: User = Depends(current_user)):
@@ -111,14 +103,21 @@ def create_expense(payload: ExpenseCreate, background_tasks: BackgroundTasks,
                    db: Session = Depends(get_db),
                    caller: User = Depends(current_user)):
     group = member_group(payload.group_id, caller, db, with_history=False)
+    if not (payload.title or "").strip():
+        raise HTTPException(400, "Add a description - it's what the expense gets categorised from")
 
+    # The form sends no category: the LLM works it out from the description
+    # and notes after the response (expense_classifier). One sent anyway -
+    # another client - is kept as the user's.
+    given = bool(payload.category)
     individual = payload.individual_amount or _compute_individual(payload.amount, payload.divider)
     expense = Expense(
         group_id=payload.group_id,
         date=payload.date,
-        category=payload.category,
-        subcategory=payload.subcategory,
-        title=payload.title,
+        category=payload.category if given else None,
+        subcategory=payload.subcategory if given else None,
+        category_source="user" if given else "pending",
+        title=payload.title.strip(),
         amount=payload.amount,
         paid_by=payload.paid_by,
         participants=payload.participants,
@@ -147,6 +146,8 @@ def create_expense(payload: ExpenseCreate, background_tasks: BackgroundTasks,
     background_tasks.add_task(
         notify_group_activity_bg, group.id, expense.paid_by, "added a new expense", summary,
     )
+    if not given:
+        background_tasks.add_task(expense_classifier.enqueue, expense.id)
     background_tasks.add_task(_index_bg, expense.id)
     _queue_conversion_check(background_tasks, expense, caller.name)
 
@@ -162,16 +163,25 @@ def update_expense(expense_id: int, payload: ExpenseCreate, background_tasks: Ba
         raise HTTPException(404, "Expense not found")
     group = member_group(expense.group_id, caller, db, with_history=False)
 
+    if not (payload.title or "").strip():
+        raise HTTPException(400, "Add a description - it's what the expense gets categorised from")
+
     individual = payload.individual_amount or _compute_individual(payload.amount, payload.divider)
     expense.date = payload.date
-    # A caller that doesn't send a subcategory (any older edit path) keeps
-    # the stored one - unless the category changed, which makes it wrong.
-    if "subcategory" in payload.model_fields_set:
-        expense.subcategory = payload.subcategory
-    elif payload.category != expense.category:
-        expense.subcategory = None
-    expense.category = payload.category
-    expense.title = payload.title
+    # Changed description or notes: the category is worked out again from
+    # the new text (expense_classifier). Unchanged text keeps what it has,
+    # unless this caller sent a category of its own.
+    norm = lambda v: (v or "").strip().lower()
+    reclassify = (norm(payload.title) != norm(expense.title)
+                  or norm(payload.notes) != norm(expense.notes)
+                  or not expense.category)    # never categorised: do it now
+    if reclassify:
+        expense.category = expense.subcategory = None
+        expense.category_source = "pending"
+    elif "category" in payload.model_fields_set and payload.category != expense.category:
+        expense.category, expense.subcategory = payload.category, payload.subcategory
+        expense.category_source = "user"
+    expense.title = payload.title.strip()
     expense.amount = payload.amount
     expense.paid_by = payload.paid_by
     expense.participants = payload.participants
@@ -203,6 +213,8 @@ def update_expense(expense_id: int, payload: ExpenseCreate, background_tasks: Ba
     # or whether this is food at all, and a stale vector would keep
     # answering the old question - but the ~7s embedding call is not
     # something the person saving should wait on.
+    if reclassify:
+        background_tasks.add_task(expense_classifier.enqueue, expense.id)
     background_tasks.add_task(_index_bg, expense.id)
     _queue_conversion_check(background_tasks, expense, caller.name)
 
@@ -596,7 +608,8 @@ def import_statement(background_tasks: BackgroundTasks,
             groups_created.append(gname)
 
         exp = Expense(
-            group_id=group.id, date=t.date, category=category, subcategory=subcategory, title=t.merchant,
+            group_id=group.id, date=t.date, category=category, subcategory=subcategory,
+            category_source="import", title=t.merchant,
             amount=t.amount, paid_by=caller.name, participants=None, divider=1,
             individual_amount=t.amount, payment_mode="upi", notes=None,
             txn_time=t.time, time_bucket=time_bucket(t.time), txn_ref=t.txn_id or None,

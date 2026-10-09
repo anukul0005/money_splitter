@@ -184,6 +184,8 @@ class ExpenseCreate(ExpenseBase):
 class ExpenseOut(ExpenseBase):
     id: int
     group_id: int
+    # "llm" / "pending" / "rules" / "import" / "user" - see models.Expense.
+    category_source: Optional[str] = None
     time_bucket: Optional[str] = None
     settled_by: Optional[str] = None   # JSON array of names who settled
     created_at: Optional[datetime] = None

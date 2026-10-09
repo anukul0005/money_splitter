@@ -5,7 +5,6 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import ReceiptCropper from '../components/ReceiptCropper'
 import { useUser } from '../UserContext'
 import { pairKey } from '../utils/masterGroups'
-import CategorySelect from '../components/CategorySelect'
 import Dropdown from '../components/Dropdown'
 import DatePicker from '../components/DatePicker'
 import TimePicker from '../components/TimePicker'
@@ -60,8 +59,6 @@ export default function AddExpense() {
   const [form, setForm] = useState({
     group_id:     defaultGroup,
     date:         new Date().toISOString().split('T')[0],
-    category:     '',
-    subcategory:  '',
     title:        '',
     amount:       '',
     paid_by:      '',
@@ -199,44 +196,6 @@ export default function AddExpense() {
     setCustomAmts(newAmts)
   }
 
-  // Keyword → category. Deliberately just a guess the person can change -
-  // nowhere near as reliable as the confidence-scored merchant/total/items
-  // themselves, so it only ever pre-selects a category button rather than
-  // silently deciding one.
-  //
-  // Checked against the merchant name ALONE first, item labels only as a
-  // fallback when the merchant gives no match - a merchant line is what
-  // OCR usually reads most cleanly (biggest text, top of the receipt), and
-  // folding every item label into the same search let one garbled word in
-  // a noisy line item ("...st0re..." from a misread character) outrank an
-  // otherwise-clear merchant name. Word-boundaried (\b...\b) for the same
-  // reason: "store" and "mall" are short enough to turn up as a substring
-  // of unrelated OCR noise if left unanchored.
-  // [pattern, category, subcategory] - names from the dropdown's list
-  // (spend_categories.TAXONOMY on the backend).
-  const CATEGORY_RULES = [
-    [/\b(uber|ola|rapido|cab|taxi|auto)\b/, 'Transport', 'Cab & auto'],
-    [/\b(irctc|railway|train)\b/, 'Transport', 'Train'],
-    [/\b(petrol|fuel|diesel|hpcl|bpcl|indian oil)\b/, 'Transport', 'Fuel'],
-    [/\b(hotel|resort|inn|lodge|airbnb|oyo)\b/, 'Travel', 'Stays'],
-    [/\b(cinema|pvr|inox|multiplex|movie)\b/, 'Entertainment', 'Movies & events'],
-    [/\b(pharmacy|chemist|medical|apollo|medplus)\b/, 'Health', 'Pharmacy'],
-    [/\b(blinkit|zepto|instamart)\b/, 'Groceries', 'Quick commerce'],
-    [/\b(mart|supermarket|grocery|grocer|bigbasket|dmart|kirana)\b/, 'Groceries', 'Kirana & supermarket'],
-    [/\b(bar|pub|wine|liquor|beer|brewery)\b/, 'Alcohol', 'Bar'],
-    [/\b(mall|store|showroom|boutique|apparel)\b/, 'Shopping', ''],
-    [/\b(cafe|coffee|chai|tea)\b/, 'Food & Dining', 'Tea & coffee'],
-    [/\b(restaurant|grill|kitchen|dhaba|biryani|pizza|diner|food)\b/, 'Food & Dining', 'Restaurants'],
-  ]
-  const guessCategory = (merchant, items) => {
-    const fromText = (text) => {
-      const lower = (text || '').toLowerCase()
-      const hit = CATEGORY_RULES.find(([re]) => re.test(lower))
-      return hit ? { category: hit[1], subcategory: hit[2] } : null
-    }
-    return fromText(merchant) || fromText((items || []).map((i) => i.label).join(' '))
-  }
-
   // A phone camera photo is routinely 3-8 MB; OCR.space's free tier
   // rejects anything over 1 MB with a 413. Downscaled and re-encoded as
   // JPEG here rather than sent as-is - a receipt is flat text on a plain
@@ -303,21 +262,7 @@ export default function AddExpense() {
     try {
       const compressed = await compressImage(file)
       const res = await scanReceipt(compressed)
-      const { merchant, date, items, total, category: llmCategory, subcategory: llmSub, confidence, provider, raw_text, extraction_method } = res.data
-      // Below the threshold /receipts/scan itself uses to accept a read
-      // (see CONFIDENCE_THRESHOLD in routers/receipts.py), the merchant
-      // name is exactly as unreliable as everything else in the OCR text -
-      // a category guessed from it is compounding one shaky read on top of
-      // another, so it's better left blank for a manual pick than silently
-      // wrong. The LLM path (extraction_method "llm") judges the category
-      // itself, from the merchant AND the actual items - "Spicy Tokyo
-      // Ramen" reads as Food to it even when the merchant's own name has
-      // a word like "store" in it, which the keyword-only guessCategory
-      // below can't tell apart. Preferred over the keyword guess whenever
-      // it's present.
-      const guess = confidence < 85 ? null
-        : llmCategory ? { category: llmCategory, subcategory: llmSub || '' }
-        : guessCategory(merchant, items)
+      const { merchant, date, items, total, category: llmCategory, confidence, provider, raw_text, extraction_method } = res.data
       // The title is just who the money went to - what was actually
       // bought reads better as a note alongside it than crowding the
       // same field.
@@ -327,8 +272,6 @@ export default function AddExpense() {
         title:    merchant || f.title,
         amount:   total != null ? String(total) : f.amount,
         date:     date || f.date,
-        category:    guess ? guess.category : f.category,
-        subcategory: guess ? guess.subcategory : f.subcategory,
         notes:    itemNote || f.notes,
       }))
       setScanInfo({
@@ -347,8 +290,6 @@ export default function AddExpense() {
     setForm((prev) => ({
       group_id:     gid,
       date:         prev.date,          // persist the selected date
-      category:     '',
-      subcategory:  '',
       title:        '',
       amount:       '',
       paid_by:      members.length === 1 ? members[0].name : '',
@@ -369,7 +310,7 @@ export default function AddExpense() {
     e.preventDefault()
     setError('')
     if (!form.group_id) return setError('Please select a group')
-    if (askTitle && !form.title.trim()) return setError('Enter a title for this expense')
+    if (!form.title.trim()) return setError('Add a description - the category is worked out from it')
     if (!form.amount || isNaN(form.amount)) return setError('Enter a valid amount')
     if (!form.paid_by) return setError('Select who paid')
     if (splitMode === 'custom' && Math.abs(customTotal - 100) > 0.5)
@@ -380,8 +321,6 @@ export default function AddExpense() {
       await createExpense({
         group_id:     Number(form.group_id),
         date:         form.date || null,
-        category:     form.category || null,
-        subcategory:  form.subcategory || null,
         title:        form.title || null,
         amount:       parseFloat(form.amount),
         paid_by:      form.paid_by,
@@ -477,7 +416,7 @@ export default function AddExpense() {
           />
         </div>
 
-        {/* Scan a receipt — pre-fills amount/title/date/category below,
+        {/* Scan a receipt — pre-fills amount/description/date/notes below,
             nothing here is saved until "Add Expense" is pressed. */}
         {form.group_id && (
           <div className="bg-amber-50 border border-amber-200 rounded-md px-4 py-3">
@@ -848,19 +787,9 @@ export default function AddExpense() {
         </div>
         )}
 
-        {/* Category */}
-        <div>
-          <label className="label">Category</label>
-          <CategorySelect
-            category={form.category}
-            subcategory={form.subcategory}
-            onChange={(v) => setForm((f) => ({ ...f, ...v }))}
-          />
-        </div>
-
         {/* Title with autocomplete from existing group expenses */}
         <div>
-          <label className="label">{askTitle ? 'Title *' : 'Description (optional)'}</label>
+          <label className="label">Description *</label>
           <input
             className="input"
             placeholder="e.g. dinner at Punjab Grill"
@@ -870,6 +799,9 @@ export default function AddExpense() {
             list="expense-title-suggestions"
             autoComplete="off"
           />
+          <p className="text-[10px] text-gray-400 mt-1">
+            The category and subcategory are worked out from this and the notes, by AI, right after you save.
+          </p>
           {existingTitles.length > 0 && (
             <datalist id="expense-title-suggestions">
               {existingTitles.map((t) => <option key={t} value={t} />)}
