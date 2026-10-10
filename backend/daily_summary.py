@@ -42,6 +42,8 @@ def _shares(db, user, start: date, end: date) -> list[dict]:
             "shared": bool(others),
             "title": (e.title or e.category or "Expense").strip(),
             "category": _history_category(e.category),
+            # A multi-item expense's category slices, as fractions of it.
+            "parts": [(_history_category(p.category), p.amount / e.amount) for p in e.parts] if e.amount else [],
         })
     return out
 
@@ -59,7 +61,8 @@ def summarise(db, user, day: date) -> dict:
     total = sum(r["share"] for r in items)
     by_cat: dict[str, float] = defaultdict(float)
     for r in items:
-        by_cat[r["category"]] += r["share"]
+        for cat, frac in r["parts"] or [(r["category"], 1.0)]:
+            by_cat[cat] += r["share"] * frac
 
     avg_from = (day - timedelta(days=AVG_DAYS)).isoformat()
     avg = sum(r["share"] for r in rows if avg_from <= r["day"] < iso) / AVG_DAYS

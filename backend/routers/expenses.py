@@ -176,7 +176,9 @@ def update_expense(expense_id: int, payload: ExpenseCreate, background_tasks: Ba
                   or norm(payload.notes) != norm(expense.notes)
                   or not expense.category)    # never categorised: do it now
     if reclassify:
+        # New text, new categorising: old category slices no longer apply.
         expense.category = expense.subcategory = None
+        expense.parts = []
         expense.category_source = "pending"
     elif "category" in payload.model_fields_set and payload.category != expense.category:
         expense.category, expense.subcategory = payload.category, payload.subcategory

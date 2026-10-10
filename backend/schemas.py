@@ -181,11 +181,22 @@ class ExpenseBase(BaseModel):
 class ExpenseCreate(ExpenseBase):
     group_id: int
 
+class ExpensePartOut(BaseModel):
+    label: Optional[str] = None
+    category: str
+    subcategory: Optional[str] = None
+    amount: float
+    basis: Optional[str] = None
+    model_config = {"from_attributes": True}
+
+
 class ExpenseOut(ExpenseBase):
     id: int
     group_id: int
     # "llm" / "pending" / "rules" / "import" / "user" - see models.Expense.
     category_source: Optional[str] = None
+    # Category slices of a multi-item expense - see models.ExpensePart.
+    parts: list[ExpensePartOut] = []
     time_bucket: Optional[str] = None
     settled_by: Optional[str] = None   # JSON array of names who settled
     created_at: Optional[datetime] = None

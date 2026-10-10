@@ -8,7 +8,7 @@ import json as _json
 from sqlalchemy import case, func
 from auth import caller_groups, current_user, expense_totals, is_member, member_group
 from database import get_db
-from models import Expense, Group, User
+from models import Expense, ExpensePart, Group, User
 from schemas import GroupStats, CategoryStat, MemberStat, TimelineStat
 
 router = APIRouter(prefix="/stats", tags=["stats"])
@@ -452,24 +452,44 @@ def get_history(db: Session = Depends(get_db), caller: User = Depends(current_us
     acc: dict[tuple, list] = defaultdict(lambda: [0.0, 0.0, 0])
     days: dict[str, set] = defaultdict(set)
     month = func.substr(Expense.date, 1, 7)
+
+    # A multi-item expense (a whole day out) counts as its category parts,
+    # each carrying its slice of the total and of the caller's share - see
+    # models.ExpensePart. Everything else counts under its own category.
+    parts: dict[int, list] = defaultdict(list)
+    for p in (db.query(ExpensePart).join(Expense, Expense.id == ExpensePart.expense_id)
+              .filter(Expense.group_id.in_([g.id for g in groups]))):
+        parts[p.expense_id].append(p)
+
+    def add(gid, ym, cat, total, share, n, eid=None):
+        if eid in parts and total:
+            for i, p in enumerate(parts[eid]):
+                f = p.amount / total
+                a = acc[(gid, ym, _history_category(p.category))]
+                a[0] += p.amount; a[1] += share * f; a[2] += 1 if i == 0 else 0
+            return
+        a = acc[(gid, ym, _history_category(cat))]
+        a[0] += total; a[1] += share; a[2] += n
+
     if solo:
+        for eid, gid, ym, amount in (db.query(Expense.id, Expense.group_id, month, Expense.amount)
+                                     .filter(Expense.group_id.in_(solo), Expense.id.in_(list(parts)))):
+            add(gid, ym or "", None, float(amount), float(amount), 1, eid)
         for gid, cat, ym, total, n in (
                 db.query(Expense.group_id, Expense.category, month, func.sum(Expense.amount), func.count())
-                .filter(Expense.group_id.in_(solo))
+                .filter(Expense.group_id.in_(solo), Expense.id.notin_(list(parts) or [-1]))
                 .group_by(Expense.group_id, Expense.category, month)):
-            a = acc[(gid, ym or "", _history_category(cat))]
-            a[0] += float(total or 0); a[1] += float(total or 0); a[2] += n
+            add(gid, ym or "", cat, float(total or 0), float(total or 0), n)
         for (d,) in (db.query(Expense.date).filter(Expense.group_id.in_(solo), Expense.date.isnot(None))
                      .distinct()):
             days[d[:4]].add(d[:10])
     if shared:
-        for e in (db.query(Expense.group_id, Expense.date, Expense.category, Expense.amount,
+        for e in (db.query(Expense.id, Expense.group_id, Expense.date, Expense.category, Expense.amount,
                            Expense.split_json, Expense.participants, Expense.individual_amount,
                            Expense.divider)
                   .filter(Expense.group_id.in_(list(shared)))):
             share = _member_share(e, me) or 0.0
-            a = acc[(e.group_id, (e.date or "")[:7], _history_category(e.category))]
-            a[0] += e.amount; a[1] += share; a[2] += 1
+            add(e.group_id, (e.date or "")[:7], e.category, e.amount, share, 1, e.id)
             if share > 0 and e.date:
                 days[e.date[:4]].add(e.date[:10])
 

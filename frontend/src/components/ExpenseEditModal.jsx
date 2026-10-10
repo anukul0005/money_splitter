@@ -96,6 +96,9 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
   const [saving,      setSaving]      = useState(false)
   const norm = (v) => (v || '').trim().toLowerCase()
   const textChanged = norm(title) !== norm(expense.title) || norm(notes) !== norm(expense.notes)
+  // A whole-day expense's category slices (backend ExpensePart) - shown
+  // for information; the expense itself stays one entry.
+  const breakdown = expense.parts ?? []
   const [error,       setError]       = useState('')
   // Track which pct fields the user has explicitly typed (vs auto-filled)
   const [touchedPcts, setTouchedPcts] = useState(() =>
@@ -322,6 +325,20 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
                   <p className="text-[10px] text-gray-400 mt-0.5">
                     {SOURCE_LABEL[expense.category_source] || 'Set earlier'} · changes if you edit the description or notes
                   </p>
+                  {breakdown.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-amber-200">
+                      <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Counted in analysis as</p>
+                      {breakdown.map((p, i) => (
+                        <div key={i} className="flex justify-between gap-2 text-[11px] text-gray-600">
+                          <span className="truncate">
+                            {p.label || p.category} <span className="text-gray-400">· {p.category}{p.subcategory ? ` › ${p.subcategory}` : ''}</span>
+                          </span>
+                          <span className="font-bold text-gray-800 shrink-0">{INR(p.amount)}</span>
+                        </div>
+                      ))}
+                      <p className="text-[10px] text-gray-400 mt-1">Estimated from your average spend on each. History counts these parts under their own categories.</p>
+                    </div>
+                  )}
                 </>
               ) : (
                 <p className="text-xs text-gray-500">Not categorised yet - saving will have AI categorise it.</p>

@@ -146,6 +146,28 @@ class Expense(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     group = relationship("Group", back_populates="expenses")
+    # Set only for an expense covering several kinds of spending at once (a
+    # whole day out: "bf+lunch+movie+beer..."). The expense stays one entry
+    # in the app; analysis counts these parts under their own categories
+    # instead of the whole amount under expense.category.
+    parts = relationship("ExpensePart", cascade="all, delete-orphan", lazy="selectin",
+                         order_by="ExpensePart.amount.desc()")
+
+
+class ExpensePart(Base):
+    """One estimated slice of a multi-item expense - see Expense.parts.
+    The slices of an expense add up to its amount."""
+    __tablename__ = "expense_parts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    expense_id = Column(Integer, ForeignKey("expenses.id", ondelete="CASCADE"), nullable=False, index=True)
+    label = Column(String(200), nullable=True)        # the item(s) from the description
+    category = Column(String(100), nullable=False)
+    subcategory = Column(String(100), nullable=True)
+    amount = Column(Float, nullable=False)
+    # How the amount was set: "avg" (the user's average for that
+    # subcategory), "remainder" (what was left after the averages).
+    basis = Column(String(20), nullable=True)
 
 
 class Payment(Base):
