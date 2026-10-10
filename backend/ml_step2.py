@@ -311,11 +311,11 @@ def main() -> None:
     # keyword rules and earlier labels disagreeing - worth a look
     disagree = []
     for key, (pat, merchant, cat, sub, method) in mapping.items():
-        if method in ("label", "manual"):
+        if method == "label":   # a manual answer is the user's call already
             hit = _rule(by_key[key][0].merchant)
             if hit and hit[0] != cat:
                 disagree.append(f"  - {merchant}: {method} says {cat} > {sub}, keyword rule says {hit[0]} > {hit[1]}")
-    report.append(f"- payees where the keyword rules disagree with the label/answer used: {len(disagree)}")
+    report.append(f"- payees where the keyword rules disagree with an earlier LLM label: {len(disagree)}")
     report += disagree[:40]
     # amounts far outside their subcategory's usual range
     by_sub = defaultdict(list)
@@ -323,6 +323,8 @@ def main() -> None:
         by_sub[(r["category"], r["subcategory"])].append(float(r["amount"]))
     outliers = []
     for r in spend_rows:
+        if r["mapping_method"] == "manual":
+            continue                          # reviewed and confirmed
         xs = sorted(by_sub[(r["category"], r["subcategory"])])
         if len(xs) >= 10:
             med = xs[len(xs) // 2]
