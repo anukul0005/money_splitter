@@ -186,6 +186,7 @@ _ADDED_COLUMNS = [
     ("users", "last_daily_summary_sent", "VARCHAR(10)"),
     ("expenses", "subcategory", "VARCHAR(100)"),
     ("expenses", "category_source", "VARCHAR(20)"),
+    ("expenses", "receipt_json", "TEXT"),
 ]
 
 # (index name, statement)

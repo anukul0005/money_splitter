@@ -142,6 +142,8 @@ class ExpenseBase(BaseModel):
     date: Optional[str] = None
     category: Optional[str] = None
     subcategory: Optional[str] = None   # within category - see spend_categories.TAXONOMY
+    # JSON of what a receipt scan extracted - see models.Expense.receipt_json.
+    receipt_json: Optional[str] = None
     title: Optional[str] = None
     amount: float
     paid_by: str

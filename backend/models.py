@@ -143,6 +143,10 @@ class Expense(Base):
     # with) an imported statement line - what stops re-uploading the same
     # statement from creating everything twice.
     txn_ref = Column(String(100), nullable=True, index=True)
+    # What a receipt scan read, when the expense was entered from one:
+    # JSON {merchant, items: [{label, amount}], subtotal, tax, total,
+    # provider, method}. Shown with the expense; kept as data for analysis.
+    receipt_json = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     group = relationship("Group", back_populates="expenses")

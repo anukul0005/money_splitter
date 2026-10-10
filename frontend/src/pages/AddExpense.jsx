@@ -41,7 +41,8 @@ export default function AddExpense() {
   const [scanBusy, setScanBusy]   = useState(false)
   const [scanError, setScanError] = useState('')
   const [scanInfo, setScanInfo]   = useState(null)   // { provider, confidence } of the last successful scan
-  const [cropFile, setCropFile]   = useState(null)   // photo awaiting the crop step, before it's sent to OCR
+  const [cropFile, setCropFile]   = useState(null)
+  const [receipt, setReceipt]     = useState(null)   // the last scan's result, saved with the expense   // photo awaiting the crop step, before it's sent to OCR
   const [csvBusy, setCsvBusy]     = useState(false)
   const [csvError, setCsvError]   = useState('')
   const [csvResult, setCsvResult] = useState(null)
@@ -257,12 +258,12 @@ export default function AddExpense() {
 
   const handleScan = async (file) => {
     setCropFile(null)
-    setScanError(''); setScanInfo(null)
+    setScanError(''); setScanInfo(null); setReceipt(null)
     setScanBusy(true)
     try {
       const compressed = await compressImage(file)
       const res = await scanReceipt(compressed)
-      const { merchant, date, items, total, category: llmCategory, confidence, provider, raw_text, extraction_method } = res.data
+      const { merchant, date, items, subtotal, tax, total, category: llmCategory, confidence, provider, raw_text, extraction_method } = res.data
       // The title is just who the money went to - what was actually
       // bought reads better as a note alongside it than crowding the
       // same field.
@@ -278,6 +279,9 @@ export default function AddExpense() {
         provider, confidence, rawText: raw_text, extractionMethod: extraction_method,
         extracted: { merchant, date, items, total, category: llmCategory },
       })
+      // Kept with the expense when it's saved (Expense.receipt_json) and
+      // shown under it from then on.
+      setReceipt({ merchant, items: items || [], subtotal, tax, total, provider, method: extraction_method })
     } catch (err) {
       setScanError(err.response?.data?.detail || 'Could not read that receipt. Try a clearer photo, or enter it manually.')
     } finally {
@@ -298,6 +302,8 @@ export default function AddExpense() {
       payment_mode: prev.payment_mode,  // persist the payment mode
       txn_time:     '',
     }))
+    setReceipt(null)
+    setScanInfo(null)
     setSplitMode('equal')
     setGentlemanFlipped(false)
     setCustomPcts(Object.fromEntries(members.map((m) => [m.name, ''])))
@@ -329,6 +335,7 @@ export default function AddExpense() {
         split_json:   buildSplitJson(),
         payment_mode: form.payment_mode || null,
         txn_time:     form.txn_time || null,
+        receipt_json: receipt ? JSON.stringify(receipt) : null,
         recorded_by:  user?.name || null,
       })
       localStorage.setItem(STORED_GROUP_KEY, form.group_id)

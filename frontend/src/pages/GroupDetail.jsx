@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { getGroup, getSettlement, getGroupStats, deleteExpense, deleteGroup } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ExpenseEditModal from '../components/ExpenseEditModal'
+import ReceiptInfo from '../components/ReceiptInfo'
 import RecordPaymentModal from '../components/RecordPaymentModal'
 import StatsPanel from '../components/StatsPanel'
 import { useUser } from '../UserContext'
@@ -223,6 +224,8 @@ export default function GroupDetail() {
                         </span>
                       )}
                     </p>
+
+                    <ReceiptInfo json={e.receipt_json} className="mt-1.5" />
 
                     {/* Custom / gentleman's split — per-member breakdown */}
                     {splitEntries && (

@@ -117,6 +117,7 @@ def create_expense(payload: ExpenseCreate, background_tasks: BackgroundTasks,
         category=payload.category if given else None,
         subcategory=payload.subcategory if given else None,
         category_source="user" if given else "pending",
+        receipt_json=payload.receipt_json,
         title=payload.title.strip(),
         amount=payload.amount,
         paid_by=payload.paid_by,
@@ -184,6 +185,9 @@ def update_expense(expense_id: int, payload: ExpenseCreate, background_tasks: Ba
         expense.category, expense.subcategory = payload.category, payload.subcategory
         expense.category_source = "user"
     expense.title = payload.title.strip()
+    # The edit form doesn't resend the scan; only a client that does replaces it.
+    if "receipt_json" in payload.model_fields_set:
+        expense.receipt_json = payload.receipt_json
     expense.amount = payload.amount
     expense.paid_by = payload.paid_by
     expense.participants = payload.participants

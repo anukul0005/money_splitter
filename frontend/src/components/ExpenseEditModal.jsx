@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { updateExpense } from '../api'
 import { useUser } from '../UserContext'
+import ReceiptInfo from './ReceiptInfo'
 import Dropdown from './Dropdown'
 import DatePicker from './DatePicker'
 
@@ -305,6 +306,12 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
             <label className="label">Date</label>
             <DatePicker value={date} onChange={setDate} />
           </div>
+
+          {expense.receipt_json && (
+            <div className="border border-amber-200 rounded-md px-3 py-2">
+              <ReceiptInfo json={expense.receipt_json} />
+            </div>
+          )}
 
           {/* Category - set by the LLM from the description and notes
               (backend expense_classifier), not picked here. Editing either
