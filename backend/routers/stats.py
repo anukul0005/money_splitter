@@ -619,6 +619,18 @@ def _inr(v: float) -> str:
     return f"Rs {v:,.0f}".replace("Rs ", "₹")
 
 
+@router.get("/predictions", response_model=dict)
+def get_predictions(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Spending forecasts from the caller's personal spending - the next day,
+    the next 7 days and the main categories, each a calibrated 80% range.
+    See ml_predict.py. Forecasts start the day after the data ends."""
+    import ml_predict
+    try:
+        return ml_predict.predict_now(db, caller)
+    except ValueError:
+        raise HTTPException(400, "Not enough spending history to forecast yet")
+
+
 @router.get("/ml-analysis", response_model=dict)
 def get_ml_analysis(db: Session = Depends(get_db), caller: User = Depends(current_user)):
     """The Step 4 spending-pattern analysis, run on demand from the caller's

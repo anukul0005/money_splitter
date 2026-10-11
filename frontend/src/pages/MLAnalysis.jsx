@@ -5,7 +5,7 @@ import {
   CategoryScale, LinearScale, Tooltip, Legend,
 } from 'chart.js'
 import { Bar, Chart as MixedChart } from 'react-chartjs-2'
-import { getMLAnalysis } from '../api'
+import { getMLAnalysis, getPredictions } from '../api'
 
 Chart.register(BarElement, BarController, LineElement, LineController, PointElement, ScatterController,
   CategoryScale, LinearScale, Tooltip, Legend)
@@ -27,6 +27,111 @@ const base = (extra = {}) => ({
   ...(extra.top || {}),
 })
 const bar = (o) => ({ borderRadius: 0, borderSkipped: false, ...o })
+
+const fmtDay = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
+
+// Low-to-high bar with the likely value marked, on a shared scale.
+function RangeBar({ low, likely, high, max }) {
+  const pos = (v) => `${Math.min(v / max, 1) * 100}%`
+  return (
+    <div className="relative h-2 bg-amber-100 mt-1.5">
+      <div className="absolute top-0 h-2 bg-brand-300" style={{ left: pos(low), width: `calc(${pos(high)} - ${pos(low)})` }} />
+      <div className="absolute -top-1 h-4 w-0.5 bg-gray-900" style={{ left: pos(likely) }} />
+    </div>
+  )
+}
+
+// Forecasts from /stats/predictions - the next day, the next 7 days and the
+// main categories, each a calibrated 80% range from the backtest's best model.
+// One request per few minutes, shared by every place the section renders -
+// it's started as the page opens, alongside the pattern analysis.
+let predCache = null
+const loadPredictions = () => {
+  if (!predCache || Date.now() - predCache.at > 5 * 60 * 1000) {
+    predCache = { at: Date.now(), promise: getPredictions().then((r) => r.data) }
+    predCache.promise.catch(() => { predCache = null })
+  }
+  return predCache.promise
+}
+
+function Predictions() {
+  const [p, setP] = useState(null)
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    loadPredictions().then(setP).catch((e) => setErr(e.response?.data?.detail || 'Could not make a forecast just now.'))
+  }, [])
+
+  if (err) return <div className="card text-xs text-red-600">{err}</div>
+  if (!p) return (
+    <div className="card flex items-center gap-3">
+      <div className="w-5 h-5 border-2 border-brand-400/30 border-t-brand-400 rounded-full animate-spin" />
+      <p className="text-xs text-gray-500">Training the forecast on your spending…</p>
+    </div>
+  )
+  const usable = p.categories.filter((c) => !c.unpredictable)
+  const catMax = Math.max(...usable.map((c) => c.high), 1)
+  const vsTypical = Math.round((p.next_7_days.likely - p.typical_week) / p.typical_week * 100)
+  return (
+    <div className="card space-y-3">
+      <div>
+        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Forecast</p>
+        <h2 className="text-sm font-bold text-gray-900">What you're likely to spend next</h2>
+        <p className="text-[10px] text-gray-400 mt-0.5">
+          Personal spending · each bar is the {p.coverage}% likely range, the line the most likely amount
+        </p>
+      </div>
+      {p.days_since_data > 2 && (
+        <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-2">
+          Your spending data runs to <b>{fmtDay(p.data_until)}</b> ({p.days_since_data} days ago), so the forecast starts
+          from there. Upload your latest PhonePe statement for an up-to-date one.
+        </p>
+      )}
+      <div className="grid grid-cols-2 gap-3">
+        {[['Next day', fmtDay(p.next_day.date), p.next_day, Math.max(p.next_day.high, 1)],
+          ['Next 7 days', `${fmtDay(p.next_7_days.from)} – ${fmtDay(p.next_7_days.to)}`, p.next_7_days, Math.max(p.next_7_days.high, 1)]]
+          .map(([label, when, f, max]) => (
+            <div key={label} className="border border-amber-200 px-3 py-2.5">
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{label}</p>
+              <p className="text-[10px] text-gray-400">{when}</p>
+              <p className="text-lg font-black text-gray-900 mt-1">{INR(f.likely)}</p>
+              <RangeBar low={f.low} likely={f.likely} high={f.high} max={max} />
+              <p className="text-[10px] text-gray-500 mt-1">{INR(f.low)} – {INR(f.high)}</p>
+            </div>
+          ))}
+      </div>
+      <p className="text-[11px] text-gray-600">
+        A typical week lately has been {INR(p.typical_week)}; the next 7 days look
+        {Math.abs(vsTypical) < 10 ? ' about the same.' : vsTypical > 0 ? ` ${vsTypical}% higher.` : ` ${Math.abs(vsTypical)}% lower.`}
+      </p>
+      <div>
+        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Next 7 days by category</p>
+        {p.categories.map((c) => (
+          <div key={c.category} className="py-1.5 border-b border-amber-100 last:border-0">
+            <div className="flex justify-between gap-2 text-xs">
+              <span className="font-bold text-gray-800">{c.category}</span>
+              <span className="font-black text-gray-900">{INR(c.likely)}</span>
+            </div>
+            {c.unpredictable ? (
+              <p className="text-[10px] text-gray-400 mt-0.5">
+                Usually around {INR(c.likely)}, but occasional big purchases make this one hard to predict.
+              </p>
+            ) : (
+              <>
+                <RangeBar low={c.low} likely={c.likely} high={c.high} max={catMax} />
+                <p className="text-[10px] text-gray-400 mt-1">{INR(c.low)} – {INR(c.high)}</p>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+      <p className="text-[10px] text-gray-400 border-t border-dashed border-amber-200 pt-2">
+        Each forecast uses whichever model did best when tested on your past months (gradient boosting, random forest or
+        a recent-weeks baseline), and its range was checked to hold the real amount about {p.coverage}% of the time.
+        Exact daily amounts are hard to predict; the 7-day range is the most reliable.
+      </p>
+    </div>
+  )
+}
 
 function Section({ n, tag, q, verdict, tone, children, how }) {
   const tones = { yes: 'bg-brand-50 text-brand-600', no: 'bg-green-50 text-green-700', mixed: 'bg-slate-100 text-slate-600' }
@@ -58,6 +163,7 @@ export default function MLAnalysis() {
   const [error, setError] = useState('')
 
   useEffect(() => {
+    loadPredictions().catch(() => {})       // start the forecast now, in parallel
     getMLAnalysis().then((r) => setD(r.data)).catch(() => setError('Could not run the analysis. Try again in a moment.'))
   }, [])
 
@@ -97,8 +203,10 @@ export default function MLAnalysis() {
     <div className="pb-24 md:pb-8">
       {header}
       <div className="px-4 md:px-5 mt-4 space-y-4">
+        <Predictions />
+
         <p className="text-[10px] text-gray-400">
-          {d.window[0]} → {d.window[1]} · {d.counts.personal} personal payments, {d.counts.shared} shared (your share)
+          Patterns · {d.window[0]} → {d.window[1]} · {d.counts.personal} personal payments, {d.counts.shared} shared (your share)
         </p>
 
         <Section n={1} tag="Time of day" q="Do I spend more at night than early in the day?"

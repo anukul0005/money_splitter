@@ -124,8 +124,8 @@ class GBM:
 
 class Forest:
     def fit(self, X, y):
-        self.m = RandomForestRegressor(n_estimators=300, min_samples_leaf=8, max_features=0.6,
-                                       random_state=0, n_jobs=-1).fit(X, np.log1p(y))
+        self.m = RandomForestRegressor(n_estimators=150, min_samples_leaf=8, max_features=0.6,
+                                       random_state=0, n_jobs=1).fit(X, np.log1p(y))
         return self
 
     def predict(self, X):
@@ -228,3 +228,74 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# ── the app's forecast (GET /stats/predictions) ───────────────────────────
+# Each forecast uses the model that did best on the walk-forward backtest,
+# with the widening that made its 80% range hold ~80% of actual outcomes
+# there (measured 2026-10-11 on the user's 2024-26 data; re-run main() to
+# refresh). (model, widen)
+PLAN = {
+    "next_day": ("gbm", 1.20),
+    "next_7_days": ("gbm", 1.60),
+    "Food & Dining": ("forest", 1.65),
+    "Transport": ("baseline", 1.85),
+    "Groceries": ("gbm", 1.55),
+    "Alcohol": ("baseline", 1.45),
+    "Everything else": ("gbm", 1.70),
+}
+MODELS = {"gbm": GBM, "forest": Forest}
+
+
+def _weekly(days, y, out, model, widen):
+    t = len(y)
+    if model == "baseline":
+        p = Baseline(weekly=True).predict(y, t)
+    else:
+        idx = list(range(56, t - 6))
+        X = np.array([weekly_features(days, y, out, j) for j in idx])
+        Y = np.array([weekly_target(y, j) for j in idx])
+        p = MODELS[model]().fit(X, Y).predict(np.array([weekly_features(days, y, out, t)]))[0]
+    return widen_range(p, widen)
+
+
+_cache: dict = {}
+
+
+def predict_now(db, user) -> dict:
+    days, y, cats, out = series(db, user)
+    # Same user, same data, same day: the same answer - fitting takes seconds.
+    key = (user.id, date.today().isoformat(), len(y), round(float(y.sum()), 2))
+    if key in _cache:
+        return _cache[key]
+    last = days[-1]
+    t = len(y)
+    m, k = PLAN["next_day"]
+    idx = list(range(56, t))
+    Xd = np.array([daily_features(days, y, out, j) for j in idx])
+    nd = widen_range(MODELS[m]().fit(Xd, y[56:t]).predict(np.array([daily_features(days, y, out, t)]))[0], k)
+    wk = _weekly(days, y, out, *PLAN["next_7_days"])
+    rng = lambda p: {"low": round(float(p[0])), "likely": round(float(p[1])), "high": round(float(p[2]))}
+    cat_out = []
+    for c, yc in cats.items():
+        mdl, kk = PLAN[c]
+        cat_out.append({"category": c, "model": mdl, **rng(_weekly(days, yc, out, mdl, kk))})
+    cat_out.sort(key=lambda x: -x["likely"])
+    typical_week = float(np.median([y[i:i + 7].sum() for i in range(max(0, t - 91), t - 6)]))
+    for c in cat_out:
+        # A top end beyond two typical weeks of *all* spending isn't a range a
+        # person can use: the page says so rather than drawing it.
+        c["unpredictable"] = c["high"] > 2 * typical_week
+    stale = (date.today() - last).days
+    result = {
+        "data_until": last.isoformat(), "days_since_data": stale,
+        "next_day": {"date": (last + timedelta(days=1)).isoformat(), "model": PLAN["next_day"][0], **rng(nd)},
+        "next_7_days": {"from": (last + timedelta(days=1)).isoformat(), "to": (last + timedelta(days=7)).isoformat(),
+                        "model": PLAN["next_7_days"][0], **rng(wk)},
+        "categories": cat_out,
+        "typical_week": round(typical_week),
+        "coverage": 80,
+    }
+    _cache.clear()
+    _cache[key] = result
+    return result
