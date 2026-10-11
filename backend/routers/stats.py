@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from collections import defaultdict
+from collections import Counter, defaultdict
 from types import SimpleNamespace
 import json as _json
 from sqlalchemy import case, func
@@ -504,6 +504,114 @@ def get_history(db: Session = Depends(get_db), caller: User = Depends(current_us
                  for (gid, ym, cat), (t, s, n) in acc.items() if len(ym) == 7],
         "days": {y: len(ds) for y, ds in sorted(days.items())},
     }
+
+
+_PERIODS = [(10, 13, "Morning"), (14, 17, "Afternoon"), (18, 22, "Evening")]   # the rest is Night
+_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+BIG_DAY = 1500
+
+
+@router.get("/patterns", response_model=dict)
+def get_patterns(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """When the caller spends, for Home: their own share over the last 365
+    days, by time of day (Morning 10-14, Afternoon 14-18, Evening 18-23,
+    Night 23-10 - the dataset's time periods), by day of the week (per
+    occurrence of that day, so five Fridays in a window don't beat four),
+    and how much rides on big days. Plus a few plain-language insights,
+    the patterns worth acting on."""
+    from datetime import date, timedelta
+    import statistics
+
+    today = date.today()
+    start = today - timedelta(days=365)
+    groups = caller_groups(db, caller, history=False)
+    if not groups:
+        return {"insights": [], "periods": [], "days": [], "daily": None}
+    me = caller.name.lower()
+    solo = {g.id for g in groups if len(g.members) == 1}
+
+    per_day: dict[str, float] = defaultdict(float)
+    period_amt, period_n = defaultdict(float), defaultdict(int)
+    for e in (db.query(Expense.group_id, Expense.date, Expense.txn_time, Expense.amount, Expense.split_json,
+                       Expense.participants, Expense.individual_amount, Expense.divider)
+              .filter(Expense.group_id.in_([g.id for g in groups]),
+                      Expense.date >= start.isoformat(), Expense.date <= today.isoformat() + "~")):
+        share = e.amount if e.group_id in solo else (_member_share(e, me) or 0.0)
+        if share <= 0 or not e.date:
+            continue
+        per_day[e.date[:10]] += share
+        t = (e.txn_time or "")[:2]
+        if t.isdigit():
+            h = int(t)
+            name = next((n for lo, hi, n in _PERIODS if lo <= h <= hi), "Night")
+            period_amt[name] += share; period_n[name] += 1
+
+    total = sum(per_day.values())
+    if not total:
+        return {"insights": [], "periods": [], "days": [], "daily": None}
+
+    timed = sum(period_amt.values())
+    periods = [{"name": n, "amount": round(period_amt[n], 2), "count": period_n[n],
+                "share": round(period_amt[n] / timed * 100, 1) if timed else 0,
+                "avg_payment": round(period_amt[n] / period_n[n], 2) if period_n[n] else 0}
+               for n in ("Morning", "Afternoon", "Evening", "Night")]
+
+    # every calendar day in the window counts, spend or not
+    occurrences = Counter((start + timedelta(days=i)).weekday() for i in range(366))
+    dow = defaultdict(float)
+    for d, amt in per_day.items():
+        dow[date.fromisoformat(d).weekday()] += amt
+    days = [{"name": _DAYS[i], "per_day": round(dow[i] / occurrences[i], 2) if occurrences[i] else 0,
+             "total": round(dow[i], 2)} for i in range(7)]
+    weekday_avg = sum(dow[i] for i in range(5)) / max(sum(occurrences[i] for i in range(5)), 1)
+    weekend_avg = sum(dow[i] for i in (5, 6)) / max(sum(occurrences[i] for i in (5, 6)), 1)
+
+    amounts = sorted(per_day.values())
+    big = [a for a in amounts if a > BIG_DAY]
+    daily = {"spend_days": len(amounts), "median": round(statistics.median(amounts), 2),
+             "average": round(total / len(amounts), 2), "big_days": len(big), "big_threshold": BIG_DAY,
+             "big_share": round(sum(big) / total * 100, 1), "total": round(total, 2),
+             "biggest": max(({"date": d, "amount": round(a, 2)} for d, a in per_day.items()), key=lambda x: x["amount"])}
+
+    # The few patterns worth acting on, biggest first.
+    insights = []
+    top = max(days, key=lambda d: d["per_day"])
+    quiet = min(days, key=lambda d: d["per_day"])
+    if quiet["per_day"] and top["per_day"] / quiet["per_day"] >= 1.3:
+        insights.append({"title": f"{top['name']}s cost the most",
+                         "text": f"A typical {top['name']} costs you {_inr(top['per_day'])}, "
+                                 f"{top['per_day'] / quiet['per_day']:.1f}x a {quiet['name']} ({_inr(quiet['per_day'])})."})
+    if big and daily["big_share"] >= 30:
+        insights.append({"title": "A few big days drive the total",
+                         "text": f"{len(big)} days over {_inr(BIG_DAY)} - {len(big) / len(amounts) * 100:.0f}% of your "
+                                 f"spending days - made up {daily['big_share']:.0f}% of what you spent."})
+    if timed:
+        busiest = max(periods, key=lambda p: p["share"])
+        if busiest["share"] >= 35:
+            insights.append({"title": f"{busiest['name']}s are when it goes",
+                             "text": f"{busiest['share']:.0f}% of your timed spending happens in the "
+                                     f"{busiest['name'].lower()} ({_PERIOD_HOURS[busiest['name']]})."})
+        night = next(p for p in periods if p["name"] == "Night")
+        day_avg = sum(p["amount"] for p in periods if p["name"] != "Night") / max(sum(p["count"] for p in periods if p["name"] != "Night"), 1)
+        if night["count"] >= 10 and day_avg and night["avg_payment"] / day_avg >= 1.3:
+            insights.append({"title": "Late-night payments run bigger",
+                             "text": f"After 11 pm a payment averages {_inr(night['avg_payment'])}, "
+                                     f"{night['avg_payment'] / day_avg:.1f}x one during the day."})
+    if weekday_avg and weekend_avg / weekday_avg >= 1.2:
+        insights.append({"title": "Weekends cost more",
+                         "text": f"A weekend day costs {_inr(weekend_avg)} against {_inr(weekday_avg)} on a weekday."})
+
+    return {"from": start.isoformat(), "to": today.isoformat(), "insights": insights[:3],
+            "periods": periods, "timed_share": round(timed / total * 100, 1),
+            "days": days, "weekday_avg": round(weekday_avg, 2), "weekend_avg": round(weekend_avg, 2),
+            "daily": daily}
+
+
+_PERIOD_HOURS = {"Morning": "10 am-2 pm", "Afternoon": "2-6 pm", "Evening": "6-11 pm", "Night": "11 pm-10 am"}
+
+
+def _inr(v: float) -> str:
+    return f"Rs {v:,.0f}".replace("Rs ", "₹")
 
 
 # NOTE: /{group_id} must stay LAST — literal routes above must be registered first

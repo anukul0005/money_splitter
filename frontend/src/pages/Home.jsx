@@ -1,73 +1,18 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getGroups, getOverview, getUserSummary, getGlobalAnalytics, getUserGroupBalances, getFriends, getLoans } from '../api'
+import { getGroups, getOverview, getUserSummary, getUserGroupBalances, getFriends, getLoans } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser, isAdmin } from '../UserContext'
 import { buildMasterGroups } from '../utils/masterGroups'
 import { owes, owed } from '../utils/money'
 import { combinedBalances } from '../utils/balances'
 import MasterGroupCard from '../components/MasterGroupCard'
+import SpendingPatterns from '../components/SpendingPatterns'
 import GroupCard from '../components/GroupCard'
 import NotificationBell from '../components/NotificationBell'
 import { MONEY_CHANGED } from '../components/PaymentClaimsInbox'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
-
-const PALETTE = [
-  '#f97316','#eab308','#22c55e','#06b6d4','#3b82f6',
-  '#8b5cf6','#ec4899','#ef4444','#14b8a6','#f59e0b',
-]
-
-function CategoryBar({ category, total, maxTotal, color, count }) {
-  const pct = maxTotal > 0 ? Math.max(4, (total / maxTotal) * 100) : 4
-  return (
-    <div className="mb-2">
-      <div className="flex justify-between items-center mb-0.5">
-        <span className="text-xs font-semibold text-gray-700 truncate max-w-[55%]">{category}</span>
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] text-gray-400">{count} exp</span>
-          <span className="text-xs font-bold text-gray-900">{INR(total)}</span>
-        </div>
-      </div>
-      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-        <div
-          className="h-2 rounded-full transition-all duration-500"
-          style={{ width: `${pct}%`, backgroundColor: color }}
-        />
-      </div>
-    </div>
-  )
-}
-
-function PersonCategoryCard({ person, cats }) {
-  const top = cats[0]
-  const maxAmt = cats[0]?.total ?? 1
-
-  return (
-    <div className="card p-3">
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <p className="text-sm font-bold text-gray-900 capitalize">{person}</p>
-        {top && <span className="text-xs font-black text-gray-800 shrink-0">{INR(top.total)}</span>}
-      </div>
-      <div className="space-y-1.5">
-        {cats.slice(0, 4).map((c, i) => (
-          <div key={c.category}>
-            <div className="flex justify-between items-baseline mb-0.5 gap-2">
-              <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide leading-tight">{c.category}</span>
-              <span className="text-xs font-bold text-gray-700 shrink-0">{INR(c.total)}</span>
-            </div>
-            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-              <div
-                className="h-1.5 rounded-full"
-                style={{ width: `${Math.max(8, (c.total / maxAmt) * 100)}%`, backgroundColor: PALETTE[i % PALETTE.length] }}
-              />
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
 
 export default function Home() {
   const nav  = useNavigate()
@@ -77,7 +22,6 @@ export default function Home() {
   const [groups,      setGroups]      = useState([])
   const [overview,    setOverview]    = useState([])
   const [userStats,   setUserStats]   = useState(null)
-  const [analytics,   setAnalytics]   = useState(null)
   const [balances,    setBalances]    = useState([])   // per-group, ranks the group list
   const [friends,     setFriends]     = useState([])   // per-person netted, drives the headline
   const [loans,       setLoans]       = useState(null) // loans + shared bills, see /loans
@@ -106,9 +50,6 @@ export default function Home() {
           .catch(() => {})
       }
       getLoans().then((r) => setLoans(r.data)).catch(() => {})
-      getGlobalAnalytics(user?.name ?? '')
-        .then((a) => setAnalytics(a.data))
-        .catch(() => {})
     } catch {
       setError('Could not reach server. The API may be waking up — please try again in 30 seconds.')
     } finally {
@@ -203,15 +144,6 @@ export default function Home() {
   const topUnsettled  = unsettledEntries.slice(0, TOP_N)
   const restUnsettled = unsettledEntries.slice(TOP_N)
   const hiddenCount   = restUnsettled.length + settledMasters.length + settledSolo.length
-
-  const byCategory    = analytics?.by_category ?? []
-  const byPersonCat   = analytics?.by_person_category ?? {}
-  const maxCatTotal   = byCategory[0]?.total ?? 1
-  const personEntries = Object.entries(byPersonCat).sort((a, b) => {
-    const aTotal = a[1].reduce((s, c) => s + c.total, 0)
-    const bTotal = b[1].reduce((s, c) => s + c.total, 0)
-    return bTotal - aTotal
-  })
 
   return (
     <div className="pb-24 md:pb-8">
@@ -345,36 +277,8 @@ export default function Home() {
           </div>
         )}
 
-        {/* Spend by Category */}
-        {byCategory.length > 0 && (
-          <div>
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Spend by Category</p>
-            <div className="card p-4">
-              {byCategory.slice(0, 10).map((c, i) => (
-                <CategoryBar
-                  key={c.category}
-                  category={c.category}
-                  total={c.total}
-                  count={c.count}
-                  maxTotal={maxCatTotal}
-                  color={PALETTE[i % PALETTE.length]}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* By Person */}
-        {personEntries.length > 0 && (
-          <div>
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Category by Person</p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {personEntries.map(([person, cats]) => (
-                <PersonCategoryCard key={person} person={person} cats={cats} />
-              ))}
-            </div>
-          </div>
-        )}
+        {/* When the money goes - replaces the old category charts */}
+        <SpendingPatterns />
 
       </div>
     </div>

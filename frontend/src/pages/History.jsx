@@ -243,6 +243,11 @@ export default function History() {
       if (r.ym > g.to) g.to = r.ym
     })
     const topGroups = Object.values(gs).filter((g) => g.value >= 1).sort((a, b) => b.value - a.value).slice(0, 5)
+    // A trip the period cuts through (Oct-Nov, with the window starting in
+    // Nov) only counts its in-period part above; its whole is shown beside it.
+    topGroups.forEach((g) => {
+      g.whole = rows.filter((r) => r.gid === g.id && bySide(r) && byCat(r)).reduce((s, r) => s + val(r), 0)
+    })
 
     // ── How months compare: complete months that had any spending ──
     const perMonth = {}
@@ -873,7 +878,10 @@ export default function History() {
         {/* ── 4. Biggest trips & shared groups ── */}
         {view.topGroups.length > 0 && (
           <div className="card">
-            <h2 className="text-xs font-black text-gray-500 uppercase tracking-widest mb-2">Biggest trips & groups</h2>
+            <h2 className="text-xs font-black text-gray-500 uppercase tracking-widest">Biggest trips & groups</h2>
+            <p className="text-[10px] text-gray-400 mb-2">
+              {measure === 'share' ? 'Your share' : 'Group totals'} spent in {periodLabel.toLowerCase() === 'last 12 months' ? 'the last 12 months' : periodLabel} · monthly groups left out
+            </p>
             {view.topGroups.map((g, i) => (
               <button
                 key={g.id}
@@ -888,7 +896,12 @@ export default function History() {
                     {base.supers[g.superKey]?.label} · {g.from === g.to ? ymLabel(g.from) : `${ymLabel(g.from)} – ${ymLabel(g.to)}`}
                   </span>
                 </span>
-                <span className="text-xs font-black text-gray-900 shrink-0">{INR(g.value)}</span>
+                <span className="text-right shrink-0">
+                  <span className="block text-xs font-black text-gray-900">{INR(g.value)}</span>
+                  {g.whole - g.value >= 1 && (
+                    <span className="block text-[10px] text-gray-400">of {INR(g.whole)} whole trip</span>
+                  )}
+                </span>
               </button>
             ))}
           </div>

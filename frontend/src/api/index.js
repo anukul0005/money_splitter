@@ -161,10 +161,10 @@ export const markActivitySeen = (name)   => api.post('/activity/seen')
 export const getGroupStats      = (groupId) => api.get(`/stats/${groupId}`)
 // Combined stats across a master group's set of groups
 export const getHistory         = ()        => api.get('/stats/history')
+export const getPatterns        = ()        => api.get('/stats/patterns')
 export const getAggregateStats  = (ids)     => api.get('/stats/aggregate', { params: { ids: ids.join(',') } })
 export const getOverview        = ()        => api.get('/stats/overview/all')
 export const getUserSummary     = (name)    => api.get('/stats/user-summary')
-export const getGlobalAnalytics     = (name) => api.get('/stats/global-analytics')
 export const getUserGroupBalances   = (name) => api.get('/stats/user-group-balances')
 export const getFriends             = (name) => api.get('/stats/friends')
 
