@@ -1,6 +1,10 @@
 """Step 4 of the spending dataset - discover spending patterns.
 
-    python ml_step4.py <user> [--since 2024-01-01] [--src ../ml_data/step3] [--out ../ml_data/step4]
+    python ml_step4.py <user> [--since 2024-01-01] [--with-salary] [--src ../ml_data/step3] [--out ../ml_data/step4]
+
+The user's salary is left out by default: they only started earning after
+September 2025, so "the week after payday" has too few real paydays to say
+anything. --with-salary brings the payday comparison back.
 
 Answers the Step 4 questions on Step 3's personal and shared datasets with
 like-for-like comparisons, never raw totals alone:
@@ -181,8 +185,8 @@ def analyse(name: str, rows: list[dict], start: date, end: date, salary_rule: st
                     "months_weekend_higher": higher, "months": len(month_diff)}
 
     # ── Q3: the week after payday vs the week before, month by month ──────
-    out += ["### 3. Does spending rise after salary day?", ""]
     if salary_rule is not None:
+        out += ["### 3. Does spending rise after salary day?", ""]
         pairs = []
         y, m = start.year, start.month
         while date(y, m, 1) <= end:
@@ -203,8 +207,6 @@ def analyse(name: str, rows: list[dict], start: date, end: date, salary_rule: st
                 f"- the week after was higher in {up} of {len(pairs)} months", ""]
         F["payday"] = {"rule": salary_rule, "paydays": len(pairs), "after_minus_before": statistics.fmean(d7),
                        "ci": boot(d7), "months_higher": up}
-    else:
-        out += ["No salary day saved for this user - set it in Account > Salary.", ""]
     return out, F
 
 
@@ -287,6 +289,8 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("user")
     ap.add_argument("--since", default="2024-01-01")
+    ap.add_argument("--with-salary", action="store_true",
+                    help="include the payday comparison (off: the user wants salary left out)")
     ap.add_argument("--src", default=os.path.join(HERE, "..", "ml_data", "step3"))
     ap.add_argument("--out", default=os.path.join(HERE, "..", "ml_data", "step4"))
     args = ap.parse_args()
@@ -298,15 +302,16 @@ def main() -> None:
     db = get_session_factory()()
     db.connection().exec_driver_sql("SET TRANSACTION READ ONLY")
     u = db.query(User).filter(func.lower(User.name) == args.user.lower()).one()
-    salary_rule, salary = u.salary_day, u.monthly_salary
+    salary_rule, salary = (u.salary_day, u.monthly_salary) if args.with_salary else (None, None)
     db.rollback(); db.close()
 
     personal = load(os.path.join(args.src, "features_personal.csv"), args.since)
     shared = load(os.path.join(args.src, "features_shared.csv"), args.since)
     end = date.fromisoformat(max(r["date"] for r in personal + shared))
     report = ["# Step 4 - spending patterns", "",
-              f"Window: {args.since} to {end}. Salary: {inr(salary) if salary else 'not set'}, credited "
-              f"{RULE_TEXT.get(salary_rule, f'on day {salary_rule}') if salary_rule else '(day not set)'}.", "",
+              f"Window: {args.since} to {end}. " + (f"Salary: {inr(salary)}, credited "
+              f"{RULE_TEXT.get(salary_rule, f'on day {salary_rule}') if salary_rule else '(day not set)'}."
+              if args.with_salary else "Salary is left out of every calculation."), "",
               "Every comparison is per calendar day (no-spend days count as zero), split into how often x how much, "
               "and made within the same day or month where possible. These are patterns, not causes.", ""]
     findings = {"window": [args.since, end.isoformat()], "salary": salary, "salary_day": salary_rule}
