@@ -190,6 +190,8 @@ _ADDED_COLUMNS = [
     ("expenses", "time_period", "VARCHAR(10)"),
     ("users", "monthly_salary", "DOUBLE PRECISION"),
     ("users", "salary_day", "VARCHAR(15)"),
+    ("users", "forecast_json", "TEXT"),
+    ("users", "forecast_basis", "INTEGER"),
 ]
 
 # (index name, statement)

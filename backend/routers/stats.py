@@ -626,7 +626,7 @@ def get_predictions(db: Session = Depends(get_db), caller: User = Depends(curren
     See ml_predict.py. Forecasts start the day after the data ends."""
     import ml_predict
     try:
-        return ml_predict.predict_now(db, caller)
+        return ml_predict.predict_cached(db, caller)
     except ValueError:
         raise HTTPException(400, "Not enough spending history to forecast yet")
 

@@ -79,6 +79,12 @@ function Predictions() {
         <p className="text-[10px] text-gray-400 mt-0.5">
           Personal spending · each bar is the {p.coverage}% likely range, the line the most likely amount
         </p>
+        {p.computed_at && (
+          <p className="text-[10px] text-gray-400 mt-0.5">
+            Made {new Date(p.computed_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}
+            {' · '}refreshes after {p.refresh_after} new expenses ({p.changes_since} so far)
+          </p>
+        )}
       </div>
       {p.days_since_data > 2 && (
         <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-2">

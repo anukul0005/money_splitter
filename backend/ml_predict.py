@@ -299,3 +299,33 @@ def predict_now(db, user) -> dict:
     _cache.clear()
     _cache[key] = result
     return result
+
+
+REFRESH_AFTER = 5     # personal expenses added (or removed) before retraining
+
+
+def _personal_count(db, user) -> int:
+    from auth import caller_groups
+    from models import Expense
+    ids = [g.id for g in caller_groups(db, user, history=False) if len(g.members) == 1]
+    return db.query(Expense).filter(Expense.group_id.in_(ids)).count() if ids else 0
+
+
+def predict_cached(db, user, force: bool = False) -> dict:
+    """The saved forecast while fewer than REFRESH_AFTER personal expenses
+    have changed since it was made; otherwise a fresh one, saved. Saved on
+    the user's row, so it survives the server sleeping or restarting."""
+    import json
+    from datetime import datetime, timezone
+    count = _personal_count(db, user)
+    if user.forecast_json and user.forecast_basis is not None and not force:
+        changed = abs(count - user.forecast_basis)
+        if changed < REFRESH_AFTER:
+            saved = json.loads(user.forecast_json)
+            return {**saved, "cached": True, "changes_since": changed, "refresh_after": REFRESH_AFTER}
+    result = predict_now(db, user)
+    result["computed_at"] = datetime.now(timezone.utc).isoformat()
+    user.forecast_json = json.dumps(result)
+    user.forecast_basis = count
+    db.commit()
+    return {**result, "cached": False, "changes_since": 0, "refresh_after": REFRESH_AFTER}
