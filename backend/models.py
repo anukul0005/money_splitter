@@ -139,7 +139,7 @@ class Expense(Base):
     # re-deriving one from free-form times every time.
     txn_time = Column(String(5), nullable=True)
     time_bucket = Column(String(20), nullable=True)
-    # Morning / Afternoon / Evening / Night when only that much is known (a
+    # Early (1-11am) / Day (11am-6pm) / Night (6pm-1am) when only that much is known (a
     # shared expense entered by hand, placed by the user afterwards). An
     # expense with a txn_time is placed from the time itself instead.
     time_period = Column(String(10), nullable=True)

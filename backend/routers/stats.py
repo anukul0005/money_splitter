@@ -506,7 +506,8 @@ def get_history(db: Session = Depends(get_db), caller: User = Depends(current_us
     }
 
 
-_PERIODS = [(10, 13, "Morning"), (14, 17, "Afternoon"), (18, 22, "Evening")]   # the rest is Night
+_PERIODS = [(1, 10, "Early"), (11, 17, "Day")]   # the rest, 18:00-00:59, is Night
+_PERIOD_NAMES = ("Early", "Day", "Night")
 _DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 BIG_DAY = 1500
 
@@ -514,8 +515,8 @@ BIG_DAY = 1500
 @router.get("/patterns", response_model=dict)
 def get_patterns(db: Session = Depends(get_db), caller: User = Depends(current_user)):
     """When the caller spends, for Home: their own share over the last 365
-    days, by time of day (Morning 10-14, Afternoon 14-18, Evening 18-23,
-    Night 23-10 - the dataset's time periods), by day of the week (per
+    days, by time of day (Early 1am-11am, Day 11am-6pm, Night 6pm-1am -
+    the dataset's time periods), by day of the week (per
     occurrence of that day, so five Fridays in a window don't beat four),
     and how much rides on big days. Plus a few plain-language insights,
     the patterns worth acting on."""
@@ -545,7 +546,7 @@ def get_patterns(db: Session = Depends(get_db), caller: User = Depends(current_u
         if t.isdigit():
             h = int(t)
             name = next((n for lo, hi, n in _PERIODS if lo <= h <= hi), "Night")
-        elif e.time_period in ("Morning", "Afternoon", "Evening", "Night"):
+        elif e.time_period in _PERIOD_NAMES:
             name = e.time_period          # no exact time, but the user placed it
         if name:
             period_amt[name] += share; period_n[name] += 1
@@ -558,7 +559,7 @@ def get_patterns(db: Session = Depends(get_db), caller: User = Depends(current_u
     periods = [{"name": n, "amount": round(period_amt[n], 2), "count": period_n[n],
                 "share": round(period_amt[n] / timed * 100, 1) if timed else 0,
                 "avg_payment": round(period_amt[n] / period_n[n], 2) if period_n[n] else 0}
-               for n in ("Morning", "Afternoon", "Evening", "Night")]
+               for n in _PERIOD_NAMES]
 
     # every calendar day in the window counts, spend or not
     occurrences = Counter((start + timedelta(days=i)).weekday() for i in range(366))
@@ -598,9 +599,9 @@ def get_patterns(db: Session = Depends(get_db), caller: User = Depends(current_u
         night = next(p for p in periods if p["name"] == "Night")
         day_avg = sum(p["amount"] for p in periods if p["name"] != "Night") / max(sum(p["count"] for p in periods if p["name"] != "Night"), 1)
         if night["count"] >= 10 and day_avg and night["avg_payment"] / day_avg >= 1.3:
-            insights.append({"title": "Late-night payments run bigger",
-                             "text": f"After 11 pm a payment averages {_inr(night['avg_payment'])}, "
-                                     f"{night['avg_payment'] / day_avg:.1f}x one during the day."})
+            insights.append({"title": "Night payments run bigger",
+                             "text": f"After 6 pm a payment averages {_inr(night['avg_payment'])}, "
+                                     f"{night['avg_payment'] / day_avg:.1f}x one before it."})
     if weekday_avg and weekend_avg / weekday_avg >= 1.2:
         insights.append({"title": "Weekends cost more",
                          "text": f"A weekend day costs {_inr(weekend_avg)} against {_inr(weekday_avg)} on a weekday."})
@@ -611,7 +612,7 @@ def get_patterns(db: Session = Depends(get_db), caller: User = Depends(current_u
             "daily": daily}
 
 
-_PERIOD_HOURS = {"Morning": "10 am-2 pm", "Afternoon": "2-6 pm", "Evening": "6-11 pm", "Night": "11 pm-10 am"}
+_PERIOD_HOURS = {"Early": "1-11 am", "Day": "11 am-6 pm", "Night": "6 pm-1 am"}
 
 
 def _inr(v: float) -> str:

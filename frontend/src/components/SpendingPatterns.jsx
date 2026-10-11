@@ -4,8 +4,8 @@ import { getPatterns } from '../api'
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 const compact = (v) => (v >= 1000 ? `₹${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : `₹${Math.round(v)}`)
 
-const PERIOD_COLORS = { Morning: '#fdba74', Afternoon: '#f97316', Evening: '#c2410c', Night: '#1e293b' }
-const PERIOD_HOURS = { Morning: '10am–2pm', Afternoon: '2–6pm', Evening: '6–11pm', Night: '11pm–10am' }
+const PERIOD_COLORS = { Early: '#fdba74', Day: '#f97316', Night: '#1e293b' }
+const PERIOD_HOURS = { Early: '1am–11am', Day: '11am–6pm', Night: '6pm–1am' }
 
 /**
  * When the money goes, for Home: the caller's own share over the last 12
@@ -57,7 +57,7 @@ export default function SpendingPatterns() {
               <div key={x.name} style={{ width: `${x.share}%`, background: PERIOD_COLORS[x.name] }} title={`${x.name}: ${x.share}%`} />
             ))}
           </div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 mt-3">
+          <div className="grid grid-cols-3 gap-x-3 gap-y-2 mt-3">
             {p.periods.map((x) => (
               <div key={x.name} className="flex items-start gap-2">
                 <span className="inline-block w-2.5 h-2.5 mt-1 shrink-0" style={{ background: PERIOD_COLORS[x.name] }} />

@@ -6,9 +6,8 @@ Takes Step 2's spending rows (is_spending = 1 - transfers, P2P and
 gambling would distort the day and category totals) and adds:
 
   hour                  0-23, from the transaction time
-  time_period           Morning 10:00-13:59, Afternoon 14:00-17:59,
-                        Evening 18:00-22:59, Night 23:00-09:59;
-                        Unknown when the statement has no time
+  time_period           Early 01:00-10:59, Day 11:00-17:59,
+                        Night 18:00-00:59; Unknown when there's no time
   day_of_week           Monday ... Sunday
   is_weekend            Yes (Saturday, Sunday) / No
   month                 YYYY-MM - trends over time
@@ -28,8 +27,8 @@ from datetime import date
 
 HERE = os.path.dirname(__file__)
 
-# (first hour, last hour, label) - Night wraps past midnight.
-PERIODS = [(10, 13, "Morning"), (14, 17, "Afternoon"), (18, 22, "Evening")]
+# (first hour, last hour, label) - Night (18:00-00:59) wraps past midnight.
+PERIODS = [(1, 10, "Early"), (11, 17, "Day")]
 
 
 def time_period(hour: int | None) -> str:
@@ -38,7 +37,7 @@ def time_period(hour: int | None) -> str:
     for lo, hi, name in PERIODS:
         if lo <= hour <= hi:
             return name
-    return "Night"          # 23:00-09:59
+    return "Night"          # 18:00-00:59
 
 
 def main() -> None:
@@ -88,7 +87,7 @@ def main() -> None:
     lines = ["# Step 3 - features", "",
              f"{len(out)} spending payments, Rs {total:,.0f}, {len(day_tot)} days with spending, "
              f"{out[0]['date']} to {out[-1]['date']}.", ""]
-    for key, order in (("time_period", ["Morning", "Afternoon", "Evening", "Night", "Unknown"]),
+    for key, order in (("time_period", ["Early", "Day", "Night", "Unknown"]),
                        ("day_of_week", ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]),
                        ("is_weekend", ["No", "Yes"])):
         c, n = share(key)
