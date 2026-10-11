@@ -192,6 +192,8 @@ _ADDED_COLUMNS = [
     ("users", "salary_day", "VARCHAR(15)"),
     ("users", "forecast_json", "TEXT"),
     ("users", "forecast_basis", "INTEGER"),
+    ("users", "analysis_json", "TEXT"),
+    ("users", "analysis_basis", "INTEGER"),
 ]
 
 # (index name, statement)

@@ -213,6 +213,8 @@ export default function MLAnalysis() {
 
         <p className="text-[10px] text-gray-400">
           Patterns · {d.window[0]} → {d.window[1]} · {d.counts.personal} personal payments, {d.counts.shared} shared (your share)
+          {d.computed_at && <> · made {new Date(d.computed_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })},
+            refreshes after {d.refresh_after} new expenses ({d.changes_since} so far)</>}
         </p>
 
         <Section n={1} tag="Time of day" q="Do I spend more at night than early in the day?"

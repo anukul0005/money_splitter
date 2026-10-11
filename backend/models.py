@@ -75,6 +75,10 @@ class User(Base):
     # count has moved by REFRESH_AFTER, so opening the page doesn't retrain.
     forecast_json = Column(Text, nullable=True)
     forecast_basis = Column(Integer, nullable=True)
+    # The same for the ML analysis patterns (ml_analysis.run_cached), counted
+    # over personal and shared expenses alike.
+    analysis_json = Column(Text, nullable=True)
+    analysis_basis = Column(Integer, nullable=True)
     last_daily_summary_sent = Column(String(10), nullable=True)
     # JSON list of payee names whose statement debits are never monthly
     # spending for this user - friends paid back or lent to, where no

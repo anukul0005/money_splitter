@@ -636,7 +636,7 @@ def get_ml_analysis(db: Session = Depends(get_db), caller: User = Depends(curren
     """The Step 4 spending-pattern analysis, run on demand from the caller's
     live data - see ml_analysis.py. Salary is never used."""
     import ml_analysis
-    return ml_analysis.run(db, caller)
+    return ml_analysis.run_cached(db, caller)
 
 
 # NOTE: /{group_id} must stay LAST — literal routes above must be registered first

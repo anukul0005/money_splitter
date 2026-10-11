@@ -118,3 +118,28 @@ def run(db, user) -> dict:
                              "trend": round((trend[k][0] - trend[k][1]) / trend[k][1] * 100) if trend[k][1] else None}
                             for k, a, n in wants["ranked"][:8]]},
     }
+
+
+REFRESH_AFTER = 5     # expenses added or removed (personal or shared) before re-running
+
+
+def run_cached(db, user) -> dict:
+    """The saved analysis while fewer than REFRESH_AFTER of the user's
+    expenses have changed since it ran; otherwise a fresh run, saved on the
+    user's row so it survives the server sleeping or restarting."""
+    import json
+    from datetime import datetime, timezone
+    from auth import caller_groups
+    ids = [g.id for g in caller_groups(db, user, history=False)]
+    count = db.query(Expense).filter(Expense.group_id.in_(ids)).count() if ids else 0
+    if user.analysis_json and user.analysis_basis is not None:
+        changed = abs(count - user.analysis_basis)
+        if changed < REFRESH_AFTER:
+            return {**json.loads(user.analysis_json), "cached": True, "changes_since": changed,
+                    "refresh_after": REFRESH_AFTER}
+    result = run(db, user)
+    result["computed_at"] = datetime.now(timezone.utc).isoformat()
+    user.analysis_json = json.dumps(result)
+    user.analysis_basis = count
+    db.commit()
+    return {**result, "cached": False, "changes_since": 0, "refresh_after": REFRESH_AFTER}
