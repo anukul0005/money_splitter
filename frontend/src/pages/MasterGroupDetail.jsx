@@ -25,6 +25,11 @@ const todayName = () => {
 }
 // The same day however it was typed ("9 Oct 26", "09 oct 26") - for
 // spotting that today's group already exists.
+// This month as the monthly groups are named: "MONTHLY EXPENSES OCT 2026".
+const thisMonthName = () => {
+  const d = new Date()
+  return `MONTHLY EXPENSES ${MONTHS[d.getMonth()]} ${d.getFullYear()}`
+}
 const dayKey = (name) => (name ?? '').trim().toLowerCase().replace(/^0(\d)/, '$1')
 
 const RECENT_SHOWN = 6    // visible straight away
@@ -97,20 +102,27 @@ export default function MasterGroupDetail() {
     master?.groups.forEach((g) => { if (g.category) counts[g.category] = (counts[g.category] || 0) + 1 })
     return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || ''
   })()
-  const onAdd = () => (todays ? nav(`/groups/${todays.id}`) : setPicking((v) => !v))
+  // A master of monthly groups (personal spending) gets this month's group,
+  // never a dated one: open it, or create it if the month has just begun.
+  const isMonthly = !!master?.groups.some((g) => monthKey(g.name) !== null)
+  const thisMonth = master?.groups.find((g) => (g.name ?? '').trim().toUpperCase() === thisMonthName())
+  const onAdd = () => {
+    if (isMonthly) return thisMonth ? nav(`/groups/${thisMonth.id}`) : addGroup(thisMonthName(), 'personal', '💰')
+    return todays ? nav(`/groups/${todays.id}`) : setPicking((v) => !v)
+  }
 
-  const addToday = async (category) => {
+  const addToday = (category) => addGroup(todayName(), category, '')
+  const addGroup = async (name, category, emoji) => {
     if (adding || !master) return
-    const name = todayName()
     setAdding(true); setAddError('')
     try {
       const r = await createGroup({
-        name, description: '', emoji: '', category,
+        name, description: '', emoji, category,
         members: master.names ?? [], created_by: user?.name,
       })
       nav(`/groups/${r.data.id}`)
     } catch (err) {
-      setAddError(err.response?.data?.detail || 'Could not create today\'s group.')
+      setAddError(err.response?.data?.detail || 'Could not create the group.')
       setAdding(false)
     }
   }
@@ -162,7 +174,7 @@ export default function MasterGroupDetail() {
           <button
             onClick={onAdd}
             disabled={adding}
-            title={todays ? `Open today's group (${todays.name})` : `Today's group with ${master.name}`}
+            title={isMonthly ? `Open ${thisMonthName().toLowerCase()}` : todays ? `Open today's group (${todays.name})` : `Today's group with ${master.name}`}
             className="flex-shrink-0 flex items-center gap-1.5 bg-cream border border-amber-200 text-gray-500 hover:bg-amber-50 rounded-md px-3 py-1.5 text-xs font-bold active:scale-95 transition-all shadow-sm disabled:opacity-50"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
@@ -190,7 +202,7 @@ export default function MasterGroupDetail() {
         </div>
         <h1 className="text-xl font-black tracking-tight">{master.name}</h1>
         <p className="text-xs text-gray-400 mt-1">{master.groups.length} groups · {INR(master.totalAmount)} total</p>
-        {picking && !todays && (
+        {picking && !todays && !isMonthly && (
           <div className="mt-3 border border-amber-200 bg-amber-50 px-3 py-2.5">
             <p className="text-[11px] text-gray-600 mb-2">
               New group <span className="font-bold">{todayName()}</span> — tap a category to create it:
