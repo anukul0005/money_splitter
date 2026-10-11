@@ -532,7 +532,7 @@ def get_patterns(db: Session = Depends(get_db), caller: User = Depends(current_u
 
     per_day: dict[str, float] = defaultdict(float)
     period_amt, period_n = defaultdict(float), defaultdict(int)
-    for e in (db.query(Expense.group_id, Expense.date, Expense.txn_time, Expense.amount, Expense.split_json,
+    for e in (db.query(Expense.group_id, Expense.date, Expense.txn_time, Expense.time_period, Expense.amount, Expense.split_json,
                        Expense.participants, Expense.individual_amount, Expense.divider)
               .filter(Expense.group_id.in_([g.id for g in groups]),
                       Expense.date >= start.isoformat(), Expense.date <= today.isoformat() + "~")):
@@ -541,9 +541,13 @@ def get_patterns(db: Session = Depends(get_db), caller: User = Depends(current_u
             continue
         per_day[e.date[:10]] += share
         t = (e.txn_time or "")[:2]
+        name = None
         if t.isdigit():
             h = int(t)
             name = next((n for lo, hi, n in _PERIODS if lo <= h <= hi), "Night")
+        elif e.time_period in ("Morning", "Afternoon", "Evening", "Night"):
+            name = e.time_period          # no exact time, but the user placed it
+        if name:
             period_amt[name] += share; period_n[name] += 1
 
     total = sum(per_day.values())
