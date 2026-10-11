@@ -52,8 +52,12 @@ rng = random.Random(42)
 RULE_TEXT = {"last_working": "the last working day", "last": "the last day", None: "the last working day", "": "the last working day"}
 
 
-def boot(xs: list[float], stat=statistics.fmean, n: int = 2000) -> tuple[float, float]:
+BOOT_N = 2000      # resamples; the in-app analysis (ml_analysis.py) uses fewer
+
+
+def boot(xs: list[float], stat=statistics.fmean, n: int | None = None) -> tuple[float, float]:
     """95% bootstrap interval of stat(xs)."""
+    n = n or BOOT_N
     if len(xs) < 2:
         return (float("nan"), float("nan"))
     vals = sorted(stat([xs[rng.randrange(len(xs))] for _ in xs]) for _ in range(n))
@@ -92,6 +96,8 @@ def load(path: str, since: str) -> list[dict]:
 
 def is_discretionary(r) -> bool:
     subs = DISCRETIONARY.get(r["category"], "no")
+    if r["category"] == "Food & Dining" and not r["subcategory"]:
+        return True       # eating out of an unknown kind - groceries are their own category
     return subs is None or (subs != "no" and r["subcategory"] in subs)
 
 
@@ -238,19 +244,19 @@ def late_night_food(rows: list[dict]) -> tuple[list[str], dict]:
     s_tot, s_oth = slope(xs, tot), slope(xs, oth)
     idx = list(range(len(months)))
     boots = sorted(slope([xs[i] for i in b], [tot[i] for i in b])
-                   for b in ([idx[rng.randrange(len(idx))] for _ in idx] for _ in range(2000)))
+                   for b in ([idx[rng.randrange(len(idx))] for _ in idx] for _ in range(BOOT_N)))
     late_total = sum(by_m[m]["late"] for m in months)
     out = ["### 4. Do late-night food orders raise monthly food spending? (personal)", "",
            f"Late night = food payments from 10 pm to 1 am. {sum(xs)} of them over {len(months)} months, "
            f"{inr(late_total)} - {late_total / max(sum(tot), 1) * 100:.0f}% of food spending.", "",
            f"- each extra late-night food order in a month goes with {inr(s_tot)} more total food spending that month "
-           f"(95% CI {inr(boots[50])} to {inr(boots[1949])}); correlation {corr(xs, tot):.2f}",
+           f"(95% CI {inr(boots[int(len(boots) * .025)])} to {inr(boots[int(len(boots) * .975)])}); correlation {corr(xs, tot):.2f}",
            f"- and with {inr(s_oth)} more spent on the *other* food that month (correlation {corr(xs, oth):.2f}) - "
            + ("late-night orders come on top of other meals, not instead of them."
               if s_oth > 0 else "other food spending dips a little, so late-night orders partly replace other meals."),
            f"- average late-night food payment {inr(late_total / max(sum(xs), 1))}", ""]
     return out, {"months": len(months), "late_orders": sum(xs), "late_amount": late_total,
-                 "slope_total_per_order": s_tot, "ci": (boots[50], boots[1949]), "slope_other_per_order": s_oth,
+                 "slope_total_per_order": s_tot, "ci": (boots[int(len(boots) * .025)], boots[int(len(boots) * .975)]), "slope_other_per_order": s_oth,
                  "corr_total": corr(xs, tot)}
 
 
@@ -259,7 +265,7 @@ def unnecessary(rows: list[dict], end: date) -> tuple[list[str], dict]:
     disc = [r for r in rows if is_discretionary(r)]
     six = (end.replace(day=1) - timedelta(days=150)).isoformat()[:7]
     twelve = (end.replace(day=1) - timedelta(days=330)).isoformat()[:7]
-    key = lambda r: r["category"] if DISCRETIONARY.get(r["category"]) is None else f"{r['category']} > {r['subcategory']}"
+    key = lambda r: r["category"] if DISCRETIONARY.get(r["category"]) is None else f"{r['category']} > {r['subcategory'] or 'other eating out'}"
     agg = defaultdict(lambda: {"amt": 0.0, "n": 0, "recent": 0.0, "prior": 0.0, "night": 0.0})
     for r in disc:
         a = agg[key(r)]

@@ -619,6 +619,14 @@ def _inr(v: float) -> str:
     return f"Rs {v:,.0f}".replace("Rs ", "₹")
 
 
+@router.get("/ml-analysis", response_model=dict)
+def get_ml_analysis(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """The Step 4 spending-pattern analysis, run on demand from the caller's
+    live data - see ml_analysis.py. Salary is never used."""
+    import ml_analysis
+    return ml_analysis.run(db, caller)
+
+
 # NOTE: /{group_id} must stay LAST — literal routes above must be registered first
 # so FastAPI matches them before the catch-all int parameter route.
 @router.get("/{group_id}", response_model=GroupStats)

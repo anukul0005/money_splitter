@@ -163,6 +163,7 @@ export const getGroupStats      = (groupId) => api.get(`/stats/${groupId}`)
 // Combined stats across a master group's set of groups
 export const getHistory         = ()        => api.get('/stats/history')
 export const getPatterns        = ()        => api.get('/stats/patterns')
+export const getMLAnalysis      = ()        => api.get('/stats/ml-analysis')
 export const getAggregateStats  = (ids)     => api.get('/stats/aggregate', { params: { ids: ids.join(',') } })
 export const getOverview        = ()        => api.get('/stats/overview/all')
 export const getUserSummary     = (name)    => api.get('/stats/user-summary')
