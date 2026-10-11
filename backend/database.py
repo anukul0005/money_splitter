@@ -194,6 +194,9 @@ _ADDED_COLUMNS = [
     ("users", "forecast_basis", "INTEGER"),
     ("users", "analysis_json", "TEXT"),
     ("users", "analysis_basis", "INTEGER"),
+    ("users", "recs_json", "TEXT"),
+    ("users", "recs_basis", "INTEGER"),
+    ("users", "savings_plan_json", "TEXT"),
 ]
 
 # (index name, statement)

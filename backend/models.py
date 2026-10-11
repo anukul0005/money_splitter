@@ -79,6 +79,11 @@ class User(Base):
     # over personal and shared expenses alike.
     analysis_json = Column(Text, nullable=True)
     analysis_basis = Column(Integer, nullable=True)
+    # Savings recommendations (ml_recommend.cached), and the plan the user
+    # started from them: {started, baseline: {area: monthly}, targets: {...}}.
+    recs_json = Column(Text, nullable=True)
+    recs_basis = Column(Integer, nullable=True)
+    savings_plan_json = Column(Text, nullable=True)
     last_daily_summary_sent = Column(String(10), nullable=True)
     # JSON list of payee names whose statement debits are never monthly
     # spending for this user - friends paid back or lent to, where no

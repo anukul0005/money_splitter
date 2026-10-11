@@ -631,6 +631,20 @@ def get_predictions(db: Session = Depends(get_db), caller: User = Depends(curren
         raise HTTPException(400, "Not enough spending history to forecast yet")
 
 
+@router.get("/recommendations", response_model=dict)
+def get_recommendations(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Personalized savings recommendations - see ml_recommend.py."""
+    import ml_recommend
+    return ml_recommend.cached(db, caller)
+
+
+@router.post("/savings-plan", response_model=dict)
+def set_savings_plan(active: bool, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Start (record today's baseline) or stop the caller's savings plan."""
+    import ml_recommend
+    return ml_recommend.start_plan(db, caller) if active else ml_recommend.stop_plan(db, caller)
+
+
 @router.get("/ml-analysis", response_model=dict)
 def get_ml_analysis(db: Session = Depends(get_db), caller: User = Depends(current_user)):
     """The Step 4 spending-pattern analysis, run on demand from the caller's

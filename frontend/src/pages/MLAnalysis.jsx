@@ -5,7 +5,7 @@ import {
   CategoryScale, LinearScale, Tooltip, Legend,
 } from 'chart.js'
 import { Bar, Chart as MixedChart } from 'react-chartjs-2'
-import { getMLAnalysis, getPredictions } from '../api'
+import { getMLAnalysis, getPredictions, getRecommendations, setSavingsPlan } from '../api'
 
 Chart.register(BarElement, BarController, LineElement, LineController, PointElement, ScatterController,
   CategoryScale, LinearScale, Tooltip, Legend)
@@ -139,6 +139,134 @@ function Predictions() {
   )
 }
 
+let recCache = null
+const loadRecs = () => {
+  if (!recCache || Date.now() - recCache.at > 5 * 60 * 1000) {
+    recCache = { at: Date.now(), promise: getRecommendations().then((r) => r.data) }
+    recCache.promise.catch(() => { recCache = null })
+  }
+  return recCache.promise
+}
+
+const EASE_TONE = { Easy: 'bg-green-50 text-green-700', Medium: 'bg-amber-50 text-amber-700', Hard: 'bg-red-50 text-red-600' }
+
+// Personalized savings (/stats/recommendations): where the money goes, what's
+// rising, realistic cuts ranked by saving x ease with an AI-written tip each,
+// and - once a plan is started - actual savings against the starting point.
+function Savings() {
+  const [r, setR] = useState(null)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [showAll, setShowAll] = useState(false)
+  useEffect(() => {
+    loadRecs().then(setR).catch(() => setErr('Could not work out savings just now.'))
+  }, [])
+  const togglePlan = async (active) => {
+    setBusy(true)
+    try {
+      const res = await setSavingsPlan(active)
+      recCache = { at: Date.now(), promise: Promise.resolve(res.data) }
+      setR(res.data)
+    } catch { setErr('Could not update the plan.') } finally { setBusy(false) }
+  }
+
+  if (err) return <div className="card text-xs text-red-600">{err}</div>
+  if (!r) return (
+    <div className="card flex items-center gap-3">
+      <div className="w-5 h-5 border-2 border-brand-400/30 border-t-brand-400 rounded-full animate-spin" />
+      <p className="text-xs text-gray-500">Finding ways to save…</p>
+    </div>
+  )
+  if (r.empty) return null
+  const recs = showAll ? r.recommendations : r.recommendations.slice(0, 5)
+  const t = r.tracking
+  return (
+    <div className="card space-y-3">
+      <div>
+        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Ways to save</p>
+        <p className="text-2xl font-black text-gray-900 mt-0.5">{INR(r.save_month)}<span className="text-sm font-bold text-gray-500"> a month</span></p>
+        <p className="text-[11px] text-gray-500">about {INR(r.save_year)} a year, from realistic cuts to wants only</p>
+      </div>
+      <p className="text-xs text-gray-700 leading-relaxed bg-amber-50/60 border border-amber-100 px-3 py-2">{r.summary}</p>
+
+      {(r.flags.length > 0 || r.day_flag.days > r.day_flag.expected) && (
+        <div>
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Rising lately (last 30 days vs your normal)</p>
+          {r.flags.map((f) => (
+            <p key={f.key} className="text-[11px] text-gray-700 py-0.5">
+              <span className="font-bold text-red-600">▲ {f.up_pct != null ? `${f.up_pct}%` : 'new'}</span> {f.title}: {INR(f.recent_30)} vs usual {INR(f.normal_30)}
+            </p>
+          ))}
+          {r.day_flag.days > r.day_flag.expected && (
+            <p className="text-[11px] text-gray-700 py-0.5">
+              <span className="font-bold text-red-600">▲</span> {r.day_flag.days} days over {INR(r.day_flag.threshold)} - usually about {r.day_flag.expected} a month
+            </p>
+          )}
+        </div>
+      )}
+
+      <div>
+        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Ranked by saving and how easy it is</p>
+        {recs.map((x, i) => (
+          <div key={x.key} className="py-2 border-b border-amber-100 last:border-0">
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-xs font-bold text-gray-900">
+                <span className="text-gray-300 mr-1">{i + 1}</span>{x.title}
+                <span className={`ml-1.5 text-[9px] font-black uppercase px-1.5 py-0.5 ${EASE_TONE[x.ease_label]}`}>{x.ease_label}</span>
+              </p>
+              <p className="text-xs font-black text-green-700 shrink-0">save {INR(x.save_month)}/mo</p>
+            </div>
+            <p className="text-[11px] text-gray-600 mt-0.5 leading-snug">{x.tip}</p>
+            <p className="text-[10px] text-gray-400 mt-0.5">
+              Now {INR(x.monthly_now)}/mo → budget {INR(x.budget)}/mo (−{x.cut_pct}%) · {INR(x.save_year)} a year
+            </p>
+          </div>
+        ))}
+        {r.recommendations.length > 5 && (
+          <button onClick={() => setShowAll((v) => !v)} className="w-full text-[11px] font-bold text-brand-500 pt-2">
+            {showAll ? 'Show fewer' : `Show all ${r.recommendations.length}`}
+          </button>
+        )}
+      </div>
+
+      {t ? (
+        <div className="border border-green-200 bg-green-50/50 px-3 py-2.5">
+          <p className="text-[10px] font-bold text-green-700 uppercase tracking-widest">Your plan · since {fmtDay(t.started)}</p>
+          {t.too_early ? (
+            <p className="text-[11px] text-gray-600 mt-1">Started {t.days} day{t.days > 1 ? 's' : ''} ago - give it two weeks before judging.</p>
+          ) : (
+            <p className="text-sm font-black text-gray-900 mt-1">
+              {t.saved_month >= 0 ? `Saving ${INR(t.saved_month)}/mo` : `Spending ${INR(-t.saved_month)}/mo more`}
+              <span className="text-[11px] font-bold text-gray-500"> · target {INR(t.target_month)}/mo</span>
+            </p>
+          )}
+          {!t.too_early && t.items.slice(0, 6).map((i) => (
+            <p key={i.key} className="text-[11px] text-gray-600">
+              {i.title}: {INR(i.actual)}/mo vs {INR(i.baseline)} before
+              <span className={i.saved_month >= 0 ? ' text-green-700 font-bold' : ' text-red-600 font-bold'}>
+                {' '}{i.saved_month >= 0 ? '−' : '+'}{INR(Math.abs(i.saved_month))}
+              </span>
+            </p>
+          ))}
+          <button disabled={busy} onClick={() => togglePlan(false)} className="text-[11px] font-bold text-gray-500 mt-2 disabled:opacity-50">
+            {busy ? 'Working…' : 'Stop tracking'}
+          </button>
+        </div>
+      ) : (
+        <button disabled={busy || !r.recommendations.length} onClick={() => togglePlan(true)}
+          className="btn-primary text-xs py-2.5 disabled:opacity-50">
+          {busy ? 'Starting…' : 'Start this plan and track my savings'}
+        </button>
+      )}
+      <p className="text-[10px] text-gray-400 border-t border-dashed border-amber-200 pt-2">
+        From your last 12 months - personal spending plus your share of shared. Needs (groceries, rent, bills, health,
+        transport) aren't cut, only wants, by an amount that's realistic for each. Advice by {r.advice_by === 'llm' ? 'AI, from category totals only' : 'built-in tips'}.
+        {r.computed_at && <> Made {new Date(r.computed_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}, refreshes after {r.refresh_after} new expenses ({r.changes_since} so far).</>}
+      </p>
+    </div>
+  )
+}
+
 function Section({ n, tag, q, verdict, tone, children, how }) {
   const tones = { yes: 'bg-brand-50 text-brand-600', no: 'bg-green-50 text-green-700', mixed: 'bg-slate-100 text-slate-600' }
   return (
@@ -170,6 +298,7 @@ export default function MLAnalysis() {
 
   useEffect(() => {
     loadPredictions().catch(() => {})       // start the forecast now, in parallel
+    loadRecs().catch(() => {})
     getMLAnalysis().then((r) => setD(r.data)).catch(() => setError('Could not run the analysis. Try again in a moment.'))
   }, [])
 
@@ -209,6 +338,7 @@ export default function MLAnalysis() {
     <div className="pb-24 md:pb-8">
       {header}
       <div className="px-4 md:px-5 mt-4 space-y-4">
+        <Savings />
         <Predictions />
 
         <p className="text-[10px] text-gray-400">
