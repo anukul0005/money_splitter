@@ -12,7 +12,7 @@ from schemas import (
     UserSignup, UserLogin, UserOut, LoginOut, SetRecovery, ResetPassword,
     AdminReset, AdminSetRecovery, AdminIssueCode, RedeemCode,
     SetEmail, SetBirthday, RequestLoginCode, VerifyLoginCode, UserMeOut,
-    SetDailySummary,
+    SetDailySummary, SetSalary,
 )
 from emailer import send_login_code
 
@@ -450,6 +450,22 @@ def set_my_daily_summary(payload: SetDailySummary, db: Session = Depends(get_db)
     """Turn the nightly "yesterday's spending" email/push on or off - your
     own account only, like the settings above."""
     caller.daily_summary = payload.enabled
+    db.commit()
+    db.refresh(caller)
+    return caller
+
+
+@router.post("/me/salary", response_model=UserMeOut)
+def set_my_salary(payload: SetSalary, db: Session = Depends(get_db),
+                  caller: User = Depends(current_user)):
+    """Your monthly pay and the day it's credited - your own account only."""
+    day = (payload.salary_day or "").strip() or None
+    if day and day not in ("last", "last_working") and not (day.isdigit() and 1 <= int(day) <= 31):
+        raise HTTPException(400, "Pick a day from 1 to 31, the last day, or the last working day")
+    if payload.monthly_salary is not None and not (0 < payload.monthly_salary < 1e8):
+        raise HTTPException(400, "That salary doesn't look right")
+    caller.monthly_salary = payload.monthly_salary
+    caller.salary_day = day
     db.commit()
     db.refresh(caller)
     return caller

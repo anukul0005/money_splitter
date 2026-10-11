@@ -39,6 +39,9 @@ class UserMeOut(UserOut):
     birth_year: Optional[int] = None
     # Opt-in nightly summary of yesterday's spending - see models.User.
     daily_summary: bool = False
+    # Pay and when it's credited - see models.User.
+    monthly_salary: Optional[float] = None
+    salary_day: Optional[str] = None
 
 
 class LoginOut(UserMeOut):
@@ -111,6 +114,11 @@ class SetBirthday(BaseModel):
 
 class SetDailySummary(BaseModel):
     enabled: bool
+
+
+class SetSalary(BaseModel):
+    monthly_salary: Optional[float] = None   # None clears it
+    salary_day: Optional[str] = None         # "1".."31", "last", "last_working"
 
 
 class RequestLoginCode(BaseModel):

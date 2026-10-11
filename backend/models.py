@@ -65,6 +65,11 @@ class User(Base):
     # Opt-in nightly email/push of yesterday's spending (see daily_summary.py),
     # and the date it last went out - same idempotency as above.
     daily_summary = Column(Boolean, nullable=False, default=False, server_default="false")
+    # Take-home pay and when it lands - for the spending analysis ("does
+    # spending rise after payday?"). salary_day is "1".."31", "last" (the
+    # month's last day) or "last_working" (its last weekday).
+    monthly_salary = Column(Float, nullable=True)
+    salary_day = Column(String(15), nullable=True)
     last_daily_summary_sent = Column(String(10), nullable=True)
     # JSON list of payee names whose statement debits are never monthly
     # spending for this user - friends paid back or lent to, where no

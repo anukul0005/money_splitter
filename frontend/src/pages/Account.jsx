@@ -2,11 +2,17 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   changePassword, setRecovery, getRecoveryQuestion, getMe, setMyEmail, setMyBirthday,
-  setMyDailySummary, listMyUpiIds, addUpiId, deleteUpiId,
+  setMyDailySummary, setMySalary, listMyUpiIds, addUpiId, deleteUpiId,
 } from '../api'
 import { useUser, isAdmin } from '../UserContext'
 import { ALL_QUESTIONS, RECOVERY_QUESTIONS, KEY_QUESTION, generateKey } from '../utils/security'
 import { pushSupported, getExistingSubscription, enablePush, disablePush } from '../push'
+
+const SALARY_DAYS = [
+  { value: 'last_working', label: 'Last working day of the month' },
+  { value: 'last', label: 'Last day of the month' },
+  ...Array.from({ length: 31 }, (_, i) => ({ value: String(i + 1), label: `On the ${i + 1}${[, 'st', 'nd', 'rd'][(i + 1) % 10 > 3 || [11, 12, 13].includes(i + 1) ? 0 : (i + 1) % 10] || 'th'}` })),
+]
 import Dropdown from '../components/Dropdown'
 
 /**
@@ -64,6 +70,14 @@ export default function Account() {
   const [summaryBusy, setSummaryBusy]   = useState(false)
   const [summaryError, setSummaryError] = useState('')
 
+  // ── Salary (for the spending analysis: does spending rise after payday?) ──
+  const [salaryInput, setSalaryInput] = useState('')
+  const [salaryDay, setSalaryDay]     = useState('')
+  const [salarySaved, setSalarySaved] = useState(null)   // { amount, day } as last saved
+  const [salaryBusy, setSalaryBusy]   = useState(false)
+  const [salaryMsg, setSalaryMsg]     = useState('')
+  const [salaryErr, setSalaryErr]     = useState('')
+
   // ── Push notifications ──
   const [pushOn, setPushOn]       = useState(false)
   const [pushBusy, setPushBusy]   = useState(false)
@@ -99,6 +113,9 @@ export default function Account() {
         setBirthYear(r.data.birth_year ? String(r.data.birth_year) : '')
         setBdayYearInput(r.data.birth_year ? String(r.data.birth_year) : '')
         setSummaryOn(!!r.data.daily_summary)
+        setSalaryInput(r.data.monthly_salary ? String(r.data.monthly_salary) : '')
+        setSalaryDay(r.data.salary_day || '')
+        setSalarySaved(r.data.monthly_salary ? { amount: r.data.monthly_salary, day: r.data.salary_day } : null)
       })
       .catch(() => {})
     if (pushSupported()) {
@@ -128,6 +145,24 @@ export default function Account() {
     setUpiBusy(true)
     try { await deleteUpiId(id); loadUpi() }
     finally { setUpiBusy(false) }
+  }
+
+  const handleSalary = async (e) => {
+    e.preventDefault()
+    setSalaryErr(''); setSalaryMsg('')
+    const amount = parseFloat(String(salaryInput).replace(/,/g, ''))
+    if (!amount || amount <= 0) return setSalaryErr('Enter your monthly salary.')
+    if (!salaryDay) return setSalaryErr('Pick when it is credited.')
+    setSalaryBusy(true)
+    try {
+      const res = await setMySalary({ monthly_salary: amount, salary_day: salaryDay })
+      setSalarySaved({ amount: res.data.monthly_salary, day: res.data.salary_day })
+      setSalaryMsg('Saved.')
+    } catch (err) {
+      setSalaryErr(err.response?.data?.detail || 'Could not save your salary.')
+    } finally {
+      setSalaryBusy(false)
+    }
   }
 
   const handleToggleSummary = async () => {
@@ -503,6 +538,41 @@ export default function Account() {
               {pushError && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2 mt-2">{pushError}</p>}
             </>
           )}
+        </div>
+
+        {/* ── Salary ── */}
+        <div className="card">
+          <h2 className="text-sm font-bold text-gray-800">Salary</h2>
+          <p className="text-xs text-gray-500 leading-relaxed mt-1 mb-3">
+            Your monthly take-home pay and when it's credited. Used only for
+            your own spending analysis - for example, whether you spend more
+            in the days after payday. Nobody else sees it.
+          </p>
+          {salarySaved && (
+            <p className="text-xs text-gray-600 mb-3">
+              Saved: <span className="font-bold">₹{Number(salarySaved.amount).toLocaleString('en-IN')}</span> a month,{' '}
+              {SALARY_DAYS.find((d) => d.value === salarySaved.day)?.label.toLowerCase() || 'day not set'}
+            </p>
+          )}
+          <form onSubmit={handleSalary} className="space-y-3">
+            <div>
+              <label className="label">Monthly salary (₹)</label>
+              <input
+                className="input" type="number" inputMode="decimal" min="1"
+                placeholder="e.g. 93500" value={salaryInput}
+                onChange={(e) => setSalaryInput(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="label">Credited</label>
+              <Dropdown value={salaryDay} onChange={setSalaryDay} placeholder="Choose a day" options={SALARY_DAYS} />
+            </div>
+            {salaryErr && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{salaryErr}</p>}
+            {salaryMsg && <p className="text-xs text-green-700">{salaryMsg}</p>}
+            <button type="submit" className="btn-primary" disabled={salaryBusy}>
+              {salaryBusy ? 'Saving…' : salarySaved ? 'Update salary' : 'Save salary'}
+            </button>
+          </form>
         </div>
 
         {/* ── Daily spending summary ── */}

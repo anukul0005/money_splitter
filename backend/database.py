@@ -188,6 +188,8 @@ _ADDED_COLUMNS = [
     ("expenses", "category_source", "VARCHAR(20)"),
     ("expenses", "receipt_json", "TEXT"),
     ("expenses", "time_period", "VARCHAR(10)"),
+    ("users", "monthly_salary", "DOUBLE PRECISION"),
+    ("users", "salary_day", "VARCHAR(15)"),
 ]
 
 # (index name, statement)
