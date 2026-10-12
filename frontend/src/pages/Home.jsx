@@ -224,17 +224,30 @@ export default function Home() {
             </button>
         </div>
 
-        {/* On-demand spending-pattern analysis - see pages/MLAnalysis.jsx */}
-        <button
-          onClick={() => nav('/ml-analysis')}
-          className="w-full flex items-center justify-between bg-field-800 hover:bg-field-700 text-white px-4 py-3 rounded-md active:scale-[0.99] transition-all"
-        >
-          <span className="text-left">
-            <span className="block text-sm font-bold">ML analysis</span>
-            <span className="block text-[11px] text-slate-300">When, how and on what your money goes - run on your latest data</span>
-          </span>
-          <span className="text-brand-400 text-lg font-bold">›</span>
-        </button>
+        {/* The insights dashboard (pages/Insights.jsx) and the on-demand
+            pattern analysis (pages/MLAnalysis.jsx) */}
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            onClick={() => nav('/insights')}
+            className="flex items-center justify-between bg-field-800 hover:bg-field-700 text-white px-3 py-3 rounded-md active:scale-[0.99] transition-all"
+          >
+            <span className="text-left">
+              <span className="block text-sm font-bold">Insights</span>
+              <span className="block text-[10px] text-slate-300 leading-snug">Totals, forecast, unusual spends, savings</span>
+            </span>
+            <span className="text-brand-400 text-lg font-bold">›</span>
+          </button>
+          <button
+            onClick={() => nav('/ml-analysis')}
+            className="flex items-center justify-between bg-field-800 hover:bg-field-700 text-white px-3 py-3 rounded-md active:scale-[0.99] transition-all"
+          >
+            <span className="text-left">
+              <span className="block text-sm font-bold">ML analysis</span>
+              <span className="block text-[10px] text-slate-300 leading-snug">When, how and on what your money goes</span>
+            </span>
+            <span className="text-brand-400 text-lg font-bold">›</span>
+          </button>
+        </div>
 
         {/* Groups (every group linked to a master group by members; unsettled first, settled behind a toggle) */}
         {(allMasters.length > 0 || soloGroups.length > 0) && (

@@ -73,6 +73,20 @@ def _key(r) -> str | None:
     return k if k in REDUCE else None
 
 
+def areas(rows, scale: float = 1.0) -> dict:
+    """Spending per saving area (REDUCE keys) in rows, times scale.
+    Late-night food is its own area, not also counted in its food subcategory."""
+    out = defaultdict(float)
+    for r in rows:
+        if r["category"] == "Food & Dining" and r["hour"] in LATE_NIGHT_HOURS:
+            out["late_night_food"] += r["amount"]
+            continue
+        k = _key(r)
+        if k:
+            out[k] += r["amount"]
+    return {k: v * scale for k, v in out.items()}
+
+
 def _llm(facts: dict) -> dict | None:
     """Short summary + one practical tip per area, from category totals only."""
     from statement_extractor import GROQ_MODEL
@@ -134,23 +148,12 @@ def build(db, user) -> dict:
     }
 
     # ── 2-5. areas: 12-month monthly average, last 30 days, saving ──
-    def areas_from(rs, scale):
-        out = defaultdict(float)
-        for r in rs:
-            if r["category"] == "Food & Dining" and r["hour"] in LATE_NIGHT_HOURS:
-                out["late_night_food"] += r["amount"]          # counted once, not in its food subcategory
-                continue
-            k = _key(r)
-            if k:
-                out[k] += r["amount"]
-        return {k: v * scale for k, v in out.items()}
-
     # the 11 months before the recent 30 days are the "normal"; the year as a whole is the baseline
     before = [r for r in year if date.fromisoformat(r["date"]) <= recent_from]
     recent = [r for r in year if date.fromisoformat(r["date"]) > recent_from]
-    base_m = areas_from(year, 1 / months)
-    normal_30 = areas_from(before, DAYS_PER_MONTH / max((recent_from - year_from).days, 1))
-    recent_30 = areas_from(recent, DAYS_PER_MONTH / 30)
+    base_m = areas(year, 1 / months)
+    normal_30 = areas(before, DAYS_PER_MONTH / max((recent_from - year_from).days, 1))
+    recent_30 = areas(recent, DAYS_PER_MONTH / 30)
 
     recs, flags = [], []
     for k, (title, cut, ease, tip) in REDUCE.items():
@@ -189,7 +192,7 @@ def build(db, user) -> dict:
         start = date.fromisoformat(plan["started"])
         since = [r for r in rows if date.fromisoformat(r["date"]) >= start]
         n_days = max((end - start).days + 1, 1)
-        actual = areas_from(since, DAYS_PER_MONTH / n_days)
+        actual = areas(since, DAYS_PER_MONTH / n_days)
         items = []
         for k, b in plan["baseline"].items():
             a = actual.get(k, 0.0)

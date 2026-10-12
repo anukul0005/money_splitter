@@ -282,6 +282,17 @@ def predict_now(db, user) -> dict:
         cat_out.append({"category": c, "model": mdl, **rng(_weekly(days, yc, out, mdl, kk))})
     cat_out.sort(key=lambda x: -x["likely"])
     typical_week = float(np.median([y[i:i + 7].sum() for i in range(max(0, t - 91), t - 6)]))
+    # The same 7-day model re-run as if it were each of the last 4 weeks -
+    # trained only on what came before that week - against what was spent:
+    # an honest predicted-vs-actual record from the first day.
+    checks = []
+    for k in range(4, 0, -1):
+        o = t - 7 * k
+        if o < 120:
+            continue
+        p = _weekly(days[:o], y[:o], out[:o], *PLAN["next_7_days"])
+        checks.append({"from": days[o].isoformat(), "to": days[o + 6].isoformat(), **rng(p),
+                       "actual": round(float(y[o:o + 7].sum()))})
     for c in cat_out:
         # A top end beyond two typical weeks of *all* spending isn't a range a
         # person can use: the page says so rather than drawing it.
@@ -294,6 +305,7 @@ def predict_now(db, user) -> dict:
                         "model": PLAN["next_7_days"][0], **rng(wk)},
         "categories": cat_out,
         "typical_week": round(typical_week),
+        "checks": checks,
         "coverage": 80,
     }
     _cache.clear()

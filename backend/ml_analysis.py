@@ -37,7 +37,7 @@ def _rows(db, user) -> tuple[list[dict], list[dict]]:
             continue
         h = hour_of(e.txn_time)
         period = time_period(h) if h is not None else (e.time_period or "Unknown")
-        base = {"date": e.date[:10], "month": e.date[:7], "hour": h, "time_period": period}
+        base = {"date": e.date[:10], "month": e.date[:7], "hour": h, "time_period": period, "title": e.title or ""}
         if len(groups[e.group_id].members) == 1:
             cat, sub = category_of(e)
             if not sub:

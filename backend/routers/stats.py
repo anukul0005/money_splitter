@@ -620,22 +620,37 @@ def _inr(v: float) -> str:
 
 
 @router.get("/predictions", response_model=dict)
-def get_predictions(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+def get_predictions(force: bool = False, db: Session = Depends(get_db), caller: User = Depends(current_user)):
     """Spending forecasts from the caller's personal spending - the next day,
     the next 7 days and the main categories, each a calibrated 80% range.
     See ml_predict.py. Forecasts start the day after the data ends."""
     import ml_predict
     try:
-        return ml_predict.predict_cached(db, caller)
+        return ml_predict.predict_cached(db, caller, force=force)
     except ValueError:
         raise HTTPException(400, "Not enough spending history to forecast yet")
 
 
 @router.get("/recommendations", response_model=dict)
-def get_recommendations(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+def get_recommendations(force: bool = False, db: Session = Depends(get_db), caller: User = Depends(current_user)):
     """Personalized savings recommendations - see ml_recommend.py."""
     import ml_recommend
-    return ml_recommend.cached(db, caller)
+    return ml_recommend.cached(db, caller, force=force)
+
+
+@router.get("/insights", response_model=dict)
+def get_insights(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """The spending insights dashboard, live - see ml_insights.py."""
+    import ml_insights
+    return ml_insights.build(db, caller)
+
+
+@router.get("/insights/version", response_model=dict)
+def get_insights_version(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Cheap check the dashboard polls: changes when expenses are added,
+    removed or their amounts edited."""
+    import ml_insights
+    return {"signature": ml_insights.signature(db, caller)}
 
 
 @router.post("/savings-plan", response_model=dict)
