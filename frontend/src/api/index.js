@@ -122,6 +122,8 @@ export const updateCard         = (id, data)  => api.put(`/credit-cards/cards/${
 export const deleteCard         = (id)        => api.delete(`/credit-cards/cards/${id}`)
 export const deleteCardBill     = (id)        => api.delete(`/credit-cards/bills/${id}`)
 export const fetchCardBills     = (months)    => api.post('/credit-cards/fetch', null, { params: { months } })
+export const recordCardPayment  = (id, data)  => api.post(`/credit-cards/bills/${id}/payments`, data)
+export const deleteCardPayment  = (id)        => api.delete(`/credit-cards/payments/${id}`)
 export const getScanProgress    = ()          => api.get('/credit-cards/scan/progress')
 // ── Push notifications ───────────────────────────────────────────────────────
 export const getVapidPublicKey  = ()         => api.get('/push/vapid-public-key')

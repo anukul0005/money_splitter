@@ -3,9 +3,10 @@ import {
   getGmailStatus, getGmailConnectUrl, disconnectGmail,
   listCardBanks, setCardBankPassword, deleteCardBank,
   getCardBankOptions, listCards, addCard, updateCard, deleteCard, deleteCardBill,
-  fetchCardBills, getScanProgress,
+  fetchCardBills, getScanProgress, recordCardPayment, deleteCardPayment,
 } from '../api'
 import Dropdown from './Dropdown'
+import DatePicker from './DatePicker'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
 const ord = (n) => `${n}${[11, 12, 13].includes(n % 100) ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th')}`
@@ -46,6 +47,107 @@ function CardForm({ banks, initial, onSave, onCancel, busy }) {
         {onCancel && <button type="button" onClick={onCancel} className="text-xs font-bold text-gray-500 px-3">Cancel</button>}
       </div>
     </form>
+  )
+}
+
+const today = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// One month's bill: amount, due date, where it came from, and the payments
+// recorded against it. Only the card's latest bill takes new payments
+// (bill.can_pay); older months show what was paid, read-only.
+function BillRow({ period, bill: b, result: r, busy, run }) {
+  const [paying, setPaying] = useState(false)
+  const [amount, setAmount] = useState('')
+  const [paidOn, setPaidOn] = useState(today())
+  const settled = b && b.total_due != null && b.remaining <= 0.01
+
+  const save = async (e) => {
+    e.preventDefault()
+    const amt = parseFloat(amount)
+    if (!amt || amt <= 0) return
+    if (await run(() => recordCardPayment(b.id, { amount: amt, paid_on: paidOn }))) {
+      setPaying(false); setAmount(''); setPaidOn(today())
+    }
+  }
+
+  return (
+    <div className="bg-amber-50/60 border border-amber-100 rounded-md px-3.5 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs font-bold text-gray-700">{monthName(period)}</span>
+        {b ? <span className="text-base font-black text-gray-900">{b.total_due != null ? INR(b.total_due) : '—'}</span>
+          : <span className="text-xs text-gray-400">{r?.status === 'not_found' ? 'Not found' : 'Not fetched yet'}</span>}
+      </div>
+
+      {!b && r?.why && <p className="text-[11px] text-gray-400 leading-relaxed mt-1.5">{r.why}</p>}
+
+      {b && (
+        <>
+          <p className="text-[11px] text-gray-600 mt-1.5 leading-relaxed">
+            {b.due_date ? `Due ${day(b.due_date)}` : 'Due date not in the email'}
+            {b.minimum_due != null ? ` · minimum ${INR(b.minimum_due)}` : ''}
+            {b.statement_date ? ` · billed ${day(b.statement_date)}` : ''}
+          </p>
+          <p className="text-[10.5px] text-gray-400 mt-1 truncate">
+            From {b.source === 'pdf' ? 'the PDF of ' : ''}“{b.email_subject || 'statement email'}”
+          </p>
+
+          {b.payments.length > 0 && (
+            <div className="mt-2.5 pt-2.5 border-t border-amber-100 space-y-1">
+              {b.payments.map((p) => (
+                <div key={p.id} className="flex items-center justify-between text-[11px]">
+                  <span className="text-gray-500">Paid {day(p.paid_on)}</span>
+                  <span className="flex items-center gap-2.5">
+                    <span className="font-bold text-green-700">{INR(p.amount)}</span>
+                    {b.can_pay && (
+                      <button onClick={() => confirm(`Remove the ${INR(p.amount)} payment?`) && run(() => deleteCardPayment(p.id))}
+                        className="text-gray-300 hover:text-red-500 font-bold" aria-label="Remove payment">×</button>
+                    )}
+                  </span>
+                </div>
+              ))}
+              {b.total_due != null && (
+                <p className={`text-[11px] font-bold pt-0.5 ${settled ? 'text-green-700' : 'text-red-600'}`}>
+                  {settled ? 'Paid in full ✓' : `${INR(b.remaining)} left to pay`}
+                </p>
+              )}
+            </div>
+          )}
+
+          {paying ? (
+            <form onSubmit={save} className="mt-3 space-y-2">
+              <div className="flex gap-2">
+                <input className="input text-sm flex-1 min-w-0" placeholder="Amount paid" inputMode="decimal" autoFocus
+                  value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ''))} />
+                <DatePicker value={paidOn} onChange={setPaidOn} className="flex-1" />
+              </div>
+              {b.remaining > 0 && (
+                <button type="button" onClick={() => setAmount(String(b.remaining))}
+                  className="text-[11px] font-bold text-brand-500">Pay in full ({INR(b.remaining)})</button>
+              )}
+              <div className="flex gap-2">
+                <button type="submit" disabled={busy || !parseFloat(amount)} className="btn-primary py-2 text-xs flex-1 disabled:opacity-50">
+                  {busy ? 'Saving…' : 'Save payment'}
+                </button>
+                <button type="button" onClick={() => setPaying(false)} className="text-xs font-bold text-gray-500 px-3">Cancel</button>
+              </div>
+            </form>
+          ) : (
+            <div className="flex items-center justify-between gap-3 mt-3">
+              <button onClick={() => setPaying(true)} disabled={!b.can_pay || settled}
+                title={b.can_pay ? '' : 'Past months are closed'}
+                className="flex-1 py-2 text-xs font-bold bg-amber-100 border border-amber-300 text-amber-800 rounded-md disabled:opacity-40 disabled:cursor-not-allowed">
+                {settled ? 'Paid in full' : b.can_pay ? 'Record payment' : 'Past month'}
+              </button>
+              <button onClick={() => confirm('Remove this bill? The next search looks for this month again.') && run(() => deleteCardBill(b.id))}
+                className="text-[11px] font-bold text-gray-400 hover:text-red-500 shrink-0">Wrong? Remove</button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
   )
 }
 
@@ -120,7 +222,7 @@ export default function CreditCards({ initialMsg = '' }) {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       {msg && <p className="text-xs text-green-700 bg-green-50 border border-green-100 rounded-md px-3 py-2">{msg}</p>}
       {error && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{error}</p>}
 
@@ -144,7 +246,7 @@ export default function CreditCards({ initialMsg = '' }) {
       </div>
 
       {/* Cards and their bills */}
-      <div className="card space-y-3">
+      <div className="card space-y-4">
         <div>
           <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Your cards</p>
           <p className="text-[11px] text-gray-400 mt-0.5">
@@ -157,53 +259,33 @@ export default function CreditCards({ initialMsg = '' }) {
         {cards?.length === 0 && !adding && <p className="text-xs text-gray-500">No cards yet - add your first one below.</p>}
 
         {cards?.map((c) => (
-          <div key={c.id} className="border border-amber-200 rounded-md px-3 py-2.5">
+          <div key={c.id} className="border border-amber-200 rounded-md px-4 py-4">
             {editing === c.id ? (
               <CardForm banks={bankOptions} busy={busy} onCancel={() => setEditing(null)}
                 initial={{ bank: c.bank, label: c.label || '', last4: c.last4 || '', bill_day: c.bill_day }}
                 onSave={(f) => saveCard(f, c.id)} />
             ) : (
               <>
-                <div className="flex items-start justify-between gap-2">
+                <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-sm font-bold text-gray-900">{c.bank}{c.label ? ` ${c.label}` : ''}{c.last4 ? ` •••• ${c.last4}` : ''}</p>
-                    <p className="text-[11px] text-gray-400">Bill on the {ord(c.bill_day)} · next {day(c.next_bill)}</p>
+                    <p className="text-[15px] font-bold text-gray-900 leading-snug">
+                      {c.bank}{c.label ? ` ${c.label}` : ''}
+                    </p>
+                    <p className="text-[11px] text-gray-400 mt-1">
+                      {c.last4 ? `•••• ${c.last4} · ` : ''}Bill on the {ord(c.bill_day)} · next {day(c.next_bill)}
+                    </p>
                   </div>
-                  <div className="flex gap-3 shrink-0 text-[11px] font-bold">
+                  <div className="flex gap-3.5 shrink-0 text-[11px] font-bold pt-0.5">
                     <button onClick={() => setEditing(c.id)} className="text-gray-400 hover:text-brand-500">Edit</button>
                     <button onClick={() => confirm(`Remove ${c.bank}${c.last4 ? ` •••• ${c.last4}` : ''} and its saved bills?`) && run(() => deleteCard(c.id))}
                       className="text-gray-400 hover:text-red-500">Remove</button>
                   </div>
                 </div>
-                <div className="mt-2 space-y-1.5">
-                  {lastPeriods(c.last_bill, MONTHS_BACK).map((period) => {
-                    const b = c.bills.find((x) => x.period === period)
-                    const r = results[`${c.id}:${period}`]
-                    return (
-                      <div key={period} className="bg-amber-50/60 border border-amber-100 rounded-md px-2.5 py-1.5">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-[11px] font-bold text-gray-600">{monthName(period)}</span>
-                          {b ? <span className="text-sm font-black text-gray-900">{b.total_due != null ? INR(b.total_due) : '—'}</span>
-                            : <span className="text-[11px] text-gray-400">{r?.status === 'not_found' ? 'Not found' : 'Not fetched yet'}</span>}
-                        </div>
-                        {b && (
-                          <>
-                            <p className="text-[10px] text-gray-500">
-                              {b.due_date ? `Due ${day(b.due_date)}` : 'Due date not in the email'}
-                              {b.minimum_due != null ? ` · minimum ${INR(b.minimum_due)}` : ''}
-                              {b.statement_date ? ` · billed ${day(b.statement_date)}` : ''}
-                            </p>
-                            <p className="text-[10px] text-gray-400 truncate">
-                              From {b.source === 'pdf' ? 'the PDF of' : ''} “{b.email_subject || 'statement email'}” ·{' '}
-                              <button onClick={() => confirm('Remove this bill? The next search looks for this month again.') && run(() => deleteCardBill(b.id))}
-                                className="font-bold text-gray-400 hover:text-red-500">Wrong? Remove</button>
-                            </p>
-                          </>
-                        )}
-                        {!b && r?.why && <p className="text-[10px] text-gray-400 leading-snug">{r.why}</p>}
-                      </div>
-                    )
-                  })}
+                <div className="mt-3.5 space-y-3">
+                  {lastPeriods(c.last_bill, MONTHS_BACK).map((period) => (
+                    <BillRow key={period} period={period} busy={busy} run={run}
+                      bill={c.bills.find((x) => x.period === period)} result={results[`${c.id}:${period}`]} />
+                  ))}
                 </div>
               </>
             )}

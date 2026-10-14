@@ -841,6 +841,20 @@ class CreditCard(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class CardPayment(Base):
+    """A payment (full or part) the user recorded against one card bill."""
+
+    __tablename__ = "card_payments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    statement_id = Column(Integer, ForeignKey("credit_card_statements.id", ondelete="CASCADE"),
+                          nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    amount = Column(Float, nullable=False)
+    paid_on = Column(String(10), nullable=False)         # YYYY-MM-DD
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class CreditCardStatement(Base):
     """One month's bill, extracted from one email's PDF attachment.
 
