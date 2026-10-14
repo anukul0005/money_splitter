@@ -127,6 +127,9 @@ export const deleteCardPayment  = (id)        => api.delete(`/credit-cards/payme
 export const getCardBillDetails = (id)        => api.get(`/credit-cards/bills/${id}/details`)
 export const readCardBillDetails = (id)       => api.post(`/credit-cards/bills/${id}/details`)
 export const fetchCardMonth     = (id, period) => api.post(`/credit-cards/cards/${id}/fetch-month`, null, { params: { period } })
+export const getCardPassword    = (id)        => api.get(`/credit-cards/cards/${id}/password`)
+export const setCardPassword    = (id, password) => api.put(`/credit-cards/cards/${id}/password`, { password })
+export const revealBankPassword = (bank)      => api.get(`/credit-cards/banks/${encodeURIComponent(bank)}/password`)
 export const getScanProgress    = ()          => api.get('/credit-cards/scan/progress')
 // ── Push notifications ───────────────────────────────────────────────────────
 export const getVapidPublicKey  = ()         => api.get('/push/vapid-public-key')

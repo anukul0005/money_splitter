@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { getCardBillDetails, readCardBillDetails, listCards, fetchCardMonth } from '../api'
+import {
+  getCardBillDetails, readCardBillDetails, listCards, fetchCardMonth,
+  getCardPassword, setCardPassword, listCardBanks, setCardBankPassword, deleteCardBank, revealBankPassword,
+} from '../api'
 import Dropdown from '../components/Dropdown'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
@@ -76,6 +79,9 @@ function BillBreakup({ billId: id }) {
     <div>
       <div className="space-y-3">
         <p className="text-sm text-red-600">{d.error}</p>
+        {/password/i.test(d.error || '') && (
+          <p className="text-[11px] text-gray-500">Set this card's PDF password in the section below, then try again.</p>
+        )}
         <button onClick={readAgain} className="btn-primary py-2.5 text-xs w-full">Try again</button>
       </div>
     </div>
@@ -234,6 +240,90 @@ function BillBreakup({ billId: id }) {
   )
 }
 
+// One saved password: hidden until "Show" (fetched then, never kept in
+// the card list), editable in place, removable.
+function PasswordRow({ name, reveal, save, remove, empty }) {
+  const [shown, setShown] = useState(null)       // the password, while shown
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const act = async (fn) => {
+    setBusy(true); setErr('')
+    try { await fn() } catch (e) { setErr(e.response?.data?.detail || 'Something went wrong.') } finally { setBusy(false) }
+  }
+  const toggleShow = () => (shown != null ? setShown(null) : act(async () => setShown((await reveal()) || '')))
+  return (
+    <div className="py-2 border-b border-amber-100 last:border-0">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-bold text-gray-800 truncate">{name}</p>
+          {!editing && (
+            <p className="text-xs text-gray-500 mt-0.5 font-mono break-all">
+              {empty ? <span className="font-sans text-gray-400">No password set</span> : shown != null ? (shown || '(empty)') : '••••••••'}
+            </p>
+          )}
+        </div>
+        {!editing && (
+          <div className="flex gap-3 shrink-0 text-[11px] font-bold">
+            {!empty && <button onClick={toggleShow} disabled={busy} className="text-gray-400 hover:text-brand-500">{shown != null ? 'Hide' : 'Show'}</button>}
+            <button onClick={() => { setEditing(true); setValue(shown || ''); setShown(null) }} className="text-gray-400 hover:text-brand-500">
+              {empty ? 'Set' : 'Edit'}
+            </button>
+            {!empty && remove && (
+              <button onClick={() => confirm(`Remove the saved password for ${name}?`) && act(remove)} disabled={busy}
+                className="text-gray-400 hover:text-red-500">Remove</button>
+            )}
+          </div>
+        )}
+      </div>
+      {editing && (
+        <form className="flex gap-2 mt-2" onSubmit={(e) => { e.preventDefault(); act(async () => { await save(value); setEditing(false) }) }}>
+          <input className="input text-sm flex-1 min-w-0" value={value} onChange={(e) => setValue(e.target.value)} autoFocus
+            placeholder="PDF password" autoComplete="off" autoCapitalize="none" spellCheck={false} name="statement-pdf-password" />
+          <button type="submit" disabled={busy || !value} className="btn-primary text-xs py-2 px-3 w-auto disabled:opacity-50">Save</button>
+          <button type="button" onClick={() => setEditing(false)} className="text-xs font-bold text-gray-500 px-1">Cancel</button>
+        </form>
+      )}
+      {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
+    </div>
+  )
+}
+
+/**
+ * The passwords that open statement PDFs: this card's own (tried first),
+ * and the older ones saved by bank name, which are still tried on every
+ * card. Shown only on request; the server decrypts for the owner alone.
+ */
+function PasswordsPanel({ card, onChanged }) {
+  const [others, setOthers] = useState([])
+  const loadOthers = () => listCardBanks().then((r) => setOthers(r.data)).catch(() => {})
+  useEffect(() => { loadOthers() }, [])
+  return (
+    <div className="card space-y-1">
+      <Label>Statement PDF password</Label>
+      <p className="text-[11px] text-gray-400 leading-relaxed">
+        Opens this card's statement PDF for the breakup. Usually a fixed formula from the bank - e.g. part of your name and date of birth.
+      </p>
+      <PasswordRow name={`This card${card.last4 ? ` (•••• ${card.last4})` : ''}`} empty={!card.has_password}
+        reveal={async () => (await getCardPassword(card.id)).data.password}
+        save={async (v) => { await setCardPassword(card.id, v); onChanged() }}
+        remove={async () => { await setCardPassword(card.id, ''); onChanged() }} />
+      {others.length > 0 && (
+        <>
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pt-3">Saved earlier · tried on every card</p>
+          {others.map((b) => (
+            <PasswordRow key={b.bank} name={b.bank}
+              reveal={async () => (await revealBankPassword(b.bank)).data.password}
+              save={async (v) => { await setCardBankPassword({ bank: b.bank, password: v }); loadOthers() }}
+              remove={async () => { await deleteCardBank(b.bank); loadOthers() }} />
+          ))}
+        </>
+      )}
+    </div>
+  )
+}
+
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 const pad = (n) => String(n).padStart(2, '0')
 
@@ -341,6 +431,8 @@ export default function CardPage() {
             </button>
           </div>
         )}
+
+        {card && <div className="mt-4"><PasswordsPanel card={card} onChanged={load} /></div>}
       </div>
     </div>
   )

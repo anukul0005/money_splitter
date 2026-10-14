@@ -203,6 +203,7 @@ _ADDED_COLUMNS = [
     ("credit_card_statements", "email_from", "VARCHAR(200)"),
     ("credit_card_statements", "source", "VARCHAR(10)"),
     ("credit_card_statements", "details_json", "TEXT"),
+    ("credit_cards", "pdf_password_encrypted", "TEXT"),
 ]
 
 # (index name, statement)

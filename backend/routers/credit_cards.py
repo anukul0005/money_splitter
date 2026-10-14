@@ -54,6 +54,16 @@ def set_bank_password(payload: SetBankPassword, db: Session = Depends(get_db),
     return {"bank": bank, "saved": True}
 
 
+@router.get("/banks/{bank}/password", response_model=dict)
+def reveal_bank_password(bank: str, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """The caller's own saved password, decrypted - only when they tap Show."""
+    row = (db.query(BankPassword)
+           .filter(BankPassword.user_id == caller.id, BankPassword.bank.ilike(bank)).first())
+    if not row:
+        raise HTTPException(404, "No saved password by that name")
+    return {"bank": row.bank, "password": secret_box.decrypt(row.password_encrypted)}
+
+
 @router.delete("/banks/{bank}", status_code=204)
 def delete_bank_password(bank: str, db: Session = Depends(get_db),
                          caller: User = Depends(current_user)):
@@ -124,6 +134,7 @@ def list_cards(db: Session = Depends(get_db), caller: User = Depends(current_use
         last = card_bills.recent_bill_dates(c.bill_day, today, 1)[0]
         y, m = (last.year, last.month + 1) if last.month < 12 else (last.year + 1, 1)
         out.append({"id": c.id, "bank": c.bank, "label": c.label, "last4": c.last4, "bill_day": c.bill_day,
+                    "has_password": bool(c.pdf_password_encrypted),
                     "name": card_bills.card_name(c), "last_bill": last.isoformat(),
                     "next_bill": card_bills.bill_date(c.bill_day, y, m).isoformat(),
                     "bills": [_bill_out(b, pays.get(b.id, []), i == 0) for i, b in enumerate(bills)]})
@@ -149,6 +160,29 @@ def update_card(card_id: int, payload: CardIn, db: Session = Depends(get_db), ca
         setattr(card, k, v)
     db.commit()
     return {"id": card.id}
+
+
+class CardPasswordIn(BaseModel):
+    password: str | None = None
+
+
+@router.get("/cards/{card_id}/password", response_model=dict)
+def reveal_card_password(card_id: int, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """This card's own PDF password, decrypted - only when the owner taps Show."""
+    card = _own_card(db, card_id, caller)
+    return {"password": secret_box.decrypt(card.pdf_password_encrypted) if card.pdf_password_encrypted else None}
+
+
+@router.put("/cards/{card_id}/password", response_model=dict)
+def set_card_password(card_id: int, payload: CardPasswordIn, db: Session = Depends(get_db),
+                      caller: User = Depends(current_user)):
+    """Set or change this card's PDF password; empty removes it. A breakup
+    that failed for want of it can then be read again."""
+    card = _own_card(db, card_id, caller)
+    pw = payload.password or ""
+    card.pdf_password_encrypted = secret_box.encrypt(pw) if pw else None
+    db.commit()
+    return {"has_password": bool(pw)}
 
 
 @router.delete("/cards/{card_id}", status_code=204)

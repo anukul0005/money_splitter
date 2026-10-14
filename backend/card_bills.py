@@ -211,6 +211,13 @@ def gmail_for(db, user_id: int):
     return _gmail_service(conn), passwords
 
 
+def passwords_for(card, passwords: list[str]) -> list[str]:
+    """The card's own PDF password first, then every older saved one."""
+    import secret_box
+    own = secret_box.decrypt(card.pdf_password_encrypted) if card.pdf_password_encrypted else None
+    return ([own] if own else []) + [p for p in passwords if p != own]
+
+
 def fetch_one(db, user_id: int, card, d: date, service, passwords: list[str]) -> dict:
     """One card's bill for the bill date `d`: the saved one, or found in
     Gmail and saved. {"status": "already_saved"|"found"|"not_found", ...}"""
@@ -222,7 +229,7 @@ def fetch_one(db, user_id: int, card, d: date, service, passwords: list[str]) ->
     if have:
         return {**row, "status": "already_saved", "bill_id": have.id, "total_due": have.total_due}
     try:
-        r = find_bill(service, card, d, passwords)
+        r = find_bill(service, card, d, passwords_for(card, passwords))
     except Exception as e:
         r = {"status": "not_found", "why": f"Gmail search failed ({str(e)[:100]})"}
     if r["status"] == "found" and db.query(CreditCardStatement).filter(

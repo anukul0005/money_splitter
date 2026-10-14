@@ -838,6 +838,9 @@ class CreditCard(Base):
     label = Column(String(60), nullable=True)           # e.g. "Amazon Pay"
     last4 = Column(String(4), nullable=True)
     bill_day = Column(Integer, nullable=False)          # 1-31; past a short month's end = its last day
+    # This card's statement PDF password, encrypted (secret_box) - tried
+    # first on its PDFs, before the older per-bank BankPassword entries.
+    pdf_password_encrypted = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

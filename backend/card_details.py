@@ -221,6 +221,11 @@ def _run(user_id: int, bill_id: int) -> None:
         _step(bill_id, "Unlocking the PDF…")
         passwords = [p for p in (secret_box.decrypt(b.password_encrypted) for b in
                                  db.query(BankPassword).filter(BankPassword.user_id == user_id)) if p]
+        from models import CreditCard
+        card = db.get(CreditCard, bill.card_id) if bill.card_id else None
+        if card:
+            from card_bills import passwords_for
+            passwords = passwords_for(card, passwords)
         text = _extract_pdf_text(pdf, passwords)
         if not text or len(text.strip()) < 100:
             raise RuntimeError("The PDF couldn't be opened with the saved passwords")
