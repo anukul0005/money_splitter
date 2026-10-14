@@ -69,6 +69,35 @@ def start_sync(user_id: int, after: str | None = None, before: str | None = None
     threading.Thread(target=_run, daemon=True).start()
 
 
+def start_card_fetch(user_id: int, months: int, today) -> None:
+    """card_bills.fetch_for_user in a background thread - see
+    routers/credit_cards.py's /fetch; the page polls /scan/progress."""
+    if get_progress(user_id).get("status") == "running":
+        raise RuntimeError("A search is already running")
+    from database import get_session_factory
+    import card_bills
+    session_factory = get_session_factory()
+    _set_progress(user_id, status="running", total=0, done=0, found=0, skipped=0, failed=0,
+                  error=None, results=[])
+
+    def _run():
+        db = session_factory()
+        try:
+            card_bills.fetch_for_user(db, user_id, months, today, lambda **f: _set_progress(user_id, **f))
+            conn = db.query(GmailConnection).filter(GmailConnection.user_id == user_id).first()
+            if conn:
+                conn.last_synced_at = datetime.now(timezone.utc)
+                db.commit()
+            _set_progress(user_id, status="done")
+        except Exception as e:
+            print(f"[card_bills] fetch failed for user {user_id}: {e}")
+            _set_progress(user_id, status="error", error=str(e))
+        finally:
+            db.close()
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
 # Broad on purpose: real statement subjects vary a lot bank to bank
 # ("Your Credit Card Statement", "e-Statement for card ending 1234",
 # "Monthly Statement"...), so this narrows by attachment + a couple of

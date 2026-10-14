@@ -1,30 +1,24 @@
-"""Credit Cards: bank statement passwords, and the extracted bills those
-passwords unlock. Lives alongside /loans as its own section of the same
-page - see statement_sync.py for the actual Gmail scan + extraction.
+"""Credit Cards: the user's cards (bank, last 4, the day the bill is
+generated), bank statement passwords, and each card's bills read from
+Gmail on those days - see card_bills.py. Lives alongside /loans as its own
+section of the same page.
 """
 from __future__ import annotations
 
-import re
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+import card_bills
 import secret_box
 import statement_sync
 from auth import current_user
 from database import get_db
-from models import BankPassword, CreditCardStatement, GmailConnection, User
+from models import BankPassword, CreditCard, CreditCardStatement, GmailConnection, User
 
 router = APIRouter(prefix="/credit-cards", tags=["credit-cards"])
-
-_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-
-
-def _valid_date(value: str | None) -> str | None:
-    if value and not _DATE_RE.match(value):
-        raise HTTPException(400, "Dates must be in YYYY-MM-DD form")
-    return value
 
 
 class SetBankPassword(BaseModel):
@@ -73,53 +67,113 @@ def delete_bank_password(bank: str, db: Session = Depends(get_db),
         db.commit()
 
 
-@router.get("/statements", response_model=list[dict])
-def list_statements(db: Session = Depends(get_db), caller: User = Depends(current_user)):
-    rows = (
-        db.query(CreditCardStatement)
-        .filter(CreditCardStatement.user_id == caller.id)
-        .order_by(CreditCardStatement.due_date.desc().nullslast(),
-                  CreditCardStatement.extracted_at.desc())
-        .all()
-    )
-    return [
-        {
-            "id": r.id,
-            "bank": r.bank,
-            "card_last4": r.card_last4,
-            "statement_date": r.statement_date,
-            "due_date": r.due_date,
-            "total_due": r.total_due,
-            "minimum_due": r.minimum_due,
-            "extracted_at": r.extracted_at,
-        }
-        for r in rows
-    ]
+# ── cards and their bills ─────────────────────────────────────────────────
+class CardIn(BaseModel):
+    bank: str
+    label: str | None = None
+    last4: str | None = None
+    bill_day: int
 
 
-@router.post("/scan", response_model=dict, status_code=202)
-def scan(after: str | None = None, before: str | None = None,
-        db: Session = Depends(get_db), caller: User = Depends(current_user)):
-    """Kicks off a scan in the background and returns immediately - a real
-    scan (Gmail search + PDF unlock + an LLM call per email) can take well
-    over the length of one HTTP request. The frontend polls /scan/progress
-    for what's happening instead of blocking on this call.
+def _clean_card(payload: CardIn) -> dict:
+    if payload.bank not in card_bills.BANKS:
+        raise HTTPException(400, "Pick a bank from the list")
+    if not 1 <= payload.bill_day <= 31:
+        raise HTTPException(400, "Bill day must be between 1 and 31")
+    last4 = (payload.last4 or "").strip() or None
+    if last4 and not (len(last4) == 4 and last4.isdigit()):
+        raise HTTPException(400, "Last 4 digits must be 4 numbers")
+    return {"bank": payload.bank, "label": (payload.label or "").strip()[:60] or None,
+            "last4": last4, "bill_day": payload.bill_day}
 
-    `after`/`before` (YYYY-MM-DD) narrow the Gmail search to a date window -
-    each bank bills on its own predictable few days of the month, so a
-    person who knows those days can search just that window instead of
-    scanning everything. Leaving both blank falls back to the last 9 months.
 
-    The obvious, immediate failures (not connected, no bank passwords) are
-    still checked synchronously here so they show up as a normal error
-    right away rather than only in the progress poll."""
-    after, before = _valid_date(after), _valid_date(before)
+def _bill_out(r: CreditCardStatement) -> dict:
+    return {"id": r.id, "card_id": r.card_id, "period": r.period, "bank": r.bank, "card_last4": r.card_last4,
+            "statement_date": r.statement_date, "due_date": r.due_date, "total_due": r.total_due,
+            "minimum_due": r.minimum_due, "email_subject": r.email_subject, "source": r.source,
+            "extracted_at": r.extracted_at}
+
+
+def _own_card(db: Session, card_id: int, caller: User) -> CreditCard:
+    card = db.query(CreditCard).filter(CreditCard.id == card_id, CreditCard.user_id == caller.id).first()
+    if not card:
+        raise HTTPException(404, "Card not found")
+    return card
+
+
+@router.get("/bank-options", response_model=list[str])
+def bank_options(caller: User = Depends(current_user)):
+    return list(card_bills.BANKS)
+
+
+@router.get("/cards", response_model=list[dict])
+def list_cards(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Each card with its saved bills (newest month first) and next bill date."""
+    today = date.today()
+    out = []
+    for c in db.query(CreditCard).filter(CreditCard.user_id == caller.id).order_by(CreditCard.bill_day, CreditCard.id):
+        bills = (db.query(CreditCardStatement).filter(CreditCardStatement.card_id == c.id)
+                 .order_by(CreditCardStatement.period.desc()).all())
+        last = card_bills.recent_bill_dates(c.bill_day, today, 1)[0]
+        y, m = (last.year, last.month + 1) if last.month < 12 else (last.year + 1, 1)
+        out.append({"id": c.id, "bank": c.bank, "label": c.label, "last4": c.last4, "bill_day": c.bill_day,
+                    "name": card_bills.card_name(c), "last_bill": last.isoformat(),
+                    "next_bill": card_bills.bill_date(c.bill_day, y, m).isoformat(),
+                    "bills": [_bill_out(b) for b in bills]})
+    return out
+
+
+@router.post("/cards", response_model=dict, status_code=201)
+def add_card(payload: CardIn, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    card = CreditCard(user_id=caller.id, **_clean_card(payload))
+    db.add(card)
+    db.commit()
+    return {"id": card.id}
+
+
+@router.put("/cards/{card_id}", response_model=dict)
+def update_card(card_id: int, payload: CardIn, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    card = _own_card(db, card_id, caller)
+    fields = _clean_card(payload)
+    if (fields["bill_day"], fields["bank"], fields["last4"]) != (card.bill_day, card.bank, card.last4):
+        # Found on the old day / bank / card - fetch again with the new one.
+        db.query(CreditCardStatement).filter(CreditCardStatement.card_id == card.id).delete()
+    for k, v in fields.items():
+        setattr(card, k, v)
+    db.commit()
+    return {"id": card.id}
+
+
+@router.delete("/cards/{card_id}", status_code=204)
+def delete_card(card_id: int, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    card = _own_card(db, card_id, caller)
+    db.query(CreditCardStatement).filter(CreditCardStatement.card_id == card.id).delete()
+    db.delete(card)
+    db.commit()
+
+
+@router.delete("/bills/{bill_id}", status_code=204)
+def delete_bill(bill_id: int, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """A wrong bill - removing it lets the next fetch look for that month again."""
+    row = db.query(CreditCardStatement).filter(CreditCardStatement.id == bill_id,
+                                               CreditCardStatement.user_id == caller.id).first()
+    if row:
+        db.delete(row)
+        db.commit()
+
+
+@router.post("/fetch", response_model=dict, status_code=202)
+def fetch(months: int = 2, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Each card's last `months` bills from Gmail, in the background - the
+    page polls /scan/progress. Months already saved are skipped."""
+    if not 1 <= months <= 12:
+        raise HTTPException(400, "Months must be 1-12")
     if not db.query(GmailConnection).filter(GmailConnection.user_id == caller.id).first():
         raise HTTPException(400, "Gmail isn't connected for this account")
-    if not db.query(BankPassword).filter(BankPassword.user_id == caller.id).first():
-        raise HTTPException(400, "Add at least one bank's password before scanning")
+    if not db.query(CreditCard).filter(CreditCard.user_id == caller.id).first():
+        raise HTTPException(400, "Add your cards and their bill dates first")
     try:
-        statement_sync.start_sync(caller.id, after=after, before=before)
+        statement_sync.start_card_fetch(caller.id, months, date.today())
     except RuntimeError as e:
         raise HTTPException(409, str(e))
     return {"started": True}

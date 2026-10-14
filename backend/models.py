@@ -824,6 +824,23 @@ class PaymentClaim(Base):
     resolved_at = Column(DateTime(timezone=True), nullable=True)
 
 
+class CreditCard(Base):
+    """One credit card the user has, and the day of the month its bill is
+    generated - which is what makes finding the bill reliable: the Gmail
+    search is narrowed to that bank's emails from that day to a week after
+    (see card_bills.py), instead of every PDF that says "statement"."""
+
+    __tablename__ = "credit_cards"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    bank = Column(String(100), nullable=False)          # a card_bills.BANKS key
+    label = Column(String(60), nullable=True)           # e.g. "Amazon Pay"
+    last4 = Column(String(4), nullable=True)
+    bill_day = Column(Integer, nullable=False)          # 1-31; past a short month's end = its last day
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class CreditCardStatement(Base):
     """One month's bill, extracted from one email's PDF attachment.
 
@@ -846,4 +863,9 @@ class CreditCardStatement(Base):
     minimum_due = Column(Float, nullable=True)
     gmail_message_id = Column(String(100), nullable=False, unique=True, index=True)
     raw_extract = Column(Text, nullable=True)   # the LLM's full JSON answer
+    card_id = Column(Integer, ForeignKey("credit_cards.id", ondelete="CASCADE"), nullable=True, index=True)
+    period = Column(String(7), nullable=True)            # "YYYY-MM" of the bill date - one per card per month
+    email_subject = Column(String(300), nullable=True)
+    email_from = Column(String(200), nullable=True)
+    source = Column(String(10), nullable=True)           # "email" (amount in the email) | "pdf"
     extracted_at = Column(DateTime(timezone=True), server_default=func.now())

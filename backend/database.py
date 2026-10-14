@@ -197,6 +197,11 @@ _ADDED_COLUMNS = [
     ("users", "recs_json", "TEXT"),
     ("users", "recs_basis", "INTEGER"),
     ("users", "savings_plan_json", "TEXT"),
+    ("credit_card_statements", "card_id", "INTEGER REFERENCES credit_cards(id) ON DELETE CASCADE"),
+    ("credit_card_statements", "period", "VARCHAR(7)"),
+    ("credit_card_statements", "email_subject", "VARCHAR(300)"),
+    ("credit_card_statements", "email_from", "VARCHAR(200)"),
+    ("credit_card_statements", "source", "VARCHAR(10)"),
 ]
 
 # (index name, statement)

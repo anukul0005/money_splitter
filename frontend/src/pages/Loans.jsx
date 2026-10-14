@@ -3,9 +3,6 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   getLoans, createLoan, repayLoan, deleteLoan,
   createBill, stopBill, repayBill, updateBillDay, getFriends,
-  getGmailStatus, getGmailConnectUrl, disconnectGmail,
-  listCardBanks, setCardBankPassword, deleteCardBank,
-  listCardStatements, scanCardStatements, getScanProgress,
   listUpiIdsFor, createPaymentClaim,
 } from '../api'
 import { MONEY_CHANGED } from '../components/PaymentClaimsInbox'
@@ -14,48 +11,12 @@ import PeoplePicker from '../components/PeoplePicker'
 import Dropdown from '../components/Dropdown'
 import DatePicker from '../components/DatePicker'
 import PayViaUpi from '../components/PayViaUpi'
+import CreditCards from '../components/CreditCards'
 import { useUser } from '../UserContext'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
 const same = (a, b) => (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase()
 
-const pad2 = (n) => String(n).padStart(2, '0')
-
-// "YYYY-MM" for the current month, and the 11 before it - current one
-// first, so the picker defaults to it.
-const recentMonths = (count = 12) => {
-  const now = new Date()
-  const out = []
-  for (let i = 0; i < count; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-    out.push({
-      value: `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`,
-      label: d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }),
-    })
-  }
-  return out
-}
-
-// Each bank bills on its own predictable few days of the month - searching
-// just that window (with a couple of days' cushion either side, since the
-// email doesn't always land the same day the bill was cut) finds a bill far
-// faster than scanning everything back 9 months. `monthValue` is "YYYY-MM",
-// so the same presets work for "last month's ICICI bill" too, not just this
-// month's.
-const bankDatePresets = (monthValue) => {
-  const [y, m1] = monthValue.split('-').map(Number)
-  const y0 = y, m = m1 - 1
-  const fmt = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
-  const range = (startDay, endDay, cushion = 2) => ({
-    from: fmt(new Date(y0, m, startDay - cushion)),
-    to: fmt(new Date(y0, m, endDay + cushion)),
-  })
-  return [
-    { label: 'ICICI (~6th)', ...range(6, 6) },
-    { label: 'Kotak / SBI / Axis (20-22)', ...range(20, 22) },
-    { label: 'Jupiter (15-16)', ...range(15, 16) },
-  ]
-}
 
 /**
  * /loans — money lent and borrowed outside any group, and shared bills
@@ -73,30 +34,6 @@ export default function Loans() {
   const [error, setError]     = useState('')
   const [showForm, setShowForm] = useState(false)
 
-  // ── Credit Cards (Gmail-connected statement scanning) ──
-  const [gmail, setGmail]           = useState(null)   // { connected, gmail_address, ... }
-  const [banks, setBanks]           = useState([])
-  const [statements, setStatements] = useState([])
-  const [bankName, setBankName]     = useState('')
-  const [bankPw, setBankPw]         = useState('')
-  const [cardBusy, setCardBusy]     = useState(false)
-  const [cardProgress, setCardProgress] = useState(null)   // { status, total, done, found, skipped, failed, error }
-  const [cardFrom, setCardFrom]     = useState('')
-  const [cardTo, setCardTo]         = useState('')
-  const [cardMonth, setCardMonth]   = useState(recentMonths(1)[0].value)
-  const [cardError, setCardError]   = useState('')
-  const [cardMsg, setCardMsg]       = useState(
-    params.get('gmail') === 'connected' ? 'Gmail connected.'
-      : params.get('gmail') === 'error' ? `Couldn't connect Gmail (${params.get('reason') || 'unknown error'}).`
-      : ''
-  )
-
-  const loadCards = () => {
-    getGmailStatus().then((r) => setGmail(r.data)).catch(() => {})
-    listCardBanks().then((r) => setBanks(r.data)).catch(() => {})
-    listCardStatements().then((r) => setStatements(r.data)).catch(() => {})
-  }
-
   const blankLoan = { role: 'lent', other: '', amount: '', start_date: '', due_date: '', interest: false, note: '',
                       emi: false, emiCount: 3, emiFirst: '', emiRows: [] }
   const [loan, setLoan] = useState(blankLoan)
@@ -106,7 +43,6 @@ export default function Loans() {
 
   useEffect(() => {
     load()
-    loadCards()
     getFriends().then((r) => setPeople(r.data.map((f) => f.name))).catch(() => {})
     // The query string only matters for the one redirect back from Google -
     // clearing it keeps a later manual refresh from re-showing "Gmail
@@ -119,68 +55,6 @@ export default function Loans() {
     window.addEventListener(MONEY_CHANGED, onChanged)
     return () => window.removeEventListener(MONEY_CHANGED, onChanged)
   }, [])
-
-  const connectGmail = async () => {
-    setCardError('')
-    try {
-      const r = await getGmailConnectUrl()
-      window.location.href = r.data.url
-    } catch (e) {
-      setCardError(e.response?.data?.detail || 'Could not start Gmail connect.')
-    }
-  }
-
-  const runCards = async (fn) => {
-    setCardError(''); setCardBusy(true)
-    try { await fn(); loadCards() }
-    catch (e) { setCardError(e.response?.data?.detail || 'Something went wrong.') }
-    finally { setCardBusy(false) }
-  }
-
-  const addBank = (e) => {
-    e.preventDefault()
-    if (!bankName.trim() || !bankPw) return setCardError('Bank name and password are required.')
-    runCards(() => setCardBankPassword({ bank: bankName.trim(), password: bankPw }))
-    setBankName(''); setBankPw('')
-  }
-
-  // A real scan (Gmail search + unlocking each PDF + an LLM call per email)
-  // can run well past a single request's lifetime, so /credit-cards/scan
-  // just starts it in the background and this polls /scan/progress for
-  // what's happening, instead of the button sitting on "Scanning…" with no
-  // sense of whether it's stuck or on email 1 of 20.
-  const doScan = async () => {
-    setCardError(''); setCardMsg(''); setCardBusy(true); setCardProgress(null)
-    try {
-      await scanCardStatements(cardFrom, cardTo)
-    } catch (e) {
-      setCardError(e.response?.data?.detail || 'Could not scan Gmail.')
-      setCardBusy(false)
-      return
-    }
-
-    let p
-    do {
-      await new Promise((r) => setTimeout(r, 900))
-      try { p = (await getScanProgress()).data }
-      catch { p = { status: 'error', error: 'Lost track of the scan - check again in a moment.' } }
-      setCardProgress(p)
-    } while (p.status === 'running')
-
-    if (p.status === 'error') {
-      setCardError(p.error || 'Could not scan Gmail.')
-    } else {
-      const { total = 0, found = 0, skipped = 0, failed = 0 } = p
-      setCardMsg(
-        found > 0
-          ? `Found ${found} new statement${found === 1 ? '' : 's'} (checked ${total} email${total === 1 ? '' : 's'}).`
-          : `No new statements (checked ${total}, ${skipped} already known, ${failed} couldn't be read).`
-      )
-    }
-    setCardProgress(null)
-    setCardBusy(false)
-    loadCards()
-  }
 
   const run = async (fn) => {
     setError('')
@@ -628,164 +502,11 @@ export default function Loans() {
 
         {/* ── Credit Cards ── */}
         {tab === 'cards' && (
-          <div className="space-y-3">
-            {cardMsg && <p className="text-xs text-green-700 bg-green-50 border border-green-100 rounded-md px-3 py-2">{cardMsg}</p>}
-            {cardError && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{cardError}</p>}
-
-            {/* Gmail connection */}
-            <div className="card space-y-2">
-              <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Gmail</p>
-              {gmail?.connected ? (
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="text-sm font-bold text-gray-900 truncate">{gmail.gmail_address}</p>
-                    <p className="text-[11px] text-gray-400 mt-0.5">
-                      {gmail.last_synced_at ? `Last scanned ${new Date(gmail.last_synced_at).toLocaleString('en-IN')}` : 'Never scanned yet'}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => confirm('Disconnect Gmail? Statements already found stay saved.') && runCards(() => disconnectGmail())}
-                    className="text-xs font-bold text-gray-400 hover:text-red-500 shrink-0"
-                  >
-                    Disconnect
-                  </button>
-                </div>
-              ) : (
-                <button onClick={connectGmail} disabled={cardBusy} className="btn-primary py-2.5 text-xs w-full">
-                  Connect Gmail
-                </button>
-              )}
-            </div>
-
-            {/* Bank passwords */}
-            <div className="card space-y-2">
-              <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Bank statement passwords</p>
-              <p className="text-[11px] text-gray-400">
-                The password that opens each bank's statement PDF - entered once, reused every month.
-              </p>
-              {banks.length > 0 && (
-                <div className="space-y-1">
-                  {banks.map((b) => (
-                    <div key={b.bank} className="flex items-center justify-between text-xs">
-                      <span className="font-semibold text-gray-700">{b.bank}</span>
-                      <button
-                        onClick={() => confirm(`Remove the saved password for ${b.bank}?`) && runCards(() => deleteCardBank(b.bank))}
-                        className="text-gray-400 hover:text-red-500 font-bold"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <form onSubmit={addBank} className="flex flex-col gap-2 pt-1">
-                <input
-                  className="input text-sm" placeholder="Bank name (e.g. HDFC)"
-                  value={bankName} onChange={(e) => setBankName(e.target.value)}
-                  autoComplete="off" name="bank-name"
-                />
-                <input
-                  className="input text-sm" placeholder="PDF password" type="password"
-                  value={bankPw} onChange={(e) => setBankPw(e.target.value)}
-                  autoComplete="current-password" name="bank-pdf-password"
-                />
-                <button type="submit" disabled={cardBusy} className="btn-primary py-2.5 text-xs w-full">Save</button>
-              </form>
-            </div>
-
-            {/* Scan + statements */}
-            {gmail?.connected && (
-              <div className="card space-y-2">
-                <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Search window</p>
-                <p className="text-[11px] text-gray-400">
-                  Leave blank to check the last 9 months, or narrow it to when a bank actually bills.
-                </p>
-                <Dropdown
-                  value={cardMonth}
-                  onChange={setCardMonth}
-                  options={recentMonths().map((m, i) => ({
-                    value: m.value,
-                    label: i === 0 ? `${m.label} (current)` : m.label,
-                  }))}
-                />
-                <div className="flex flex-wrap gap-1.5">
-                  {bankDatePresets(cardMonth).map((p) => (
-                    <button
-                      key={p.label} type="button"
-                      onClick={() => { setCardFrom(p.from); setCardTo(p.to) }}
-                      className="text-[11px] px-2 py-1 rounded-full border border-gray-200 text-gray-600 hover:border-orange-300 hover:text-orange-600"
-                    >
-                      {p.label}
-                    </button>
-                  ))}
-                  {(cardFrom || cardTo) && (
-                    <button
-                      type="button"
-                      onClick={() => { setCardFrom(''); setCardTo('') }}
-                      className="text-[11px] px-2 py-1 rounded-full text-gray-400 hover:text-red-500"
-                    >
-                      Clear
-                    </button>
-                  )}
-                </div>
-                <div className="flex gap-2">
-                  <DatePicker value={cardFrom} onChange={setCardFrom} placeholder="From" className="flex-1" />
-                  <DatePicker value={cardTo} onChange={setCardTo} placeholder="To" className="flex-1" />
-                </div>
-                <button onClick={doScan} disabled={cardBusy || banks.length === 0} className="btn-primary py-2.5 text-xs w-full">
-                  {cardBusy ? 'Scanning…' : 'Scan for new statements'}
-                </button>
-              </div>
-            )}
-            {cardProgress?.status === 'running' && (
-              <div className="space-y-1">
-                <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
-                  <div
-                    className="h-full bg-orange-500 transition-all duration-300"
-                    style={{
-                      width: cardProgress.total > 0
-                        ? `${Math.min(100, (cardProgress.done / cardProgress.total) * 100)}%`
-                        : '15%',
-                    }}
-                  />
-                </div>
-                <p className="text-[11px] text-gray-400 text-center">
-                  {cardProgress.total > 0
-                    ? `Scanning email ${cardProgress.done} of ${cardProgress.total} — ${cardProgress.found} found so far`
-                    : 'Searching Gmail…'}
-                </p>
-              </div>
-            )}
-            {gmail?.connected && banks.length === 0 && (
-              <p className="text-[11px] text-gray-400 text-center">Add at least one bank's password before scanning.</p>
-            )}
-
-            {statements.length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-8">No statements found yet</p>
-            ) : (
-              statements.map((s) => (
-                <div key={s.id} className="card">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="text-sm font-bold text-gray-900">
-                        {s.bank}{s.card_last4 ? ` •••• ${s.card_last4}` : ''}
-                      </p>
-                      <p className="text-xs text-gray-400 mt-0.5">
-                        {s.due_date ? `Due ${s.due_date}` : 'Due date not found'}
-                        {s.statement_date ? ` · statement ${s.statement_date}` : ''}
-                      </p>
-                    </div>
-                    <p className="text-base font-black text-gray-900 shrink-0">
-                      {s.total_due != null ? INR(s.total_due) : '—'}
-                    </p>
-                  </div>
-                  {s.minimum_due != null && (
-                    <p className="text-[11px] text-gray-400 mt-1">Minimum due: {INR(s.minimum_due)}</p>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
+          <CreditCards initialMsg={
+            params.get('gmail') === 'connected' ? 'Gmail connected.'
+              : params.get('gmail') === 'error' ? `Couldn't connect Gmail (${params.get('reason') || 'unknown error'}).`
+              : ''
+          } />
         )}
       </div>
     </div>

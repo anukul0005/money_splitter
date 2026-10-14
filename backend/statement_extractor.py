@@ -16,7 +16,7 @@ from database import get_settings
 
 GROQ_MODEL = "openai/gpt-oss-120b"
 
-_SYSTEM_PROMPT = """You read raw text extracted from an Indian credit card statement PDF. Extract its key billing fields.
+_SYSTEM_PROMPT = """You read raw text from an Indian credit card statement - the statement PDF, or the bank's statement email. Extract its key billing fields.
 
 Respond with ONLY a JSON object, no other text, in exactly this shape:
 {
@@ -32,6 +32,8 @@ Rules:
 - Use null for anything you cannot confidently read - never guess or invent a value.
 - Numbers are plain numbers with no currency symbol or thousands separator.
 - If several dates or amounts appear (e.g. a previous statement's figures shown for reference), use only the ones for THIS statement's own billing cycle.
+- total_due is the "Total Amount Due" / "Total Dues" / "Total outstanding" for this bill, not a credit limit, available limit, reward points or a single transaction.
+- If the text isn't a credit card bill at all (a savings account statement, a loan, a payment receipt, a promotion), return all nulls.
 """
 
 
@@ -62,7 +64,7 @@ def available() -> bool:
     return bool(_candidates())
 
 
-def extract(statement_text: str) -> dict:
+def extract(statement_text: str, hint: str = "") -> dict:
     """Raises on any failure - not configured, every candidate key/provider
     failing, or a reply that isn't valid JSON in the expected shape. The
     caller decides what a failed extraction means for that statement."""
@@ -79,7 +81,7 @@ def extract(statement_text: str) -> dict:
         "model": GROQ_MODEL,
         "messages": [
             {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": text},
+            {"role": "user", "content": (f"Context: {hint}\n\n" if hint else "") + text},
         ],
         "response_format": {"type": "json_object"},
         "temperature": 0,
