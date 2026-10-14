@@ -16,12 +16,12 @@ export function nameList(names) {
 }
 
 // A supergroup's name as the logged-in person sees it: everyone else, after
-// "w" - "w Anjali", "w Utkarsh, Anjali & Nandini". A supergroup of just
+// "With" - "With Anjali", "With Utkarsh, Anjali & Nandini". A supergroup of just
 // yourself (your own monthly tracking) keeps your name.
 export function masterName(names, me) {
   const others = me ? names.filter((n) => n.trim().toLowerCase() !== me.trim().toLowerCase()) : names
   if (!me || others.length === names.length) return nameList(names)
-  return others.length ? `w ${nameList(others)}` : nameList(names)
+  return others.length ? `With ${nameList(others)}` : nameList(names)
 }
 
 // groups: array of GroupSummary-like objects with { id, member_names, total_amount, ... }
