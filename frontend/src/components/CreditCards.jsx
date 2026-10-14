@@ -92,7 +92,8 @@ function CardBlock({ card: c, banks, results, busy, run, editing, setEditing, sa
         </div>
       </div>
 
-      <div className={`card ${settled ? 'opacity-60' : ''}`}>
+      <div className={`card ${settled ? 'opacity-60' : ''} ${editing || paying ? '' : 'cursor-pointer active:scale-[0.99] transition-transform'}`}
+        onClick={editing || paying ? undefined : () => nav(`/credit-cards/card/${c.id}`)}>
         {editing ? (
           <CardForm banks={banks} busy={busy} onCancel={() => setEditing(null)}
             initial={{ bank: c.bank, label: c.label || '', last4: c.last4 || '', bill_day: c.bill_day }}
@@ -120,12 +121,8 @@ function CardBlock({ card: c, banks, results, busy, run, editing, setEditing, sa
                 const r = results[`${c.id}:${period}`]
                 return (
                   <div key={period}>
-                    <div className={`flex items-center justify-between text-[11px] ${b ? 'cursor-pointer' : ''}`}
-                      onClick={b ? () => nav(`/credit-cards/bill/${b.id}`) : undefined}>
-                      <span className="text-gray-500">
-                        {shortMonth(period)}
-                        {b && <span className="ml-1.5 font-bold text-brand-500">breakup ›</span>}
-                      </span>
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-gray-500">{shortMonth(period)}</span>
                       {!b ? (
                         <span className="text-gray-400">{r?.status === 'not_found' ? 'Not found' : 'Not fetched yet'}</span>
                       ) : b.total_due == null ? (
@@ -145,7 +142,7 @@ function CardBlock({ card: c, banks, results, busy, run, editing, setEditing, sa
                         <span className="flex items-center gap-2">
                           <span className="text-green-600 font-bold">{INR(p.amount)}</span>
                           {b.can_pay && (
-                            <button onClick={() => confirm(`Remove the ${INR(p.amount)} payment?`) && run(() => deleteCardPayment(p.id))}
+                            <button onClick={(e) => { e.stopPropagation(); confirm(`Remove the ${INR(p.amount)} payment?`) && run(() => deleteCardPayment(p.id)) }}
                               className="text-gray-300 hover:text-red-500 font-bold" aria-label="Remove payment">×</button>
                           )}
                         </span>
@@ -159,7 +156,7 @@ function CardBlock({ card: c, banks, results, busy, run, editing, setEditing, sa
             {latest && (
               <p className="text-[10px] text-gray-400 mt-2 truncate">
                 From {latest.source === 'pdf' ? 'the PDF of ' : ''}“{latest.email_subject || 'statement email'}” ·{' '}
-                <button onClick={() => confirm('Remove this bill? The next search looks for this month again.') && run(() => deleteCardBill(latest.id))}
+                <button onClick={(e) => { e.stopPropagation(); confirm('Remove this bill? The next search looks for this month again.') && run(() => deleteCardBill(latest.id)) }}
                   className="font-bold hover:text-red-500">wrong?</button>
               </p>
             )}
@@ -183,8 +180,8 @@ function CardBlock({ card: c, banks, results, busy, run, editing, setEditing, sa
                 </div>
               </form>
             ) : (
-              <div className="flex gap-2 mt-3">
-                <button onClick={() => setPaying(true)} disabled={!latest || settled || latest.total_due == null}
+              <div className="flex gap-2 mt-3" onClick={(e) => e.stopPropagation()}>
+                <button onClick={(e) => { e.stopPropagation(); setPaying(true) }} disabled={!latest || settled || latest.total_due == null}
                   className="flex-1 py-2 text-xs font-bold bg-amber-100 border border-amber-300 text-amber-800 rounded-md disabled:opacity-40 disabled:cursor-not-allowed">
                   {settled ? 'Paid in full' : 'Record payment'}
                 </button>

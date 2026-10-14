@@ -198,53 +198,63 @@ def find_bill(service, card, d: date, passwords: list[str]) -> dict:
     return {"status": "not_found", "why": "; ".join(why[:3]) or "no statement email in that week"}
 
 
-def fetch_for_user(db, user_id: int, months: int, today: date, progress) -> list[dict]:
-    """Every card's last `months` bills. Months already saved are skipped."""
+def gmail_for(db, user_id: int):
+    """(Gmail service, saved PDF passwords) for this user."""
     import secret_box
-    from models import BankPassword, CreditCard, CreditCardStatement, GmailConnection
+    from models import BankPassword, GmailConnection
     from statement_sync import _gmail_service
-
     conn = db.query(GmailConnection).filter(GmailConnection.user_id == user_id).first()
     if not conn:
         raise RuntimeError("Gmail isn't connected for this account")
     passwords = [p for p in (secret_box.decrypt(b.password_encrypted) for b in
                              db.query(BankPassword).filter(BankPassword.user_id == user_id)) if p]
-    service = _gmail_service(conn)
+    return _gmail_service(conn), passwords
+
+
+def fetch_one(db, user_id: int, card, d: date, service, passwords: list[str]) -> dict:
+    """One card's bill for the bill date `d`: the saved one, or found in
+    Gmail and saved. {"status": "already_saved"|"found"|"not_found", ...}"""
+    from models import CreditCardStatement
+    period = d.strftime("%Y-%m")
+    row = {"card_id": card.id, "card": card_name(card), "bill_date": d.isoformat(), "period": period}
+    have = (db.query(CreditCardStatement)
+            .filter(CreditCardStatement.card_id == card.id, CreditCardStatement.period == period).first())
+    if have:
+        return {**row, "status": "already_saved", "bill_id": have.id, "total_due": have.total_due}
+    try:
+        r = find_bill(service, card, d, passwords)
+    except Exception as e:
+        r = {"status": "not_found", "why": f"Gmail search failed ({str(e)[:100]})"}
+    if r["status"] == "found" and db.query(CreditCardStatement).filter(
+            CreditCardStatement.gmail_message_id == r["message_id"]).first():
+        r = {"status": "not_found", "why": "that email is already saved as another card's bill"}
+    if r["status"] != "found":
+        return {**row, "status": "not_found", "why": r.get("why")}
+    bill = CreditCardStatement(
+        user_id=user_id, card_id=card.id, period=period, bank=card.bank,
+        card_last4=r.get("card_last4") or card.last4,
+        statement_date=r.get("statement_date") or d.isoformat(), due_date=r.get("due_date"),
+        total_due=r.get("total_due"), minimum_due=r.get("minimum_due"),
+        gmail_message_id=r["message_id"], email_subject=r["subject"], email_from=r["from"],
+        source=r["source"], raw_extract=json.dumps({k: r.get(k) for k in (
+            "bank", "card_last4", "statement_date", "due_date", "total_due", "minimum_due")}),
+    )
+    db.add(bill)
+    db.commit()
+    return {**row, "status": "found", "bill_id": bill.id, "total_due": r.get("total_due"), "source": r["source"]}
+
+
+def fetch_for_user(db, user_id: int, months: int, today: date, progress) -> list[dict]:
+    """Every card's last `months` bills. Months already saved are skipped."""
+    from models import CreditCard
+    service, passwords = gmail_for(db, user_id)
     cards = db.query(CreditCard).filter(CreditCard.user_id == user_id).order_by(CreditCard.bill_day).all()
     jobs = [(c, d) for c in cards for d in recent_bill_dates(c.bill_day, today, months)]
     progress(total=len(jobs), done=0, found=0, skipped=0, failed=0)
-    results, found, skipped, failed = [], 0, 0, 0
+    results = []
     for i, (card, d) in enumerate(jobs, start=1):
-        period = d.strftime("%Y-%m")
-        row = {"card_id": card.id, "card": card_name(card), "bill_date": d.isoformat(), "period": period}
-        have = (db.query(CreditCardStatement)
-                .filter(CreditCardStatement.card_id == card.id, CreditCardStatement.period == period).first())
-        if have:
-            skipped += 1
-            results.append({**row, "status": "already_saved", "total_due": have.total_due})
-        else:
-            try:
-                r = find_bill(service, card, d, passwords)
-            except Exception as e:
-                r = {"status": "not_found", "why": f"Gmail search failed ({str(e)[:100]})"}
-            if r["status"] == "found" and db.query(CreditCardStatement).filter(
-                    CreditCardStatement.gmail_message_id == r["message_id"]).first():
-                r = {"status": "not_found", "why": "that email is already saved as another card's bill"}
-            if r["status"] == "found":
-                db.add(CreditCardStatement(
-                    user_id=user_id, card_id=card.id, period=period, bank=card.bank,
-                    card_last4=r.get("card_last4") or card.last4,
-                    statement_date=r.get("statement_date") or d.isoformat(), due_date=r.get("due_date"),
-                    total_due=r.get("total_due"), minimum_due=r.get("minimum_due"),
-                    gmail_message_id=r["message_id"], email_subject=r["subject"], email_from=r["from"],
-                    source=r["source"], raw_extract=json.dumps({k: r.get(k) for k in (
-                        "bank", "card_last4", "statement_date", "due_date", "total_due", "minimum_due")}),
-                ))
-                db.commit()
-                found += 1
-                results.append({**row, "status": "found", "total_due": r.get("total_due"), "source": r["source"]})
-            else:
-                failed += 1
-                results.append({**row, "status": "not_found", "why": r.get("why")})
-        progress(done=i, found=found, skipped=skipped, failed=failed, results=results)
+        results.append(fetch_one(db, user_id, card, d, service, passwords))
+        count = lambda st: sum(1 for r in results if r["status"] == st)
+        progress(done=i, found=count("found"), skipped=count("already_saved"), failed=count("not_found"),
+                 results=results)
     return results

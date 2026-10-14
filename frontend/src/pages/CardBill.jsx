@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
-import { getCardBillDetails, readCardBillDetails } from '../api'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { getCardBillDetails, readCardBillDetails, listCards, fetchCardMonth } from '../api'
+import Dropdown from '../components/Dropdown'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
 const day = (iso) => (iso ? new Date(`${iso}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '')
@@ -16,58 +17,55 @@ const FILTERS = [['all', 'All'], ['spends', 'Spends'], ['credits', 'Payments & r
  * biggest merchants and every transaction. Read once in the background,
  * then saved - this polls while it's being read.
  */
-export default function CardBill() {
-  const { id } = useParams()
-  const nav = useNavigate()
+function BillBreakup({ billId: id }) {
   const [d, setD] = useState(null)
   const [error, setError] = useState('')
   const [filter, setFilter] = useState('all')
   const [category, setCategory] = useState(null)
   const started = useRef(false)
 
-  const poll = async () => {
+  // Each bill shown gets a generation number; a poll from a bill the
+  // month picker has since moved away from (or a closed page) is dropped.
+  const gen = useRef(0)
+  const poll = async (g) => {
+    if (g !== gen.current) return
     try {
       let r = (await getCardBillDetails(id)).data
+      if (g !== gen.current) return
       if (r.status === 'none' && !started.current) {
         started.current = true
         await readCardBillDetails(id)
         r = { ...r, status: 'reading', step: 'Opening the statement email…' }
       }
       setD(r)
-      if (r.status === 'reading') setTimeout(poll, 2000)
+      if (r.status === 'reading') setTimeout(() => poll(g), 2000)
     } catch (e) {
-      setError(e.response?.data?.detail || 'Could not load this bill.')
+      if (g === gen.current) setError(e.response?.data?.detail || 'Could not load this bill.')
     }
   }
-  useEffect(() => { poll() }, [id])
+  useEffect(() => {
+    const g = ++gen.current
+    started.current = false
+    setD(null); setError(''); setFilter('all'); setCategory(null)
+    poll(g)
+    return () => { gen.current++ }
+  }, [id])
 
   const readAgain = async () => {
     setError('')
     try {
       await readCardBillDetails(id)
       setD((x) => ({ ...x, status: 'reading', step: 'Opening the statement email…' }))
-      setTimeout(poll, 2000)
+      const g = gen.current
+      setTimeout(() => poll(g), 2000)
     } catch (e) { setError(e.response?.data?.detail || 'Could not start reading.') }
   }
 
   const b = d?.bill
-  const header = (
-    <div className="px-5 pt-10 md:pt-6 pb-4 bg-cream border-b border-amber-100/60">
-      <button onClick={() => nav(-1)} className="text-xs font-bold text-gray-400 mb-2">← Credit cards</button>
-      <h1 className="text-xl font-black tracking-tight">{b?.card || 'Card bill'}</h1>
-      {b && (
-        <p className="text-xs text-gray-500 mt-1">
-          {monthName(b.period)} bill · <b className="text-gray-900">{b.total_due != null ? INR(b.total_due) : '—'}</b>
-          {b.due_date ? ` · due ${day(b.due_date)}` : ''}
-        </p>
-      )}
-    </div>
-  )
-
-  if (error && !d) return <div className="pb-24">{header}<p className="px-5 mt-6 text-sm text-red-600">{error}</p></div>
+  if (error && !d) return <p className="text-sm text-red-600">{error}</p>
   if (!d || d.status === 'reading') return (
-    <div className="pb-24">{header}
-      <div className="flex flex-col items-center py-16 gap-3 px-8 text-center">
+    <div>
+      <div className="flex flex-col items-center py-14 gap-3 px-8 text-center">
         <div className="w-8 h-8 border-[3px] border-brand-400/30 border-t-brand-400 rounded-full animate-spin" />
         <p className="text-xs text-gray-600">{d?.step || 'Loading…'}</p>
         <p className="text-[11px] text-gray-400">The first read of a statement takes up to a minute. After that it opens instantly.</p>
@@ -75,8 +73,8 @@ export default function CardBill() {
     </div>
   )
   if (d.status === 'error') return (
-    <div className="pb-24">{header}
-      <div className="px-5 mt-6 space-y-3">
+    <div>
+      <div className="space-y-3">
         <p className="text-sm text-red-600">{d.error}</p>
         <button onClick={readAgain} className="btn-primary py-2.5 text-xs w-full">Try again</button>
       </div>
@@ -109,9 +107,8 @@ export default function CardBill() {
   ].filter((r) => r[1] != null)
 
   return (
-    <div className="pb-24 md:pb-8">
-      {header}
-      <div className="px-4 md:px-5 mt-4 space-y-4 max-w-2xl">
+    <div>
+      <div className="space-y-4">
 
         {/* Summary */}
         <div className="card space-y-2">
@@ -232,6 +229,118 @@ export default function CardBill() {
           <button onClick={readAgain} className="font-bold text-brand-500">Read again</button>
         </p>
         {error && <p className="text-xs text-red-600 text-center">{error}</p>}
+      </div>
+    </div>
+  )
+}
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const pad = (n) => String(n).padStart(2, '0')
+
+/**
+ * /credit-cards/card/:id - one credit card, opened by tapping it on the
+ * Credit Cards tab. Month and year pickers choose the bill; a month with a
+ * saved bill shows its breakup, one without can be looked up in Gmail.
+ */
+export default function CardPage() {
+  const { id } = useParams()
+  const nav = useNavigate()
+  const [params, setParams] = useSearchParams()
+  const [card, setCard] = useState(null)
+  const [error, setError] = useState('')
+  const [finding, setFinding] = useState(false)
+  const [notFound, setNotFound] = useState('')
+
+  const load = () => listCards().then((r) => {
+    const c = r.data.find((x) => String(x.id) === String(id))
+    if (!c) setError('Card not found.')
+    setCard(c || null)
+    return c
+  }).catch(() => setError('Could not load this card.'))
+
+  useEffect(() => { load() }, [id])
+
+  const period = params.get('period') || card?.bills[0]?.period || card?.last_bill?.slice(0, 7) || ''
+  const [year, month] = period ? period.split('-').map(Number) : [new Date().getFullYear(), new Date().getMonth() + 1]
+  const setPeriod = (y, m) => { setNotFound(''); setParams({ period: `${y}-${pad(m)}` }, { replace: true }) }
+  const bill = card?.bills.find((b) => b.period === period)
+
+  const now = new Date()
+  const firstYear = Math.min(now.getFullYear() - 1, ...(card?.bills || []).map((b) => Number(b.period.slice(0, 4))))
+  const years = []
+  for (let y = now.getFullYear(); y >= firstYear; y--) years.push({ value: y, label: String(y) })
+  const saved = Object.fromEntries((card?.bills || []).map((b) => [b.period, b]))
+  const monthOptions = MONTHS.map((name, i) => {
+    const b = saved[`${year}-${pad(i + 1)}`]
+    return { value: i + 1, label: b && b.total_due != null ? `${name} · ${INR(b.total_due)}` : name }
+  })
+
+  const findInGmail = async () => {
+    setFinding(true); setNotFound('')
+    try {
+      const r = (await fetchCardMonth(id, period)).data
+      if (r.status === 'not_found') setNotFound(r.why || 'No bill found for this month.')
+      await load()
+    } catch (e) {
+      setNotFound(e.response?.data?.detail || 'Could not search Gmail just now.')
+    } finally { setFinding(false) }
+  }
+
+  return (
+    <div className="pb-24 md:pb-8">
+      <div className="px-5 pt-10 md:pt-6 pb-4 bg-cream border-b border-amber-100/60">
+        <button onClick={() => nav(-1)} className="text-xs font-bold text-gray-400 mb-2">← Credit cards</button>
+        <h1 className="text-xl font-black tracking-tight">
+          {card ? `${card.bank}${card.label ? ` ${card.label}` : ''}` : 'Credit card'}
+        </h1>
+        {card && (
+          <p className="text-xs text-gray-500 mt-1">
+            {card.last4 ? `•••• ${card.last4} · ` : ''}bill generated on the {card.bill_day}{[1, 21, 31].includes(card.bill_day) ? 'st' : [2, 22].includes(card.bill_day) ? 'nd' : [3, 23].includes(card.bill_day) ? 'rd' : 'th'}
+          </p>
+        )}
+        {card && (
+          <div className="flex gap-2 mt-3">
+            <Dropdown className="flex-1" value={month} onChange={(m) => setPeriod(year, Number(m))} options={monthOptions} />
+            <Dropdown className="w-28" value={year} onChange={(y) => setPeriod(Number(y), month)} options={years} />
+          </div>
+        )}
+      </div>
+
+      <div className="px-4 md:px-5 mt-4 max-w-2xl">
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        {!card && !error && <p className="text-xs text-gray-400 text-center py-10">Loading…</p>}
+
+        {card && bill && (
+          <>
+            <div className="card mb-4">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-sm font-bold text-gray-900">{MONTHS[month - 1]} {year} bill</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {bill.due_date ? `Due ${day(bill.due_date)}` : ''}{bill.minimum_due != null ? ` · minimum ${INR(bill.minimum_due)}` : ''}
+                  </p>
+                </div>
+                <p className="text-base font-black text-gray-900 shrink-0">{bill.total_due != null ? INR(bill.total_due) : '—'}</p>
+              </div>
+              {bill.paid > 0 && (
+                <p className={`text-[11px] font-bold mt-1.5 ${bill.remaining <= 0.01 ? 'text-green-700' : 'text-red-600'}`}>
+                  Paid {INR(bill.paid)}{bill.remaining <= 0.01 ? ' · paid in full ✓' : ` · ${INR(bill.remaining)} left`}
+                </p>
+              )}
+            </div>
+            <BillBreakup billId={bill.id} />
+          </>
+        )}
+
+        {card && !bill && period && (
+          <div className="card text-center space-y-3 py-6">
+            <p className="text-sm text-gray-600">No {MONTHS[month - 1]} {year} bill saved for this card.</p>
+            {notFound && <p className="text-[11px] text-gray-400 leading-relaxed">{notFound}</p>}
+            <button onClick={findInGmail} disabled={finding} className="btn-primary py-2.5 text-xs w-full disabled:opacity-50">
+              {finding ? 'Searching Gmail…' : `Find the ${MONTHS[month - 1]} bill in Gmail`}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )

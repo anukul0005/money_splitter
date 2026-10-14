@@ -94,7 +94,7 @@ export default function App() {
                 <Route path="/history"    element={<History />} />
                 <Route path="/ml-analysis" element={<MLAnalysis />} />
                 <Route path="/insights" element={<Insights />} />
-                <Route path="/credit-cards/bill/:id" element={<CardBill />} />
+                <Route path="/credit-cards/card/:id" element={<CardBill />} />
                 <Route path="/master/:key" element={<MasterGroupDetail />} />
                 <Route path="/friends" element={<Friends />} />
                 <Route path="/friends/:name" element={<FriendDetail />} />

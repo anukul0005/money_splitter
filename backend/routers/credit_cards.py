@@ -246,6 +246,27 @@ def read_bill_details(bill_id: int, db: Session = Depends(get_db), caller: User 
     return {"started": True}
 
 
+@router.post("/cards/{card_id}/fetch-month", response_model=dict)
+def fetch_month(card_id: int, period: str, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """One card's bill for one month ("YYYY-MM"): the saved one, or searched
+    in Gmail on that month's bill date now. A future bill date is refused."""
+    import re as _re
+    card = _own_card(db, card_id, caller)
+    if not _re.fullmatch(r"\d{4}-\d{2}", period or ""):
+        raise HTTPException(400, "Month must be YYYY-MM")
+    y, m = map(int, period.split("-"))
+    if not 1 <= m <= 12:
+        raise HTTPException(400, "Month must be YYYY-MM")
+    d = card_bills.bill_date(card.bill_day, y, m)
+    if d > date.today():
+        raise HTTPException(400, f"This bill is generated on {d:%d %b %Y} - it isn't out yet")
+    try:
+        service, passwords = card_bills.gmail_for(db, caller.id)
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+    return card_bills.fetch_one(db, caller.id, card, d, service, passwords)
+
+
 @router.post("/fetch", response_model=dict, status_code=202)
 def fetch(months: int = 2, db: Session = Depends(get_db), caller: User = Depends(current_user)):
     """Each card's last `months` bills from Gmail, in the background - the
