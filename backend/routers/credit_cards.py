@@ -1,7 +1,7 @@
 """Credit Cards: the user's cards (bank, last 4, the day the bill is
-generated), bank statement passwords, and each card's bills read from
-Gmail on those days - see card_bills.py. Lives alongside /loans as its own
-section of the same page.
+generated, its own statement PDF password), the older per-bank PDF
+passwords, and each card's bills read from Gmail on those days - see
+card_bills.py. Lives alongside /loans as its own section of the same page.
 """
 from __future__ import annotations
 
