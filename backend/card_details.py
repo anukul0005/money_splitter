@@ -42,9 +42,14 @@ Plain numbers, no currency symbols or commas. null for anything not clearly stat
 
 _TXN_PROMPT = """You read part of the text of an Indian credit card statement PDF. List every transaction line in it.
 Respond with ONLY a JSON object: {"transactions": [{"date": "YYYY-MM-DD", "description": string,
- "amount": number, "type": "debit"|"credit", "kind": "purchase"|"payment"|"refund"|"cashback"|"fee"|"interest"|"tax"|"emi"|"other"}]}
+ "amount": number, "type": "debit"|"credit", "kind": "purchase"|"payment"|"refund"|"cashback"|"fee"|"interest"|"tax"|"emi"|"other",
+ "foreign_amount": number|null, "currency": string|null}]}
 Rules:
-- amount is positive; type says the direction ("Cr"/"credit"/payments/refunds are credit).
+- amount is ALWAYS the Indian Rupee (INR / Rs / ₹) amount charged to the card - the statement's rupee amount column.
+- International / foreign-currency transactions (USD, EUR, GBP...; often merchants abroad, e.g. "US", "HK", "CZ", "SAN FRANCISCO") show TWO amounts on the line: the original foreign amount and the converted rupee amount. Put the RUPEE amount in amount, the original in foreign_amount and its code (e.g. "USD") in currency. Never put the foreign amount in amount. The rupee amount is the larger number for USD/EUR/GBP charges.
+- For rupee-only lines, foreign_amount and currency are null.
+- Foreign currency markup / cross-currency fees and the GST/IGST on them are their own lines: kind "fee" or "tax".
+- amount is positive; type says the direction ("Cr"/"credit"/payments/refunds/waivers are credit). A surcharge waiver or reversal is a credit with kind "refund".
 - Only real transaction rows from this statement - not summary totals, not reward point tables, not offers, not EMI schedules for future months.
 - Keep the description as printed (merchant and place), without the reference numbers.
 - If this part has no transactions, return {"transactions": []}."""
@@ -107,15 +112,43 @@ def merchant(desc: str) -> str:
     return " ".join(words).title() or desc[:30].title()
 
 
-def _categorise(txns: list[dict]) -> None:
+_CARD_NOTE = ("Merchant name from a credit card statement, often abbreviated and followed by city and country: "
+              "'SERV'/'SERVICE STN'/'FILLING' is a fuel station, 'SI' is a standing-instruction subscription, "
+              "'US'/'HK'/'CZ'/'SG' at the end means a merchant abroad. Software, AI and cloud subscriptions "
+              "(e.g. Claude, ChatGPT, Google Cloud, Apify) are Entertainment > Subscriptions.")
+
+
+def user_history(db, user_name: str) -> dict[str, tuple[str, str | None]]:
+    """How the user has filed each merchant before, by merchant() key - the
+    most common category among their own categorised expenses."""
+    from collections import Counter
+    from sqlalchemy import func
+    from models import Expense, Member
+    groups = [g for (g,) in db.query(Member.group_id).filter(func.lower(Member.name) == user_name.strip().lower())]
+    seen: dict[str, Counter] = defaultdict(Counter)
+    for title, cat, sub in (db.query(Expense.title, Expense.category, Expense.subcategory)
+                            .filter(Expense.group_id.in_(groups), Expense.category.isnot(None), Expense.title.isnot(None))):
+        if cat and cat not in ("Other", "Small vendors", "One-off payments", "Uncategorized"):
+            seen[merchant(title).lower()][(cat, sub)] += 1
+    return {k: c.most_common(1)[0][0] for k, c in seen.items() if k}
+
+
+def _categorise(txns: list[dict], history: dict | None = None) -> None:
+    """The AI categoriser decides; it's told what card-statement names look
+    like and, where there is one, how the user filed the same merchant before."""
     import expense_classifier as ec
     from spend_categories import categorize
+    history = history or {}
     spends = [t for t in txns if t["type"] == "debit" and t["kind"] in ("purchase", "emi", "other")]
     names = sorted({t["description"] for t in spends})
     answer: dict[str, tuple[str, str | None]] = {}
+
+    def note(n):
+        past = history.get(merchant(n).lower())
+        return _CARD_NOTE + (f" The user has filed this merchant as {past[0]} > {past[1] or '-'} before." if past else "")
     for start in range(0, len(names), 20):
         batch = names[start:start + 20]
-        items = [{"id": i, "description": n, "notes": "", "amount": next(t["amount"] for t in spends if t["description"] == n),
+        items = [{"id": i, "description": n, "notes": note(n), "amount": next(t["amount"] for t in spends if t["description"] == n),
                   "group": "credit card statement"} for i, n in enumerate(batch)]
         try:
             for r in ec._chat(items).get("results", []):
@@ -135,22 +168,49 @@ def _categorise(txns: list[dict]) -> None:
             t["category"], t["subcategory"] = got[0], got[1]
 
 
-def read_statement(text: str) -> dict:
-    summary = _ask(_SUMMARY_PROMPT, text[:9000], 1500)
-    summary = {k: (_num(v) if k not in ("due_date", "period_from", "period_to") else v)
-               for k, v in summary.items()}
+def _extract_txns(text: str, note: str = "") -> list[dict]:
     txns = []
     for part in _chunks(text):
-        for t in (_ask(_TXN_PROMPT, part).get("transactions") or []):
+        for t in (_ask(_TXN_PROMPT, (f"Note: {note}\n\n" if note else "") + part).get("transactions") or []):
             amt = _num(t.get("amount"))
             if not amt or not t.get("description"):
                 continue
+            fx = _num(t.get("foreign_amount"))
+            cur = t.get("currency") if isinstance(t.get("currency"), str) and t.get("currency").upper() not in ("INR", "RS") else None
             txns.append({"date": t.get("date") if isinstance(t.get("date"), str) else None,
                          "description": str(t["description"]).strip()[:120], "amount": abs(amt),
                          "type": "credit" if t.get("type") == "credit" else "debit",
                          "kind": t.get("kind") if t.get("kind") in ("purchase", "payment", "refund", "cashback", "fee",
-                                                                    "interest", "tax", "emi", "other") else "other"})
-    _categorise(txns)
+                                                                    "interest", "tax", "emi", "other") else "other",
+                         "foreign_amount": abs(fx) if fx and cur else None,
+                         "currency": cur.upper()[:3] if fx and cur else None})
+    return txns
+
+
+def read_statement(text: str, history: dict | None = None) -> dict:
+    summary = _ask(_SUMMARY_PROMPT, text[:9000], 1500)
+    summary = {k: (_num(v) if k not in ("due_date", "period_from", "period_to") else v)
+               for k, v in summary.items()}
+    txns = _extract_txns(text)
+    # Self-check: previous balance - credits + debits should be the bill.
+    # When it isn't (a foreign-currency line read in dollars, a line
+    # missed), ask once more with the gap spelled out and keep whichever
+    # reading comes closer to the bill.
+    prev, total = summary.get("previous_balance"), summary.get("total_due")
+    gap = lambda ts: abs(round(prev - sum(t["amount"] for t in ts if t["type"] == "credit")
+                               + sum(t["amount"] for t in ts if t["type"] == "debit") - total, 2))
+    if prev is not None and total is not None and txns and gap(txns) > 2:
+        debits = round(sum(t["amount"] for t in txns if t["type"] == "debit"), 2)
+        note = (f"A first reading of this statement found debits totalling Rs {debits:,.2f}, but the statement's own "
+                f"summary says purchases/debits are Rs {summary.get('purchases_debits')} and the total due is Rs {total}. "
+                "Check every foreign-currency line uses its RUPEE amount, and that no fee, tax or line is missing.")
+        try:
+            again = _extract_txns(text, note)
+            if again and gap(again) < gap(txns):
+                txns = again
+        except Exception as e:
+            print(f"[card_details] second reading failed: {e}")
+    _categorise(txns, history)
     txns.sort(key=lambda t: (t["date"] or "", -t["amount"]))
 
     debits = round(sum(t["amount"] for t in txns if t["type"] == "debit"), 2)
@@ -265,7 +325,9 @@ def _run(user_id: int, bill_id: int) -> None:
         keep = pages_to_read(card.bank if card else bill.bank, len(pages))
         text = "\n".join(pages[:keep])
         _step(bill_id, f"Reading pages 1–{keep} of {len(pages)}…")
-        details = read_statement(text)
+        from models import User
+        owner = db.get(User, user_id)
+        details = read_statement(text, user_history(db, owner.name) if owner else None)
         details["pages"] = {"read": keep, "total": len(pages)}
         bill.details_json = json.dumps(details)
         db.commit()

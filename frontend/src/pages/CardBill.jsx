@@ -218,6 +218,7 @@ function BillBreakup({ billId: id }) {
                     <p className="text-[10px] text-gray-400">
                       {x.category}{x.subcategory ? ` · ${x.subcategory}` : ''}
                       {x.kind === 'refund' ? ' · refund' : x.kind === 'cashback' ? ' · cashback' : ''}
+                      {x.foreign_amount ? ` · ${x.currency} ${Number(x.foreign_amount).toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : ''}
                     </p>
                   </div>
                   <span className={`text-xs font-bold shrink-0 ${x.type === 'credit' ? 'text-green-700' : 'text-gray-900'}`}>
