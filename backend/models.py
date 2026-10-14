@@ -882,4 +882,5 @@ class CreditCardStatement(Base):
     email_subject = Column(String(300), nullable=True)
     email_from = Column(String(200), nullable=True)
     source = Column(String(10), nullable=True)           # "email" (amount in the email) | "pdf"
+    details_json = Column(Text, nullable=True)           # the PDF's breakup - see card_details.py
     extracted_at = Column(DateTime(timezone=True), server_default=func.now())

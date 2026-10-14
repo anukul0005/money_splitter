@@ -91,7 +91,7 @@ def _bill_out(r: CreditCardStatement, payments: list[CardPayment], latest: bool)
     paid = round(sum(p.amount for p in payments), 2)
     return {"payments": [{"id": p.id, "amount": p.amount, "paid_on": p.paid_on} for p in payments],
             "paid": paid, "remaining": round(max((r.total_due or 0) - paid, 0), 2) if r.total_due is not None else None,
-            "can_pay": latest, "id": r.id, "card_id": r.card_id, "period": r.period, "bank": r.bank, "card_last4": r.card_last4,
+            "can_pay": latest, "has_details": bool(r.details_json), "id": r.id, "card_id": r.card_id, "period": r.period, "bank": r.bank, "card_last4": r.card_last4,
             "statement_date": r.statement_date, "due_date": r.due_date, "total_due": r.total_due,
             "minimum_due": r.minimum_due, "email_subject": r.email_subject, "source": r.source,
             "extracted_at": r.extracted_at}
@@ -207,6 +207,43 @@ def delete_payment(payment_id: int, db: Session = Depends(get_db), caller: User 
     if row:
         db.delete(row)
         db.commit()
+
+
+def _own_bill(db: Session, bill_id: int, caller: User) -> CreditCardStatement:
+    bill = db.query(CreditCardStatement).filter(CreditCardStatement.id == bill_id,
+                                                CreditCardStatement.user_id == caller.id).first()
+    if not bill:
+        raise HTTPException(404, "Bill not found")
+    return bill
+
+
+@router.get("/bills/{bill_id}/details", response_model=dict)
+def bill_details(bill_id: int, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """The bill's breakup from its PDF: "ready" with the details, "reading"
+    (with the current step) while a read is running, "error", or "none"
+    when it hasn't been read yet - see card_details.py."""
+    import json
+    import card_details
+    bill = _own_bill(db, bill_id, caller)
+    card = db.get(CreditCard, bill.card_id) if bill.card_id else None
+    head = {"bill": {"id": bill.id, "period": bill.period, "card": card_bills.card_name(card) if card else bill.bank,
+                     "total_due": bill.total_due, "minimum_due": bill.minimum_due, "due_date": bill.due_date,
+                     "statement_date": bill.statement_date}}
+    live = card_details.status(bill.id)
+    if live and live["status"] == "reading":
+        return {**head, **live}
+    if bill.details_json:
+        return {**head, "status": "ready", **json.loads(bill.details_json)}
+    return {**head, **(live or {"status": "none"})}
+
+
+@router.post("/bills/{bill_id}/details", response_model=dict, status_code=202)
+def read_bill_details(bill_id: int, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Read (or re-read) the bill's PDF in the background."""
+    import card_details
+    bill = _own_bill(db, bill_id, caller)
+    card_details.start(caller.id, bill.id)
+    return {"started": True}
 
 
 @router.post("/fetch", response_model=dict, status_code=202)

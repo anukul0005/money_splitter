@@ -13,6 +13,7 @@ import EditGroup   from './pages/EditGroup'
 import History     from './pages/History'
 import MLAnalysis  from './pages/MLAnalysis'
 import Insights    from './pages/Insights'
+import CardBill    from './pages/CardBill'
 import Login       from './pages/Login'
 import ResetPassword from './pages/ResetPassword'
 import AdminRecovery from './pages/AdminRecovery'
@@ -93,6 +94,7 @@ export default function App() {
                 <Route path="/history"    element={<History />} />
                 <Route path="/ml-analysis" element={<MLAnalysis />} />
                 <Route path="/insights" element={<Insights />} />
+                <Route path="/credit-cards/bill/:id" element={<CardBill />} />
                 <Route path="/master/:key" element={<MasterGroupDetail />} />
                 <Route path="/friends" element={<Friends />} />
                 <Route path="/friends/:name" element={<FriendDetail />} />

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   getGmailStatus, getGmailConnectUrl, disconnectGmail,
   getCardBankOptions, listCards, addCard, updateCard, deleteCard, deleteCardBill,
@@ -59,6 +60,7 @@ const shortMonth = (period) => new Date(`${period}-01T00:00:00`).toLocaleDateStr
 // month underneath, the payments made, and "Record payment". Only the
 // latest bill takes payments (bill.can_pay) - past months are closed.
 function CardBlock({ card: c, banks, results, busy, run, editing, setEditing, saveCard }) {
+  const nav = useNavigate()
   const [paying, setPaying] = useState(false)
   const [amount, setAmount] = useState('')
   const [paidOn, setPaidOn] = useState(today())
@@ -118,8 +120,12 @@ function CardBlock({ card: c, banks, results, busy, run, editing, setEditing, sa
                 const r = results[`${c.id}:${period}`]
                 return (
                   <div key={period}>
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-gray-500">{shortMonth(period)}</span>
+                    <div className={`flex items-center justify-between text-[11px] ${b ? 'cursor-pointer' : ''}`}
+                      onClick={b ? () => nav(`/credit-cards/bill/${b.id}`) : undefined}>
+                      <span className="text-gray-500">
+                        {shortMonth(period)}
+                        {b && <span className="ml-1.5 font-bold text-brand-500">breakup ›</span>}
+                      </span>
                       {!b ? (
                         <span className="text-gray-400">{r?.status === 'not_found' ? 'Not found' : 'Not fetched yet'}</span>
                       ) : b.total_due == null ? (
