@@ -37,6 +37,9 @@ async def lifespan(app: FastAPI):
         expense_classifier.sweep()
     except Exception as e:
         print(f"[warn] pending categorisation sweep failed (non-fatal): {e}")
+    # Woken after 12:30 IST with today's daily jobs not yet run (the cron
+    # ping was refused, say)? Run them now - see routers/cron.py.
+    cron.maybe_catch_up()
     yield
 
 
@@ -70,6 +73,7 @@ async def no_caching(request, call_next):
     should ever be stored. `Vary` is belt and braces for any proxy in front
     of us that caches despite being told not to.
     """
+    cron.maybe_catch_up()        # today's daily jobs, if due and not yet run
     response = await call_next(request)
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     response.headers["Pragma"] = "no-cache"

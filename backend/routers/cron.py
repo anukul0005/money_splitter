@@ -15,14 +15,16 @@ an environment nobody has set one up for yet.
 from __future__ import annotations
 
 import calendar
-from datetime import datetime, timedelta, timezone
+import json
+import threading
+from datetime import datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from database import get_db, get_settings
+from database import get_db, get_session_factory, get_settings
 from emailer import send_birthday_wish, notify_group_memory, send_debt_reminder, send_daily_summary
-from models import Expense, Group, User
+from models import Expense, Group, JobRun, User
 
 router = APIRouter(prefix="/cron", tags=["cron"])
 
@@ -41,6 +43,66 @@ def _check_key(key: str) -> None:
 
 @router.get("/daily", response_model=dict)
 def run_daily(key: str = "", db: Session = Depends(get_db)):
+    """The external pinger's entry point - see daily_jobs."""
+    _check_key(key)
+    return _run_and_record(db, "cron")
+
+
+# ── catch-up ──────────────────────────────────────────────────────────────
+# Render's free plan sleeps the server when idle, and its edge sometimes
+# refuses the pinger's wake-up call outright (429 "hibernate-rate-limited")
+# - the request never reaches us, so a day's birthdays and memories were
+# silently skipped. So the server doesn't depend on the pinger: whenever it
+# is awake after DUE (anyone opening the app wakes it) and today's run
+# hasn't happened, it runs it itself in the background. Every part of
+# daily_jobs sends at most once per person/group per day, so the pinger and
+# the catch-up can't double-send.
+DUE = time(12, 30)
+_done_for: str | None = None        # IST date this process knows is done
+_running = threading.Lock()
+
+
+def _run_and_record(db: Session, source: str) -> dict:
+    global _done_for
+    result = daily_jobs(db)
+    row = db.get(JobRun, "daily") or JobRun(name="daily")
+    row.last_date, row.source, row.result = result["date"], source, json.dumps(result)[:4000]
+    db.add(row)
+    db.commit()
+    _done_for = result["date"]
+    return result
+
+
+def _catch_up() -> None:
+    global _done_for
+    if not _running.acquire(blocking=False):
+        return
+    db = get_session_factory()()
+    try:
+        today = datetime.now(IST).date().isoformat()
+        row = db.get(JobRun, "daily")
+        if row and row.last_date == today:
+            _done_for = today
+            return
+        result = _run_and_record(db, "catch-up")
+        print(f"[cron] catch-up ran today's daily jobs: {result}")
+    except Exception as e:  # never let this break a request
+        print(f"[cron] catch-up failed: {e}")
+    finally:
+        db.close()
+        _running.release()
+
+
+def maybe_catch_up() -> None:
+    """Cheap enough for every request: a date compare until the day's run
+    is due and not yet known to be done, then one background thread."""
+    now = datetime.now(IST)
+    if now.time() < DUE or _done_for == now.date().isoformat() or _running.locked():
+        return
+    threading.Thread(target=_catch_up, daemon=True).start()
+
+
+def daily_jobs(db: Session) -> dict:
     """Everything that needs to happen once a day: birthdays, "on this day
     last year" expense memories, and - on the 1st of the month only - a
     reminder to whoever currently owes someone money.
@@ -52,7 +114,6 @@ def run_daily(key: str = "", db: Session = Depends(get_db)):
     rest of the run - any one of these emails is exactly the sort of thing
     that must not go silently unsent for everyone because one row was bad.
     """
-    _check_key(key)
     from routers.stats import top_transaction_partners
 
     # India's date, not the server's: Render runs on UTC, which is still the

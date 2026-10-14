@@ -741,6 +741,20 @@ class UpiId(Base):
     __table_args__ = (UniqueConstraint("user_id", "upi_id", name="uq_upi_user_upi"),)
 
 
+class JobRun(Base):
+    """When a scheduled job last completed, by name ("daily") - so the
+    catch-up in routers/cron.py runs today's daily jobs once, whether the
+    external pinger got through or not."""
+
+    __tablename__ = "job_runs"
+
+    name = Column(String(50), primary_key=True)
+    last_date = Column(String(10), nullable=True)      # IST date, YYYY-MM-DD
+    source = Column(String(20), nullable=True)         # "cron" | "catch-up"
+    result = Column(Text, nullable=True)               # the run's summary, JSON
+    ran_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class Nudge(Base):
     """One "settle up" reminder sent from the Balances page bell: who sent
     it, to whom, which way the money is owed and how much, at that moment.
