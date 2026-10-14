@@ -112,7 +112,7 @@ export default function Home() {
   // still show up inside their super group on Home, each carrying its own
   // "Historical" badge via GroupCard — they're just always settled, so they
   // land behind "Show settled" rather than among the top unsettled cards.
-  const { masters: everyMaster, solo: soloGroups } = buildMasterGroups(myGroups, 1)
+  const { masters: everyMaster, solo: soloGroups } = buildMasterGroups(myGroups, 1, user?.name)
   // A single-member master can never carry a real balance - nothing to
   // settle with just yourself - so it would otherwise always sink to
   // "settled" and sit hidden behind "Show more" no matter how many months

@@ -145,7 +145,7 @@ export default function MasterGroupDetail() {
       .then((r) => {
         // minGroups=1 so a direct link still resolves even if this member
         // set currently has only one group.
-        const { masters } = buildMasterGroups(r.data, 1)
+        const { masters } = buildMasterGroups(r.data, 1, user?.name)
         setMaster(masters.find((m) => m.key === decodeURIComponent(key)) ?? null)
       })
       .finally(() => setLoading(false))
@@ -174,7 +174,7 @@ export default function MasterGroupDetail() {
           <button
             onClick={onAdd}
             disabled={adding}
-            title={isMonthly ? `Open ${thisMonthName().toLowerCase()}` : todays ? `Open today's group (${todays.name})` : `Today's group with ${master.name}`}
+            title={isMonthly ? `Open ${thisMonthName().toLowerCase()}` : todays ? `Open today's group (${todays.name})` : `Today's group, ${master.name}`}
             className="flex-shrink-0 flex items-center gap-1.5 bg-cream border border-amber-200 text-gray-500 hover:bg-amber-50 rounded-md px-3 py-1.5 text-xs font-bold active:scale-95 transition-all shadow-sm disabled:opacity-50"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">

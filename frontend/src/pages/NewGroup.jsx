@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { createGroup, getGroups } from '../api'
 import { useUser } from '../UserContext'
+import { buildMasterGroups, pairKey } from '../utils/masterGroups'
 
 export default function NewGroup() {
   const nav = useNavigate()
@@ -23,6 +24,7 @@ export default function NewGroup() {
     preset.length ? preset : (user?.name ? [user.name] : [])
   )
   const [known, setKnown]           = useState([])   // people you already share groups with
+  const [allGroups, setAllGroups]   = useState([])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError]           = useState('')
 
@@ -31,6 +33,7 @@ export default function NewGroup() {
   useEffect(() => {
     getGroups()
       .then((r) => {
+        setAllGroups(r.data)
         const freq = new Map()
         r.data.forEach((g) => (g.member_names ?? []).forEach((n) => {
           freq.set(n, (freq.get(n) || 0) + 1)
@@ -59,9 +62,18 @@ export default function NewGroup() {
     (m) => m.toLowerCase() === user.name.toLowerCase()
   )
 
+  // "+ New Group" starts a new supergroup - a set of people you don't have
+  // one with yet. The same people as an existing supergroup belong in that
+  // one (its "+ Add"), so that's offered instead. Coming from a supergroup
+  // (preset members) is exactly that, so it's allowed.
+  const existing = !fromSupergroup && members.length > 0
+    ? buildMasterGroups(allGroups, 1, user?.name).masters.find((m) => m.key === pairKey(members))
+    : null
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
+    if (existing) return
     if (!form.name.trim()) return setError('Group name is required')
     if (members.length < 1) return setError('Add at least one member')
 
@@ -85,7 +97,12 @@ export default function NewGroup() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
           </button>
-          <h1 className="text-xl font-bold">New Group</h1>
+          <div>
+            <h1 className="text-xl font-bold">New Group</h1>
+            {!fromSupergroup && (
+              <p className="text-[11px] text-gray-400 mt-0.5">Starts a new supergroup, with people you don't have one with yet</p>
+            )}
+          </div>
         </div>
       </div>
 
@@ -218,9 +235,20 @@ export default function NewGroup() {
           </p>
         )}
 
+        {existing && (
+          <div className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-md px-4 py-3 space-y-2">
+            <p>
+              You already have <b>{existing.name}</b> ({existing.groups.length} group{existing.groups.length === 1 ? '' : 's'}) with
+              exactly these people. New groups with them go there - open it and tap <b>+ Add</b>.
+            </p>
+            <button type="button" onClick={() => nav(`/master/${encodeURIComponent(existing.key)}`, { state: { master: existing } })}
+              className="font-bold text-brand-600">Open {existing.name} ›</button>
+          </div>
+        )}
+
         {error && <p className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-md px-4 py-3">{error}</p>}
 
-        <button type="submit" className="btn-primary" disabled={submitting}>
+        <button type="submit" className="btn-primary disabled:opacity-50" disabled={submitting || !!existing}>
           {submitting ? 'Creating…' : `Create Group with ${members.length} member${members.length !== 1 ? 's' : ''}`}
         </button>
       </form>

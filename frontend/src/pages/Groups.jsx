@@ -33,7 +33,7 @@ export default function Groups() {
   // minGroups=1: every 2+ member group gets linked to a master group, even
   // ones whose exact member set is currently unique (e.g. "Mumbai with
   // Apoorv") — matches Home's behavior instead of leaving them as solo cards.
-  const { masters, solo } = buildMasterGroups(filtered, 1)
+  const { masters, solo } = buildMasterGroups(filtered, 1, user?.name)
 
   if (loading) return <LoadingSpinner />
 

@@ -15,10 +15,20 @@ export function nameList(names) {
   return `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`
 }
 
+// A supergroup's name as the logged-in person sees it: everyone else, after
+// "w" - "w Anjali", "w Utkarsh, Anjali & Nandini". A supergroup of just
+// yourself (your own monthly tracking) keeps your name.
+export function masterName(names, me) {
+  const others = me ? names.filter((n) => n.trim().toLowerCase() !== me.trim().toLowerCase()) : names
+  if (!me || others.length === names.length) return nameList(names)
+  return others.length ? `w ${nameList(others)}` : nameList(names)
+}
+
 // groups: array of GroupSummary-like objects with { id, member_names, total_amount, ... }
 // minGroups: minimum groups sharing a member set to form a master (default 2 —
 // pass 1 to link every group to a master, even ones whose member set is unique).
-export function buildMasterGroups(groups, minGroups = 2) {
+// me: the logged-in user's name, for masterName.
+export function buildMasterGroups(groups, minGroups = 2, me = null) {
   const byPair = new Map()
   for (const g of groups) {
     const names = g.member_names ?? []
@@ -34,7 +44,7 @@ export function buildMasterGroups(groups, minGroups = 2) {
     if (entry.groups.length >= minGroups) {
       masters.push({
         key: entry.key,
-        name: nameList(entry.names),
+        name: masterName(entry.names, me),
         names: entry.names,
         groups: entry.groups,
         totalAmount: entry.groups.reduce((s, g) => s + (g.total_amount ?? 0), 0),
