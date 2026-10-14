@@ -466,6 +466,63 @@ def send_debt_reminder(db, to_email: str | None, name: str, debts: list[tuple[st
     _push.send_push_to_user(db, name, "💰 Your dues this month", push_body, url="/balances/owe")
 
 
+def send_nudge(db, to_email: str | None, recipient: str, sender: str, they_owe: bool,
+               amount: float, items: list[tuple[str, float]], upi_ids: list[str]) -> list[str]:
+    """A "settle up" reminder one person sends another from the Balances
+    page bell - by email and app push, whichever the recipient has.
+
+    they_owe: the recipient owes the sender `amount` (a payment reminder,
+    with the sender's UPI ID to pay into); otherwise the sender owes the
+    recipient (a heads-up that they know and will settle). `items` is
+    what makes up the figure - groups, loans, bills - each signed from the
+    headline's direction (positive adds to it), so the amount can be checked
+    rather than taken on trust. Returns the channels it went out on.
+    """
+    first = recipient.split()[0] if recipient.split() else recipient
+    link = f"{get_settings().frontend_url}/balances/{'owe' if they_owe else 'owed'}"
+    if they_owe:
+        subject = f"💰 {sender} sent a reminder: you owe ₹{amount:,.0f}"
+        heading = f"A reminder from {sender} 💰"
+        intro = f"Hi {first}, {sender} sent you a reminder to settle up. You owe them ₹{amount:,.2f}:"
+        push_title, push_body = f"💰 Reminder from {sender}", f"You owe {sender} ₹{amount:,.0f}. Tap to see the breakdown."
+    else:
+        subject = f"🤝 {sender} owes you ₹{amount:,.0f}"
+        heading = f"{sender} is settling up 🤝"
+        intro = f"Hi {first}, {sender} wanted you to know they owe you ₹{amount:,.2f} and will settle it:"
+        push_title, push_body = f"🤝 {sender} owes you ₹{amount:,.0f}", f"{sender} sent a note that they'll settle up."
+    plain = [intro]
+    html = [escape(intro)]
+    if len(items) > 8:
+        # Years of small groups would make a wall of lines: the 7 biggest,
+        # then the rest as one.
+        ranked = sorted(items, key=lambda x: -abs(x[1]))
+        items = ranked[:7] + [(f"{len(ranked) - 7} other groups and payments", sum(v for _, v in ranked[7:]))]
+    for label, signed in items:
+        sign = "" if signed > 0 else "−"         # items are signed from the recipient's side
+        plain.append(f"  {label}: {sign}₹{abs(signed):,.2f}")
+        html.append(f"{escape(label)}: <strong>{sign}₹{abs(signed):,.2f}</strong>")
+    if they_owe and upi_ids:
+        plain.append(f"Pay {sender} by UPI: {', '.join(upi_ids)}")
+        html.append(f"Pay {escape(sender)} by UPI: <strong>{escape(', '.join(upi_ids))}</strong>")
+    tail = ("Already paid? Ask them to record it in the app, so this goes away." if they_owe
+            else "Once it's paid, record it in the app so both of you see the same balance.")
+    plain.append(tail)
+    html.append(escape(tail))
+    channels = []
+    if to_email:
+        _send(to_email, subject, "\n\n".join(plain) + f"\n\n{link}",
+              _layout(heading, html, button_url=link, button_label="Open in SplitEasy",
+                      footer=f"Sent by SplitEasy because {sender} tapped \"remind\" for you."))
+        channels.append("email")
+    if _push.available():
+        from models import PushSubscription, User
+        u = db.query(User).filter(User.name.ilike(recipient)).first()
+        if u and db.query(PushSubscription).filter(PushSubscription.user_id == u.id).count():
+            _push.send_push_to_user(db, recipient, push_title, push_body, url=f"/balances/{'owe' if they_owe else 'owed'}")
+            channels.append("push")
+    return channels
+
+
 def send_daily_summary(db, to_email: str | None, name: str, s: dict) -> None:
     """Yesterday's spending, sent by the daily cron (12:30 PM IST) to
     anyone who turned it on in Account (User.daily_summary). `s` is

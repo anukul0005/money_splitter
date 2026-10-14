@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { getFriends, getGroups, getLoans, paymentsBetween, listUpiIdsFor, listMyUpiIds, createPaymentClaim } from '../api'
+import {
+  getFriends, getGroups, getLoans, paymentsBetween, listUpiIdsFor, listMyUpiIds, createPaymentClaim,
+  sendNudge, getRecentNudges,
+} from '../api'
 import { MONEY_CHANGED } from '../components/PaymentClaimsInbox'
 import { useUser } from '../UserContext'
 import { owes, owed } from '../utils/money'
@@ -21,8 +24,36 @@ function stamp(iso) {
 }
 
 
-function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates }) {
+/** "just now", "3 h ago", "2 days ago" */
+function ago(iso) {
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000)
+  if (mins < 2) return 'just now'
+  if (mins < 60) return `${mins} min ago`
+  if (mins < 48 * 60) return `${Math.round(mins / 60)} h ago`
+  return `${Math.round(mins / 1440)} days ago`
+}
+
+function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastNudge, onNudged }) {
   const [payments, setPayments] = useState(null)
+
+  // The bell: a "settle up" reminder by email + app push. A confirm step
+  // first - it reaches a real person - then the server works out the
+  // amount itself (routers/nudges.py) and says how it was delivered.
+  const [bellOpen, setBellOpen] = useState(false)
+  const [nudge, setNudge] = useState({ busy: false, msg: '', err: '' })
+  const remind = async (e) => {
+    e.stopPropagation()
+    setNudge({ busy: true, msg: '', err: '' })
+    try {
+      const r = (await sendNudge(row.name)).data
+      const via = r.channels.map((c) => (c === 'push' ? 'app notification' : 'email')).join(' and ')
+      setNudge({ busy: false, msg: `Sent to ${r.name} by ${via}.`, err: '' })
+      setBellOpen(false)
+      onNudged(row.name, r.sent_at)
+    } catch (err) {
+      setNudge({ busy: false, msg: '', err: err.response?.data?.detail || 'Could not send the reminder.' })
+    }
+  }
   const loanOnly = row.groups.length === 0 && row.loanItems.length > 0
 
   // "Pay via UPI" - on a "you owe" row this is their saved UPI ID, to
@@ -94,6 +125,17 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates }) {
         </button>
         <div className="flex items-center gap-1.5 flex-shrink-0">
           <button
+            onClick={(e) => { e.stopPropagation(); setBellOpen((o) => !o); setNudge({ busy: false, msg: '', err: '' }) }}
+            title={owing ? `Let ${row.name} know` : `Remind ${row.name}`} aria-label="Send a reminder"
+            className={`flex items-center justify-center w-6 h-6 rounded-md border transition-all active:scale-95 ${
+              bellOpen ? 'bg-brand-400 border-brand-400 text-white' : 'bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100'
+            }`}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2a2 2 0 01-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+            </svg>
+          </button>
+          <button
             onClick={toggleUpi}
             title="Pay via UPI" aria-label="Pay via UPI"
             className={`flex items-center justify-center w-6 h-6 rounded-md border text-[10px] font-black transition-all active:scale-95 ${
@@ -107,6 +149,33 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates }) {
           </span>
         </div>
       </div>
+
+      {lastNudge && !bellOpen && !nudge.msg && (
+        <p className="text-[10px] text-gray-400 mt-1 pl-5">Reminded {ago(lastNudge)}</p>
+      )}
+      {nudge.msg && <p className="text-[10.84px] font-bold text-green-700 mt-2 pl-5">✓ {nudge.msg}</p>}
+      {bellOpen && (
+        <div className="mt-3 border border-amber-200 bg-amber-50 rounded-md px-3 py-2.5">
+          <p className="text-[0.739rem] text-gray-700">
+            {owing
+              ? <>Let <b>{row.name}</b> know you owe {INR(Math.abs(row.net))} and will settle it?</>
+              : <>Remind <b>{row.name}</b> to pay you {INR(Math.abs(row.net))}?</>}
+          </p>
+          <p className="text-[10px] text-gray-500 mt-0.5">
+            Sent by email and app notification, with the breakdown{owing ? '' : ' and your UPI ID'}.
+            {lastNudge && ` Last reminded ${ago(lastNudge)}.`}
+          </p>
+          {nudge.err && <p className="text-[10.84px] text-red-600 mt-1">{nudge.err}</p>}
+          <div className="flex gap-2 mt-2">
+            <button onClick={remind} disabled={nudge.busy}
+              className="btn-primary text-[0.739rem] py-1.5 px-3 w-auto disabled:opacity-50">
+              {nudge.busy ? 'Sending…' : 'Send reminder'}
+            </button>
+            <button onClick={(e) => { e.stopPropagation(); setBellOpen(false) }}
+              className="text-[0.739rem] font-bold text-gray-500 px-2">Cancel</button>
+          </div>
+        </div>
+      )}
 
       {upiOpen && (
         <div className="mt-3">
@@ -221,6 +290,7 @@ export default function Balances() {
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState(new Set())
   const [payOpen, setPayOpen] = useState(false)
+  const [nudges, setNudges] = useState({})        // lower-cased name -> last reminder sent
 
   const load = () => {
     if (!user?.name) { setLoading(false); return }
@@ -235,6 +305,7 @@ export default function Balances() {
   }
 
   useEffect(() => { load() }, [user?.name])
+  useEffect(() => { getRecentNudges().then((r) => setNudges(r.data)).catch(() => {}) }, [user?.name])
 
   useEffect(() => {
     const onChanged = () => load()
@@ -307,6 +378,8 @@ export default function Balances() {
             nav={nav}
             me={me}
             groupDates={groupDates}
+            lastNudge={nudges[row.name.trim().toLowerCase()]}
+            onNudged={(name, at) => setNudges((n) => ({ ...n, [name.trim().toLowerCase()]: at }))}
           />
         ))}
       </div>

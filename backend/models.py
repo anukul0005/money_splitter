@@ -741,6 +741,23 @@ class UpiId(Base):
     __table_args__ = (UniqueConstraint("user_id", "upi_id", name="uq_upi_user_upi"),)
 
 
+class Nudge(Base):
+    """One "settle up" reminder sent from the Balances page bell: who sent
+    it, to whom, which way the money is owed and how much, at that moment.
+    Kept so each card can say when its person was last reminded, and so
+    the same person can't be pinged over and over (see routers/nudges.py)."""
+
+    __tablename__ = "nudges"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sender = Column(String(100), nullable=False, index=True)
+    recipient = Column(String(100), nullable=False)
+    they_owe = Column(Boolean, nullable=False)     # True: recipient owes sender
+    amount = Column(Float, nullable=False)
+    channels = Column(String(50), nullable=True)    # "email,push"
+    sent_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class PayeeLabel(Base):
     """What one person's payments to one payee are - decided once, then
     reused by every statement import.
