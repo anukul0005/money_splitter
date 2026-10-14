@@ -12,7 +12,7 @@ import { useUser } from '../UserContext'
 import { pairKey, nameList } from '../utils/masterGroups'
 
 Chart.register(BarElement, BarController, LineElement, LineController, PointElement, CategoryScale, LinearScale, Tooltip)
-Chart.defaults.font.family = "'Space Grotesk', system-ui, sans-serif"
+Chart.defaults.font.family = "Num, 'Space Grotesk', system-ui, sans-serif"
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 // ₹2.5L / ₹40k / ₹600 - axis labels that stay short at any scale.
@@ -57,7 +57,7 @@ const changeLabels = {
     labels.forEach((v, i) => {
       if (v == null || !bars[i]) return
       ctx.save()
-      ctx.font = "bold 10px 'Space Grotesk', system-ui, sans-serif"
+      ctx.font = "bold 10px Num, 'Space Grotesk', system-ui, sans-serif"
       ctx.fillStyle = v > 0 ? '#ef4444' : v < 0 ? '#16a34a' : '#94a3b8'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'bottom'
@@ -70,7 +70,7 @@ const changeLabels = {
 const SOLO   = '#f97316'
 const SHARED = '#3b82f6'
 const AVG    = '#64748b'
-const TICK_FONT = { size: 10, family: "'Space Grotesk', system-ui, sans-serif" }
+const TICK_FONT = { size: 10, family: "Num, 'Space Grotesk', system-ui, sans-serif" }
 // A leading year with fewer days of spending than this is a stray entry or
 // two, not a year - charting it squeezes the real years and drags averages.
 const MIN_DAYS = 12

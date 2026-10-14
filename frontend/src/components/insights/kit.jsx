@@ -16,7 +16,8 @@ export const fmtWhen = (ts) => new Date(ts).toLocaleString('en-IN', { day: 'nume
 
 export const P = ['Early', 'Day', 'Night']
 export const BRAND = '#f97316', SLATE = '#334155', SOFT = '#cbd5e1', UP = '#dc2626', DOWN = '#16a34a'
-export const FONT = { family: "'Space Grotesk', system-ui, sans-serif", size: 10 }
+export const FONT = { family: "Num, 'Space Grotesk', system-ui, sans-serif", size: 10 }
+Chart.defaults.font.family = FONT.family          // tooltips too: digits in Plex Mono (index.css)
 
 export const base = (extra = {}) => ({
   responsive: true, maintainAspectRatio: false, animation: false,

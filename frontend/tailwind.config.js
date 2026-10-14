@@ -61,7 +61,7 @@ export default {
         },
       },
       fontFamily: {
-        sans: ['"Space Grotesk"', 'system-ui', 'sans-serif'],
+        sans: ['Num', '"Space Grotesk"', 'system-ui', 'sans-serif'],   // Num: digits in Plex Mono - see index.css
         mono: ['"IBM Plex Mono"', '"Courier New"', 'monospace'],
       },
       fontWeight: {

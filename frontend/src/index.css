@@ -3,6 +3,57 @@
 @tailwind utilities;
 
 @layer base {
+  /* Numbers in IBM Plex Mono, as in the reports Claude made: 'Num' covers
+     only the digits 0-9 and the rupee sign, and comes first in every font
+     stack (tailwind.config.js sans, chart fonts) - so every number in the
+     app, even inside a sentence, is drawn in Plex Mono with even-width
+     digits, and everything else falls through to Space Grotesk. Commas
+     and full stops stay Space Grotesk: a monospaced comma in ordinary
+     text leaves a visible gap. Self-hosted in public/fonts. */
+  @font-face {
+    font-family: 'Num'; font-style: normal; font-weight: 400; font-display: swap;
+    src: url('/fonts/plex-mono-400-latin.woff2') format('woff2');
+    unicode-range: U+0030-0039;
+  }
+  @font-face {
+    font-family: 'Num'; font-style: normal; font-weight: 400; font-display: swap;
+    src: url('/fonts/plex-mono-400-latin-ext.woff2') format('woff2');
+    unicode-range: U+20B9;
+  }
+  @font-face {
+    font-family: 'Num'; font-style: normal; font-weight: 500; font-display: swap;
+    src: url('/fonts/plex-mono-500-latin.woff2') format('woff2');
+    unicode-range: U+0030-0039;
+  }
+  @font-face {
+    font-family: 'Num'; font-style: normal; font-weight: 500; font-display: swap;
+    src: url('/fonts/plex-mono-500-latin-ext.woff2') format('woff2');
+    unicode-range: U+20B9;
+  }
+  @font-face {
+    font-family: 'Num'; font-style: normal; font-weight: 600; font-display: swap;
+    src: url('/fonts/plex-mono-600-latin.woff2') format('woff2');
+    unicode-range: U+0030-0039;
+  }
+  @font-face {
+    font-family: 'Num'; font-style: normal; font-weight: 600; font-display: swap;
+    src: url('/fonts/plex-mono-600-latin-ext.woff2') format('woff2');
+    unicode-range: U+20B9;
+  }
+  @font-face {
+    font-family: 'Num'; font-style: normal; font-weight: 700; font-display: swap;
+    src: url('/fonts/plex-mono-700-latin.woff2') format('woff2');
+    unicode-range: U+0030-0039;
+  }
+  @font-face {
+    font-family: 'Num'; font-style: normal; font-weight: 700; font-display: swap;
+    src: url('/fonts/plex-mono-700-latin-ext.woff2') format('woff2');
+    unicode-range: U+20B9;
+  }
+}
+
+
+@layer base {
   html {
     /* No height on html: `-webkit-fill-available` here made the layout
        viewport taller than what iOS Safari actually shows, and the
