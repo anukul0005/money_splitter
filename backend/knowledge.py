@@ -546,7 +546,12 @@ def index_expense(db: Session, expense, group_id: int | None = None) -> str | No
     from models import KnowledgeItem
 
     t = expense_text(expense)
-    kind = classify(t)
+    venue = getattr(expense, "venue", None)
+    # A named restaurant, cafe or bar is a place to eat - whatever the regexes
+    # make of the words around it. (A liquor shop's bottles stay drinks.)
+    is_place = bool(venue) and (expense.category == "Food & Dining"
+                                or (expense.category == "Alcohol" and expense.subcategory == "Bar"))
+    kind = FOOD if is_place else classify(t)
     row = (db.query(KnowledgeItem)
              .filter(KnowledgeItem.expense_id == expense.id)
              .first())
@@ -561,7 +566,15 @@ def index_expense(db: Session, expense, group_id: int | None = None) -> str | No
 
     # Retrieval may refile this: see link(). "Beer Cafe" arrives here as a
     # drink and leaves as food.
-    brand, score, kind = link(t, kind, db=db)
+    if is_place:
+        # Linked on the venue's own name, and only kept when the two names
+        # share a word that identifies something - so "Subway" can't become
+        # "The Salad Story" just because both are near "sandwich" places.
+        brand, score, _ = link(venue, FOOD, db=db)
+        if brand and not (_distinctive(venue) & _distinctive(brand)):
+            brand = None
+    else:
+        brand, score, kind = link(t, kind, db=db)
     heads = max(int(expense.divider or 1), 1)
     if row is None:
         row = KnowledgeItem(expense_id=expense.id)
@@ -569,8 +582,9 @@ def index_expense(db: Session, expense, group_id: int | None = None) -> str | No
     row.group_id = group_id if group_id is not None else expense.group_id
     row.kind = kind
     row.title = t[:500]
-    row.label = brand or _label(t)
+    row.label = brand or (venue if is_place else None) or _label(t)
     row.matched_brand = brand
+    row.venue = venue if is_place else None
     row.match_score = round(score, 4)
     row.amount = float(expense.amount or 0)
     row.per_head = round(float(expense.amount or 0) / heads, 2)
@@ -659,15 +673,18 @@ def learned(db: Session, kind: str, group_ids: list[int],
     if not group_ids:
         return []
 
-    # Only things that linked to the catalogue are offered as suggestions.
-    # An expense the vectors could not name still gets indexed and is still
+    # Only things that can be named are offered as suggestions: a catalogue
+    # link, or a venue the AI categoriser read from the expense (a place you
+    # have paid at, whether or not any published list has it). Grouped by
+    # that name, so every visit to one place is one suggestion with its
+    # average spend. An expense the vectors could not name still gets indexed and is still
     # searchable - it just does not become advice. "Seth sethani petrol beer
     # zomato kinara" is a real evening and a useless recommendation, and the
     # bar for putting a name in front of somebody as a thing to go and buy is
     # that we can actually name it.
     col = "per_head" if per_head else "amount"
     rows = db.execute(sql(f"""
-        SELECT matched_brand                   AS label,
+        SELECT COALESCE(matched_brand, venue)  AS label,
                MAX(matched_brand)              AS matched_brand,
                COUNT(*)                        AS times,
                AVG({col})                      AS avg_spend,
@@ -676,8 +693,8 @@ def learned(db: Session, kind: str, group_ids: list[int],
                MAX(occurred_on)                AS last_had
         FROM knowledge_items
         WHERE kind = :kind AND group_id = ANY(:gids)
-          AND matched_brand IS NOT NULL
-        GROUP BY matched_brand
+          AND (matched_brand IS NOT NULL OR venue IS NOT NULL)
+        GROUP BY COALESCE(matched_brand, venue)
         HAVING AVG({col}) BETWEEN :lo AND :hi
         ORDER BY COUNT(*) DESC, MAX(occurred_on) DESC NULLS LAST
         LIMIT :lim

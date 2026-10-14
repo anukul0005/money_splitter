@@ -206,6 +206,7 @@ export const getFoodMeta       = ()     => api.get('/food/meta')
 export const getFoodRecommendation = (p) => api.get('/food/', { params: p })
 export const searchFood        = (p)    => api.get('/food/search', { params: p })
 export const listPlaceNames    = (city) => api.get('/food/names', { params: { city } })
+export const getMyPlaces       = ()     => api.get('/food/my-places')
 
 // ── Forecast ───────────────────────────────────────────────────────────────────
 // Two directions on the same question. /budget splits one total into a

@@ -204,6 +204,8 @@ _ADDED_COLUMNS = [
     ("credit_card_statements", "source", "VARCHAR(10)"),
     ("credit_card_statements", "details_json", "TEXT"),
     ("credit_cards", "pdf_password_encrypted", "TEXT"),
+    ("expenses", "venue", "VARCHAR(120)"),
+    ("knowledge_items", "venue", "VARCHAR(200)"),
 ]
 
 # (index name, statement)

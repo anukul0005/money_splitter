@@ -453,6 +453,29 @@ def list_places(city: str = "", db: Session = Depends(get_db),
     return [_place_out(r) for r in q.order_by(PlaceOverride.id.desc()).all()]
 
 
+@router.get("/my-places", response_model=list[dict])
+def my_places(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Every place the caller has paid at, from the knowledge base: the venue
+    the AI read from each food expense (or its published-list match), with
+    visits, average bill, average per person and the last visit."""
+    from sqlalchemy import text as sql
+    gids = [g.id for g in db.query(Group).all() if is_member(g, caller)]
+    if not gids:
+        return []
+    rows = db.execute(sql("""
+        SELECT COALESCE(matched_brand, venue) AS name, MAX(matched_brand) AS listed,
+               COUNT(*) AS visits, AVG(amount) AS avg_bill, AVG(per_head) AS avg_per_head,
+               MAX(occurred_on) AS last_visit
+        FROM knowledge_items
+        WHERE kind = 'food' AND group_id = ANY(:g) AND (matched_brand IS NOT NULL OR venue IS NOT NULL)
+        GROUP BY COALESCE(matched_brand, venue)
+        ORDER BY COUNT(*) DESC, MAX(occurred_on) DESC NULLS LAST
+    """), {"g": gids}).mappings().all()
+    return [{"name": r["name"], "in_price_list": bool(r["listed"]), "visits": r["visits"],
+             "avg_bill": round(float(r["avg_bill"] or 0)), "avg_per_head": round(float(r["avg_per_head"] or 0)),
+             "last_visit": (r["last_visit"] or "")[:10] or None} for r in rows]
+
+
 def _known_names(db: Session, city: str = "") -> list[dict]:
     """Every restaurant we already hold, published or added by hand.
 

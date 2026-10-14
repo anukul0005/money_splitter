@@ -136,6 +136,10 @@ class Expense(Base):
     # Within `category`, from spend_categories.TAXONOMY ("Food & Dining" ->
     # "Restaurants"). Optional; older expenses have none.
     subcategory = Column(String(100), nullable=True)
+    # The restaurant / cafe / bar named in the title or notes, as the AI
+    # categoriser read it ("Lunch at seth sethani" -> "Seth Sethani") - what
+    # makes it one of the user's places in the knowledge base.
+    venue = Column(String(120), nullable=True)
     # Where category/subcategory came from: "llm" (expense_classifier, from
     # the description and notes), "pending" (queued for it), "rules" (the
     # keyword fallback), "import" (a statement import), "user", or NULL for
@@ -373,6 +377,7 @@ class KnowledgeItem(Base):
     label = Column(String(200), nullable=True)   # canonical name, or the phrase
     matched_brand = Column(String(200), nullable=True)
     match_score = Column(Float, nullable=True)
+    venue = Column(String(200), nullable=True)   # the expense's venue - a place even when not in any list
     amount = Column(Float, nullable=True)
     per_head = Column(Float, nullable=True)
     occurred_on = Column(String(20), nullable=True)

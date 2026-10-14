@@ -40,6 +40,7 @@ _started = False
 _start_lock = threading.Lock()
 _turn = itertools.count()   # which Groq key goes first, alternating per request
 _memo: dict[str, tuple[str, str | None]] = {}   # text key -> (category, subcategory)
+_venues: dict[str, str | None] = {}              # text key -> venue
 
 _TAXONOMY_LINES = "\n".join(f"  {c}: {', '.join(subs)}" for c, subs in TAXONOMY.items())
 _SYSTEM_PROMPT = f"""You categorise personal expenses an Indian user typed into an expense app.
@@ -53,9 +54,10 @@ Rules:
 - Judge by what was bought: "dinner at Punjab Grill" is Food & Dining > Restaurants, "Uber to office" is Transport > Cab & auto, "Blinkit milk" is Groceries > Quick commerce, "beer" is Alcohol.
 - The notes often list the items bought - use them.
 - If nothing fits, use Other > Unclassified merchant.
+- venue: the name of the restaurant, cafe, bar, dhaba, sweet shop or food outlet the money was spent at, when the description or notes name one - "Lunch at seth sethani" -> "Seth Sethani", "MCDONALDS" -> "McDonald's", "Mamagoto - Binge central noida" -> "Mamagoto". Use its usual spelling, without area, city or branch. null when no specific place is named: generic words ("morning bf", "chicken", "snacks"), a delivery app alone ("Zomato", "Swiggy"), a grocery or other shop, or a person's name.
 
 Respond with ONLY a JSON object:
-{{"results": [{{"id": <the item's id>, "category": string, "subcategory": string}}]}}
+{{"results": [{{"id": <the item's id>, "category": string, "subcategory": string, "venue": string or null}}]}}
 Return exactly one result per item id you were given."""
 
 
@@ -145,18 +147,20 @@ def _process(ids: set[int]) -> None:
         todo: dict[str, list] = {}
         for e in rows:
             key = _text_key(e.title, e.notes)
-            if key in _memo:
+            if key in _memo and key in _venues:
                 e.category, e.subcategory = _memo[key]
+                e.venue = _venues[key]
                 e.category_source = "llm"
                 continue
-            prior = (db.query(Expense.category, Expense.subcategory)
+            prior = (db.query(Expense.category, Expense.subcategory, Expense.venue)
                      .filter(Expense.category_source == "llm", Expense.id != e.id,
                              func.lower(func.trim(Expense.title)) == (e.title or "").strip().lower(),
                              func.lower(func.trim(func.coalesce(Expense.notes, ""))) == (e.notes or "").strip().lower())
                      .first())
             if prior and prior.category:
                 _memo[key] = (prior.category, prior.subcategory)
-                e.category, e.subcategory = prior.category, prior.subcategory
+                _venues[key] = prior.venue
+                e.category, e.subcategory, e.venue = prior.category, prior.subcategory, prior.venue
                 e.category_source = "llm"
                 continue
             todo.setdefault(key, []).append(e)
@@ -171,10 +175,12 @@ def _process(ids: set[int]) -> None:
                 items.append({"id": i, "description": e.title or "", "notes": e.notes or "",
                               "amount": e.amount, "group": groups.get(e.group_id, "")})
             answers: dict[int, tuple[str, str | None]] = {}
+            venues: dict[int, str | None] = {}
             try:
                 for r in _chat(items).get("results", []):
                     if isinstance(r, dict) and isinstance(r.get("id"), int):
                         answers[r["id"]] = _clean(r.get("category"), r.get("subcategory"))
+                        venues[r["id"]] = canonical_venue(db, clean_venue(r.get("venue")))
             except Exception as err:
                 print(f"[classify] LLM unavailable, using rules: {err}")
             for i, key in enumerate(chunk):
@@ -186,12 +192,59 @@ def _process(ids: set[int]) -> None:
                     continue          # stays pending - retried on the next run
                 if source == "llm":
                     _memo[key] = got
+                    _venues[key] = venues.get(i)
                 for e in todo[key]:
                     e.category, e.subcategory = got
+                    e.venue = venues.get(i) if source == "llm" else None
                     e.category_source = source
             db.commit()
+        _reindex(db, rows)
     finally:
         db.close()
+
+
+def clean_venue(v) -> str | None:
+    if not isinstance(v, str):
+        return None
+    v = " ".join(v.split()).strip(" -,.")
+    return v[:120] if 2 <= len(v) and v.lower() not in ("null", "none", "n/a", "unknown") else None
+
+
+def _squash(v: str) -> str:
+    return "".join(ch for ch in v.lower() if ch.isalnum())
+
+
+def canonical_venue(db, v: str | None) -> str | None:
+    """An existing spelling of the same place when there is one - "Zafar
+    Omlet Corner" becomes the "Zafar Omelet Corner" already on file - so one
+    place doesn't split into two in the knowledge base."""
+    if not v:
+        return v
+    from difflib import SequenceMatcher
+    from sqlalchemy import func as f
+    from models import Expense
+    key = _squash(v)
+    best, best_n = None, 0
+    for name, n in (db.query(Expense.venue, f.count()).filter(Expense.venue.isnot(None)).group_by(Expense.venue)):
+        k = _squash(name)
+        if k == key or (min(len(k), len(key)) >= 6 and SequenceMatcher(None, k, key).ratio() >= 0.9):
+            if n > best_n:
+                best, best_n = name, n
+    return best or v
+
+
+def _reindex(db, rows) -> None:
+    """The knowledge base indexes an expense when it's saved, before it has
+    a category - so once categorised (and its venue read), index it again."""
+    try:
+        from knowledge import index_expense
+        for e in rows:
+            if e.category_source != "pending":
+                index_expense(db, e)
+        db.commit()
+    except Exception as err:  # the knowledge base must never break categorising
+        db.rollback()
+        print(f"[classify] re-indexing failed: {err}")
 
 
 def _worker() -> None:
