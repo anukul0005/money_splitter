@@ -7,8 +7,8 @@
      only the digits 0-9 and the rupee sign, and comes first in every font
      stack (tailwind.config.js sans, chart fonts) - so every number in the
      app, even inside a sentence, is drawn in Plex Mono with even-width
-     digits, and everything else falls through to Space Grotesk. Commas
-     and full stops stay Space Grotesk: a monospaced comma in ordinary
+     digits, and everything else falls through to IBM Plex Sans. Commas
+     and full stops stay Plex Sans: a monospaced comma in ordinary
      text leaves a visible gap. Self-hosted in public/fonts. */
   @font-face {
     font-family: 'Num'; font-style: normal; font-weight: 400; font-display: swap;
