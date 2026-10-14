@@ -2,7 +2,8 @@
 (GET/POST /credit-cards/bills/{id}/details).
 
   1. the bill's own email (saved when the bill was found) -> its PDF,
-     unlocked with the saved bank passwords
+     unlocked with the card's password (then the older saved ones); a
+     bank's trailing terms-and-offers pages are dropped (SKIP_LAST_PAGES)
   2. the statement summary (previous balance, payments, purchases, fees,
      interest, total due...) from the first pages, via the LLM
   3. every transaction, page by page in chunks, via the LLM
@@ -128,7 +129,9 @@ def _categorise(txns: list[dict]) -> None:
         elif t["kind"] in ("fee", "interest", "tax"):
             t["category"], t["subcategory"] = "Card fees & interest", t["kind"].title()
         else:
-            got = answer.get(t["description"]) or categorize(t["description"], t["amount"])
+            got = answer.get(t["description"])
+            t["category_by"] = "ai" if got else "rules"
+            got = got or categorize(t["description"], t["amount"])
             t["category"], t["subcategory"] = got[0], got[1]
 
 
@@ -173,7 +176,9 @@ def read_statement(text: str) -> dict:
     return {
         "summary": summary,
         "transactions": txns,
-        "totals": {"spent": spent, "fees": fees, "debits": debits, "credits": credits, "count": len(txns)},
+        "totals": {"spent": spent, "fees": fees, "debits": debits, "credits": credits, "count": len(txns),
+                   "categorised_by_ai": sum(1 for t in txns if t.get("category_by") == "ai"),
+                   "categorised": sum(1 for t in txns if t.get("category_by"))},
         "by_category": [{"category": c, "amount": round(v[0], 2), "count": v[1],
                          "share": round(v[0] / spent * 100, 1) if spent else 0}
                         for c, v in sorted(by_cat.items(), key=lambda x: -x[1][0])],
@@ -182,6 +187,34 @@ def read_statement(text: str) -> dict:
         "check": check,
         "read_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+# Pages at the end of a bank's statement that are never transactions -
+# terms and conditions, offers, ads. Skipped before anything is read, so
+# they can't turn into "transactions" and don't cost AI calls. ICICI ends
+# every statement with 8 such pages.
+SKIP_LAST_PAGES = {"ICICI Bank": 8}
+MIN_PAGES = 3           # never read fewer than this, whatever the rule says
+
+
+def pages_to_read(bank: str, total: int) -> int:
+    """How many pages, from the start, hold the statement itself."""
+    skip = SKIP_LAST_PAGES.get(bank, 0)
+    return max(total - skip, min(MIN_PAGES, total))
+
+
+def pdf_pages(pdf_bytes: bytes, passwords: list[str]) -> list[str] | None:
+    """The PDF's text page by page - opened with no password, then each saved
+    one in turn (the card's own first)."""
+    import io
+    import pdfplumber
+    for pw in [None, *passwords]:
+        try:
+            with pdfplumber.open(io.BytesIO(pdf_bytes), password=pw) as pdf:
+                return [(p.extract_text() or "") for p in pdf.pages]
+        except Exception:
+            continue
+    return None
 
 
 def status(bill_id: int) -> dict | None:
@@ -206,7 +239,7 @@ def _run(user_id: int, bill_id: int) -> None:
     import secret_box
     from database import get_session_factory
     from models import BankPassword, CreditCardStatement, GmailConnection
-    from statement_sync import _extract_pdf_text, _first_pdf_attachment, _gmail_service
+    from statement_sync import _first_pdf_attachment, _gmail_service
     db = get_session_factory()()
     try:
         bill = db.get(CreditCardStatement, bill_id)
@@ -226,11 +259,14 @@ def _run(user_id: int, bill_id: int) -> None:
         if card:
             from card_bills import passwords_for
             passwords = passwords_for(card, passwords)
-        text = _extract_pdf_text(pdf, passwords)
-        if not text or len(text.strip()) < 100:
+        pages = pdf_pages(pdf, passwords)
+        if not pages or len("".join(pages).strip()) < 100:
             raise RuntimeError("The PDF couldn't be opened with the saved passwords")
-        _step(bill_id, f"Reading {len(_chunks(text))} part(s) of the statement…")
+        keep = pages_to_read(card.bank if card else bill.bank, len(pages))
+        text = "\n".join(pages[:keep])
+        _step(bill_id, f"Reading pages 1–{keep} of {len(pages)}…")
         details = read_statement(text)
+        details["pages"] = {"read": keep, "total": len(pages)}
         bill.details_json = json.dumps(details)
         db.commit()
         with _lock:

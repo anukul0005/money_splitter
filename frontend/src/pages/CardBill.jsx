@@ -231,7 +231,10 @@ function BillBreakup({ billId: id }) {
         </div>
 
         <p className="text-[10px] text-gray-400 text-center">
-          Read from the statement PDF{d.read_at ? ` on ${new Date(d.read_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}` : ''} ·{' '}
+          Read from the statement PDF
+          {d.pages ? ` (pages 1–${d.pages.read} of ${d.pages.total}${d.pages.read < d.pages.total ? ' - the rest are terms and offers' : ''})` : ''}
+          {d.read_at ? ` on ${new Date(d.read_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}` : ''}
+          {t.categorised ? ` · ${t.categorised_by_ai} of ${t.categorised} spends categorised by AI` : ''} ·{' '}
           <button onClick={readAgain} className="font-bold text-brand-500">Read again</button>
         </p>
         {error && <p className="text-xs text-red-600 text-center">{error}</p>}
