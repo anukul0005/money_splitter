@@ -1,4 +1,5 @@
-"""Where to eat tonight, for this many people, on this budget.
+"""Where to eat tonight, for this many people, on this budget - and every
+place you have already eaten at (/my-places).
 
 The same shape as the drink recommender, grounded the same way: a cited price
 table (food_prices) plus what this exact set of people has actually spent on
