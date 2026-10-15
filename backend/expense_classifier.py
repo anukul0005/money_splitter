@@ -52,9 +52,11 @@ Pick the category and subcategory that best describe what the money was spent on
 Rules:
 - Use the exact category and subcategory spellings above.
 - Judge by what was bought: "dinner at Punjab Grill" is Food & Dining > Restaurants, "Uber to office" is Transport > Cab & auto, "Blinkit milk" is Groceries > Quick commerce, "beer" is Alcohol.
+- "FL" in a payee name ("NEW SINDHI BASTI FL", "RAWER ROAD 2 FL") marks a foreign-liquor shop: Alcohol > Liquor store.
+- Company names stand for their outlets: "Connaught Plaza Restaurants" runs McDonald's, "Burrito Restaurants" runs Taco Bell, "Jubilant Foodworks" runs Domino's.
 - The notes often list the items bought - use them.
 - If nothing fits, use Other > Unclassified merchant.
-- venue: the name of the restaurant, cafe, bar, dhaba, sweet shop or food outlet the money was spent at, when the description or notes name one - "Lunch at seth sethani" -> "Seth Sethani", "MCDONALDS" -> "McDonald's", "Mamagoto - Binge central noida" -> "Mamagoto". Use its usual spelling, without area, city or branch. null when no specific place is named: generic words ("morning bf", "chicken", "snacks"), a delivery app alone ("Zomato", "Swiggy"), a grocery or other shop, or a person's name.
+- venue: the name of the restaurant, cafe, bar, dhaba, sweet shop or food outlet the money was spent at, when the description or notes name one - "Lunch at seth sethani" -> "Seth Sethani", "MCDONALDS" -> "McDonald's", "Mamagoto - Binge central noida" -> "Mamagoto". Use its usual spelling, without area, city or branch. null when no specific place is named: generic words ("morning bf", "chicken", "snacks"), a delivery app alone ("Zomato", "Swiggy"), a grocery or other shop, a liquor shop (an "FL" payee), a mall, or a person's name. For a company that runs a chain, give the chain ("Connaught Plaza Restaurants" -> "McDonald's").
 
 Respond with ONLY a JSON object:
 {{"results": [{{"id": <the item's id>, "category": string, "subcategory": string, "venue": string or null}}]}}
