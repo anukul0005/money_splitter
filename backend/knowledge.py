@@ -287,6 +287,16 @@ def _distinctive(s: str) -> set[str]:
     return {w for w in words if len(w) > 1} or words
 
 
+def same_place(a: str, b: str) -> bool:
+    """Whether two restaurant names are the same place: near-identical once
+    case, spaces, punctuation and a leading "The" are dropped ("Nexe chinese"
+    / "Nexe's chinese", "United Coffee House" / "United Coffee House Rewind")."""
+    from difflib import SequenceMatcher
+    sq = lambda s: re.sub(r"[^a-z0-9]", "", re.sub(r"^the\s+", "", s.lower().strip()))
+    x, y = sq(a), sq(b)
+    return bool(x and y) and (x == y or SequenceMatcher(None, x, y).ratio() >= 0.8)
+
+
 def _squash(s: str) -> str:
     """A name with its spaces closed up, for people who type it that way.
 
@@ -551,6 +561,11 @@ def index_expense(db: Session, expense, group_id: int | None = None) -> str | No
     # make of the words around it. (A liquor shop's bottles stay drinks.)
     is_place = bool(venue) and (expense.category == "Food & Dining"
                                 or (expense.category == "Alcohol" and expense.subcategory == "Bar"))
+    if is_place and expense.category == "Alcohol":
+        # "Black Dog", "J&B" under Bar are the bottle, not the bar.
+        bottle, _, _ = link(venue, DRINK, db=db)
+        if bottle and same_place(venue, bottle):
+            is_place = False
     kind = FOOD if is_place else classify(t)
     row = (db.query(KnowledgeItem)
              .filter(KnowledgeItem.expense_id == expense.id)
@@ -568,10 +583,11 @@ def index_expense(db: Session, expense, group_id: int | None = None) -> str | No
     # drink and leaves as food.
     if is_place:
         # Linked on the venue's own name, and only kept when the two names
-        # share a word that identifies something - so "Subway" can't become
-        # "The Salad Story" just because both are near "sandwich" places.
+        # are near-identical. Sharing a word was not enough: "Indian Mutton
+        # Centre" became Indian Coffee House, "Patiyala Seekh Kawab" Nizam's
+        # Kathi Kabab, every ice-cream cart Natural Ice Cream.
         brand, score, _ = link(venue, FOOD, db=db)
-        if brand and not (_distinctive(venue) & _distinctive(brand)):
+        if brand and not same_place(venue, brand):
             brand = None
     else:
         brand, score, kind = link(t, kind, db=db)
@@ -684,7 +700,7 @@ def learned(db: Session, kind: str, group_ids: list[int],
     # that we can actually name it.
     col = "per_head" if per_head else "amount"
     rows = db.execute(sql(f"""
-        SELECT COALESCE(matched_brand, venue)  AS label,
+        SELECT COALESCE(venue, matched_brand)  AS label,
                MAX(matched_brand)              AS matched_brand,
                COUNT(*)                        AS times,
                AVG({col})                      AS avg_spend,
@@ -694,7 +710,7 @@ def learned(db: Session, kind: str, group_ids: list[int],
         FROM knowledge_items
         WHERE kind = :kind AND group_id = ANY(:gids)
           AND (matched_brand IS NOT NULL OR venue IS NOT NULL)
-        GROUP BY COALESCE(matched_brand, venue)
+        GROUP BY COALESCE(venue, matched_brand)
         HAVING AVG({col}) BETWEEN :lo AND :hi
         ORDER BY COUNT(*) DESC, MAX(occurred_on) DESC NULLS LAST
         LIMIT :lim

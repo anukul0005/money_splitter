@@ -464,12 +464,12 @@ def my_places(db: Session = Depends(get_db), caller: User = Depends(current_user
     if not gids:
         return []
     rows = db.execute(sql("""
-        SELECT COALESCE(matched_brand, venue) AS name, MAX(matched_brand) AS listed,
+        SELECT COALESCE(venue, matched_brand) AS name, MAX(matched_brand) AS listed,
                COUNT(*) AS visits, AVG(amount) AS avg_bill, AVG(per_head) AS avg_per_head,
                MAX(occurred_on) AS last_visit
         FROM knowledge_items
         WHERE kind = 'food' AND group_id = ANY(:g) AND (matched_brand IS NOT NULL OR venue IS NOT NULL)
-        GROUP BY COALESCE(matched_brand, venue)
+        GROUP BY COALESCE(venue, matched_brand)
         ORDER BY COUNT(*) DESC, MAX(occurred_on) DESC NULLS LAST
     """), {"g": gids}).mappings().all()
     return [{"name": r["name"], "in_price_list": bool(r["listed"]), "visits": r["visits"],
