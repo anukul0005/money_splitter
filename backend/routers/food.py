@@ -477,6 +477,25 @@ def my_places(db: Session = Depends(get_db), caller: User = Depends(current_user
              "last_visit": (r["last_visit"] or "")[:10] or None} for r in rows]
 
 
+@router.get("/my-places/visits", response_model=list[dict])
+def my_place_visits(name: str, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Every visit to one of the caller's places: date, description, bill,
+    the caller's share and which group it was in, newest first."""
+    from sqlalchemy import text as sql
+    groups = {g.id: g for g in db.query(Group).all() if is_member(g, caller)}
+    if not groups:
+        return []
+    rows = db.execute(sql("""
+        SELECT e.id, e.date, e.title, e.amount, e.divider, e.group_id
+        FROM knowledge_items k JOIN expenses e ON e.id = k.expense_id
+        WHERE k.kind = 'food' AND k.group_id = ANY(:g) AND COALESCE(k.venue, k.matched_brand) = :n
+        ORDER BY e.date DESC NULLS LAST
+    """), {"g": list(groups), "n": name}).mappings().all()
+    return [{"id": r["id"], "date": (r["date"] or "")[:10] or None, "title": r["title"], "amount": r["amount"],
+             "per_head": round(r["amount"] / max(r["divider"] or 1, 1), 2),
+             "group": groups[r["group_id"]].name, "group_id": r["group_id"]} for r in rows]
+
+
 def _known_names(db: Session, city: str = "") -> list[dict]:
     """Every restaurant we already hold, published or added by hand.
 

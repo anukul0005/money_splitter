@@ -48,44 +48,24 @@ const BUDGET_STEP = 50
  * number published consistently enough to tabulate — so every total here is
  * called an estimate, and the page says so rather than implying a quote.
  */
-// Every place you've paid at, from the knowledge base - the venue the AI
-// read from each food expense, priced from your own bills.
+// Every place you've paid at, from the knowledge base - a summary that
+// opens the full list (/food/places, pages/MyPlaces.jsx).
 function YourPlaces() {
+  const nav = useNavigate()
   const [places, setPlaces] = useState(null)
-  const [all, setAll] = useState(false)
   useEffect(() => { getMyPlaces().then((r) => setPlaces(r.data)).catch(() => setPlaces([])) }, [])
   if (!places || places.length === 0) return null
-  const shown = all ? places : places.slice(0, 8)
   return (
-    <div className="card space-y-2">
-      <div className="flex items-baseline justify-between">
-        <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Your places</p>
-        <span className="text-[11px] text-gray-400">{places.length} from your expenses</span>
-      </div>
-      {shown.map((p) => (
-        <div key={p.name} className="flex items-start justify-between gap-3 py-1.5 border-b border-amber-100 last:border-0">
-          <div className="min-w-0">
-            <p className="text-sm font-bold text-gray-900 break-words">
-              {p.name}
-              {p.in_price_list && <span className="ml-1.5 text-[9px] font-bold text-brand-600 uppercase tracking-wider">in the price list</span>}
-            </p>
-            <p className="text-[11px] text-gray-500">
-              {p.visits} visit{p.visits === 1 ? '' : 's'}{p.last_visit ? ` · last ${fmtDate(p.last_visit)}` : ''}
-            </p>
-          </div>
-          <div className="text-right shrink-0">
-            <p className="text-sm font-black text-brand-600">{INR(p.avg_per_head)}</p>
-            <p className="text-[10px] text-gray-400">per person{p.avg_bill !== p.avg_per_head ? ` · bill ${INR(p.avg_bill)}` : ''}</p>
-          </div>
+    <button onClick={() => nav('/food/places')} className="card w-full text-left active:scale-[0.99] transition-transform">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Places I've eaten at</p>
+          <p className="text-sm font-bold text-gray-900 mt-1">{places.length} places, from your expenses</p>
+          <p className="text-[11px] text-gray-500 mt-0.5 truncate">{places.slice(0, 4).map((p) => p.name).join(' · ')}</p>
         </div>
-      ))}
-      {places.length > 8 && (
-        <button onClick={() => setAll((v) => !v)} className="w-full text-xs font-bold text-brand-500 pt-1">
-          {all ? 'Show fewer' : `Show all ${places.length}`}
-        </button>
-      )}
-      <p className="text-[10px] text-gray-400">Averages from what you actually paid. New expenses add to this on their own.</p>
-    </div>
+        <span className="text-brand-500 text-lg font-bold shrink-0">›</span>
+      </div>
+    </button>
   )
 }
 
