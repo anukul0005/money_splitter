@@ -805,6 +805,29 @@ class PayeeLabel(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class StatementSkip(Base):
+    """A statement payment the import deliberately didn't add as spending
+    but that is still worth seeing in its month: an investment, or money
+    sent to a person (p2p, an excluded friend, a settle-up or loan).
+    Shown on the monthly group's Investments / To people tabs. Other
+    skips - self transfers, card repayments, gambling - aren't kept.
+    """
+
+    __tablename__ = "statement_skips"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_name = Column(String(100), nullable=False, index=True)
+    kind = Column(String(20), nullable=False)          # "investment" | "people"
+    date = Column(String(10), nullable=False, index=True)   # YYYY-MM-DD
+    time = Column(String(5), nullable=True)
+    merchant = Column(String(200), nullable=False)
+    amount = Column(Float, nullable=False)
+    txn_id = Column(String(100), nullable=True)
+    reason = Column(Text, nullable=True)
+    source = Column(String(30), nullable=True)         # "Google Pay", "PhonePe"
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class PaymentClaim(Base):
     """A payer saying "I've paid you" - not a payment yet.
 

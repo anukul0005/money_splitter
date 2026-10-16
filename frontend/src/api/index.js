@@ -81,6 +81,7 @@ export const importStatement    = (file)     => {
   fd.append('file', file)
   return api.post('/expenses/import-statement', fd)
 }
+export const getMonthlySkipped  = (groupId)  => api.get(`/expenses/monthly/${groupId}/skipped`)
 export const getMe              = ()         => api.get('/users/me')
 // ── UPI IDs (for "pay via UPI" QR / deep link) ──────────────────────────────────
 export const listMyUpiIds       = ()         => api.get('/users/me/upi')

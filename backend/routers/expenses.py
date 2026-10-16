@@ -6,7 +6,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 from auth import caller_groups, current_user, is_member, member_group
 from database import get_db
-from models import Group, Expense, Loan, Member, PayeeLabel, User
+from models import Group, Expense, Loan, Member, PayeeLabel, StatementSkip, User
 from schemas import ExpenseCreate, ExpenseOut
 from emailer import notify_group_activity_bg
 from activity import record_activity
@@ -384,6 +384,32 @@ def _index_many_bg(expense_ids: list[int]) -> None:
         _index_bg(eid)
 
 
+@router.get("/monthly/{group_id}/skipped", response_model=dict)
+def monthly_skipped(group_id: int, db: Session = Depends(get_db),
+                    caller: User = Depends(current_user)):
+    """The investments and payments to people from imported statements
+    that fall in this monthly group's month - what the import left out of
+    the group but the month still includes."""
+    group = member_group(group_id, caller, db, with_history=False)
+    parts = group.name.upper().split()
+    if (len(parts) != 4 or " ".join(parts[:2]) != "MONTHLY EXPENSES"
+            or parts[2] not in _MONTH_ABBR or not parts[3].isdigit()):
+        raise HTTPException(400, "Only a monthly expenses group has these.")
+    month = f"{parts[3]}-{_MONTH_ABBR.index(parts[2]) + 1:02d}"
+    rows = (db.query(StatementSkip)
+            .filter(func.lower(StatementSkip.user_name) == caller.name.lower(),
+                    StatementSkip.date.like(f"{month}-%"))
+            .order_by(StatementSkip.date.desc(), StatementSkip.time.desc())
+            .all())
+    out = {"month": month, "investments": [], "people": []}
+    for s in rows:
+        out["investments" if s.kind == "investment" else "people"].append({
+            "id": s.id, "date": s.date, "time": s.time, "merchant": s.merchant,
+            "amount": s.amount, "reason": s.reason, "source": s.source,
+        })
+    return out
+
+
 @router.post("/import-statement", response_model=dict)
 @router.post("/import-csv", response_model=dict)   # old path, for a frontend still cached
 def import_statement(background_tasks: BackgroundTasks,
@@ -478,6 +504,9 @@ def import_statement(background_tasks: BackgroundTasks,
     excluded_txns = {e[4:] for e in entries if e.startswith("txn:")}
     excluded = {_norm(e) for e in entries if not e.startswith("txn:")}
     leftover = []
+    # Investments and money sent to people: not spending, but kept so the
+    # month's group can show them (StatementSkip).
+    skips: list[tuple[str, object, str]] = []
 
     def merge(exp, parts) -> None:
         """Fill an existing monthly-group entry's blanks from its payment(s)."""
@@ -513,6 +542,7 @@ def import_statement(background_tasks: BackgroundTasks,
             existing_refs.add(t.txn_id)   # a debit repeated within the file counts once
         if is_investment(t.merchant):
             investments.append({"date": t.date, "merchant": t.merchant, "amount": t.amount})
+            skips.append(("investment", t, "investment"))
             continue
         if is_credit_repayment(t.merchant):
             repayments.append({"date": t.date, "merchant": t.merchant, "amount": t.amount})
@@ -522,6 +552,7 @@ def import_statement(background_tasks: BackgroundTasks,
             continue
         if _norm(t.merchant) in excluded or t.txn_id in excluded_txns:
             friends.append({"date": t.date, "merchant": t.merchant, "amount": t.amount})
+            skips.append(("people", t, "excluded payee"))
             continue
 
         candidate = _closest(monthly_pool, t, lambda e: e.date, lambda e: e.amount)
@@ -542,6 +573,7 @@ def import_statement(background_tasks: BackgroundTasks,
             transfer_pool.remove(transfer)
             transfers.append({"date": t.date, "merchant": t.merchant, "amount": t.amount,
                               "matched": transfer[2]})
+            skips.append(("people", t, transfer[2]))
             continue
 
         leftover.append(t)
@@ -587,6 +619,8 @@ def import_statement(background_tasks: BackgroundTasks,
         if lab is not None and lab.decision != "spending":
             why = lab.decision.replace("_", " ") + (f" - {lab.note}" if lab.source == "llm" and lab.note else "")
             not_spending.append({**line, "reason": why, "by": lab.source})
+            if lab.decision in ("p2p", "investment"):
+                skips.append(("people" if lab.decision == "p2p" else "investment", t, why))
             continue
         if lab is not None:
             keep.append((t, lab.category, lab.subcategory))
@@ -596,6 +630,7 @@ def import_statement(background_tasks: BackgroundTasks,
             # The user's rule: a one-off payment to a person or masked number
             # is P2P unless something says otherwise.
             not_spending.append({**line, "reason": "p2p - one-off payment to a person", "by": "rules"})
+            skips.append(("people", t, "one-off payment to a person"))
             continue
         keep.append((t, cat, sub))
 
@@ -624,6 +659,20 @@ def import_statement(background_tasks: BackgroundTasks,
         )
         db.add(exp)
         created.append(exp)
+
+    # Re-uploading a statement must not list a payment twice.
+    def skip_key(date, merchant, amount, txn_id):
+        return txn_id or f"{date}|{_norm(merchant)}|{round(amount, 2)}"
+    seen = {skip_key(s.date, s.merchant, s.amount, s.txn_id) for s in
+            db.query(StatementSkip).filter(func.lower(StatementSkip.user_name) == me).all()}
+    for kind, t, reason in skips:
+        k = skip_key(t.date, t.merchant, t.amount, t.txn_id)
+        if k in seen:
+            continue
+        seen.add(k)
+        db.add(StatementSkip(user_name=caller.name, kind=kind, date=t.date, time=t.time,
+                             merchant=t.merchant, amount=t.amount, txn_id=t.txn_id or None,
+                             reason=reason, source=t.source))
 
     # Ids read before the commit: afterwards each expense is expired, and
     # reading .id would cost one SELECT per row.

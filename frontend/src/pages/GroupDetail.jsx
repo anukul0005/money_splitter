@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { getGroup, getSettlement, getGroupStats, deleteExpense, deleteGroup } from '../api'
+import { getGroup, getSettlement, getGroupStats, deleteExpense, deleteGroup, getMonthlySkipped } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ExpenseEditModal from '../components/ExpenseEditModal'
 import ReceiptInfo from '../components/ReceiptInfo'
@@ -22,7 +22,17 @@ export default function GroupDetail() {
   const [tab, setTab]                   = useState('expenses')
   const [editingExpense, setEditingExp] = useState(null)   // expense being edited
   const [editingPayment, setEditingPayment] = useState(null)
+  const [skipped, setSkipped]           = useState(null)   // monthly groups: investments / to people
 
+  // Fetched the first time either tab is opened, not on every visit.
+  useEffect(() => {
+    if ((tab === 'investments' || tab === 'people') && skipped === null) {
+      getMonthlySkipped(id)
+        .then((r) => setSkipped(r.data))
+        .catch(() => setSkipped({ investments: [], people: [], error: true }))
+    }
+  }, [tab, id, skipped])
+  useEffect(() => { setSkipped(null); setTab('expenses') }, [id])
 
   const fetchData = () =>
     Promise.all([getGroup(id), getSettlement(id), getGroupStats(id)])
@@ -57,7 +67,7 @@ export default function GroupDetail() {
 
   // A one-person group has nothing to settle and no per-person split to edit
   const isSolo = group.members.length === 1
-
+  const isMonthly = isSolo && /^MONTHLY EXPENSES [A-Z]{3} \d{4}$/.test(group.name.toUpperCase())
 
 
   return (
@@ -103,16 +113,17 @@ export default function GroupDetail() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 mt-3">
+        <div className="flex gap-1 mt-3 overflow-x-auto">
           {/* Stats here is this one group only - a master group's own Stats
               toggle covers every group that shares its exact member set,
               which a solo group like a personal Monthly Expenses tracker
               has no equivalent of to find this in otherwise. */}
-          {([['expenses','Expenses'],...(isSolo ? [] : [['settle','Settle Up']]),['stats','Stats']]).map(([v, label]) => (
+          {([['expenses','Expenses'],...(isSolo ? [] : [['settle','Settle Up']]),['stats','Stats'],
+             ...(isMonthly ? [['investments','Investments'],['people','To people']] : [])]).map(([v, label]) => (
             <button
               key={v}
               onClick={() => setTab(v)}
-              className={`flex-1 py-2 text-xs font-bold transition-colors border ${
+              className={`flex-1 px-2 py-2 text-xs font-bold whitespace-nowrap transition-colors border ${
                 tab === v
                   ? 'bg-brand-400 text-white border-brand-400'
                   : 'text-gray-500 border-transparent hover:bg-amber-50'
@@ -139,6 +150,45 @@ export default function GroupDetail() {
           <p className="text-base font-black">{group.members.length}</p>
         </div>
       </div>
+
+      {/* Investments / To people - payments from imported statements that
+          aren't spending, so they're not in the group, but are this month's */}
+      {(tab === 'investments' || tab === 'people') && (
+        <div className="px-5">
+          {skipped === null ? <LoadingSpinner /> : (() => {
+            const rows = tab === 'investments' ? skipped.investments : skipped.people
+            if (skipped.error) return <p className="text-sm text-red-500 py-8 text-center">Couldn't load these.</p>
+            if (rows.length === 0) return (
+              <p className="text-sm text-gray-400 py-12 text-center">
+                {tab === 'investments' ? 'No investments' : 'No payments to people'} this month.
+                <br /><span className="text-xs">They appear here after you import a statement.</span>
+              </p>
+            )
+            return (
+              <>
+                <div className="card py-3 px-4 mb-2 flex justify-between items-center">
+                  <p className="text-xs text-gray-500">{rows.length} payment{rows.length === 1 ? '' : 's'}</p>
+                  <p className="text-base font-black text-brand-600">{INR(rows.reduce((s, r) => s + r.amount, 0))}</p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {rows.map((r) => (
+                    <div key={r.id} className="card px-4 py-3 flex justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold truncate">{r.merchant}</p>
+                        <p className="text-xs text-gray-400">
+                          {r.date}{r.time ? ` · ${r.time}` : ''}{r.source ? ` · ${r.source}` : ''}
+                        </p>
+                        {tab === 'people' && r.reason && <p className="text-[11px] text-gray-400 truncate">{r.reason}</p>}
+                      </div>
+                      <p className="text-sm font-bold whitespace-nowrap">{INR(r.amount)}</p>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )
+          })()}
+        </div>
+      )}
 
       {/* Expenses tab */}
       {tab === 'expenses' && (
