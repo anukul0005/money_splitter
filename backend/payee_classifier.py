@@ -149,17 +149,18 @@ def classify(payees: list[dict]) -> dict[str, dict]:
             failures.append(e)
             continue
         for r in reply.get("results", []):
-            # The model now and then puts a bare string in the list; skipping
-            # it, not raising, keeps the rest of this batch's answers.
-            if not isinstance(r, dict):
-                continue
+            # Any one malformed answer - a bare string in the list, a list
+            # where a category name belongs, an id out of range - is skipped
+            # on its own, never raised: that would lose every answer.
             try:
-                p = batch[int(r.get("id"))]
-            except (TypeError, ValueError, IndexError):
+                i = int(r.get("id"))
+                if not 0 <= i < len(batch):
+                    continue
+                cleaned = _clean(r)
+            except Exception:
                 continue
-            cleaned = _clean(r)
             if cleaned:
-                out[p["key"]] = cleaned
+                out[batch[i]["key"]] = cleaned
     if failures and not out:
         raise failures[-1]
     return out
