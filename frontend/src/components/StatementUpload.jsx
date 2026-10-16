@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { startImportJob, getImportJob, cancelImportJob } from '../api'
+import { startImportJob, getImportJob, cancelImportJob, listStatementPasswords, forgetStatementPassword } from '../api'
 import StatementImportResult from './StatementImportResult'
 
 // The payment apps a statement can come from, and the file types each
@@ -32,7 +32,16 @@ function UploadIcon() {
  * `onPick` gets the chosen app - see useStatementUpload's `pick`.
  */
 export function StatementUploadButton({ busy, onPick }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen]   = useState(false)
+  const [saved, setSaved] = useState([])   // apps with a remembered password
+  useEffect(() => {
+    if (open) listStatementPasswords().then((r) => setSaved(r.data)).catch(() => setSaved([]))
+  }, [open])
+  const forget = async (app) => {
+    if (!confirm(`Forget your saved ${app} statement password?`)) return
+    await forgetStatementPassword(app).catch(() => {})
+    setSaved((s) => s.filter((a) => a !== app))
+  }
   return (
     <div className="relative flex-shrink-0">
       <button
@@ -63,6 +72,17 @@ export function StatementUploadButton({ busy, onPick }) {
                 <span className="block text-[11px] text-gray-400">{a.hint}</span>
               </button>
             ))}
+            {saved.length > 0 && (
+              <div className="border-t border-amber-100 mt-1 pt-1.5 pb-1 px-3">
+                <p className="text-[10px] font-black text-gray-400 tracking-widest">SAVED PASSWORDS</p>
+                {saved.map((app) => (
+                  <div key={app} className="flex items-center justify-between py-1">
+                    <span className="text-xs text-gray-700">🔒 {app}</span>
+                    <button onClick={() => forget(app)} className="text-[11px] font-bold text-red-600">Forget</button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </>
       )}
@@ -107,6 +127,7 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
   const [locked, setLocked]     = useState(false)   // the file needs a password
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+  const [remember, setRemember] = useState(true)   // statements keep one fixed password
   const [result, setResult]     = useState(null)
   const [cancelling, setCancelling] = useState(false)
   const [notice, setNotice]     = useState('')
@@ -172,7 +193,7 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
     }, POLL_MS)
   }
 
-  const upload = async (f, pw = '') => {
+  const upload = async (f, pw = '', keep = false) => {
     if (!f) return
     setFile(f); setError(''); setResult(null); setNotice('')
     setProgress({ stage: 'Uploading', fraction: 0 })
@@ -180,7 +201,7 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
     try {
       const { data } = await startImportJob(f, pw, (e) => {
         if (e.total) setProgress({ stage: 'Uploading', fraction: UPLOAD_SHARE * (e.loaded / e.total) })
-      }, abortRef.current.signal)
+      }, abortRef.current.signal, keep)
       jobRef.current = data.job_id
       setProgress({ stage: 'Starting', fraction: UPLOAD_SHARE })
       poll(data.job_id)
@@ -225,7 +246,7 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
       )}
       {notice && !busy && <p className="text-xs text-gray-600 pr-5">{notice}</p>}
       {locked && !busy && (
-        <form onSubmit={(e) => { e.preventDefault(); if (password) upload(file, password) }}>
+        <form onSubmit={(e) => { e.preventDefault(); if (password) upload(file, password, remember) }}>
           <div className="flex items-center gap-3 pr-6">
             <span className="flex-shrink-0 w-9 h-9 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
@@ -267,9 +288,22 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
             </button>
           </div>
           {error && <p className="text-xs text-red-600 mt-1.5">{error}</p>}
-          <p className="text-[11px] text-gray-400 mt-1.5">
-            Only used to open this file - it isn't saved.
-          </p>
+          <label className="flex items-start gap-2 mt-2.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+              className="mt-0.5 w-4 h-4 accent-brand-400 flex-shrink-0"
+            />
+            <span className="text-xs text-gray-700">
+              Remember this password
+              <span className="block text-[11px] text-gray-400">
+                {remember
+                  ? 'Saved encrypted, so your next statement opens on its own. Forget it any time from the Upload menu.'
+                  : 'Only used to open this file - not saved.'}
+              </span>
+            </span>
+          </label>
           <button type="submit" disabled={!password} className="btn-primary text-sm mt-3 disabled:opacity-50">
             Unlock & import
           </button>

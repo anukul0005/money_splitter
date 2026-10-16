@@ -9,7 +9,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 from auth import caller_groups, current_user, is_member, member_group
 from database import get_db
-from models import Group, Expense, Loan, Member, PayeeLabel, StatementSkip, User
+from models import BankPassword, Group, Expense, Loan, Member, PayeeLabel, StatementSkip, User
 from schemas import ExpenseCreate, ExpenseOut
 from emailer import notify_group_activity_bg
 from activity import record_activity
@@ -434,7 +434,8 @@ def import_statement(background_tasks: BackgroundTasks,
     # no other request could finish and give its connection back, so the
     # pool (15) filled and everything else timed out after 30s.
     try:
-        result, created_ids = run_import(db, caller, file.file.read(), password or None)
+        result, created_ids = run_import(db, caller, file.file.read(), password or None,
+                                         saved_passwords=_statement_passwords(db, caller.id))
     except StatementLocked as e:
         raise HTTPException(400, _locked_detail(e))
     except ValueError as e:
@@ -445,13 +446,15 @@ def import_statement(background_tasks: BackgroundTasks,
 
 
 def run_import(db: Session, caller: User, raw: bytes, password: str | None = None,
-               progress=None) -> tuple[dict, list[int]]:
+               progress=None, saved_passwords: list[str] | None = None) -> tuple[dict, list[int]]:
     """Fill the caller's month-wise "MONTHLY EXPENSES <MON> <YEAR>" groups
     from a payment-app statement - PhonePe CSV, Google Pay PDF, or any
     other type statement_import knows. Returns (summary, ids of the
     expenses created - to index for search). `password` opens a locked
-    PDF; `progress(stage, fraction)` hears how far along it is. Raises
-    StatementLocked / ValueError for a file it can't read.
+    PDF - without one, `saved_passwords` (the caller's remembered
+    statement passwords) are tried; `progress(stage, fraction)` hears how
+    far along it is. Raises StatementLocked / ValueError for a file it
+    can't read.
 
     Per debit line:
       1. already imported (its transaction id is on an expense anywhere the
@@ -488,8 +491,18 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
     """
     step = progress or (lambda stage, fraction: None)
     step("Reading the statement", 0.0)
-    source, txns = parse_statement(
-        raw, password, lambda done, total: step("Reading the statement", 0.30 * done / total))
+    read = lambda done, total: step("Reading the statement", 0.30 * done / total)
+    tries = [password] if password else [None, *(saved_passwords or [])]
+    for i, pw in enumerate(tries):
+        try:
+            source, txns = parse_statement(raw, pw, read)
+            break
+        except StatementLocked:
+            if i == len(tries) - 1:
+                # Typed and wrong -> "wrong"; nothing typed (saved ones
+                # included) -> ask for it.
+                raise StatementLocked(wrong=bool(password)) from None
+    used_saved = not password and i > 0
     step("Matching with your entries", 0.30)
 
     mine = caller_groups(db, caller)
@@ -737,7 +750,53 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
         "credits_ignored": credits,
         "groups_created": groups_created,
         "source": source,
+        "used_saved_password": used_saved,
     }, created_ids
+
+
+# ── remembered statement passwords ─────────────────────────────────────────
+# Kept in bank_passwords (encrypted, like a card statement's) under
+# "statement:<app>" - one per payment app, since each app's statements
+# are locked with that person's own fixed password.
+_STATEMENT_PREFIX = "statement:"
+
+
+def _statement_passwords(db: Session, user_id: int) -> list[str]:
+    from secret_box import decrypt
+    rows = (db.query(BankPassword)
+            .filter(BankPassword.user_id == user_id,
+                    BankPassword.bank.like(f"{_STATEMENT_PREFIX}%")).all())
+    return [pw for pw in (decrypt(r.password_encrypted) for r in rows) if pw]
+
+
+def _remember_statement_password(db: Session, user_id: int, app: str, password: str) -> None:
+    from secret_box import encrypt
+    bank = f"{_STATEMENT_PREFIX}{app}"
+    row = (db.query(BankPassword)
+           .filter(BankPassword.user_id == user_id, BankPassword.bank == bank).first())
+    if row:
+        row.password_encrypted = encrypt(password)
+    else:
+        db.add(BankPassword(user_id=user_id, bank=bank, password_encrypted=encrypt(password)))
+    db.commit()
+
+
+@router.get("/statement-passwords", response_model=list)
+def list_statement_passwords(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Which apps' statement passwords are remembered - names only."""
+    rows = (db.query(BankPassword)
+            .filter(BankPassword.user_id == caller.id,
+                    BankPassword.bank.like(f"{_STATEMENT_PREFIX}%")).all())
+    return sorted(r.bank[len(_STATEMENT_PREFIX):] for r in rows)
+
+
+@router.delete("/statement-passwords/{app}", response_model=dict)
+def forget_statement_password(app: str, db: Session = Depends(get_db),
+                              caller: User = Depends(current_user)):
+    db.query(BankPassword).filter(BankPassword.user_id == caller.id,
+                                  BankPassword.bank == f"{_STATEMENT_PREFIX}{app}").delete()
+    db.commit()
+    return {"ok": True}
 
 
 # ── import jobs: the same import, with progress ───────────────────────────
@@ -766,14 +825,23 @@ def _job_finish(job_id: str, error: dict) -> None:
         _jobs[job_id].update(status="error", error=error)
 
 
-def _run_job(job_id: str, user_id: int, raw: bytes, password: str | None) -> None:
+def _run_job(job_id: str, user_id: int, raw: bytes, password: str | None,
+             remember: bool = False) -> None:
     from database import get_session_factory
     db = get_session_factory()()
     try:
         caller = db.get(User, user_id)
         result, created_ids = run_import(
             db, caller, raw, password,
-            lambda stage, fraction: _job_update(job_id, stage=stage, progress=round(fraction, 3)))
+            lambda stage, fraction: _job_update(job_id, stage=stage, progress=round(fraction, 3)),
+            saved_passwords=_statement_passwords(db, user_id))
+        if password and remember:
+            # Only now: the password is known to open this app's statements.
+            try:
+                _remember_statement_password(db, user_id, result["source"], password)
+                result["password_saved"] = True
+            except Exception as e:  # remembering is a convenience, never a failed import
+                print(f"[import] couldn't save statement password: {e!r}")
         with _jobs_lock:
             _jobs[job_id].update(status="done", stage="Done", progress=1.0, result=result)
     except _Cancelled:
@@ -801,6 +869,7 @@ def _run_job(job_id: str, user_id: int, raw: bytes, password: str | None) -> Non
 
 @router.post("/import-jobs", response_model=dict)
 def start_import_job(file: UploadFile = File(...), password: str = Form(""),
+                     remember: bool = Form(False),
                      caller: User = Depends(current_user)):
     """Start importing a statement in the background; poll
     GET /expenses/import-jobs/{job_id} for its progress and result."""
@@ -813,7 +882,7 @@ def start_import_job(file: UploadFile = File(...), password: str = Form(""),
             del _jobs[k]
         _jobs[job_id] = {"user_id": caller.id, "status": "running", "stage": "Starting",
                          "progress": 0.0, "touched": now}
-    threading.Thread(target=_run_job, args=(job_id, caller.id, raw, password or None),
+    threading.Thread(target=_run_job, args=(job_id, caller.id, raw, password or None, remember),
                      daemon=True).start()
     return {"job_id": job_id}
 

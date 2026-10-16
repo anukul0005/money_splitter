@@ -9,6 +9,8 @@ export default function StatementImportResult({ result: csvResult }) {
     <div className="text-xs text-brand-700 mt-2 space-y-0.5">
       <p className="font-bold">✓ {csvResult.source ? `${csvResult.source} statement` : 'Statement'} imported into your monthly groups</p>
       <p>{csvResult.created} added · {csvResult.merged} merged with existing entries</p>
+      {csvResult.used_saved_password && <p className="text-gray-500">🔒 Opened with your saved password</p>}
+      {csvResult.password_saved && <p className="text-gray-500">🔒 Password saved - next time it opens on its own</p>}
       <p className="text-gray-500">
         {csvResult.linked_to_shared?.length ?? 0} already in shared groups
         {` · ${csvResult.skipped_as_transfers?.length ?? 0} settle-ups/loans`}
