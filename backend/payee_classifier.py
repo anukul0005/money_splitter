@@ -127,15 +127,19 @@ def _clean(r: dict) -> dict | None:
             "reason": str(r.get("reason") or "")[:200]}
 
 
-def classify(payees: list[dict]) -> dict[str, dict]:
+def classify(payees: list[dict], progress=None) -> dict[str, dict]:
     """payees: [{"key", "name", "count", "total", "median", "min", "max",
     "hour", "fridays", "first", "last"}] -> {key: {decision, category,
     subcategory, confidence, reason}}. Payees the model skips or answers
     malformed are simply absent from the result, and so is a batch whose
-    request fails - unless every batch fails, which raises."""
+    request fails - unless every batch fails, which raises.
+    `progress(done, total)` is called after each batch, answered or not."""
     out: dict[str, dict] = {}
     failures: list[Exception] = []
-    for start in range(0, len(payees), BATCH):
+    total = -(-len(payees) // BATCH)
+    for n, start in enumerate(range(0, len(payees), BATCH), 1):
+        if progress and n > 1:
+            progress(n - 1, total)
         batch = payees[start:start + BATCH]
         lines = [
             f'{i}. "{p["name"]}" - {p["count"]} payment(s), total Rs {p["total"]:.0f}, '
@@ -161,6 +165,8 @@ def classify(payees: list[dict]) -> dict[str, dict]:
                 continue
             if cleaned:
                 out[batch[i]["key"]] = cleaned
+    if progress:
+        progress(total, total)
     if failures and not out:
         raise failures[-1]
     return out

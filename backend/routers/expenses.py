@@ -1,7 +1,10 @@
 import json
+import threading
+import time
+import uuid
 import statistics
 from collections import defaultdict
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from auth import caller_groups, current_user, is_member, member_group
@@ -11,7 +14,7 @@ from schemas import ExpenseCreate, ExpenseOut
 from emailer import notify_group_activity_bg
 from activity import record_activity
 from spend_categories import categorize
-from statement_import import is_self_transfer, own_accounts, parse_statement, time_bucket
+from statement_import import StatementLocked, is_self_transfer, own_accounts, parse_statement, time_bucket
 import expense_classifier
 import payee_classifier
 
@@ -410,15 +413,45 @@ def monthly_skipped(group_id: int, db: Session = Depends(get_db),
     return out
 
 
+def _locked_detail(e: StatementLocked) -> dict:
+    """The 400 body for a locked PDF: a code the app shows a password box
+    for, rather than only a message."""
+    return {"code": "password_wrong" if e.wrong else "password_required", "message": str(e)}
+
+
 @router.post("/import-statement", response_model=dict)
 @router.post("/import-csv", response_model=dict)   # old path, for a frontend still cached
 def import_statement(background_tasks: BackgroundTasks,
                      file: UploadFile = File(...),
+                     password: str = Form(""),
                      db: Session = Depends(get_db),
                      caller: User = Depends(current_user)):
+    """Import a statement in one request - see run_import. The app uses
+    the import-jobs endpoints below instead, which report progress."""
+    # A plain def, so FastAPI runs all of this in a worker thread. It was
+    # async, which ran every query - hundreds of round trips to the
+    # database on a big statement - on the event loop itself. While it ran,
+    # no other request could finish and give its connection back, so the
+    # pool (15) filled and everything else timed out after 30s.
+    try:
+        result, created_ids = run_import(db, caller, file.file.read(), password or None)
+    except StatementLocked as e:
+        raise HTTPException(400, _locked_detail(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if created_ids:
+        background_tasks.add_task(_index_many_bg, created_ids)
+    return result
+
+
+def run_import(db: Session, caller: User, raw: bytes, password: str | None = None,
+               progress=None) -> tuple[dict, list[int]]:
     """Fill the caller's month-wise "MONTHLY EXPENSES <MON> <YEAR>" groups
     from a payment-app statement - PhonePe CSV, Google Pay PDF, or any
-    other type statement_import.FORMATS knows.
+    other type statement_import knows. Returns (summary, ids of the
+    expenses created - to index for search). `password` opens a locked
+    PDF; `progress(stage, fraction)` hears how far along it is. Raises
+    StatementLocked / ValueError for a file it can't read.
 
     Per debit line:
       1. already imported (its transaction id is on an expense anywhere the
@@ -453,16 +486,11 @@ def import_statement(background_tasks: BackgroundTasks,
          expenses doesn't hide the rest of that day's payments.
     Credits ("Received from ...") are ignored - this fills expenses.
     """
-    # A plain def, so FastAPI runs all of this in a worker thread. It was
-    # async, which ran every query below - hundreds of round trips to the
-    # database on a big statement - on the event loop itself. While it ran,
-    # no other request could finish and give its connection back, so the
-    # pool (15) filled and everything else timed out after 30s.
-    raw = file.file.read()
-    try:
-        source, txns = parse_statement(raw)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    step = progress or (lambda stage, fraction: None)
+    step("Reading the statement", 0.0)
+    source, txns = parse_statement(
+        raw, password, lambda done, total: step("Reading the statement", 0.30 * done / total))
+    step("Matching with your entries", 0.30)
 
     mine = caller_groups(db, caller)
     existing_refs = {r for g in mine for e in g.expenses for r in _refs(e.txn_ref)}
@@ -531,7 +559,10 @@ def import_statement(background_tasks: BackgroundTasks,
                            "matched": f"{exp.title or exp.category or 'Expense'} "
                                       f"(₹{exp.amount:,.2f}, {exp.group.name}{how})"})
 
-    for t in sorted(txns, key=lambda x: (x.date, x.time or "")):
+    ordered = sorted(txns, key=lambda x: (x.date, x.time or ""))
+    for n, t in enumerate(ordered, 1):
+        if n % 25 == 0:
+            step("Matching with your entries", 0.30 + 0.20 * n / len(ordered))
         if t.kind != "Debit":
             credits += 1
             continue
@@ -599,7 +630,10 @@ def import_statement(background_tasks: BackgroundTasks,
     llm = {"asked": len(unknown), "answered": 0, "error": None}
     if unknown and payee_classifier.available():
         try:
-            answers = payee_classifier.classify([_payee_facts(k, ts) for k, ts in unknown.items()])
+            step("Categorising payees with AI", 0.50)
+            answers = payee_classifier.classify(
+                [_payee_facts(k, ts) for k, ts in unknown.items()],
+                progress=lambda done, total: step("Categorising payees with AI", 0.50 + 0.40 * done / total))
         except Exception as e:  # the LLM is a help, never a reason an import fails
             answers, llm["error"] = {}, str(e)[:200]
         for key, a in answers.items():
@@ -634,6 +668,7 @@ def import_statement(background_tasks: BackgroundTasks,
             continue
         keep.append((t, cat, sub))
 
+    step("Saving", 0.92)
     created: list[Expense] = []
     groups_created: list[str] = []
     for t, category, subcategory in keep:
@@ -679,8 +714,6 @@ def import_statement(background_tasks: BackgroundTasks,
     db.flush()
     created_ids = [e.id for e in created]
     db.commit()
-    if created_ids:
-        background_tasks.add_task(_index_many_bg, created_ids)
 
     return {
         "created": len(created),
@@ -701,4 +734,74 @@ def import_statement(background_tasks: BackgroundTasks,
         "credits_ignored": credits,
         "groups_created": groups_created,
         "source": source,
-    }
+    }, created_ids
+
+
+# ── import jobs: the same import, with progress ───────────────────────────
+# A statement can take a minute (pages to read, an AI call per 20 payees),
+# so the app starts the import as a job and polls it for a progress bar.
+# Jobs live in this process's memory: the API runs as one process (see
+# render.yaml's startCommand), and a job is only needed while it's polled.
+_jobs: dict[str, dict] = {}
+_jobs_lock = threading.Lock()
+
+
+def _job_update(job_id: str, **fields) -> None:
+    with _jobs_lock:
+        _jobs[job_id].update(fields)
+
+
+def _run_job(job_id: str, user_id: int, raw: bytes, password: str | None) -> None:
+    from database import get_session_factory
+    db = get_session_factory()()
+    try:
+        caller = db.get(User, user_id)
+        result, created_ids = run_import(
+            db, caller, raw, password,
+            lambda stage, fraction: _job_update(job_id, stage=stage, progress=round(fraction, 3)))
+        _job_update(job_id, status="done", stage="Done", progress=1.0, result=result)
+    except StatementLocked as e:
+        _job_update(job_id, status="error", error=_locked_detail(e))
+        return
+    except ValueError as e:
+        _job_update(job_id, status="error", error={"code": "unreadable", "message": str(e)})
+        return
+    except Exception as e:  # never leave the app polling a job that died
+        print(f"[import] job {job_id} failed: {e!r}")
+        _job_update(job_id, status="error",
+                    error={"code": "failed", "message": "The import failed - please try again."})
+        return
+    finally:
+        db.close()
+    if created_ids:
+        _index_many_bg(created_ids)
+
+
+@router.post("/import-jobs", response_model=dict)
+def start_import_job(file: UploadFile = File(...), password: str = Form(""),
+                     caller: User = Depends(current_user)):
+    """Start importing a statement in the background; poll
+    GET /expenses/import-jobs/{job_id} for its progress and result."""
+    raw = file.file.read()
+    job_id = uuid.uuid4().hex
+    now = time.time()
+    with _jobs_lock:
+        # Forget jobs nobody has looked at for an hour.
+        for k in [k for k, j in _jobs.items() if now - j["touched"] > 3600]:
+            del _jobs[k]
+        _jobs[job_id] = {"user_id": caller.id, "status": "running", "stage": "Starting",
+                         "progress": 0.0, "touched": now}
+    threading.Thread(target=_run_job, args=(job_id, caller.id, raw, password or None),
+                     daemon=True).start()
+    return {"job_id": job_id}
+
+
+@router.get("/import-jobs/{job_id}", response_model=dict)
+def import_job_status(job_id: str, caller: User = Depends(current_user)):
+    """{status: running|done|error, stage, progress 0-1, result | error}."""
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if job is None or job["user_id"] != caller.id:
+            raise HTTPException(404, "No such import - it may have finished over an hour ago.")
+        job["touched"] = time.time()
+        return {k: v for k, v in job.items() if k not in ("user_id", "touched")}

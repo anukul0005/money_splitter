@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { getGroups, createExpense, scanReceipt, importStatement } from '../api'
-import StatementImportResult from '../components/StatementImportResult'
+import { getGroups, createExpense, scanReceipt } from '../api'
+import { useStatementUpload, ANY_STATEMENT } from '../components/StatementUpload'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ReceiptCropper from '../components/ReceiptCropper'
 import { useUser } from '../UserContext'
@@ -44,10 +44,7 @@ export default function AddExpense() {
   const [scanInfo, setScanInfo]   = useState(null)   // { provider, confidence } of the last successful scan
   const [cropFile, setCropFile]   = useState(null)
   const [receipt, setReceipt]     = useState(null)   // the last scan's result, saved with the expense   // photo awaiting the crop step, before it's sent to OCR
-  const [csvBusy, setCsvBusy]     = useState(false)
-  const [csvError, setCsvError]   = useState('')
-  const [csvResult, setCsvResult] = useState(null)
-  const csvInputRef     = useRef(null)
+  const statement = useStatementUpload(null, { panelClassName: 'mt-2' })
   const cameraInputRef  = useRef(null)
   const galleryInputRef = useRef(null)
 
@@ -242,20 +239,6 @@ export default function AddExpense() {
   const onFilePicked = (file) => { if (file) setCropFile(file) }
 
   const handleCropCancel = () => { setCropFile(null); resetFileInputs() }
-
-  const handleCsv = async (file) => {
-    if (!file) return
-    setCsvError(''); setCsvResult(null); setCsvBusy(true)
-    try {
-      const res = await importStatement(file)
-      setCsvResult(res.data)
-    } catch (err) {
-      setCsvError(err.response?.data?.detail || 'Could not import that file.')
-    } finally {
-      setCsvBusy(false)
-      if (csvInputRef.current) csvInputRef.current.value = ''
-    }
-  }
 
   const handleScan = async (file) => {
     setCropFile(null)
@@ -467,23 +450,15 @@ export default function AddExpense() {
               <>
                 <button
                   type="button"
-                  disabled={csvBusy}
-                  onClick={() => csvInputRef.current?.click()}
+                  disabled={statement.busy}
+                  onClick={() => statement.pick(ANY_STATEMENT)}
                   className="w-full mt-2 py-2.5 text-xs font-bold text-gray-700 bg-white border border-amber-300 rounded-md hover:bg-amber-100 active:scale-[0.98] transition-all disabled:opacity-50"
                 >
                   📄 Upload statement (.csv / .pdf)
                 </button>
                 <p className="text-[11px] text-gray-500 mt-1">PhonePe (.csv) or Google Pay (.pdf)</p>
-                <input
-                  ref={csvInputRef}
-                  type="file"
-                  accept=".csv,text/csv,.pdf,application/pdf"
-                  className="hidden"
-                  onChange={(e) => handleCsv(e.target.files?.[0])}
-                />
-                {csvBusy && <p className="text-xs text-gray-500 mt-2">Importing statement…</p>}
-                {csvError && <p className="text-xs text-red-600 mt-2">{csvError}</p>}
-                {csvResult && !csvBusy && <StatementImportResult result={csvResult} />}
+                {statement.input}
+                {statement.panel}
               </>
             )}
 

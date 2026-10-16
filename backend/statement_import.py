@@ -5,9 +5,10 @@ Parsing only - deciding what to do with each row (create it, merge it into
 an expense already entered by hand, skip it) is routers/expenses.py's
 import endpoint, which needs the database.
 
-Adding a statement type: write a parser taking the raw file bytes and
-returning StatementTxn rows - raising ValueError when the file isn't its
-format - and add it to FORMATS. parse_statement tries each in turn.
+Adding a statement type: write a parser returning StatementTxn rows and
+raising ValueError when the file isn't its format, and add it to
+PDF_FORMATS (it gets the PDF's text lines - see pdf_lines) or CSV_FORMATS
+(it gets the raw bytes). parse_statement tries each of the matching kind.
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ import io
 import re
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Callable
 
 
 @dataclass
@@ -120,7 +122,18 @@ def parse_phonepe_csv(raw: bytes) -> list[StatementTxn]:
     return txns
 
 
-def pdf_lines(raw: bytes) -> list[str]:
+class StatementLocked(ValueError):
+    """The PDF is password-protected and no password, or the wrong one,
+    was given - the caller should ask for it and try again."""
+
+    def __init__(self, wrong: bool):
+        self.wrong = wrong
+        super().__init__("That password didn't open the PDF - check it and try again." if wrong
+                         else "This PDF is password-protected. Enter its password to import it.")
+
+
+def pdf_lines(raw: bytes, password: str | None = None,
+              progress: Callable[[int, int], None] | None = None) -> list[str]:
     """Every text line of a PDF, top to bottom, page after page.
 
     Built from the characters directly rather than pdfplumber's
@@ -129,18 +142,24 @@ def pdf_lines(raw: bytes) -> list[str]:
     their letters ("PaitdoSwiggy"). Characters do come out in reading
     order, though, so a word is a run of them each starting where the last
     ended - a jump back (overlap) or a real gap starts the next word.
-    Raises ValueError for a file that won't open (not a PDF, or locked).
+    `password` opens a locked statement (banks and PhonePe email them that
+    way); it's used for this read only, never stored. `progress(done,
+    total)` is called after each page. Raises StatementLocked when the PDF
+    needs a password it wasn't given, ValueError when it won't open at all.
     """
     import pdfplumber   # only needed here; the CSV path shouldn't pay for it
+    from pdfminer.pdfdocument import PDFPasswordIncorrect
 
     try:
-        pdf = pdfplumber.open(io.BytesIO(raw))
+        pdf = pdfplumber.open(io.BytesIO(raw), password=password or "")
+    except PDFPasswordIncorrect:
+        raise StatementLocked(wrong=bool(password)) from None
     except Exception as e:
-        raise ValueError("Couldn't open that PDF - if it's password-protected, "
-                         "save an unlocked copy and upload that.") from e
+        raise ValueError("Couldn't open that PDF - it may be damaged.") from e
     out: list[str] = []
     with pdf:
-        for page in pdf.pages:
+        total = len(pdf.pages)
+        for n, page in enumerate(pdf.pages, 1):
             rows: dict[int, list[list]] = {}   # line's top -> [[x0, word], ...]
             prev = None
             for c in page.chars:
@@ -156,6 +175,8 @@ def pdf_lines(raw: bytes) -> list[str]:
                     rows[top][-1][1] += ch
                 prev = c
             out += [" ".join(w for _, w in sorted(words)) for _, words in sorted(rows.items())]
+            if progress:
+                progress(n, total)
     return out
 
 
@@ -165,8 +186,8 @@ _GPAY_TIME = re.compile(r"^(\d{1,2}:\d{2} [AP]M)(?:.*?ID:\s*(\S+))?")
 _GPAY_ACCOUNT = re.compile(r"^Paid (?:by|to) (.+)$")
 
 
-def parse_gpay_pdf(raw: bytes) -> list[StatementTxn]:
-    """Every transaction of a Google Pay statement PDF.
+def parse_gpay_pdf(lines: list[str]) -> list[StatementTxn]:
+    """Every transaction of a Google Pay statement PDF, from its pdf_lines.
 
     Each one is three lines:
         01 Apr, 2026   Paid to Swiggy                        ₹150
@@ -176,9 +197,6 @@ def parse_gpay_pdf(raw: bytes) -> list[StatementTxn]:
     moved between the owner's own accounts, kept as a debit for
     is_self_transfer to skip. Raises ValueError when this isn't one.
     """
-    if not raw.startswith(b"%PDF"):
-        raise ValueError("Not a PDF.")
-    lines = pdf_lines(raw)
     if not any("Google Pay" in ln for ln in lines):
         raise ValueError("This PDF isn't a Google Pay statement.")
 
@@ -215,22 +233,29 @@ def parse_gpay_pdf(raw: bytes) -> list[StatementTxn]:
 
 
 # Every statement type the import understands, tried in order.
-FORMATS = [
+PDF_FORMATS: list[tuple[str, Callable[[list[str]], list[StatementTxn]]]] = [
     ("Google Pay", parse_gpay_pdf),
+]
+CSV_FORMATS: list[tuple[str, Callable[[bytes], list[StatementTxn]]]] = [
     ("PhonePe", parse_phonepe_csv),
 ]
 
 
-def parse_statement(raw: bytes) -> tuple[str, list[StatementTxn]]:
-    """(app name, transactions) for a statement file of any known type."""
-    is_pdf = raw.startswith(b"%PDF")
-    for name, parse in FORMATS:
+def parse_statement(raw: bytes, password: str | None = None,
+                    progress: Callable[[int, int], None] | None = None,
+                    ) -> tuple[str, list[StatementTxn]]:
+    """(app name, transactions) for a statement file of any known type.
+    Raises StatementLocked for a locked PDF without its password (see
+    pdf_lines), ValueError for anything it can't read."""
+    if raw.startswith(b"%PDF"):
+        lines = pdf_lines(raw, password, progress)
+        attempts = [(name, lambda f=f: f(lines)) for name, f in PDF_FORMATS]
+    else:
+        attempts = [(name, lambda f=f: f(raw)) for name, f in CSV_FORMATS]
+    for name, run in attempts:
         try:
-            return name, parse(raw)
-        except ValueError as e:
-            # A PDF that wouldn't open says so, rather than "unsupported".
-            if is_pdf and isinstance(e.__cause__, Exception):
-                raise
+            return name, run()
+        except ValueError:
             continue
-    names = ", ".join(n for n, _ in FORMATS)
+    names = ", ".join([f"{n} PDF" for n, _ in PDF_FORMATS] + [f"{n} CSV" for n, _ in CSV_FORMATS])
     raise ValueError(f"This file isn't a statement type the app can read yet (supported: {names}).")
