@@ -5,13 +5,11 @@ function HomeIcon()    { return <svg className="w-5 h-5" fill="none" stroke="cur
 // Matches the bottom nav: sparkles rather than a cocktail glass, because the
 // key opens food as well as drinks.
 function SparkIcon()   { return <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M13 3l2.1 6.3L21 11.4l-5.9 2.1L13 19.8l-2.1-6.3L5 11.4l5.9-2.1L13 3zM5.5 3v3M4 4.5h3M6 17.5v3M4.5 19h3" /></svg> }
-function FriendsIcon() { return <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14c-4.418 0-8 2.239-8 5v1h16v-1c0-2.761-3.582-5-8-5z" /></svg> }
 function HistoryIcon() { return <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> }
 
 const items = [
   { to: '/',        label: 'Home',        icon: HomeIcon,    exact: true },
   { to: '/recommend', label: 'Recommend', icon: SparkIcon,  exact: false, highlight: true },
-  { to: '/friends', label: 'Friends',     icon: FriendsIcon, exact: false },
   { to: '/history', label: 'History',     icon: HistoryIcon, exact: false },
 ]
 

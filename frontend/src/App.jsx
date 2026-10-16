@@ -24,7 +24,6 @@ import Account       from './pages/Account'
 import Notifications from './pages/Notifications'
 import Balances      from './pages/Balances'
 import MasterGroupDetail from './pages/MasterGroupDetail'
-import Friends           from './pages/Friends'
 import FriendDetail      from './pages/FriendDetail'
 import Recommend         from './pages/Recommend'
 import { UserContext, isAdmin } from './UserContext'
@@ -98,7 +97,6 @@ export default function App() {
                 <Route path="/credit-cards/card/:id" element={<CardBill />} />
                 <Route path="/food/places" element={<MyPlaces />} />
                 <Route path="/master/:key" element={<MasterGroupDetail />} />
-                <Route path="/friends" element={<Friends />} />
                 <Route path="/friends/:name" element={<FriendDetail />} />
                 <Route path="/account" element={<Account />} />
                 <Route path="/loans" element={<Loans />} />

@@ -7,6 +7,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import StatsPanel from '../components/StatsPanel'
 import { buildMasterGroups } from '../utils/masterGroups'
 import Dropdown from '../components/Dropdown'
+import { StatementUploadButton, useStatementUpload } from '../components/StatementUpload'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 
@@ -25,11 +26,6 @@ const todayName = () => {
 }
 // The same day however it was typed ("9 Oct 26", "09 oct 26") - for
 // spotting that today's group already exists.
-// This month as the monthly groups are named: "MONTHLY EXPENSES OCT 2026".
-const thisMonthName = () => {
-  const d = new Date()
-  return `MONTHLY EXPENSES ${MONTHS[d.getMonth()]} ${d.getFullYear()}`
-}
 const dayKey = (name) => (name ?? '').trim().toLowerCase().replace(/^0(\d)/, '$1')
 
 const RECENT_SHOWN = 6    // visible straight away
@@ -102,14 +98,10 @@ export default function MasterGroupDetail() {
     master?.groups.forEach((g) => { if (g.category) counts[g.category] = (counts[g.category] || 0) + 1 })
     return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || ''
   })()
-  // A master of monthly groups (personal spending) gets this month's group,
-  // never a dated one: open it, or create it if the month has just begun.
+  // A master of monthly groups (personal spending) has no "+ Add": its
+  // months come from statement uploads (StatementUploadButton).
   const isMonthly = !!master?.groups.some((g) => monthKey(g.name) !== null)
-  const thisMonth = master?.groups.find((g) => (g.name ?? '').trim().toUpperCase() === thisMonthName())
-  const onAdd = () => {
-    if (isMonthly) return thisMonth ? nav(`/groups/${thisMonth.id}`) : addGroup(thisMonthName(), 'personal', '💰')
-    return todays ? nav(`/groups/${todays.id}`) : setPicking((v) => !v)
-  }
+  const onAdd = () => todays ? nav(`/groups/${todays.id}`) : setPicking((v) => !v)
 
   const addToday = (category) => addGroup(todayName(), category, '')
   const addGroup = async (name, category, emoji) => {
@@ -126,6 +118,15 @@ export default function MasterGroupDetail() {
       setAdding(false)
     }
   }
+
+  // A monthly master's "Upload": a statement fills the month-wise groups,
+  // creating new months as needed, so the list is re-read once it's in.
+  const reloadMaster = () => getGroups().then((r) => {
+    const { masters } = buildMasterGroups(r.data, 1, user?.name)
+    setMaster(masters.find((m) => m.key === decodeURIComponent(key)) ?? null)
+    setStats(null)
+  })
+  const upload = useStatementUpload(reloadMaster)
 
   // Stats are consolidated across every group in the master, so they're
   // fetched once the user actually asks for them rather than on page load.
@@ -170,18 +171,24 @@ export default function MasterGroupDetail() {
         <div className="flex items-start justify-between gap-3">
           <button onClick={() => nav(-1)} className="text-xs font-bold text-gray-400 mb-2">← Back</button>
           <div className="flex items-center gap-2">
-          {/* "+ Add" creates today's group in this master - see onAdd / addToday. */}
-          <button
-            onClick={onAdd}
-            disabled={adding}
-            title={isMonthly ? `Open ${thisMonthName().toLowerCase()}` : todays ? `Open today's group (${todays.name})` : `Today's group, ${master.name}`}
-            className="flex-shrink-0 flex items-center gap-1.5 bg-cream border border-amber-200 text-gray-500 hover:bg-amber-50 rounded-md px-3 py-1.5 text-xs font-bold active:scale-95 transition-all shadow-sm disabled:opacity-50"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-            </svg>
-            {adding ? 'Adding…' : 'Add'}
-          </button>
+          {/* Monthly: "Upload" imports a payment-app statement into the
+              month-wise groups. Otherwise "+ Add" creates today's group in
+              this master - see onAdd / addToday. */}
+          {isMonthly ? (
+            <StatementUploadButton busy={upload.busy} onPick={upload.pick} />
+          ) : (
+            <button
+              onClick={onAdd}
+              disabled={adding}
+              title={todays ? `Open today's group (${todays.name})` : `Today's group, ${master.name}`}
+              className="flex-shrink-0 flex items-center gap-1.5 bg-cream border border-amber-200 text-gray-500 hover:bg-amber-50 rounded-md px-3 py-1.5 text-xs font-bold active:scale-95 transition-all shadow-sm disabled:opacity-50"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+              {adding ? 'Adding…' : 'Add'}
+            </button>
+          )}
           <button
             onClick={() => setShowStats((v) => !v)}
             title={showStats ? 'Back to groups' : 'Stats across all these groups'}
@@ -228,6 +235,8 @@ export default function MasterGroupDetail() {
         )}
         {addError && <p className="text-xs text-red-600 mt-1">{addError}</p>}
       </div>
+      {upload.input}
+      {upload.panel}
 
       {showStats ? (
         statsLoading ? <LoadingSpinner /> : (
