@@ -160,24 +160,40 @@ def pdf_lines(raw: bytes, password: str | None = None,
     with pdf:
         total = len(pdf.pages)
         for n, page in enumerate(pdf.pages, 1):
-            rows: dict[int, list[list]] = {}   # line's top -> [[x0, word], ...]
+            words: list[list] = []   # [baseline, x0, text]
             prev = None
             for c in page.chars:
-                top, ch = round(c["top"]), c["text"]
+                ch = c["text"]
                 if ch.isspace():
                     prev = None
                     continue
-                if (prev is None or round(prev["top"]) != top
+                # A gap of more than ~a sixth of the font size is a space
+                # the PDF didn't spell out as a character.
+                if (prev is None or abs(prev["bottom"] - c["bottom"]) > 1
                         or c["x0"] < prev["x1"] - 0.5
-                        or c["x0"] > prev["x1"] + 0.3 * c["size"]):
-                    rows.setdefault(top, []).append([c["x0"], ch])
+                        or c["x0"] > prev["x1"] + 0.15 * c["size"]):
+                    words.append([c["bottom"], c["x0"], ch])
                 else:
-                    rows[top][-1][1] += ch
+                    words[-1][2] += ch
                 prev = c
-            out += [" ".join(w for _, w in sorted(words)) for _, words in sorted(rows.items())]
+            out += _rows(words)
+            page.close()   # a 600-page statement must not hold every page in memory
             if progress:
                 progress(n, total)
     return out
+
+
+def _rows(words: list[list]) -> list[str]:
+    """Words into lines, top to bottom: a line is every word whose baseline
+    is within 3pt of the line's first - text in two font sizes on one row
+    (a bold name beside a small grey label) sits a point or two apart."""
+    lines: list[list] = []   # [baseline, [(x0, text), ...]]
+    for base, x0, text in sorted(words):
+        if lines and base - lines[-1][0] <= 3:
+            lines[-1][1].append((x0, text))
+        else:
+            lines.append([base, [(x0, text)]])
+    return [" ".join(t for _, t in sorted(ws)) for _, ws in lines]
 
 
 _GPAY_HEAD = re.compile(
@@ -232,9 +248,63 @@ def parse_gpay_pdf(lines: list[str]) -> list[StatementTxn]:
     return txns
 
 
+_PP_HEAD = re.compile(
+    r"^([A-Z][a-z]{2} \d{1,2}, \d{4}) (.+?) (Debit|Credit) INR ?([\d,]+(?:\.\d+)?)$")
+_PP_TIME = re.compile(r"^(\d{1,2}:\d{2} ?[AP]M)\b")
+_PP_TXN_ID = re.compile(r"Transaction ID ?: ?(\S+)")
+_PP_ACCOUNT = re.compile(r"^(?:Debited from|Credited to) (\S+)")
+
+
+def parse_phonepe_pdf(lines: list[str]) -> list[StatementTxn]:
+    """Every transaction of a PhonePe statement PDF, from its pdf_lines.
+
+    Each one is a block:
+        Feb 14, 2018   Paid to KFC                              Debit  INR 165.00
+        07:36 PM       Transaction ID : C1802141935589772477972
+                       UTR No : 804538670227
+                       Debited from XX0908 INR 164.70 | Wallet INR 0.30
+    The Transaction ID is the same one PhonePe's CSV carries, so a payment
+    imported from either is recognised by the other. Raises ValueError
+    when this isn't one.
+    """
+    if not any(ln.startswith("Transaction Statement for") for ln in lines) \
+            or not any("UTR No" in ln for ln in lines):
+        raise ValueError("This PDF isn't a PhonePe statement.")
+
+    txns: list[StatementTxn] = []
+    cur: StatementTxn | None = None
+    for ln in lines:
+        head = _PP_HEAD.match(ln)
+        if head:
+            day, details, kind, amount = head.groups()
+            cur = StatementTxn(
+                date=datetime.strptime(day, "%b %d, %Y").date().isoformat(), time=None,
+                merchant=_merchant(details), txn_id="", kind=kind,
+                amount=round(float(amount.replace(",", "")), 2), source="PhonePe",
+            )
+            txns.append(cur)
+            continue
+        if cur is None:
+            continue
+        tm = _PP_TIME.match(ln)
+        if tm and cur.time is None:
+            cur.time = datetime.strptime(tm.group(1).replace(" ", ""), "%I:%M%p").strftime("%H:%M")
+        tid = _PP_TXN_ID.search(ln)
+        if tid and not cur.txn_id:
+            cur.txn_id = tid.group(1)
+        acct = _PP_ACCOUNT.match(ln)
+        if acct and not cur.instrument:
+            cur.instrument = acct.group(1)   # "XX5552", or "Wallet"
+            cur = None   # this transaction is complete
+    if not txns:
+        raise ValueError("No transactions found in this PhonePe statement.")
+    return txns
+
+
 # Every statement type the import understands, tried in order.
 PDF_FORMATS: list[tuple[str, Callable[[list[str]], list[StatementTxn]]]] = [
     ("Google Pay", parse_gpay_pdf),
+    ("PhonePe", parse_phonepe_pdf),
 ]
 CSV_FORMATS: list[tuple[str, Callable[[bytes], list[StatementTxn]]]] = [
     ("PhonePe", parse_phonepe_csv),
