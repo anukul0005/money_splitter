@@ -9,7 +9,7 @@ function HistoryIcon() { return <svg className="w-5 h-5" fill="none" stroke="cur
 
 const items = [
   { to: '/',        label: 'Home',        icon: HomeIcon,    exact: true },
-  { to: '/recommend', label: 'Recommend', icon: SparkIcon,  exact: false, highlight: true },
+  { to: '/recommend', label: 'Recommend', icon: SparkIcon,  exact: false },
   { to: '/history', label: 'History',     icon: HistoryIcon, exact: false },
 ]
 
@@ -33,16 +33,14 @@ export default function Sidebar({ user, onLogout }) {
 
       {/* Nav links */}
       <nav className="flex-1 px-3 py-4 space-y-1">
-        {items.map(({ to, label, icon: Icon, exact, highlight }) => (
+        {items.map(({ to, label, icon: Icon, exact }) => (
           <NavLink
             key={to}
             to={to}
             end={exact}
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-semibold transition-all ${
-                highlight
-                  ? 'bg-brand-400 text-white shadow-md shadow-brand-400/30'
-                  : isActive
+                isActive
                   ? 'bg-field-800 text-brand-400'
                   : 'text-slate-300/60 hover:bg-field-800 hover:text-white'
               }`

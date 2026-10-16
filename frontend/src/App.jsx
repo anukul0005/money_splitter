@@ -72,13 +72,22 @@ export default function App() {
             tree away and rebuilds it. Belt and braces next to the server's
             no-store headers: nothing rendered for the previous person can
             survive into the next person's session. */}
-        <div key={user.name} className="flex min-h-screen min-h-dvh bg-canvas">
+        {/* On phones the app is exactly the visible screen tall and only the
+            content area scrolls - the page itself never does, so the bottom
+            nav is an ordinary block under it with nothing for Safari to
+            reposition. Both earlier fixes moved with the page and floated:
+            position:fixed pins to iOS's layout viewport, which drifts from
+            the visible screen (keyboard, collapsing toolbars), and
+            position:sticky lagged mid-screen during momentum scrolling.
+            Desktop keeps normal page scrolling. */}
+        <div key={user.name} className="flex h-[100dvh] overflow-hidden md:h-auto md:min-h-dvh md:overflow-visible bg-canvas">
           {/* Desktop sidebar */}
           <Sidebar user={user} onLogout={handleLogout} />
 
           {/* Main content — offset by sidebar width on desktop */}
-          <div className="flex-1 min-w-0 md:ml-56 flex flex-col min-h-dvh">
-            <div className="max-w-4xl mx-auto w-full flex-1">
+          <div className="flex-1 min-w-0 md:ml-56 flex flex-col min-h-0 md:min-h-dvh">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain md:overflow-visible">
+            <div className="max-w-4xl mx-auto w-full">
               {/* Above every page, so "did this payment arrive?" can't be
                   missed whichever screen the payee happens to be on. */}
               <PaymentClaimsInbox />
@@ -108,12 +117,10 @@ export default function App() {
                 )}
               </Routes>
             </div>
+            </div>
 
-            {/* Mobile bottom nav - last in the column and sticky, NOT
-                position:fixed: fixed pins to iOS Safari's layout viewport,
-                which drifts from the visible screen (keyboard, pickers,
-                collapsing toolbars) and left the bar floating mid-screen.
-                Sticky sits in the flow and sticks to the visible bottom. */}
+            {/* Mobile bottom nav - the last block of the screen-tall column,
+                below the scrolling content (see the comment above). */}
             <BottomNav user={user} onLogout={handleLogout} />
           </div>
         </div>

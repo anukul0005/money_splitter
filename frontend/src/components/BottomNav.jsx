@@ -2,11 +2,11 @@ import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { isAdmin } from '../UserContext'
 
-// The raised centre key is the recommender. Adding an expense is still one
-// tap from Home's quick actions and from "+ Add" inside any group.
+// Adding an expense is one tap from Home's quick actions and from "+ Add"
+// inside any group, so the bar is just the main pages, all alike.
 const items = [
   { to: '/',          label: 'Home',      icon: HomeIcon },
-  { to: '/recommend', label: 'Recommend', icon: CompassIcon, highlight: true },
+  { to: '/recommend', label: 'Recommend', icon: CompassIcon },
   { to: '/history',   label: 'History',   icon: HistoryIcon },
 ]
 
@@ -25,40 +25,29 @@ export default function BottomNav({ user, onLogout }) {
   }
 
   return (
-    // will-change-transform + a translateZ(0) force this onto its own
-    // compositing layer - without it, iOS Safari's sticky repaint lags
-    // behind fast/elastic scrolling on long pages, so the bar visibly
-    // detaches and floats mid-screen until scrolling settles.
-    <nav
-      className="sticky bottom-0 w-full bg-field-950 border-t border-field-800 pb-safe z-50 md:hidden will-change-transform"
-      style={{ transform: 'translateZ(0)' }}
-    >
+    // A plain block at the foot of the app's screen-tall column (App.jsx):
+    // the page never scrolls, so there's nothing for it to float with.
+    <nav className="flex-shrink-0 w-full bg-field-950 border-t border-field-800 pb-safe z-50 md:hidden">
       <div className="flex items-center justify-around h-16 px-2">
-        {items.map(({ to, label, icon: Icon, highlight }) => (
+        {items.map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}
             end={to === '/'}
             className={({ isActive }) =>
               `flex flex-col items-center gap-0.5 flex-1 py-2 transition-colors ${
-                highlight ? 'text-white' : isActive ? 'text-brand-400' : 'text-slate-300/40'
+                isActive ? 'text-brand-400' : 'text-slate-300/40'
               }`
             }
           >
-            {({ isActive }) =>
-              highlight ? (
-                <span className="bg-brand-400 p-2 -mt-5 rounded-lg shadow-lg shadow-brand-400/40 ring-4 ring-field-950">
-                  <Icon />
+            {({ isActive }) => (
+              <>
+                <Icon />
+                <span className={`text-[10px] font-semibold ${isActive ? 'text-brand-400' : 'text-slate-300/40'}`}>
+                  {label}
                 </span>
-              ) : (
-                <>
-                  <Icon />
-                  <span className={`text-[10px] font-semibold ${isActive ? 'text-brand-400' : 'text-slate-300/40'}`}>
-                    {label}
-                  </span>
-                </>
-              )
-            }
+              </>
+            )}
           </NavLink>
         ))}
 
