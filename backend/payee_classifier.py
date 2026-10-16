@@ -149,6 +149,10 @@ def classify(payees: list[dict]) -> dict[str, dict]:
             failures.append(e)
             continue
         for r in reply.get("results", []):
+            # The model now and then puts a bare string in the list; skipping
+            # it, not raising, keeps the rest of this batch's answers.
+            if not isinstance(r, dict):
+                continue
             try:
                 p = batch[int(r.get("id"))]
             except (TypeError, ValueError, IndexError):
