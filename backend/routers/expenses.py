@@ -11,7 +11,7 @@ from schemas import ExpenseCreate, ExpenseOut
 from emailer import notify_group_activity_bg
 from activity import record_activity
 from spend_categories import categorize
-from statement_import import is_self_transfer, own_accounts, parse_phonepe_csv, time_bucket
+from statement_import import is_self_transfer, own_accounts, parse_statement, time_bucket
 import expense_classifier
 import payee_classifier
 
@@ -384,13 +384,15 @@ def _index_many_bg(expense_ids: list[int]) -> None:
         _index_bg(eid)
 
 
-@router.post("/import-csv", response_model=dict)
+@router.post("/import-statement", response_model=dict)
+@router.post("/import-csv", response_model=dict)   # old path, for a frontend still cached
 def import_statement(background_tasks: BackgroundTasks,
                      file: UploadFile = File(...),
                      db: Session = Depends(get_db),
                      caller: User = Depends(current_user)):
     """Fill the caller's month-wise "MONTHLY EXPENSES <MON> <YEAR>" groups
-    from a PhonePe statement CSV.
+    from a payment-app statement - PhonePe CSV, Google Pay PDF, or any
+    other type statement_import.FORMATS knows.
 
     Per debit line:
       1. already imported (its transaction id is on an expense anywhere the
@@ -432,7 +434,7 @@ def import_statement(background_tasks: BackgroundTasks,
     # pool (15) filled and everything else timed out after 30s.
     raw = file.file.read()
     try:
-        txns = parse_phonepe_csv(raw)
+        source, txns = parse_statement(raw)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -490,7 +492,7 @@ def import_statement(background_tasks: BackgroundTasks,
             exp.title = first.merchant
         elif first.merchant.lower() not in (exp.title or "").lower() \
                 and first.merchant.lower() not in (exp.notes or "").lower():
-            exp.notes = (f"{exp.notes} · " if exp.notes else "") + f"PhonePe: {first.merchant}"
+            exp.notes = (f"{exp.notes} · " if exp.notes else "") + f"{first.source}: {first.merchant}"
 
     def link(exp, parts) -> None:
         exp.txn_ref = ",".join(p.txn_id for p in parts if p.txn_id) or None
@@ -649,4 +651,5 @@ def import_statement(background_tasks: BackgroundTasks,
         "llm": llm,
         "credits_ignored": credits,
         "groups_created": groups_created,
+        "source": source,
     }

@@ -470,12 +470,13 @@ export default function AddExpense() {
                   onClick={() => csvInputRef.current?.click()}
                   className="w-full mt-2 py-2.5 text-xs font-bold text-gray-700 bg-white border border-amber-300 rounded-md hover:bg-amber-100 active:scale-[0.98] transition-all disabled:opacity-50"
                 >
-                  📄 Upload PhonePe statement (.csv)
+                  📄 Upload statement (.csv / .pdf)
                 </button>
+                <p className="text-[11px] text-gray-500 mt-1">PhonePe (.csv) or Google Pay (.pdf)</p>
                 <input
                   ref={csvInputRef}
                   type="file"
-                  accept=".csv,text/csv"
+                  accept=".csv,text/csv,.pdf,application/pdf"
                   className="hidden"
                   onChange={(e) => handleCsv(e.target.files?.[0])}
                 />
@@ -483,7 +484,7 @@ export default function AddExpense() {
                 {csvError && <p className="text-xs text-red-600 mt-2">{csvError}</p>}
                 {csvResult && !csvBusy && (
                   <div className="text-xs text-brand-700 mt-2 space-y-0.5">
-                    <p className="font-bold">✓ Statement imported into your monthly groups</p>
+                    <p className="font-bold">✓ {csvResult.source ? `${csvResult.source} statement` : 'Statement'} imported into your monthly groups</p>
                     <p>{csvResult.created} added · {csvResult.merged} merged with existing entries</p>
                     <p className="text-gray-500">
                       {csvResult.linked_to_shared?.length ?? 0} already in shared groups

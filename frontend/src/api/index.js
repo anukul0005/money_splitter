@@ -79,7 +79,7 @@ export const scanReceipt        = (file)     => {
 export const importStatement    = (file)     => {
   const fd = new FormData()
   fd.append('file', file)
-  return api.post('/expenses/import-csv', fd)
+  return api.post('/expenses/import-statement', fd)
 }
 export const getMe              = ()         => api.get('/users/me')
 // ── UPI IDs (for "pay via UPI" QR / deep link) ──────────────────────────────────

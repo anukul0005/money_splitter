@@ -94,7 +94,7 @@ function ForecastCard({ p, err, onRetrain, retraining }) {
       {p.days_since_data > 2 && (
         <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-2">
           Your personal spending runs to <b>{fmtDay(p.data_until)}</b>, so the forecast starts the day after.
-          Import your latest PhonePe statement for an up-to-date one.
+          Import your latest PhonePe or Google Pay statement for an up-to-date one.
         </p>
       )}
       <div className="grid grid-cols-2 gap-2">
@@ -456,7 +456,7 @@ export default function Insights() {
       <div className="px-4 md:px-5 mt-4 space-y-4">
         {lag && (
           <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 px-3 py-2">
-            Your personal spending runs to <b>{fmtDay(d.personal_until)}</b>. Import your latest PhonePe statement to bring
+            Your personal spending runs to <b>{fmtDay(d.personal_until)}</b>. Import your latest PhonePe or Google Pay statement to bring
             today and this week up to date - everything here updates on its own once it's in.
           </p>
         )}
