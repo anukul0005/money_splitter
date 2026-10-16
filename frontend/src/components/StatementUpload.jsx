@@ -104,12 +104,13 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
   const [error, setError]       = useState('')
   const [locked, setLocked]     = useState(false)   // the file needs a password
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [result, setResult]     = useState(null)
 
   useEffect(() => () => clearTimeout(pollRef.current), [])
   const busy = progress !== null
 
-  const reset = () => { setError(''); setResult(null); setLocked(false); setPassword('') }
+  const reset = () => { setError(''); setResult(null); setLocked(false); setPassword(''); setShowPassword(false) }
 
   const pick = (a) => {
     setApp(a); reset(); setFile(null)
@@ -188,34 +189,57 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
       {busy && <ProgressBar stage={progress.stage} fraction={progress.fraction} />}
       {busy && <p className="text-[11px] text-gray-400 mt-1.5">Your {app?.label} statement - this can take a minute.</p>}
       {locked && !busy && (
-        <form
-          className="pr-5"
-          onSubmit={(e) => { e.preventDefault(); if (password) upload(file, password) }}
-        >
-          <p className="text-xs font-bold text-gray-700">🔒 {file?.name} is password-protected</p>
-          <p className="text-[11px] text-gray-500 mt-0.5">
-            Enter the password the statement came with. It's only used to open this file and isn't saved.
-          </p>
-          <div className="flex gap-2 mt-2">
+        <form onSubmit={(e) => { e.preventDefault(); if (password) upload(file, password) }}>
+          <div className="flex items-center gap-3 pr-6">
+            <span className="flex-shrink-0 w-9 h-9 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
+                <rect x="5" y="11" width="14" height="10" rx="2" />
+                <path strokeLinecap="round" d="M8 11V7a4 4 0 018 0v4" />
+              </svg>
+            </span>
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-gray-800">Password needed</p>
+              <p className="text-[11px] text-gray-500 truncate">{file?.name}</p>
+            </div>
+          </div>
+
+          <label htmlFor="statement-pdf-password" className="block text-[11px] font-semibold text-gray-600 mt-3 mb-1">
+            Statement password
+          </label>
+          <div className="relative">
             <input
-              type="password"
+              id="statement-pdf-password"
+              type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="PDF password"
+              placeholder="Enter the PDF's password"
               autoFocus
               autoComplete="off"
               autoCapitalize="none"
+              autoCorrect="off"
               spellCheck={false}
               name="statement-pdf-password"
-              className="input text-sm flex-1"
+              className="input pr-16"
             />
-            <button type="submit" disabled={!password} className="btn-primary px-4 text-xs disabled:opacity-50">
-              Unlock & import
+            <button
+              type="button"
+              onClick={() => setShowPassword((v) => !v)}
+              className="absolute inset-y-0 right-0 px-3 text-[11px] font-bold text-brand-600"
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+            >
+              {showPassword ? 'Hide' : 'Show'}
             </button>
           </div>
+          {error && <p className="text-xs text-red-600 mt-1.5">{error}</p>}
+          <p className="text-[11px] text-gray-400 mt-1.5">
+            Only used to open this file - it isn't saved.
+          </p>
+          <button type="submit" disabled={!password} className="btn-primary text-sm mt-3 disabled:opacity-50">
+            Unlock & import
+          </button>
         </form>
       )}
-      {error && !busy && <p className="text-xs text-red-600 pr-5 mt-1">{error}</p>}
+      {error && !busy && !locked && <p className="text-xs text-red-600 pr-5 mt-1">{error}</p>}
       {result && !busy && <StatementImportResult result={result} />}
     </div>
   )
