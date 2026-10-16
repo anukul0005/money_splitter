@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { startImportJob, getImportJob } from '../api'
+import { startImportJob, getImportJob, cancelImportJob } from '../api'
 import StatementImportResult from './StatementImportResult'
 
 // The payment apps a statement can come from, and the file types each
@@ -98,6 +98,8 @@ function ProgressBar({ stage, fraction }) {
 export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } = {}) {
   const inputRef = useRef(null)
   const pollRef  = useRef(null)
+  const jobRef   = useRef(null)    // the running import's id, for Cancel
+  const abortRef = useRef(null)    // stops the file upload itself
   const [app, setApp]           = useState(null)
   const [file, setFile]         = useState(null)    // kept so a locked PDF can be retried with its password
   const [progress, setProgress] = useState(null)    // { stage, fraction } while importing
@@ -106,11 +108,13 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [result, setResult]     = useState(null)
+  const [cancelling, setCancelling] = useState(false)
+  const [notice, setNotice]     = useState('')
 
   useEffect(() => () => clearTimeout(pollRef.current), [])
   const busy = progress !== null
 
-  const reset = () => { setError(''); setResult(null); setLocked(false); setPassword(''); setShowPassword(false) }
+  const reset = () => { setNotice(''); setError(''); setResult(null); setLocked(false); setPassword(''); setShowPassword(false) }
 
   const pick = (a) => {
     setApp(a); reset(); setFile(null)
@@ -121,7 +125,19 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
     }
   }
 
-  const finish = () => { clearTimeout(pollRef.current); setProgress(null) }
+  const finish = () => {
+    clearTimeout(pollRef.current); setProgress(null); setCancelling(false)
+    jobRef.current = null; abortRef.current = null
+  }
+
+  const cancel = async () => {
+    setCancelling(true)
+    if (!jobRef.current) {   // still sending the file - just stop sending it
+      abortRef.current?.abort()
+      return
+    }
+    try { await cancelImportJob(jobRef.current) } catch { /* the next poll says how it ended */ }
+  }
 
   const fail = (detail) => {
     finish()
@@ -140,6 +156,8 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
         if (data.status === 'done') {
           finish(); setResult(data.result); setLocked(false); setPassword('')
           onImported?.()
+        } else if (data.status === 'cancelled') {
+          finish(); setNotice('Import cancelled - nothing from that statement was saved.')
         } else if (data.status === 'error') {
           fail(data.error)
         } else {
@@ -156,15 +174,21 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
 
   const upload = async (f, pw = '') => {
     if (!f) return
-    setFile(f); setError(''); setResult(null)
+    setFile(f); setError(''); setResult(null); setNotice('')
     setProgress({ stage: 'Uploading', fraction: 0 })
+    abortRef.current = new AbortController()
     try {
       const { data } = await startImportJob(f, pw, (e) => {
         if (e.total) setProgress({ stage: 'Uploading', fraction: UPLOAD_SHARE * (e.loaded / e.total) })
-      })
+      }, abortRef.current.signal)
+      jobRef.current = data.job_id
       setProgress({ stage: 'Starting', fraction: UPLOAD_SHARE })
       poll(data.job_id)
     } catch (err) {
+      if (err.code === 'ERR_CANCELED') {
+        finish(); setNotice('Upload cancelled.')
+        return
+      }
       fail(err.response?.data?.detail)
     } finally {
       if (inputRef.current) inputRef.current.value = ''
@@ -175,7 +199,7 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
     <input ref={inputRef} type="file" className="hidden" onChange={(e) => upload(e.target.files?.[0])} />
   )
 
-  const panel = (busy || error || result || locked) && (
+  const panel = (busy || error || result || locked || notice) && (
     <div className={`${panelClassName} card px-4 py-3 relative`}>
       {!busy && (
         <button
@@ -187,7 +211,19 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
         </button>
       )}
       {busy && <ProgressBar stage={progress.stage} fraction={progress.fraction} />}
-      {busy && <p className="text-[11px] text-gray-400 mt-1.5">Your {app?.label} statement - this can take a minute.</p>}
+      {busy && (
+        <div className="flex items-center justify-between gap-3 mt-1.5">
+          <p className="text-[11px] text-gray-400">Your {app?.label} statement - this can take a minute.</p>
+          <button
+            onClick={cancel}
+            disabled={cancelling}
+            className="flex-shrink-0 text-xs font-bold text-red-600 hover:text-red-700 disabled:opacity-50"
+          >
+            {cancelling ? 'Cancelling…' : 'Cancel'}
+          </button>
+        </div>
+      )}
+      {notice && !busy && <p className="text-xs text-gray-600 pr-5">{notice}</p>}
       {locked && !busy && (
         <form onSubmit={(e) => { e.preventDefault(); if (password) upload(file, password) }}>
           <div className="flex items-center gap-3 pr-6">

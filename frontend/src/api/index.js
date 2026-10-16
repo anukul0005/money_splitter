@@ -78,12 +78,13 @@ export const scanReceipt        = (file)     => {
 }
 export const getMonthlySkipped  = (groupId)  => api.get(`/expenses/monthly/${groupId}/skipped`)
 // A statement import as a background job, polled for a progress bar.
-export const startImportJob     = (file, password, onUploadProgress) => {
+export const startImportJob     = (file, password, onUploadProgress, signal) => {
   const fd = new FormData()
   fd.append('file', file)
   if (password) fd.append('password', password)
-  return api.post('/expenses/import-jobs', fd, { onUploadProgress })
+  return api.post('/expenses/import-jobs', fd, { onUploadProgress, signal })
 }
+export const cancelImportJob    = (jobId)    => api.post(`/expenses/import-jobs/${jobId}/cancel`)
 export const getImportJob       = (jobId)    => api.get(`/expenses/import-jobs/${jobId}`)
 export const getMe              = ()         => api.get('/users/me')
 // ── UPI IDs (for "pay via UPI" QR / deep link) ──────────────────────────────────

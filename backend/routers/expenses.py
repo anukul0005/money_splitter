@@ -709,6 +709,9 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
                              merchant=t.merchant, amount=t.amount, txn_id=t.txn_id or None,
                              reason=reason, source=t.source))
 
+    # The last point an import can still be cancelled - nothing above is
+    # committed yet, so stopping here leaves no trace.
+    step("Saving", 0.97)
     # Ids read before the commit: afterwards each expense is expired, and
     # reading .id would cost one SELECT per row.
     db.flush()
@@ -746,9 +749,21 @@ _jobs: dict[str, dict] = {}
 _jobs_lock = threading.Lock()
 
 
+class _Cancelled(Exception):
+    pass
+
+
 def _job_update(job_id: str, **fields) -> None:
     with _jobs_lock:
-        _jobs[job_id].update(fields)
+        job = _jobs[job_id]
+        if job.get("cancel"):
+            raise _Cancelled()
+        job.update(fields)
+
+
+def _job_finish(job_id: str, error: dict) -> None:
+    with _jobs_lock:
+        _jobs[job_id].update(status="error", error=error)
 
 
 def _run_job(job_id: str, user_id: int, raw: bytes, password: str | None) -> None:
@@ -759,17 +774,24 @@ def _run_job(job_id: str, user_id: int, raw: bytes, password: str | None) -> Non
         result, created_ids = run_import(
             db, caller, raw, password,
             lambda stage, fraction: _job_update(job_id, stage=stage, progress=round(fraction, 3)))
-        _job_update(job_id, status="done", stage="Done", progress=1.0, result=result)
+        with _jobs_lock:
+            _jobs[job_id].update(status="done", stage="Done", progress=1.0, result=result)
+    except _Cancelled:
+        # run_import commits only at its very end, so rolling back leaves
+        # nothing of this statement behind.
+        db.rollback()
+        with _jobs_lock:
+            _jobs[job_id].update(status="cancelled", stage="Cancelled")
+        return
     except StatementLocked as e:
-        _job_update(job_id, status="error", error=_locked_detail(e))
+        _job_finish(job_id, error=_locked_detail(e))
         return
     except ValueError as e:
-        _job_update(job_id, status="error", error={"code": "unreadable", "message": str(e)})
+        _job_finish(job_id, error={"code": "unreadable", "message": str(e)})
         return
     except Exception as e:  # never leave the app polling a job that died
         print(f"[import] job {job_id} failed: {e!r}")
-        _job_update(job_id, status="error",
-                    error={"code": "failed", "message": "The import failed - please try again."})
+        _job_finish(job_id, error={"code": "failed", "message": "The import failed - please try again."})
         return
     finally:
         db.close()
@@ -796,6 +818,20 @@ def start_import_job(file: UploadFile = File(...), password: str = Form(""),
     return {"job_id": job_id}
 
 
+@router.post("/import-jobs/{job_id}/cancel", response_model=dict)
+def cancel_import_job(job_id: str, caller: User = Depends(current_user)):
+    """Stop an import that's still running. It stops at its next progress
+    step (a page, a batch of payees) and saves nothing; one already saving
+    or finished can't be undone this way."""
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if job is None or job["user_id"] != caller.id:
+            raise HTTPException(404, "No such import.")
+        if job["status"] == "running":
+            job["cancel"] = True
+        return {"status": job["status"]}
+
+
 @router.get("/import-jobs/{job_id}", response_model=dict)
 def import_job_status(job_id: str, caller: User = Depends(current_user)):
     """{status: running|done|error, stage, progress 0-1, result | error}."""
@@ -804,4 +840,4 @@ def import_job_status(job_id: str, caller: User = Depends(current_user)):
         if job is None or job["user_id"] != caller.id:
             raise HTTPException(404, "No such import - it may have finished over an hour ago.")
         job["touched"] = time.time()
-        return {k: v for k, v in job.items() if k not in ("user_id", "touched")}
+        return {k: v for k, v in job.items() if k not in ("user_id", "touched", "cancel")}
