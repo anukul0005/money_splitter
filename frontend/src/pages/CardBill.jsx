@@ -334,7 +334,7 @@ function BillBreakup({ billId: id }) {
                   <div className="min-w-0">
                     <p className="text-xs font-semibold text-gray-800 leading-snug">{x.description}</p>
                     <p className="text-[10px] text-gray-400">
-                      {x.category}{x.subcategory ? ` · ${x.subcategory}` : ''}
+                      {x.time ? `${x.time} · ` : ''}{x.category}{x.subcategory ? ` · ${x.subcategory}` : ''}
                       {x.kind === 'refund' ? ' · refund' : x.kind === 'cashback' ? ' · cashback' : ''}
                       {x.foreign_amount ? ` · ${x.currency} ${Number(x.foreign_amount).toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : ''}
                     </p>

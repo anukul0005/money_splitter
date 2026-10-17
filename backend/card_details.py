@@ -44,7 +44,7 @@ Respond with ONLY a JSON object:
 Plain numbers, no currency symbols or commas. null for anything not clearly stated - never guess."""
 
 _TXN_PROMPT = """You read part of the text of an Indian credit card statement PDF. List every transaction line in it.
-Respond with ONLY a JSON object: {"transactions": [{"date": "YYYY-MM-DD", "description": string,
+Respond with ONLY a JSON object: {"transactions": [{"date": "YYYY-MM-DD", "time": "HH:MM"|null, "description": string,
  "amount": number, "type": "debit"|"credit", "kind": "purchase"|"payment"|"refund"|"cashback"|"fee"|"interest"|"tax"|"emi"|"other",
  "foreign_amount": number|null, "currency": string|null}]}
 Rules:
@@ -54,6 +54,9 @@ Rules:
 - Foreign currency markup / cross-currency fees and the GST/IGST on them are their own lines: kind "fee" or "tax".
 - amount is positive; type says the direction ("Cr"/"credit"/payments/refunds/waivers are credit). A surcharge waiver or reversal is a credit with kind "refund".
 - Only real transaction rows from this statement - not summary totals, not reward point tables, not offers, not EMI schedules for future months.
+- time is the transaction's time of day when the statement prints one next to it (e.g. "14:32", "02:32 PM",
+  "14:32:05"), as 24-hour "HH:MM"; null when the line has no time. Never invent one, and never take it from a
+  reference number.
 - Keep the description as printed (merchant and place), without the reference numbers.
 - If this part has no transactions, return {"transactions": []}."""
 
@@ -103,6 +106,23 @@ def _chunks(text: str) -> list[str]:
 
 def _num(v):
     return round(float(v), 2) if isinstance(v, (int, float)) else None
+
+
+_TIME = re.compile(r"^\s*(\d{1,2})[:.](\d{2})(?::\d{2})?\s*([AaPp][Mm])?\s*$")
+
+
+def _time(v) -> str | None:
+    """The model's time as "HH:MM", or None for anything that isn't a real
+    time of day ("14:32", "2:32 PM", "14:32:05" all fine; "25:00" isn't)."""
+    m = _TIME.match(v) if isinstance(v, str) else None
+    if not m:
+        return None
+    h, mins, ampm = int(m.group(1)), int(m.group(2)), (m.group(3) or "").lower()
+    if ampm:
+        if not 1 <= h <= 12:
+            return None
+        h = h % 12 + (12 if ampm == "pm" else 0)
+    return f"{h:02d}:{mins:02d}" if h < 24 and mins < 60 else None
 
 
 # Words that say where or what kind of company, not which merchant - left
@@ -227,6 +247,7 @@ def _extract_txns(text: str, note: str = "") -> list[dict]:
             fx = _num(t.get("foreign_amount"))
             cur = t.get("currency") if isinstance(t.get("currency"), str) and t.get("currency").upper() not in ("INR", "RS") else None
             txns.append({"date": t.get("date") if isinstance(t.get("date"), str) else None,
+                         "time": _time(t.get("time")),
                          "description": str(t["description"]).strip()[:120], "amount": abs(amt),
                          "type": "credit" if t.get("type") == "credit" else "debit",
                          "kind": t.get("kind") if t.get("kind") in ("purchase", "payment", "refund", "cashback", "fee",
