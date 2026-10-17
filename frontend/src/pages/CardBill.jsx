@@ -14,6 +14,111 @@ const Label = ({ children }) => <p className="text-xs font-bold text-gray-500 up
 
 const FILTERS = [['all', 'All'], ['spends', 'Spends'], ['credits', 'Payments & refunds'], ['fees', 'Fees']]
 
+const isSpend = (x) => x.type === 'debit' && x.category !== 'Card fees & interest'
+const addDays = (iso, n) => {
+  const t = new Date(`${iso}T00:00:00Z`)
+  t.setUTCDate(t.getUTCDate() + n)
+  return t.toISOString().slice(0, 10)
+}
+const daysBetween = (a, b) => Math.round((new Date(`${b}T00:00:00Z`) - new Date(`${a}T00:00:00Z`)) / 86400000)
+
+/**
+ * The bill period cut into its first 10 days, middle 10 and the rest
+ * (a 30-day bill: 10/10/10, a 31-day one: 10/10/11), with what was spent
+ * in each. Spends only - payments, refunds and fees don't count. A
+ * transaction dated a day outside the period (banks post a few that way)
+ * goes in the nearest window.
+ */
+function billWindows(summary, transactions) {
+  const dated = transactions.filter((x) => x.date)
+  let from = summary.period_from, to = summary.period_to
+  if (!from || !to) {
+    if (!dated.length) return null
+    const ds = dated.map((x) => x.date).sort()
+    from = from || ds[0]
+    to = to || ds[ds.length - 1]
+  }
+  const length = daysBetween(from, to) + 1
+  if (length < 15) return null      // too short a period to split in three
+  const bounds = [[0, 9], [10, 19], [20, length - 1]]
+  const names = ['First 10 days', 'Middle 10 days', `Last ${length - 20} days`]
+  const wins = bounds.map(([a, b], i) => ({
+    key: i, name: names[i], from: addDays(from, a), to: addDays(from, b),
+    days: b - a + 1, amount: 0, count: 0,
+  }))
+  for (const x of dated) {
+    if (!isSpend(x)) continue
+    const off = daysBetween(from, x.date)
+    const w = wins[off < 10 ? 0 : off < 20 ? 1 : 2]
+    w.amount += x.amount
+    w.count += 1
+  }
+  const total = wins.reduce((t, w) => t + w.amount, 0)
+  return total > 0 ? { wins, total } : null
+}
+
+function windowOf(win, x) {
+  if (!win || !x.date) return false
+  const { key, from, to } = win
+  // the outer windows also take the stray day or two outside the period
+  return (key === 0 || x.date >= from) && (key === 2 || x.date <= to)
+}
+
+function SpendWindows({ data, selected, onSelect }) {
+  const { wins, total } = data
+  const max = Math.max(...wins.map((w) => w.amount), 1)
+  const top = wins.reduce((a, b) => (b.amount > a.amount ? b : a))
+  const share = (w) => Math.round((w.amount / total) * 100)
+  return (
+    <div className="card space-y-3">
+      <div className="flex items-baseline justify-between">
+        <Label>When in the bill</Label>
+        <span className="text-[11px] text-gray-500">{INR(total)} spent</span>
+      </div>
+      <p className="text-xs text-gray-700">
+        <b>{share(top)}%</b> of this bill was spent in the <b>{top.name.toLowerCase()}</b>
+        {` (${day(top.from)} – ${day(top.to)}).`}
+      </p>
+      <div className="grid grid-cols-3 gap-3 pt-1" role="list">
+        {wins.map((w) => {
+          const on = selected === w.key
+          const dim = selected != null && !on
+          return (
+            <button
+              key={w.key}
+              role="listitem"
+              onClick={() => onSelect(on ? null : w.key)}
+              aria-pressed={on}
+              title={`${w.name}: ${INR(w.amount)} over ${w.count} transaction${w.count === 1 ? '' : 's'}, ${INR(Math.round(w.amount / w.days))} a day`}
+              className={`text-left transition-opacity ${dim ? 'opacity-40' : ''}`}
+            >
+              <p className="text-sm font-black text-gray-900 tabular-nums">{INR(Math.round(w.amount))}</p>
+              <p className="text-[10px] text-gray-500 tabular-nums">{share(w)}%</p>
+              {/* bar area: a fixed-height track, the bar anchored to its floor */}
+              <div className="h-28 mt-1.5 flex items-end border-b border-amber-200">
+                <div
+                  className={`w-full rounded-t ${on ? 'bg-brand-500' : 'bg-brand-400'}`}
+                  style={{ height: `${Math.max((w.amount / max) * 100, w.amount > 0 ? 3 : 0)}%` }}
+                />
+              </div>
+              <p className="text-[11px] font-bold text-gray-800 mt-1.5 leading-tight">{w.name}</p>
+              <p className="text-[10px] text-gray-500">{day(w.from)} – {day(w.to)}</p>
+              <p className="text-[10px] text-gray-400 mt-0.5 tabular-nums">
+                {w.count} txn{w.count === 1 ? '' : 's'} · {INR(Math.round(w.amount / w.days))}/day
+              </p>
+            </button>
+          )
+        })}
+      </div>
+      {selected != null && (
+        <p className="text-[11px] text-brand-500 font-bold">
+          Showing {wins[selected].name.toLowerCase()} below · tap it again for all
+        </p>
+      )}
+    </div>
+  )
+}
+
 /**
  * One credit card bill's detailed breakup, read from its statement PDF
  * (backend card_details.py): the summary, spending by category, the
@@ -25,6 +130,7 @@ function BillBreakup({ billId: id }) {
   const [error, setError] = useState('')
   const [filter, setFilter] = useState('all')
   const [category, setCategory] = useState(null)
+  const [windowKey, setWindowKey] = useState(null)   // a "When in the bill" column, tapped
   const started = useRef(false)
 
   // Each bill shown gets a generation number; a poll from a bill the
@@ -89,7 +195,10 @@ function BillBreakup({ billId: id }) {
 
   const s = d.summary || {}
   const t = d.totals
+  const windows = billWindows(s, d.transactions)
+  const win = windows && windowKey != null ? windows.wins[windowKey] : null
   const txns = d.transactions.filter((x) => {
+    if (win) return isSpend(x) && windowOf(win, x)
     if (category) return x.category === category && x.type === 'debit'
     if (filter === 'spends') return x.type === 'debit' && x.category !== 'Card fees & interest'
     if (filter === 'credits') return x.type === 'credit'
@@ -163,7 +272,7 @@ function BillBreakup({ billId: id }) {
           </div>
           {d.by_category.length === 0 && <p className="text-xs text-gray-500">No spends on this bill.</p>}
           {d.by_category.map((c) => (
-            <button key={c.category} onClick={() => { setCategory(category === c.category ? null : c.category); setFilter('all') }}
+            <button key={c.category} onClick={() => { setCategory(category === c.category ? null : c.category); setFilter('all'); setWindowKey(null) }}
               className={`w-full text-left ${category && category !== c.category ? 'opacity-40' : ''}`}>
               <div className="flex items-center justify-between text-xs">
                 <span className="font-bold text-gray-800">{c.category}</span>
@@ -177,6 +286,15 @@ function BillBreakup({ billId: id }) {
           ))}
           {category && <p className="text-[11px] text-brand-500 font-bold">Showing {category} below · tap it again for all</p>}
         </div>
+
+        {/* First / middle / last 10 days */}
+        {windows && (
+          <SpendWindows
+            data={windows}
+            selected={windowKey}
+            onSelect={(k) => { setWindowKey(k); setCategory(null); setFilter('all') }}
+          />
+        )}
 
         {/* Merchants */}
         {d.top_merchants.length > 0 && (
@@ -198,7 +316,7 @@ function BillBreakup({ billId: id }) {
             <Label>Transactions</Label>
             <span className="text-[11px] text-gray-400">{txns.length} of {t.count}</span>
           </div>
-          {!category && (
+          {!category && !win && (
             <div className="flex gap-1.5 flex-wrap">
               {FILTERS.map(([k, l]) => (
                 <button key={k} onClick={() => setFilter(k)}
