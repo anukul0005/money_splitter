@@ -7,7 +7,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import PeoplePicker from '../components/PeoplePicker'
 import PlaceEditForm from '../components/PlaceEditForm'
 import RecommendTabs from '../components/RecommendTabs'
-import { useUser } from '../UserContext'
+import { hasFullAccess, useUser } from '../UserContext'
 
 // A missing number renders as a dash, never as "₹NaN" — see the note in
 // Recommend.jsx. Number(undefined) is NaN and went straight onto the card.
@@ -919,11 +919,11 @@ export default function RecommendFood({ tab, setTab }) {
                 Where these prices come from
               </summary>
               <p className="text-[10px] text-gray-500 leading-relaxed mt-2">
-                Unlike alcohol, food has no legal price — a restaurant sets its
+                {hasFullAccess(user) ? 'Unlike alcohol, food' : 'Food'} has no legal price — a restaurant sets its
                 own menu and changes it whenever it likes. So these are “cost
                 for two”, the figure listing sites publish and diners already
                 think in, scaled to your head count. It is a typical bill for a
-                normal order and excludes alcohol. Where two sources disagreed
+                normal order{hasFullAccess(user) ? ' and excludes alcohol' : ''}. Where two sources disagreed
                 the row keeps both ends as a range rather than picking one and
                 calling it the price. Every total is an estimate, which is why
                 each is shown with a ~. Nothing is scraped from Zomato or

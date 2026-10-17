@@ -83,7 +83,7 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
         raise HTTPException(401, "Incorrect username or password")
     return LoginOut(
         id=user.id, name=user.name, is_admin=user.is_admin, email=user.email,
-        created_at=user.created_at, token=create_token(user),
+        created_at=user.created_at, token=create_token(user), has_full_access=user.has_full_access,
     )
 
 
@@ -283,6 +283,97 @@ def admin_issue_code(payload: AdminIssueCode, db: Session = Depends(get_db)):
         "expires_at": expires.isoformat(),
         "expires_in_hours": CODE_TTL_HOURS,
     }
+
+
+# ── full access (see models.User.full_access) ─────────────────────────────
+# Never named for what it unlocks: a person without it sees "full access"
+# and nothing more.
+
+class UnlockCode(BaseModel):
+    code: str
+
+
+@router.post("/admin-issue-access-code", response_model=dict)
+def admin_issue_access_code(payload: AdminIssueCode, db: Session = Depends(get_db)):
+    """Mint a one-time 6-digit code that gives `target_name` full access.
+    Authorised by the admin's own passkey, like admin-issue-code; returned
+    once, only its hash kept. Separate from the password-reset code, so
+    issuing one never disturbs the other."""
+    admin_issue = _require_admin(payload.admin_name, payload.admin_answer, db)
+    target = db.query(User).filter(User.name.ilike((payload.target_name or "").strip())).first()
+    if not target:
+        raise HTTPException(404, f"No user named {payload.target_name}")
+    if target.has_full_access:
+        raise HTTPException(400, f"{target.name} already has full access")
+    code = str(secrets.randbelow(1000000)).zfill(6)
+    expires = datetime.now(timezone.utc) + timedelta(hours=CODE_TTL_HOURS)
+    target.access_code_salt = secrets.token_hex(16)
+    target.access_code_hash = _hash(code, target.access_code_salt)
+    target.access_code_expires_at = expires
+    db.commit()
+    print(f"[access] {admin_issue.name} issued a full-access code for {target.name}")
+    return {"target": target.name, "code": code, "expires_at": expires.isoformat(),
+            "expires_in_hours": CODE_TTL_HOURS}
+
+
+@router.post("/me/access-request", response_model=dict)
+def request_full_access(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Tell the admins someone wants a full-access code (email and/or push,
+    whichever each admin has)."""
+    if caller.has_full_access:
+        return {"ok": True, "already": True}
+    from emailer import send_notice
+    admins = db.query(User).filter(User.is_admin == True).all()  # noqa: E712
+    for a in admins:
+        try:
+            send_notice(db, a.name, f"{caller.name} asked for full access",
+                        [f"{caller.name} has asked for a full-access code.",
+                         "Issue one from Admin → One-time codes, then send it to them."],
+                        f"{caller.name} asked for a full-access code", url="/admin/codes",
+                        button_label="Issue a code")
+        except Exception as e:  # a missed notice mustn't fail the request
+            print(f"[access] couldn't notify {a.name}: {e}")
+    return {"ok": True, "notified": len(admins)}
+
+
+@router.post("/me/unlock", response_model=UserMeOut)
+def unlock_full_access(payload: UnlockCode, db: Session = Depends(get_db),
+                       caller: User = Depends(current_user)):
+    """Redeem an admin's full-access code. Burnt on success; wrong guesses
+    count toward the same lockout as every other code."""
+    now = datetime.now(timezone.utc)
+    generic = "That code isn't valid. Ask an admin for a new one."
+    if caller.reset_locked_until is not None:
+        locked = caller.reset_locked_until
+        if locked.tzinfo is None:
+            locked = locked.replace(tzinfo=timezone.utc)
+        if locked > now:
+            mins = max(1, int((locked - now).total_seconds() // 60) + 1)
+            raise HTTPException(429, f"Too many wrong attempts. Try again in {mins} minute(s).")
+    if caller.has_full_access:
+        return caller
+    if not caller.access_code_hash or not caller.access_code_salt:
+        raise HTTPException(401, generic)
+    expires = caller.access_code_expires_at
+    if expires is not None and expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if expires is None or expires < now:
+        raise HTTPException(401, "That code has expired. Ask an admin for a new one.")
+    if not secrets.compare_digest(caller.access_code_hash,
+                                  _hash((payload.code or "").strip(), caller.access_code_salt)):
+        caller.reset_fail_count = (caller.reset_fail_count or 0) + 1
+        if caller.reset_fail_count >= MAX_RESET_ATTEMPTS:
+            caller.reset_locked_until = now + timedelta(minutes=LOCKOUT_MINUTES)
+            caller.reset_fail_count = 0
+        db.commit()
+        raise HTTPException(401, generic)
+    caller.full_access = True
+    caller.access_code_hash = caller.access_code_salt = None
+    caller.access_code_expires_at = None
+    caller.reset_fail_count = 0
+    db.commit()
+    db.refresh(caller)
+    return caller
 
 
 @router.post("/redeem-code", response_model=UserOut)
@@ -725,7 +816,7 @@ def verify_login_code(payload: VerifyLoginCode, db: Session = Depends(get_db)):
 
     return LoginOut(
         id=user.id, name=user.name, is_admin=user.is_admin, email=user.email,
-        created_at=user.created_at, token=create_token(user),
+        created_at=user.created_at, token=create_token(user), has_full_access=user.has_full_access,
     )
 
 

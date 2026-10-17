@@ -13,7 +13,7 @@ import ProductReviewForm from '../components/ProductReviewForm'
 import RecommendTabs from '../components/RecommendTabs'
 import RecommendFood from './RecommendFood'
 import Forecast from './Forecast'
-import { useUser } from '../UserContext'
+import { useUser, hasFullAccess } from '../UserContext'
 
 // A missing number renders as a dash, never as "₹NaN". Number(undefined) is
 // NaN, so any field the server stops sending — or hasn't started sending yet,
@@ -240,7 +240,16 @@ function MatchBreakdown({ score, breakdown, weights, open, onToggle }) {
  * subject in India, so the state matters more than anything else) and what
  * this exact set of people has actually bought together before.
  */
+/** Drinks, food and the party forecast for people with full access;
+ *  everyone else gets the food recommender on its own (no tabs, no mention
+ *  of the rest) - see UserContext.hasFullAccess. */
 export default function Recommend() {
+  const user = useUser()
+  if (!hasFullAccess(user)) return <RecommendFood tab="food" setTab={() => {}} />
+  return <DrinksRecommend />
+}
+
+function DrinksRecommend() {
   const nav  = useNavigate()
   const user = useUser()
 

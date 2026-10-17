@@ -1,3 +1,5 @@
+import { hasFullAccess, useUser } from '../UserContext'
+
 /**
  * Drinks / food / forecast switch, shared by all three halves of the
  * recommender.
@@ -7,6 +9,8 @@
  * between them would read as the page jumping on every switch.
  */
 export default function RecommendTabs({ tab, setTab }) {
+  // Without full access the food page stands alone - no tabs to show.
+  if (!hasFullAccess(useUser())) return null
   const tabs = [
     ['drinks',   'Drinks'],
     ['food',     'Food'],

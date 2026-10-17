@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { hasFullAccess, useUser } from '../UserContext'
 import { useNavigate } from 'react-router-dom'
 import { Bar, Chart as MixedChart } from 'react-chartjs-2'
 import { getMLAnalysis } from '../api'
@@ -29,6 +30,7 @@ function Section({ n, tag, q, verdict, tone, children, how }) {
  * not causes. Salary is never used.
  */
 export default function MLAnalysis() {
+  const user = useUser()
   const nav = useNavigate()
   const [d, setD] = useState(null)
   const [error, setError] = useState('')
@@ -163,7 +165,7 @@ export default function MLAnalysis() {
 
         <Section n={5} tag="Wants" q="Which categories make up most of the unnecessary spending?"
           verdict={w.items[0]?.k || '—'} tone="yes"
-          how="Unnecessary = discretionary wants: eating out and delivery, alcohol, tobacco, entertainment, non-essential shopping. Trend: last 6 months vs the 6 before.">
+          how={`Unnecessary = discretionary wants: eating out and delivery, ${hasFullAccess(user) ? 'alcohol, ' : ''}tobacco, entertainment, non-essential shopping. Trend: last 6 months vs the 6 before.`}>
           <p className="text-xs text-gray-700 leading-relaxed">
             Wants came to <b>{INR(w.total)}</b>, <b>{w.share}%</b> of your personal spending. <b>{w.items[0]?.k}</b> is the largest
             {growers.length > 0 && <>; growing fastest: {growers.map((x) => `${x.k} (+${x.trend}%)`).join(', ')}</>}.

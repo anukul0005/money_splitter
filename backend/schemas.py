@@ -39,6 +39,8 @@ class UserMeOut(UserOut):
     birth_year: Optional[int] = None
     # Opt-in nightly summary of yesterday's spending - see models.User.
     daily_summary: bool = False
+    # The drinks side of the app - see models.User.full_access.
+    has_full_access: bool = False
     # Pay and when it's credited - see models.User.
     monthly_salary: Optional[float] = None
     salary_day: Optional[str] = None

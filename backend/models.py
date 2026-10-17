@@ -91,7 +91,20 @@ class User(Base):
     # is a friend, "Ajay kiryana store" is groceries. An entry "txn:<id>"
     # excludes that one payment instead of the payee. See import_statement.
     excluded_payees = Column(Text, nullable=True)
+    # "Full access": the drinks side of the app (the drinks recommender, the
+    # party forecast, drink price editing). Off for everyone by default - a
+    # new account never sees it, or any mention of it - and switched on by
+    # redeeming a one-time code an admin issues (users.py). Admins always
+    # have it; see has_full_access.
+    full_access = Column(Boolean, nullable=False, default=False, server_default="false")
+    access_code_hash = Column(String(128), nullable=True)
+    access_code_salt = Column(String(64), nullable=True)
+    access_code_expires_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    @property
+    def has_full_access(self) -> bool:
+        return bool(self.full_access or self.is_admin)
 
 
 class Group(Base):

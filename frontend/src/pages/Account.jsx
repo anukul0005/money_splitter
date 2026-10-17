@@ -4,7 +4,8 @@ import {
   changePassword, setRecovery, getRecoveryQuestion, getMe, setMyEmail, setMyBirthday,
   setMyDailySummary, setMySalary, listMyUpiIds, addUpiId, deleteUpiId,
 } from '../api'
-import { useUser, isAdmin } from '../UserContext'
+import { useUser, isAdmin, hasFullAccess } from '../UserContext'
+import UnlockAccess from '../components/UnlockAccess'
 import { ALL_QUESTIONS, RECOVERY_QUESTIONS, KEY_QUESTION, generateKey } from '../utils/security'
 import { pushSupported, getExistingSubscription, enablePush, disablePush } from '../push'
 
@@ -298,6 +299,9 @@ export default function Account() {
       </div>
 
       <div className="px-5 mt-5 space-y-4 max-w-lg">
+
+        {/* ── Full access (only shown until it's unlocked) ── */}
+        {!hasFullAccess(user) && <UnlockAccess />}
 
         {/* ── Security question ── */}
         <div className="card">

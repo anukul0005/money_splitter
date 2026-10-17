@@ -150,6 +150,10 @@ def create_tables():
 # tables it has never seen and never touches an existing one's columns.
 # (table, column, type/definition)
 _ADDED_COLUMNS = [
+    ("users", "full_access", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("users", "access_code_hash", "VARCHAR(128)"),
+    ("users", "access_code_salt", "VARCHAR(64)"),
+    ("users", "access_code_expires_at", "TIMESTAMPTZ"),
     ("expenses", "split_json", "TEXT"),
     ("expenses", "payment_mode", "VARCHAR(50)"),
     ("groups", "category", "VARCHAR(50)"),

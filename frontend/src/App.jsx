@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import BottomNav  from './components/BottomNav'
 import Sidebar    from './components/Sidebar'
@@ -26,7 +26,8 @@ import Balances      from './pages/Balances'
 import MasterGroupDetail from './pages/MasterGroupDetail'
 import FriendDetail      from './pages/FriendDetail'
 import Recommend         from './pages/Recommend'
-import { UserContext, isAdmin } from './UserContext'
+import { UserContext, RefreshUserContext, isAdmin } from './UserContext'
+import { getMe } from './api'
 
 const SESSION_KEY = 'splitter_session_v2'
 
@@ -45,6 +46,21 @@ function getStoredUser() {
 
 export default function App() {
   const [user, setUser] = useState(getStoredUser)
+
+  // The saved session is a snapshot from sign-in; re-read the account on
+  // load (and on demand) so anything changed since - full access unlocked,
+  // say - shows without signing out and back in.
+  const refreshUser = useCallback(async () => {
+    const stored = getStoredUser()
+    if (!stored) return
+    try {
+      const { data } = await getMe()
+      const merged = { ...stored, ...data, token: stored.token }
+      localStorage.setItem(SESSION_KEY, JSON.stringify(merged))
+      setUser(merged)
+    } catch { /* offline or signed out - keep what we have */ }
+  }, [])
+  useEffect(() => { refreshUser() }, [refreshUser])
 
   const handleLogout = () => {
     localStorage.clear()
@@ -67,6 +83,7 @@ export default function App() {
 
   return (
     <UserContext.Provider value={user}>
+    <RefreshUserContext.Provider value={refreshUser}>
       <BrowserRouter>
         {/* Keyed on who is signed in, so switching accounts throws the whole
             tree away and rebuilds it. Belt and braces next to the server's
@@ -125,6 +142,7 @@ export default function App() {
           </div>
         </div>
       </BrowserRouter>
+    </RefreshUserContext.Provider>
     </UserContext.Provider>
   )
 }

@@ -25,7 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from auth import current_user
+from auth import current_user, require_full_access
 from database import get_db
 from food_prices import for_city
 from liquor_prices import STATES, for_state
@@ -38,7 +38,9 @@ from routers.recommend import (
     _overrides_by_state, _products_by_name,
 )
 
-router = APIRouter(prefix="/forecast", tags=["forecast"])
+# The party forecast prices drinks - full access only (auth.require_full_access).
+router = APIRouter(prefix="/forecast", tags=["forecast"],
+                   dependencies=[Depends(require_full_access)])
 
 # A disposable glass, bought per person, whenever a spirit is being poured
 # outside a restaurant - beer is drunk from its own bottle, so a beer-only

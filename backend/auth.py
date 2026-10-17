@@ -131,6 +131,14 @@ def current_user(request: Request, db: Session = Depends(get_db)) -> User:
     return user
 
 
+def require_full_access(user: User = Depends(current_user)) -> User:
+    """Guards the drinks side of the API (see User.full_access). A 404, not
+    a 403: to someone without access these routes simply don't exist."""
+    if not user.has_full_access:
+        raise HTTPException(404, "Not Found")
+    return user
+
+
 def require_admin(user: User = Depends(current_user)) -> User:
     if not user.is_admin:
         raise HTTPException(403, "Admins only")

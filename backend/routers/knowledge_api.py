@@ -41,6 +41,11 @@ def knowledge_search(q: str, kind: str = "", limit: int = 20,
         raise HTTPException(400, "Search for something")
     if kind and kind not in (DRINK, FOOD):
         raise HTTPException(400, f"kind must be {DRINK} or {FOOD}")
+    if not caller.has_full_access:
+        # drinks are full-access only (models.User.full_access)
+        if kind == DRINK:
+            raise HTTPException(400, f"kind must be {FOOD}")
+        kind = FOOD
     return search(db, q, kind or None, _my_group_ids(db, caller),
                   limit=max(1, min(limit, 50)))
 

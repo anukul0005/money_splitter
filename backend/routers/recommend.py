@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from pydantic import BaseModel, Field, field_validator
 
-from auth import current_user, is_member
+from auth import current_user, is_member, require_full_access
 from database import get_db
 from knowledge import DRINK, DRINK_RE, is_alcohol, learned
 from brand_names import canonicalise as bn_canonicalise, core as bn_core, key as bn_key
@@ -31,7 +31,9 @@ from liquor_prices import (
 )
 from models import Group, PriceOverride, Product, ProductReview, RecommendationEvent, User
 
-router = APIRouter(prefix="/recommend", tags=["recommend"])
+# Every route here is the drinks side - full access only (auth.require_full_access).
+router = APIRouter(prefix="/recommend", tags=["recommend"],
+                   dependencies=[Depends(require_full_access)])
 
 # Words that mark an expense as a drinks run. Deliberately \b-bounded: an
 # unbounded "gin" matched "Monginis", a bakery, and put cake in the liquor data.

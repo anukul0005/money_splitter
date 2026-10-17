@@ -62,6 +62,9 @@ export const listUsersBasic     = ()         => api.get('/users/')
 // One-time codes: an admin mints one for another user; that user spends it to
 // set a new password and their own security question.
 export const adminIssueCode     = (data)     => api.post('/users/admin-issue-code', data)
+export const adminIssueAccessCode = (data)   => api.post('/users/admin-issue-access-code', data)
+export const requestFullAccess  = ()         => api.post('/users/me/access-request')
+export const unlockFullAccess   = (code)     => api.post('/users/me/unlock', { code })
 export const redeemCode         = (data)     => api.post('/users/redeem-code', data)
 export const requestLoginCode   = (data)     => api.post('/users/email-code', data)
 export const verifyLoginCode    = (data)     => api.post('/users/email-code/verify', data)

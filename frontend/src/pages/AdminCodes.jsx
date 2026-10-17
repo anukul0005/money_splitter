@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { adminIssueCode, listUsersBasic, getRecoveryQuestion } from '../api'
+import { adminIssueCode, adminIssueAccessCode, listUsersBasic, getRecoveryQuestion } from '../api'
 import { useUser, isAdmin } from '../UserContext'
 import { KEY_QUESTION } from '../utils/security'
 import Dropdown from '../components/Dropdown'
@@ -22,7 +22,8 @@ export default function AdminCodes() {
   const [users, setUsers]     = useState([])
   const [target, setTarget]   = useState('')
   const [passkey, setPasskey] = useState('')
-  const [issued, setIssued]   = useState(null)   // { target, code, expires_in_hours }
+  const [issued, setIssued]   = useState(null)   // { target, code, expires_in_hours, kind }
+  const [kind, setKind]       = useState('reset') // 'reset' (password) | 'access' (full access)
   const [error, setError]     = useState('')
   const [busy, setBusy]       = useState(false)
   const [needs, setNeeds]     = useState({})     // name -> has_recovery
@@ -65,12 +66,13 @@ export default function AdminCodes() {
     if (!usesKey && passkey.trim().length < 3) return setError('Enter the answer to your security question.')
     setBusy(true)
     try {
-      const r = await adminIssueCode({
+      const issue = kind === 'access' ? adminIssueAccessCode : adminIssueCode
+      const r = await issue({
         admin_name: user.name,
         admin_answer: passkey,
         target_name: target,
       })
-      setIssued(r.data)
+      setIssued({ ...r.data, kind })
       setPasskey('')
     } catch (err) {
       setError(err.response?.data?.detail || 'Could not issue a code.')
@@ -91,16 +93,26 @@ export default function AdminCodes() {
         <button onClick={() => nav('/')} className="text-xs font-bold text-white/50 mb-2">← Home</button>
         <h1 className="text-2xl font-bold tracking-tight">One-time codes</h1>
         <p className="text-slate-300/40 text-xs mt-1 font-medium">
-          Give a locked-out user a way back in
+          Get a locked-out user back in, or give someone full access
         </p>
       </div>
 
       <div className="px-5 mt-5 space-y-4 max-w-lg">
         <div className="card">
+          <div className="flex gap-1 mb-3 bg-amber-100/60 rounded-lg p-0.5" role="tablist" aria-label="What the code is for">
+            {[['reset', 'Password reset'], ['access', 'Full access']].map(([v, label]) => (
+              <button key={v} type="button" role="tab" aria-selected={kind === v}
+                onClick={() => { setKind(v); setIssued(null); setError('') }}
+                className={`flex-1 rounded-md py-1.5 text-xs font-bold transition-all ${
+                  kind === v ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
           <p className="text-xs text-gray-500 leading-relaxed mb-4">
-            The code lets them set a new password and choose their own security
-            question — after that they can reset themselves without you. It works
-            once and expires in 24 hours.
+            {kind === 'access'
+              ? 'Full access turns on the drinks recommender, party forecast and drink prices for them. It works once and expires in 24 hours.'
+              : 'The code lets them set a new password and choose their own security question — after that they can reset themselves without you. It works once and expires in 24 hours.'}
           </p>
 
           <form onSubmit={handleIssue} className="space-y-3">
@@ -153,7 +165,9 @@ export default function AdminCodes() {
               <p className="text-3xl font-black text-green-800 tracking-[0.3em] my-2">{issued.code}</p>
               <p className="text-[11px] text-green-700 leading-relaxed">
                 Send this to {issued.target}. They enter it at
-                <span className="font-bold"> Forgot password → I have a one-time code</span>.
+                <span className="font-bold">
+                  {issued.kind === 'access' ? ' Account → Full access → Unlock' : ' Forgot password → I have a one-time code'}
+                </span>.
               </p>
               <p className="text-[10px] text-gray-500 mt-2">
                 Single use · expires in {issued.expires_in_hours} hours · shown only now
