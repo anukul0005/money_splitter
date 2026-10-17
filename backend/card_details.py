@@ -6,7 +6,9 @@
      bank's trailing terms-and-offers pages are dropped (SKIP_LAST_PAGES)
   2. the statement summary (previous balance, payments, purchases, fees,
      interest, total due...) from the first pages, via the LLM
-  3. every transaction, page by page in chunks, via the LLM
+  3. every transaction, in page-sized chunks, via the LLM - a chunk whose
+     answer was cut off, failed, or lists clearly fewer rows than the chunk
+     has date-and-amount lines is split in half and read again
   4. each spend categorised with the app's own taxonomy (the same AI
      categoriser expenses use, keyword rules as the fallback)
   5. totals by category, the biggest merchants, and a check that the
@@ -27,7 +29,8 @@ import urllib.request
 from collections import defaultdict
 from datetime import datetime, timezone
 
-CHUNK = 7000            # characters of statement text per transactions call
+CHUNK = 4000            # characters of statement text per transactions call (~a page)
+MIN_SPLIT = 1000        # a chunk shorter than this isn't split any further
 _status: dict[int, dict] = {}       # bill id -> {"status": "reading"|"error", "error"}
 _lock = threading.Lock()
 
@@ -69,10 +72,19 @@ def _ask(system: str, text: str, max_tokens: int = 6000) -> dict:
             **extra})
         try:
             with urllib.request.urlopen(req, timeout=90) as resp:
-                return json.loads(json.loads(resp.read().decode())["choices"][0]["message"]["content"])
+                choice = json.loads(resp.read().decode())["choices"][0]
+            if choice.get("finish_reason") == "length":
+                # Out of output tokens mid-answer: a shorter input is the
+                # fix, not another provider - see _read_part.
+                raise _Truncated()
+            return json.loads(choice["message"]["content"])
         except (urllib.error.URLError, KeyError, ValueError, TimeoutError) as e:
             last = e
     raise last or RuntimeError("No LLM key configured")
+
+
+class _Truncated(Exception):
+    """The model ran out of output tokens before finishing its answer."""
 
 
 def _chunks(text: str) -> list[str]:
@@ -168,10 +180,47 @@ def _categorise(txns: list[dict], history: dict | None = None) -> None:
             t["category"], t["subcategory"] = got[0], got[1]
 
 
+# A line that is plausibly one transaction row: a date, then later an
+# amount with paise ("16 Oct 2026 ... 1,234.56", "16/10/26 ... 99.00").
+_ROW = re.compile(r"(\b\d{1,2}[ /.-](?:\d{1,2}|[A-Za-z]{3,9})[ /.,-]+\d{2,4}\b|\b\d{4}-\d{2}-\d{2}\b)"
+                  r".*\d[\d,]*\.\d{2}\b")
+
+
+def _halves(part: str) -> tuple[str, str]:
+    lines = part.splitlines()
+    mid = len(lines) // 2
+    return "\n".join(lines[:mid]), "\n".join(lines[mid:])
+
+
+def _read_part(part: str, note: str, depth: int = 0) -> list:
+    """The LLM's transaction rows for one chunk. Models drop rows on a busy
+    chunk - cutting the answer off, or just listing fewer - which lost a
+    statement's last fortnight with no error. So a reply that failed, was
+    cut off, or comes back more than a couple of rows (or 10%) short of
+    the chunk's date-and-amount lines is re-read as two halves, and the
+    fuller reading wins. The line count can include a summary line or two
+    ("Total due 20,795.77") - that only costs a re-read, never a row."""
+    try:
+        got = _ask(_TXN_PROMPT, (f"Note: {note}\n\n" if note else "") + part).get("transactions") or []
+        failed = None
+    except Exception as e:      # cut off, unparseable, or every provider down
+        got, failed = None, e
+    rows = sum(1 for ln in part.splitlines() if _ROW.search(ln))
+    short = got is not None and rows >= 4 and len(got) < rows - max(2, rows // 10)
+    if (failed or short) and depth < 3 and len(part) > MIN_SPLIT:
+        a, b = _halves(part)
+        split = _read_part(a, note, depth + 1) + _read_part(b, note, depth + 1)
+        if got is None or len(split) > len(got):
+            return split
+    if failed:
+        raise failed
+    return got
+
+
 def _extract_txns(text: str, note: str = "") -> list[dict]:
     txns = []
     for part in _chunks(text):
-        for t in (_ask(_TXN_PROMPT, (f"Note: {note}\n\n" if note else "") + part).get("transactions") or []):
+        for t in _read_part(part, note):
             amt = _num(t.get("amount"))
             if not amt or not t.get("description"):
                 continue
