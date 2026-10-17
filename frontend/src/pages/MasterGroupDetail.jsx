@@ -86,6 +86,9 @@ export default function MasterGroupDetail() {
   const [picking, setPicking]     = useState(false)
   const [adding, setAdding]       = useState(false)
   const [addError, setAddError]   = useState('')
+  const [custom, setCustom]       = useState(false)   // the "Custom" name form is open
+  const [customName, setCustomName] = useState('')
+  const [customCat, setCustomCat] = useState('')
   const user = useUser()
 
   // "+ Add" makes today's group with no form: the members are this
@@ -101,7 +104,16 @@ export default function MasterGroupDetail() {
   // A master of monthly groups (personal spending) has no "+ Add": its
   // months come from statement uploads (StatementUploadButton).
   const isMonthly = !!master?.groups.some((g) => monthKey(g.name) !== null)
-  const onAdd = () => todays ? nav(`/groups/${todays.id}`) : setPicking((v) => !v)
+  // "+ Add" opens the picker even when today's group exists - it can still
+  // make a custom-named group (and offers to open today's).
+  const onAdd = () => { setPicking((v) => !v); setCustom(false); setAddError('') }
+  const addCustom = () => {
+    const name = customName.trim()
+    if (!name) return
+    const clash = master?.groups.find((g) => (g.name ?? '').trim().toLowerCase() === name.toLowerCase())
+    if (clash) return setAddError(`"${clash.name}" already exists here - open it from the list below.`)
+    addGroup(name, customCat || usualCategory || 'other', '')
+  }
 
   const addToday = (category) => addGroup(todayName(), category, '')
   const addGroup = async (name, category, emoji) => {
@@ -180,7 +192,7 @@ export default function MasterGroupDetail() {
             <button
               onClick={onAdd}
               disabled={adding}
-              title={todays ? `Open today's group (${todays.name})` : `Today's group, ${master.name}`}
+              title={`New group with ${master.name}`}
               className="flex-shrink-0 flex items-center gap-1.5 bg-cream border border-amber-200 text-gray-500 hover:bg-amber-50 rounded-md px-3 py-1.5 text-xs font-bold active:scale-95 transition-all shadow-sm disabled:opacity-50"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
@@ -209,13 +221,24 @@ export default function MasterGroupDetail() {
         </div>
         <h1 className="text-xl font-black tracking-tight">{master.name}</h1>
         <p className="text-xs text-gray-400 mt-1">{master.groups.length} groups · {INR(master.totalAmount)} total</p>
-        {picking && !todays && !isMonthly && (
+        {picking && !isMonthly && (
           <div className="mt-3 border border-amber-200 bg-amber-50 px-3 py-2.5">
-            <p className="text-[11px] text-gray-600 mb-2">
-              New group <span className="font-bold">{todayName()}</span> — tap a category to create it:
-            </p>
+            {todays ? (
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <p className="text-[11px] text-gray-600">
+                  Today's group <span className="font-bold">{todays.name}</span> already exists.
+                </p>
+                <button onClick={() => nav(`/groups/${todays.id}`)} className="text-xs font-bold text-brand-600 whitespace-nowrap">
+                  Open it →
+                </button>
+              </div>
+            ) : (
+              <p className="text-[11px] text-gray-600 mb-2">
+                New group <span className="font-bold">{todayName()}</span> — tap a category to create it, or name it yourself:
+              </p>
+            )}
             <div className="flex gap-1.5 flex-wrap">
-              {['trip', 'outing', 'festival', 'personal', 'other'].map((c) => (
+              {!todays && ['trip', 'outing', 'festival', 'personal'].map((c) => (
                 <button
                   key={c}
                   onClick={() => addToday(c)}
@@ -229,8 +252,65 @@ export default function MasterGroupDetail() {
                   {c}
                 </button>
               ))}
+              <button
+                onClick={() => { setCustom((v) => !v); setCustomCat(usualCategory || 'other'); setAddError('') }}
+                disabled={adding}
+                aria-expanded={custom}
+                className={`px-3 py-1.5 text-xs font-bold border transition-colors disabled:opacity-50 ${
+                  custom ? 'bg-gray-800 text-white border-gray-800' : 'bg-cream text-gray-600 border-amber-200 hover:text-gray-900'
+                }`}
+              >
+                ✎ Custom
+              </button>
             </div>
-            {usualCategory && <p className="text-[10px] text-gray-400 mt-1.5">Highlighted: what these groups usually are</p>}
+            {!todays && !custom && usualCategory && (
+              <p className="text-[10px] text-gray-400 mt-1.5">Highlighted: what these groups usually are</p>
+            )}
+
+            {custom && (
+              <form
+                className="mt-3 pt-3 border-t border-amber-200"
+                onSubmit={(e) => { e.preventDefault(); addCustom() }}
+              >
+                <label htmlFor="custom-group-name" className="block text-[11px] font-semibold text-gray-600 mb-1">
+                  Group name
+                </label>
+                <input
+                  id="custom-group-name"
+                  value={customName}
+                  onChange={(e) => { setCustomName(e.target.value); setAddError('') }}
+                  placeholder="e.g. Goa weekend, Diwali shopping"
+                  maxLength={60}
+                  autoFocus
+                  className="input"
+                />
+                <p className="text-[11px] font-semibold text-gray-600 mt-2.5 mb-1">Category</p>
+                <div className="flex gap-1.5 flex-wrap">
+                  {['trip', 'outing', 'festival', 'personal', 'other'].map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setCustomCat(c)}
+                      aria-pressed={customCat === c}
+                      className={`px-2.5 py-1 text-[11px] font-bold border capitalize transition-colors ${
+                        customCat === c
+                          ? 'bg-brand-400 text-white border-brand-400'
+                          : 'bg-cream text-gray-600 border-amber-200 hover:text-gray-900'
+                      }`}
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="submit"
+                  disabled={adding || !customName.trim()}
+                  className="btn-primary text-sm mt-3 disabled:opacity-50"
+                >
+                  {adding ? 'Creating…' : 'Create group'}
+                </button>
+              </form>
+            )}
           </div>
         )}
         {addError && <p className="text-xs text-red-600 mt-1">{addError}</p>}
