@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { getGroup, updateGroup } from '../api/index.js'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser } from '../UserContext'
+import { dn } from '../utils/displayName'
 
 export default function EditGroup() {
   const { id } = useParams()
@@ -186,7 +187,7 @@ export default function EditGroup() {
                       : 'bg-cream border-amber-200 text-gray-800'
                   }`}
                 >
-                  <span className="text-sm font-semibold">{m.name}</span>
+                  <span className="text-sm font-semibold">{dn(m.name)}</span>
                   <div className="flex items-center gap-2">
                     {isPending && (
                       <span className="text-xs text-brand-600 font-medium bg-brand-400/10 px-2 py-0.5 ">new</span>

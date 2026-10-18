@@ -11,6 +11,7 @@ import { combinedBalances } from '../utils/balances'
 import LoadingSpinner from '../components/LoadingSpinner'
 import RecordPaymentModal from '../components/RecordPaymentModal'
 import PayViaUpi from '../components/PayViaUpi'
+import { dn } from '../utils/displayName'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 const same = (a, b) => (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase()
@@ -47,7 +48,7 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
     try {
       const r = (await sendNudge(row.name)).data
       const via = r.channels.map((c) => (c === 'push' ? 'app notification' : 'email')).join(' and ')
-      setNudge({ busy: false, msg: `Sent to ${r.name} by ${via}.`, err: '' })
+      setNudge({ busy: false, msg: `Sent to ${dn(r.name)} by ${via}.`, err: '' })
       setBellOpen(false)
       onNudged(row.name, r.sent_at)
     } catch (err) {
@@ -115,7 +116,7 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
             onClick={(e) => { e.stopPropagation(); nav(`/friends/${encodeURIComponent(row.name)}`) }}
             className="text-[0.764rem] font-bold text-gray-900 hover:text-brand-600 truncate"
           >
-            {row.name} →
+            {dn(row.name)} →
           </span>
           {loanOnly && (
             <span className="text-[7.87px] font-bold uppercase tracking-widest text-orange-600 bg-orange-50 border border-orange-200 rounded px-1.5 py-0.5 flex-shrink-0">
@@ -126,7 +127,7 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
         <div className="flex items-center gap-1.5 flex-shrink-0">
           <button
             onClick={(e) => { e.stopPropagation(); setBellOpen((o) => !o); setNudge({ busy: false, msg: '', err: '' }) }}
-            title={owing ? `Let ${row.name} know` : `Remind ${row.name}`} aria-label="Send a reminder"
+            title={owing ? `Let ${dn(row.name)} know` : `Remind ${dn(row.name)}`} aria-label="Send a reminder"
             className={`flex items-center justify-center w-6 h-6 rounded-md border transition-all active:scale-95 ${
               bellOpen ? 'bg-brand-400 border-brand-400 text-white' : 'bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100'
             }`}
@@ -158,8 +159,8 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
         <div className="mt-3 border border-amber-200 bg-amber-50 rounded-md px-3 py-2.5">
           <p className="text-[0.739rem] text-gray-700">
             {owing
-              ? <>Let <b>{row.name}</b> know you owe {INR(Math.abs(row.net))} and will settle it?</>
-              : <>Remind <b>{row.name}</b> to pay you {INR(Math.abs(row.net))}?</>}
+              ? <>Let <b>{dn(row.name)}</b> know you owe {INR(Math.abs(row.net))} and will settle it?</>
+              : <>Remind <b>{dn(row.name)}</b> to pay you {INR(Math.abs(row.net))}?</>}
           </p>
           <p className="text-[10px] text-gray-500 mt-0.5">
             Sent by email and app notification, with the breakdown{owing ? '' : ' and your UPI ID'}.
@@ -182,7 +183,7 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
           {upiEntry === 'loading' && <p className="text-xs text-gray-400 text-center py-2">Loading…</p>}
           {upiEntry === 'none' && (
             <p className="text-xs text-gray-400 text-center py-2">
-              {owing ? `${row.name} hasn't added a UPI ID yet.` : "You haven't added a UPI ID yet - add one in Account."}
+              {owing ? `${dn(row.name)} hasn't added a UPI ID yet.` : "You haven't added a UPI ID yet - add one in Account."}
             </p>
           )}
           {Array.isArray(upiEntry) && (
@@ -190,7 +191,7 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
               upiId={upiEntry[0].upi_id}
               payeeName={owing ? row.name : me}
               amount={Math.abs(row.net)}
-              note={owing ? `Settling up with ${row.name}` : `${row.name} paying ${me}`}
+              note={owing ? `Settling up with ${dn(row.name)}` : `${dn(row.name)} paying ${dn(me)}`}
               showAppButtons={owing}
               onClaim={owing
                 ? (amt) => createPaymentClaim({ payee: row.name, amount: amt, kind: 'balance', note: `Settling up with ${row.name}` })

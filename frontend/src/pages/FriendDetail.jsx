@@ -6,6 +6,7 @@ import GroupCard from '../components/GroupCard'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser } from '../UserContext'
 import { isSettled } from '../utils/money'
+import { dn } from '../utils/displayName'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 
@@ -96,7 +97,7 @@ export default function FriendDetail() {
             Record
           </button>
         </div>
-        <h1 className="text-xl font-black tracking-tight">{friendName}</h1>
+        <h1 className="text-xl font-black tracking-tight">{dn(friendName)}</h1>
         <p className={`text-sm font-bold mt-1 ${settled ? 'text-gray-400' : owes ? 'text-red-500' : 'text-green-600'}`}>
           {settled ? 'Settled up' : owes ? `You owe ${INR(Math.abs(net))}` : `Owes you ${INR(net)}`}
         </p>
@@ -109,7 +110,7 @@ export default function FriendDetail() {
             <GroupCard
               key={row.key}
               group={row.data}
-              friendBalance={{ name: friendName, net: byGroup[row.data.id] ?? 0 }}
+              friendBalance={{ name: dn(friendName), net: byGroup[row.data.id] ?? 0 }}
             />
           ) : (
             /* A settlement, sitting between the groups at the time it happened.

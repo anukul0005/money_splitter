@@ -9,6 +9,7 @@ import { pairKey } from '../utils/masterGroups'
 import Dropdown from '../components/Dropdown'
 import DatePicker from '../components/DatePicker'
 import TimePicker from '../components/TimePicker'
+import { dn } from '../utils/displayName'
 
 const PAYMENT_MODES = [
   { value: 'cash',        label: 'Cash' },
@@ -539,7 +540,7 @@ export default function AddExpense() {
                         : 'bg-amber-50 text-gray-700 border-amber-200'
                     }`}
                   >
-                    {m.name}
+                    {dn(m.name, members.map((x) => x.name))}
                   </button>
                 ))}
               </div>
@@ -652,7 +653,7 @@ export default function AddExpense() {
                 const amt = form.amount ? (parseFloat(form.amount) * pct / 100).toFixed(2) : null
                 return (
                   <div key={m.id} className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-md px-3 py-2.5">
-                    <span className="text-sm font-bold text-gray-800 flex-1">{m.name}</span>
+                    <span className="text-sm font-bold text-gray-800 flex-1">{dn(m.name, members.map((x) => x.name))}</span>
                     <span className="text-xs font-black text-amber-700 bg-amber-100 px-2 py-0.5">{pct}%</span>
                     {amt && <span className="text-sm font-black text-gray-900">₹{amt}</span>}
                   </div>
@@ -677,7 +678,7 @@ export default function AddExpense() {
                 const amt = customAmts[m.name] ?? ''
                 return (
                   <div key={m.id} className="flex items-center gap-2">
-                    <span className="text-sm font-bold text-gray-700 w-20 truncate">{m.name}</span>
+                    <span className="text-sm font-bold text-gray-700 w-20 truncate">{dn(m.name, members.map((x) => x.name))}</span>
                     <div className="relative flex-1">
                       <input
                         type="number" min="0" max="100" step="any"

@@ -7,6 +7,7 @@ import ReceiptInfo from '../components/ReceiptInfo'
 import RecordPaymentModal from '../components/RecordPaymentModal'
 import StatsPanel from '../components/StatsPanel'
 import { useUser } from '../UserContext'
+import { dn } from '../utils/displayName'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 
@@ -67,6 +68,9 @@ export default function GroupDetail() {
 
   // A one-person group has nothing to settle and no per-person split to edit
   const isSolo = group.members.length === 1
+  // What each member is called, told apart within this group (utils/displayName)
+  const memberNames = group.members.map((m) => m.name)
+  const d = (n) => dn(n, memberNames)
   const isMonthly = isSolo && /^MONTHLY EXPENSES [A-Z]{3} \d{4}$/.test(group.name.toUpperCase())
 
 
@@ -82,7 +86,7 @@ export default function GroupDetail() {
           </button>
           <div className="flex-1 min-w-0">
             <h1 className="text-lg font-bold leading-tight">{group.name}</h1>
-            <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">{group.members.map((m) => m.name).join(' · ')}</p>
+            <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">{memberNames.map(d).join(' · ')}</p>
           </div>
           <div className="flex items-center gap-1 flex-shrink-0">
             <button
@@ -278,7 +282,7 @@ export default function GroupDetail() {
                       {e.title || e.category || 'Expense'}
                     </p>
                     <p className="text-xs text-gray-400 mt-0.5">
-                      {e.paid_by} · {e.date || '—'}{e.txn_time ? ` · ${e.txn_time}` : ''}
+                      {d(e.paid_by)} · {e.date || '—'}{e.txn_time ? ` · ${e.txn_time}` : ''}
                       {e.payment_mode && (
                         <span className="ml-1.5 inline-block bg-amber-50 border border-amber-200 rounded-md px-1.5 py-px text-[10px] font-bold text-amber-700 tracking-wide">
                           {e.payment_mode.replace('_', ' ').toUpperCase()}
@@ -298,7 +302,7 @@ export default function GroupDetail() {
                           const pct = Math.round((amt / e.amount) * 100)
                           return (
                             <div key={name} className="flex items-center justify-between gap-2">
-                              <span className="text-xs font-bold text-gray-700">{name}</span>
+                              <span className="text-xs font-bold text-gray-700">{d(name)}</span>
                               <span className="text-xs text-gray-400">{pct}%</span>
                               <span className="text-xs font-black text-gray-900">{INR(amt)}</span>
                             </div>
@@ -351,7 +355,7 @@ export default function GroupDetail() {
                   <div className="mt-2.5 border-t border-amber-100 pt-2.5 space-y-1.5">
                     {debtors.map((name) => (
                       <div key={name} className="flex items-center gap-2">
-                        <span className="text-xs font-semibold text-gray-600 flex-1 min-w-0 truncate">{name}</span>
+                        <span className="text-xs font-semibold text-gray-600 flex-1 min-w-0 truncate">{d(name)}</span>
                         <span className="text-[10px] font-bold text-gray-500 bg-amber-50 border border-amber-200 rounded-md px-1.5 py-0.5 flex-shrink-0">
                           share {INR(getOwed(name))}
                         </span>
@@ -376,10 +380,10 @@ export default function GroupDetail() {
               {settlement.balances.map((b) => (
                 <div key={b.member} className="flex items-center gap-3">
                   <div className="w-8 h-8 bg-gray-100 flex items-center justify-center font-black text-gray-600 text-sm flex-shrink-0">
-                    {b.member[0].toUpperCase()}
+                    {d(b.member)[0].toUpperCase()}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold truncate">{b.member}</p>
+                    <p className="text-sm font-bold truncate">{d(b.member)}</p>
                     <p className="text-xs text-gray-400">Paid {INR(b.paid)} · Share {INR(b.share)}</p>
                   </div>
                   <div className={`text-sm font-black flex-shrink-0 ${b.net >= 0 ? 'text-brand-600' : 'text-red-500'}`}>
@@ -403,9 +407,9 @@ export default function GroupDetail() {
                     <svg className="w-4 h-4 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                     </svg>
-                    <span className="font-bold text-sm text-green-700 flex-shrink-0">{p.from_member}</span>
+                    <span className="font-bold text-sm text-green-700 flex-shrink-0">{d(p.from_member)}</span>
                     <span className="text-xs text-green-600 flex-shrink-0">paid</span>
-                    <span className="font-bold text-sm text-green-700 flex-1 min-w-0 truncate">{p.to_member}</span>
+                    <span className="font-bold text-sm text-green-700 flex-1 min-w-0 truncate">{d(p.to_member)}</span>
                     <div className="text-right flex-shrink-0">
                       <span className="font-black text-green-700 text-sm">{INR(p.settled_amount)}</span>
                       {p.total_owed > p.settled_amount + 0.5 && (
@@ -420,11 +424,11 @@ export default function GroupDetail() {
                     key={`pending-${i}`}
                     className="w-full text-left flex items-center gap-2 bg-red-50 border border-red-100 rounded-md px-3 py-2.5"
                   >
-                    <span className="font-bold text-sm text-red-700 flex-shrink-0">{t.from_member}</span>
+                    <span className="font-bold text-sm text-red-700 flex-shrink-0">{d(t.from_member)}</span>
                     <svg className="w-4 h-4 text-red-400 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
                     </svg>
-                    <span className="font-bold text-sm text-red-700 flex-1 min-w-0 truncate">{t.to_member}</span>
+                    <span className="font-bold text-sm text-red-700 flex-1 min-w-0 truncate">{d(t.to_member)}</span>
                     <span className="font-black text-brand-700 text-sm flex-shrink-0">{INR(t.amount)}</span>
                   </div>
                 ))}
@@ -449,9 +453,9 @@ export default function GroupDetail() {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                     </svg>
                     <span className="text-sm text-green-800 flex-1 min-w-0 truncate">
-                      <span className="font-bold">{p.from_member}</span>
+                      <span className="font-bold">{d(p.from_member)}</span>
                       <span className="text-green-600"> paid </span>
-                      <span className="font-bold">{p.to_member}</span>
+                      <span className="font-bold">{d(p.to_member)}</span>
                       {p.note && <span className="text-xs text-green-600"> · {p.note}</span>}
                     </span>
                     <span className="text-xs text-gray-400 flex-shrink-0 hidden sm:inline">{p.date || ''}</span>

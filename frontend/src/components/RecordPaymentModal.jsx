@@ -3,6 +3,7 @@ import { getGroups, createPaymentAuto, updatePayment, deletePayment } from '../a
 import { useUser } from '../UserContext'
 import Dropdown from './Dropdown'
 import DatePicker from './DatePicker'
+import { dn } from '../utils/displayName'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
 
@@ -63,7 +64,7 @@ export default function RecordPaymentModal({ onClose, onSaved, prefillFriend, pa
   const preview = useMemo(() => {
     const amt = parseFloat(form.amount)
     if (!form.from_member || !form.to_member || !amt || amt <= 0) return ''
-    return `${form.from_member} paid ${form.to_member} ${INR(amt)}`
+    return `${dn(form.from_member, people)} paid ${dn(form.to_member, people)} ${INR(amt)}`
   }, [form.from_member, form.to_member, form.amount])
 
   const submit = async (e) => {
@@ -137,7 +138,7 @@ export default function RecordPaymentModal({ onClose, onSaved, prefillFriend, pa
                 value={form.from_member}
                 onChange={(v) => setForm((f) => ({ ...f, from_member: v }))}
                 placeholder={loading ? 'Loading…' : 'Select…'}
-                options={people.map((m) => ({ value: m, label: m }))}
+                options={people.map((m) => ({ value: m, label: dn(m, people) }))}
               />
             </div>
             <div>
@@ -146,7 +147,7 @@ export default function RecordPaymentModal({ onClose, onSaved, prefillFriend, pa
                 value={form.to_member}
                 onChange={(v) => setForm((f) => ({ ...f, to_member: v }))}
                 placeholder={loading ? 'Loading…' : 'Select…'}
-                options={people.map((m) => ({ value: m, label: m }))}
+                options={people.map((m) => ({ value: m, label: dn(m, people) }))}
               />
             </div>
           </div>

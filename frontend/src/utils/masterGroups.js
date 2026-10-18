@@ -7,9 +7,13 @@ export function pairKey(names) {
   return names.map((n) => n.trim().toLowerCase()).sort().join('|')
 }
 
-// Human-readable name list: "Anukul, Ajay" for 2, "Anukul, Anubhav & Ajay" for 3+.
-export function nameList(names) {
-  if (!names || names.length === 0) return ''
+import { dnList } from './displayName'
+
+// Human-readable name list: "Anukul, Ajay" for 2, "Anukul, Anubhav & Ajay" for 3+ -
+// as people are called, not their usernames (utils/displayName).
+export function nameList(rawNames) {
+  if (!rawNames || rawNames.length === 0) return ''
+  const names = dnList(rawNames)
   if (names.length === 1) return names[0]
   if (names.length === 2) return names.join(', ')
   return `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`

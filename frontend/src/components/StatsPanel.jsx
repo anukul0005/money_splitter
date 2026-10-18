@@ -5,6 +5,7 @@ import {
   LineElement, PointElement, LineController, Filler,
 } from 'chart.js'
 import { Bar, Doughnut } from 'react-chartjs-2'
+import { dn } from '../utils/displayName'
 
 Chart.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend, ArcElement, DoughnutController, BarController, LineElement, PointElement, LineController, Filler)
 Chart.defaults.font.family = "Num, 'IBM Plex Sans', system-ui, sans-serif"
@@ -89,7 +90,7 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
 
   // Horizontal bar chart (member names on y-axis)
   const memberChartData = {
-    labels: stats.by_member?.map((x) => x.member.toUpperCase()) || [],
+    labels: stats.by_member?.map((x) => dn(x.member, stats.by_member.map((y) => y.member)).toUpperCase()) || [],
     datasets: [{
       label: 'Paid',
       data: stats.by_member?.map((x) => x.total_paid) || [],

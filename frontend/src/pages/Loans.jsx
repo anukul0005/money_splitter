@@ -13,6 +13,7 @@ import DatePicker from '../components/DatePicker'
 import PayViaUpi from '../components/PayViaUpi'
 import CreditCards from '../components/CreditCards'
 import { useUser } from '../UserContext'
+import { dn } from '../utils/displayName'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
 const same = (a, b) => (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase()
@@ -355,7 +356,7 @@ export default function Loans() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="text-sm font-bold text-gray-900">
-                      {iOwe ? `You owe ${other}` : `${other} owes you`}
+                      {iOwe ? `You owe ${dn(other)}` : `${dn(other)} owes you`}
                     </p>
                     <p className="text-xs text-gray-400 mt-0.5">
                       Lent {INR(l.principal)}{l.start_date ? ` on ${l.start_date}` : ''} · {l.emi ? `last EMI ${l.due_date}` : `due ${l.due_date}`}
@@ -407,7 +408,7 @@ export default function Loans() {
                   </button>
                 </div>
                 {openPayKey === `loan-${l.id}` && (
-                  <PayPanel personName={other} amount={l.total_due} note={`Loan repayment to ${other}`} kind="loan" refId={l.id} />
+                  <PayPanel personName={other} amount={l.total_due} note={`Loan repayment to ${dn(other)}`} kind="loan" refId={l.id} />
                 )}
               </div>
             )
@@ -456,7 +457,7 @@ export default function Loans() {
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="text-sm font-bold text-gray-900">
-                            {iPay ? `${m} owes you` : `You owe ${b.payer}`}
+                            {iPay ? `${dn(m)} owes you` : `You owe ${dn(b.payer)}`}
                           </p>
                           <p className="text-xs text-gray-400 mt-0.5">{b.title} · {INR(share)}/month</p>
                         </div>
@@ -490,7 +491,7 @@ export default function Loans() {
                         </div>
                       )}
                       {openPayKey === `bill-${b.id}-${m}` && (
-                        <PayPanel personName={b.payer} amount={due} note={`${b.title} - ${m}`} kind="bill" refId={b.id} />
+                        <PayPanel personName={b.payer} amount={due} note={`${b.title} - ${dn(m)}`} kind="bill" refId={b.id} />
                       )}
                     </div>
                   )

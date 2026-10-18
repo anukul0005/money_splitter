@@ -28,7 +28,8 @@ import MasterGroupDetail from './pages/MasterGroupDetail'
 import FriendDetail      from './pages/FriendDetail'
 import Recommend         from './pages/Recommend'
 import { UserContext, RefreshUserContext, isAdmin } from './UserContext'
-import { getMe } from './api'
+import { getMe, listUsersBasic } from './api'
+import { setDirectory } from './utils/displayName'
 
 const SESSION_KEY = 'splitter_session_v2'
 
@@ -62,6 +63,14 @@ export default function App() {
     } catch { /* offline or signed out - keep what we have */ }
   }, [])
   useEffect(() => { refreshUser() }, [refreshUser])
+
+  // Everyone's full name, so screens show "Ajay" rather than the username
+  // "Ajay1969" (utils/displayName). Re-rendering once it's in shows them.
+  const [, setNamesLoaded] = useState(0)
+  useEffect(() => {
+    if (!user?.token) return
+    listUsersBasic().then((r) => { setDirectory(r.data); setNamesLoaded((n) => n + 1) }).catch(() => {})
+  }, [user?.token])
 
   const handleLogout = () => {
     localStorage.clear()

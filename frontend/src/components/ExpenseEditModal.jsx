@@ -4,6 +4,7 @@ import { useUser } from '../UserContext'
 import ReceiptInfo from './ReceiptInfo'
 import Dropdown from './Dropdown'
 import DatePicker from './DatePicker'
+import { dn } from '../utils/displayName'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 const r2  = (n) => Math.round(n * 100) / 100
@@ -357,7 +358,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
           {members.length > 1 && (
             <div>
               <label className="label">Paid By</label>
-              <Dropdown value={paidBy} onChange={setPaidBy} options={members.map((m) => ({ value: m, label: m }))} />
+              <Dropdown value={paidBy} onChange={setPaidBy} options={members.map((m) => ({ value: m, label: dn(m, members) }))} />
             </div>
           )}
 
@@ -423,7 +424,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
               <p className="text-[10px] font-black text-amber-700 tracking-widest mb-1">Equal split</p>
               {members.map((m) => (
                 <div key={m} className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-gray-700">{m}</span>
+                  <span className="text-xs font-bold text-gray-700">{dn(m, members)}</span>
                   <span className="text-xs font-black text-gray-900">{INR(r2(amtNum / members.length))}</span>
                 </div>
               ))}
@@ -439,7 +440,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
                 const amt = customAmts[m] ?? ''
                 return (
                   <div key={m} className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-gray-700 w-20 truncate">{m}</span>
+                    <span className="text-xs font-bold text-gray-700 w-20 truncate">{dn(m, members)}</span>
                     <div className="relative flex-1">
                       <input
                         type="number" inputMode="decimal" min="0" max="100" step="any"
