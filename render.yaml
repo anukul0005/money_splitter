@@ -61,6 +61,11 @@ services:
       # extractor when this is blank.
       - key: GROQ_API_KEY
         sync: false
+      # Google Gemini (Google AI Studio) - the notebook-page reader's vision
+      # model (ledger_reader.py). Free tier: aistudio.google.com/apikey.
+      # Blank just disables the notebook feature; nothing else uses it.
+      - key: GEMINI_API_KEY
+        sync: false
       # Web push (push.py). Not generateValue - a VAPID keypair is real EC
       # key material, not an arbitrary random string, so it has to be
       # generated properly (see the deploy notes) and pasted in here.

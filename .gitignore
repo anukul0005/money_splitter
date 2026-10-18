@@ -41,3 +41,7 @@ client_secret_*.json
 # Hugging Face token pasted in while setting up Qwen3-VL - the real one
 # belongs in .env and Render's environment, never the repo.
 apikey_hf.txt
+
+# Gemini API key pasted in while setting up the notebook reader - belongs in
+# .env and Render, never the repo.
+apikey_gemini.txt

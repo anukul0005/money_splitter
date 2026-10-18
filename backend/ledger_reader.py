@@ -6,8 +6,8 @@ and English mixed - into rows: an item, a total and each person's share.
       गला सेट         2,40,000    150     90 th
       मांग टीका          70,000     50     20 th
 
-A vision model (Qwen on Groq - the app's free LLM account) transcribes the
-table; it gets digits mostly right and handwriting words often wrong, so:
+A vision model (Gemini 2.5 Pro, Google AI Studio free tier - GEMINI_API_KEY)
+transcribes the table; it gets digits mostly right and handwriting words often wrong, so:
   1. the prompt carries what this person has taught it before (LedgerHint):
      which column letter is whom in this group, and words it misread;
   2. arithmetic fixes what it can - a share written in thousands ("150"
@@ -28,7 +28,11 @@ import re
 import urllib.error
 import urllib.request
 
-VISION_MODEL = os.getenv("LEDGER_VISION_MODEL", "qwen/qwen3.8-27b")
+# Google AI Studio's OpenAI-compatible endpoint, so the request below is the
+# same shape the rest of the app already uses. Override the model with
+# LEDGER_VISION_MODEL if ever needed.
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+VISION_MODEL = os.getenv("LEDGER_VISION_MODEL", "gemini-2.5-pro")
 
 _PROMPT = """A photo of a handwritten Indian expense page, Hindi (Devanagari) and English mixed. It is a table:
 the first column names the item, then amount columns headed by letters or words. Rules:
@@ -65,29 +69,31 @@ def _image_b64(raw: bytes) -> str:
 
 
 def _ask_vision(prompt: str, image_b64: str) -> dict:
-    from statement_extractor import _candidates
+    """Send the page to Gemini 2.5 Pro and parse its JSON reply. Raises
+    RuntimeError when no key is set or the request fails."""
+    from database import get_settings
+    key = get_settings().gemini_api_key
+    if not key:
+        raise RuntimeError("The notebook reader isn't set up yet - add a Gemini API key (GEMINI_API_KEY).")
     body = json.dumps({
         "model": VISION_MODEL, "temperature": 0, "max_tokens": 4000,
+        "response_format": {"type": "json_object"},
         "messages": [{"role": "user", "content": [
             {"type": "text", "text": prompt},
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}]}],
     }).encode()
-    last: Exception | None = None
-    for url, key, extra in _candidates():
-        if "groq.com" not in url:
-            continue       # the free account; OpenRouter's vision models need paid credit
-        req = urllib.request.Request(url, data=body, method="POST", headers={
-            "Authorization": f"Bearer {key}", "Content-Type": "application/json", "Accept": "application/json",
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-            **extra})
-        try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                content = json.loads(resp.read().decode())["choices"][0]["message"]["content"]
-            m = re.search(r"\{.*\}", content, re.S)       # tolerate ```json fences
-            return json.loads(m.group(0) if m else content)
-        except (urllib.error.URLError, KeyError, ValueError, TimeoutError) as e:
-            last = e
-    raise RuntimeError(f"Couldn't read the page: {last}" if last else "No AI key configured")
+    req = urllib.request.Request(GEMINI_URL, data=body, method="POST", headers={
+        "Authorization": f"Bearer {key}", "Content-Type": "application/json", "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            content = json.loads(resp.read().decode())["choices"][0]["message"]["content"]
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="replace")[:200]
+        raise RuntimeError(f"Gemini rejected the page ({e.code}): {detail}") from None
+    except (urllib.error.URLError, KeyError, ValueError, TimeoutError) as e:
+        raise RuntimeError(f"Couldn't reach Gemini: {e}") from None
+    m = re.search(r"\{.*\}", content, re.S)       # tolerate ```json fences
+    return json.loads(m.group(0) if m else content)
 
 
 def _num(v) -> float | None:

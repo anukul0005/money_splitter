@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     # limit (8000) is easy to blow through in a single scan.
     groq_api_key_2: str = ""
     openrouter_api_key: str = ""
+    # Google Gemini (Google AI Studio) - the notebook-page reader's vision
+    # model (ledger_reader.py). Its own key, separate from everything above,
+    # because Groq has no model that reads handwriting well. Blank means the
+    # notebook feature returns a "not configured" error rather than failing
+    # mid-read. Free tier: aistudio.google.com/apikey.
+    gemini_api_key: str = ""
 
     # Gmail OAuth (routers/gmail_auth.py) - a Google Cloud OAuth client,
     # read-only Gmail scope, used to find and download credit card
