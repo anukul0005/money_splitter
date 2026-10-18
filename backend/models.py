@@ -97,6 +97,10 @@ class User(Base):
     # redeeming a one-time code an admin issues (users.py). Admins always
     # have it; see has_full_access.
     full_access = Column(Boolean, nullable=False, default=False, server_default="false")
+    # What the person is called, as they'd write it ("Ajay Kumar Singh") -
+    # shown on their own home page. Optional; `name` stays the login and the
+    # name every group, expense and balance is keyed on.
+    full_name = Column(String(100), nullable=True)
     access_code_hash = Column(String(128), nullable=True)
     access_code_salt = Column(String(64), nullable=True)
     access_code_expires_at = Column(DateTime(timezone=True), nullable=True)

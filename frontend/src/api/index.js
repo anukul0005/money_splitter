@@ -65,6 +65,7 @@ export const adminIssueCode     = (data)     => api.post('/users/admin-issue-cod
 export const adminIssueAccessCode = (data)   => api.post('/users/admin-issue-access-code', data)
 export const requestFullAccess  = ()         => api.post('/users/me/access-request')
 export const unlockFullAccess   = (code)     => api.post('/users/me/unlock', { code })
+export const setFullName        = (full_name) => api.post('/users/me/full-name', { full_name })
 export const redeemCode         = (data)     => api.post('/users/redeem-code', data)
 export const requestLoginCode   = (data)     => api.post('/users/email-code', data)
 export const verifyLoginCode    = (data)     => api.post('/users/email-code/verify', data)

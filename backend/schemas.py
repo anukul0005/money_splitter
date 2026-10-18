@@ -41,6 +41,8 @@ class UserMeOut(UserOut):
     daily_summary: bool = False
     # The drinks side of the app - see models.User.full_access.
     has_full_access: bool = False
+    # Optional display name - see models.User.full_name.
+    full_name: Optional[str] = None
     # Pay and when it's credited - see models.User.
     monthly_salary: Optional[float] = None
     salary_day: Optional[str] = None

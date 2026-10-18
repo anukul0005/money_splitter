@@ -151,6 +151,7 @@ def create_tables():
 # (table, column, type/definition)
 _ADDED_COLUMNS = [
     ("users", "full_access", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("users", "full_name", "VARCHAR(100)"),
     ("users", "access_code_hash", "VARCHAR(128)"),
     ("users", "access_code_salt", "VARCHAR(64)"),
     ("users", "access_code_expires_at", "TIMESTAMPTZ"),

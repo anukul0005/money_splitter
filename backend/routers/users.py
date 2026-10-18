@@ -43,11 +43,18 @@ def _set_password(user: User, new_password: str) -> None:
     user.password_hash = _hash(new_password, user.salt)
 
 
+# Sign-up used to cap passwords at 6 characters; 4 is the floor every
+# reset path already enforces, 64 just keeps a pasted novel out.
+PASSWORD_MIN, PASSWORD_MAX = 4, 64
+
+
 @router.post("/signup", response_model=UserOut, status_code=201)
 def signup(payload: UserSignup, db: Session = Depends(get_db)):
     name = payload.name.strip()
     if not name or not payload.password:
         raise HTTPException(400, "Name and password are required")
+    if not PASSWORD_MIN <= len(payload.password) <= PASSWORD_MAX:
+        raise HTTPException(400, f"Password must be {PASSWORD_MIN}-{PASSWORD_MAX} characters")
     existing = db.query(User).filter(User.name.ilike(name)).first()
     if existing:
         raise HTTPException(409, "Username already taken")
@@ -474,6 +481,24 @@ def get_me(caller: User = Depends(current_user)):
     """The signed-in caller's own record, email included - the one place
     that's safe to read it back from, since list_users (everyone else's
     names) deliberately never includes it."""
+    return caller
+
+
+class SetFullName(BaseModel):
+    full_name: str = ""
+
+
+@router.post("/me/full-name", response_model=UserMeOut)
+def set_full_name(payload: SetFullName, db: Session = Depends(get_db),
+                  caller: User = Depends(current_user)):
+    """Set (or, with an empty string, clear) the caller's full name - shown
+    on their home page; the username they log in with doesn't change."""
+    full = " ".join((payload.full_name or "").split())
+    if len(full) > 60:
+        raise HTTPException(400, "Keep it under 60 characters")
+    caller.full_name = full or None
+    db.commit()
+    db.refresh(caller)
     return caller
 
 

@@ -101,6 +101,7 @@ export default function Login({ onLogin }) {
     setError('')
     const name = username.trim()
     if (!name || !password) { setError('Please fill in all fields.'); return }
+    if (password.length < 4 || password.length > 64) { setError('Password must be 4–64 characters.'); return }
     if (password !== confirmPw) { setError('Passwords do not match.'); return }
     if (recAnswer.trim().length < 3) {
       setError('Set a recovery answer (3+ characters) so you can reset your own password later.')
@@ -388,17 +389,17 @@ export default function Login({ onLogin }) {
                   <label className="label">
                     Password{' '}
                     <span className="text-gray-400 font-normal normal-case tracking-normal">
-                      (max 6 characters)
+                      (4–64 characters)
                     </span>
                   </label>
                   <div className="relative">
                     <input
                       className="input pr-16"
                       type={showPw ? 'text' : 'password'}
-                      placeholder="Up to 6 characters"
+                      placeholder="At least 4 characters"
                       value={password}
                       onChange={e => setPassword(e.target.value)}
-                      maxLength={6}
+                      maxLength={64}
                       autoCapitalize="none"
                     />
                     <button
@@ -410,8 +411,8 @@ export default function Login({ onLogin }) {
                     </button>
                   </div>
                   {password.length > 0 && (
-                    <p className={`text-[10px] mt-1 font-bold ${password.length <= 6 ? 'text-brand-600' : 'text-red-500'}`}>
-                      {password.length}/6 characters
+                    <p className={`text-[10px] mt-1 font-bold ${password.length >= 4 ? 'text-brand-600' : 'text-red-500'}`}>
+                      {password.length < 4 ? `${4 - password.length} more character${4 - password.length === 1 ? '' : 's'} needed` : `${password.length} characters ✓`}
                     </p>
                   )}
                 </div>
@@ -424,7 +425,7 @@ export default function Login({ onLogin }) {
                     placeholder="Repeat your password"
                     value={confirmPw}
                     onChange={e => setConfirmPw(e.target.value)}
-                    maxLength={6}
+                    maxLength={64}
                     autoCapitalize="none"
                   />
                 </div>
