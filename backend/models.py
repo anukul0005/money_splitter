@@ -845,6 +845,27 @@ class StatementSkip(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class LedgerHint(Base):
+    """What a person has taught the notebook-page reader (ledger_reader.py),
+    fed back into its prompt next time:
+      kind "column": in group `group_id`, column heading `key` is member `value`
+                     ("R" -> "Reetu");
+      kind "word":   the model read `key` where `value` was written
+                     ("Ring" -> "साड़ी"), for any of this person's pages.
+    """
+
+    __tablename__ = "ledger_hints"
+    __table_args__ = (UniqueConstraint("user_id", "group_id", "kind", "key", name="uq_ledger_hint"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    group_id = Column(Integer, ForeignKey("groups.id", ondelete="CASCADE"), nullable=True)
+    kind = Column(String(10), nullable=False)
+    key = Column(String(200), nullable=False)
+    value = Column(String(200), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class PaymentClaim(Base):
     """A payer saying "I've paid you" - not a payment yet.
 

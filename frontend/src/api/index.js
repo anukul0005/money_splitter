@@ -75,6 +75,14 @@ export const setMyDailySummary  = (enabled)  => api.post('/users/me/daily-summar
 export const setMySalary        = (data)     => api.post('/users/me/salary', data)
 // multipart, not JSON - axios sets the right Content-Type + boundary on
 // its own once it sees a FormData body, so nothing is set here by hand.
+// A handwritten page of shared expenses -> rows to review -> expenses (routers/ledger.py)
+export const readLedgerPage     = (groupId, file) => {
+  const fd = new FormData()
+  fd.append('group_id', groupId)
+  fd.append('file', file)
+  return api.post('/ledger/read', fd)
+}
+export const saveLedgerPage     = (body)     => api.post('/ledger/save', body)
 export const scanReceipt        = (file)     => {
   const fd = new FormData()
   fd.append('file', file)

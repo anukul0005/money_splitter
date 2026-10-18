@@ -5,7 +5,7 @@ from database import create_tables, get_settings
 from routers import (
     groups, expenses, settlements, stats, users, payments, activity, recommend,
     food, knowledge_api, forecast, cron, receipts, push, loans, gmail_auth,
-    credit_cards, payment_claims, nudges,
+    credit_cards, payment_claims, nudges, ledger,
 )
 
 
@@ -99,6 +99,7 @@ app.include_router(gmail_auth.router)
 app.include_router(credit_cards.router)
 app.include_router(payment_claims.router)
 app.include_router(nudges.router)
+app.include_router(ledger.router)
 
 
 @app.get("/health")

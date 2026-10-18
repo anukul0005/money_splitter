@@ -103,6 +103,17 @@ export default function GroupDetail() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
               </svg>
             </button>
+            {/* A handwritten page of several expenses at once (LedgerImport) */}
+            {!isMonthly && (
+              <button
+                className="text-gray-500 hover:text-gray-800 border border-amber-200 bg-cream text-xs font-bold px-2.5 py-1.5 ml-1 rounded-md"
+                onClick={() => nav(`/groups/${id}/ledger`)}
+                title="Read a notebook page"
+                aria-label="Read a notebook page"
+              >
+                📒
+              </button>
+            )}
             <button
               className="bg-brand-400 text-white text-xs font-bold px-3 py-1.5 shadow-sm ml-1"
               onClick={() => nav(`/add?group=${id}`)}

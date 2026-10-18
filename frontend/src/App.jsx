@@ -7,6 +7,7 @@ import Home        from './pages/Home'
 import Groups      from './pages/Groups'
 import GroupDetail from './pages/GroupDetail'
 import AddExpense  from './pages/AddExpense'
+import LedgerImport      from './pages/LedgerImport'
 import NewGroup    from './pages/NewGroup'
 import MonthlyGroup from './pages/MonthlyGroup'
 import EditGroup   from './pages/EditGroup'
@@ -115,6 +116,7 @@ export default function App() {
                 <Route path="/groups/monthly" element={<MonthlyGroup />} />
                 <Route path="/groups/:id" element={<GroupDetail />} />
                 <Route path="/groups/:id/edit" element={<EditGroup />} />
+                <Route path="/groups/:id/ledger" element={<LedgerImport />} />
                 <Route path="/add"        element={<AddExpense />} />
                 <Route path="/recommend"  element={<Recommend />} />
                 <Route path="/history"    element={<History />} />
