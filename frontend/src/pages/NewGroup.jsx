@@ -172,23 +172,24 @@ export default function NewGroup() {
             </button>
           </div>
 
-          {/* Two or more people the typed name could be */}
+          {/* Two or more people the typed name could be (this and the live
+              matches below are set 15% smaller than the page's usual sizes) */}
           {choosing && (
             <div className="mt-2 border border-amber-300 bg-amber-50 rounded-md p-3">
-              <p className="text-xs font-bold text-gray-800 mb-2">
+              <p className="text-[10.2px] font-bold text-gray-800 mb-2">
                 {choosing.options.length} people on the app match "{choosing.typed}" - which one?
               </p>
               <div className="space-y-1.5">
                 {choosing.options.map((u) => (
                   <button key={u.name} type="button" onClick={() => add(u.name)}
                     className="w-full text-left bg-white border border-amber-200 rounded-md px-3 py-2 hover:bg-amber-100">
-                    <span className="text-sm font-bold text-gray-800">{u.name}</span>
-                    <span className="block text-[11px] text-gray-500">{u.full_name || 'no full name set'}</span>
+                    <span className="text-[11.9px] font-bold text-gray-800">{u.name}</span>
+                    <span className="block text-[9.35px] text-gray-500">{u.full_name || 'no full name set'}</span>
                   </button>
                 ))}
                 {!onApp(choosing.typed) && (
                   <button type="button" onClick={() => add(choosing.typed)}
-                    className="w-full text-left text-xs font-bold text-gray-600 px-3 py-1.5">
+                    className="w-full text-left text-[10.2px] font-bold text-gray-600 px-3 py-1.5">
                     Neither - add "{choosing.typed}" (not on the app)
                   </button>
                 )}
@@ -203,23 +204,23 @@ export default function NewGroup() {
                 <button key={u.name} type="button" onClick={() => add(u.name)}
                   className="w-full text-left px-3 py-2 hover:bg-amber-50 flex items-center justify-between gap-3">
                   <span className="min-w-0">
-                    <span className="text-sm font-bold text-gray-800">{u.name}</span>
-                    {u.full_name && <span className="text-xs text-gray-500"> · {u.full_name}</span>}
+                    <span className="text-[11.9px] font-bold text-gray-800">{u.name}</span>
+                    {u.full_name && <span className="text-[10.2px] text-gray-500"> · {u.full_name}</span>}
                   </span>
-                  <span className="text-[10px] font-bold text-green-700 flex-shrink-0">ON THE APP</span>
+                  <span className="text-[8.5px] font-bold text-green-700 flex-shrink-0">ON THE APP</span>
                 </button>
               ))}
               {knownOffApp.map((n) => (
                 <button key={n} type="button" onClick={() => add(n)}
                   className="w-full text-left px-3 py-2 hover:bg-amber-50 flex items-center justify-between gap-3">
-                  <span className="text-sm font-bold text-gray-800">{n}</span>
-                  <span className="text-[10px] font-bold text-gray-400 flex-shrink-0">FROM YOUR GROUPS</span>
+                  <span className="text-[11.9px] font-bold text-gray-800">{n}</span>
+                  <span className="text-[8.5px] font-bold text-gray-400 flex-shrink-0">FROM YOUR GROUPS</span>
                 </button>
               ))}
               {!exactAppUser && !taken(query) && !knownOffApp.some((n) => lc(n) === t) && (
                 <button type="button" onClick={() => add(query)}
-                  className="w-full text-left px-3 py-2 hover:bg-amber-50 text-sm text-gray-600">
-                  + Add "<b>{query.trim()}</b>" <span className="text-xs text-gray-400">(not on the app)</span>
+                  className="w-full text-left px-3 py-2 hover:bg-amber-50 text-[11.9px] text-gray-600">
+                  + Add "<b>{query.trim()}</b>" <span className="text-[10.2px] text-gray-400">(not on the app)</span>
                 </button>
               )}
             </div>
