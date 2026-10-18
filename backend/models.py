@@ -159,8 +159,9 @@ class Expense(Base):
     venue = Column(String(120), nullable=True)
     # Where category/subcategory came from: "llm" (expense_classifier, from
     # the description and notes), "pending" (queued for it), "rules" (the
-    # keyword fallback), "import" (a statement import), "user", or NULL for
-    # rows from before this was tracked.
+    # keyword fallback), "import" (a statement import), "merchant" (an import
+    # placed by MerchantLabel), "user", or NULL for rows from before this
+    # was tracked.
     category_source = Column(String(20), nullable=True)
     title = Column(String(200), nullable=True)
     amount = Column(Float, nullable=False)
@@ -187,6 +188,11 @@ class Expense(Base):
     # with) an imported statement line - what stops re-uploading the same
     # statement from creating everything twice.
     txn_ref = Column(String(100), nullable=True, index=True)
+    # The payee exactly as the statement named it ("SRI SAI FILLING STN"),
+    # for a row that came from or was merged with a statement line. Kept
+    # apart from title, which the person may rewrite ("Petrol") - and that
+    # rewrite is what teaches MerchantLabel what this payee is.
+    merchant = Column(String(200), nullable=True)
     # What a receipt scan read, when the expense was entered from one:
     # JSON {merchant, items: [{label, amount}], subtotal, tax, total,
     # provider, method}. Shown with the expense; kept as data for analysis.
@@ -820,6 +826,35 @@ class PayeeLabel(Base):
     source = Column(String(10), nullable=False)
     note = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class MerchantLabel(Base):
+    """What a statement payee is, learnt from a person describing a payment
+    to it by hand - shared by everyone on the app.
+
+    PhonePe names like "SRI SAI FILLING STN PVT" or "BHARAT ENT 22" defeat
+    the keyword rules and the LLM alike; a person who writes "Petrol" on one
+    of those payments knows. The category that description was given is
+    stored here under the payee, and every import of that payee - anyone's -
+    takes it (merchant_memory.py). The latest person's answer wins.
+
+    `owner` is "" for a label everyone's imports use. A payee that is just a
+    person's name ("RAHUL SHARMA") is labelled for its teacher alone: many
+    people share a name, and someone else's Rahul is likely a friend they
+    send money to, not the shop this one was.
+    """
+
+    __tablename__ = "merchant_labels"
+    __table_args__ = (UniqueConstraint("merchant_key", "owner", name="uq_merchant_labels_key_owner"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    merchant_key = Column(String(200), nullable=False, index=True)
+    owner = Column(String(100), nullable=False, default="")
+    merchant = Column(String(200), nullable=False)
+    category = Column(String(100), nullable=False)
+    subcategory = Column(String(100), nullable=True)
+    taught_by = Column(String(100), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class StatementSkip(Base):

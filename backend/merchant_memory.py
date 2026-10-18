@@ -1,0 +1,152 @@
+"""What statement payees are, learnt from people describing payments by hand.
+
+A statement line names its payee the way the bank does - "SRI SAI FILLING
+STN PVT", "BHARAT ENT 22" - and those names defeat the keyword rules and
+the LLM alike. But when the person writes their own description on one of
+those payments ("Petrol"), either by editing the imported row or because
+it was merged with an expense they had already entered, the categoriser
+works out a category from that text. That category is what the payee is.
+
+learn() stores it as a MerchantLabel, and every statement import after that
+- by anyone on the app - files that payee's payments under it
+(routers/expenses.py), with no LLM call. Earlier imports of the payee that
+nobody has touched are re-filed at the same moment.
+
+A payee that is only a person's name is learnt for its teacher alone (see
+models.MerchantLabel.owner); a masked number or phone UPI id, which says
+nothing about who was paid, is never learnt.
+"""
+from __future__ import annotations
+
+import re
+
+from sqlalchemy import func, or_
+
+from spend_categories import _ANONYMOUS, _BUSINESS, _rule
+
+# Categories that say nothing about a payee - not worth remembering.
+_UNINFORMATIVE = {"Other", "Small vendors", "One-off payments"}
+# Rows a label may re-file: imported and never described by a person.
+_REFILEABLE = ("import", "merchant")
+EVERYONE = ""
+
+
+def key(merchant: str | None) -> str:
+    """Case, spaces and punctuation dropped - the import's own payee key
+    (routers/expenses._norm)."""
+    return "".join(ch for ch in (merchant or "").lower() if ch.isalnum())
+
+
+def _scope(merchant: str, teacher: str) -> str | None:
+    """Who a label for this payee applies to: EVERYONE for a business, the
+    teacher alone for a person's name, None for an anonymous payee."""
+    m = (merchant or "").strip()
+    if len(key(m)) < 4 or "*" in m or _ANONYMOUS.search(m) or sum(c.isdigit() for c in m) >= 6:
+        return None
+    return EVERYONE if (_rule(m) or _BUSINESS.search(m)) else teacher
+
+
+def _described(e) -> bool:
+    """The title is the person's own words, not the payee name copied in."""
+    return bool(e.title) and key(e.title) != key(e.merchant)
+
+
+def learn_from(db, e) -> None:
+    """Remember what e's payee is, when e is a statement payment a person
+    described and that description has been categorised. Call after the
+    category is set; the caller commits. A category picked by hand
+    teaches even with the payee name left as the title."""
+    if not (e.merchant and e.category and not e.parts):
+        return
+    if not (_described(e) or e.category_source == "user"):
+        return
+    if e.category_source not in ("llm", "user", "rules") or e.category in _UNINFORMATIVE:
+        return
+    learn(db, e.merchant, e.category, e.subcategory, e.paid_by)
+
+
+def learn(db, merchant: str, category: str, subcategory: str | None, teacher: str) -> None:
+    from models import Expense, MerchantLabel
+
+    owner = _scope(merchant, teacher)
+    if owner is None:
+        return
+    k = key(merchant)
+    lab = (db.query(MerchantLabel)
+           .filter(MerchantLabel.merchant_key == k, MerchantLabel.owner == owner).first())
+    if lab is None:
+        db.add(MerchantLabel(merchant_key=k, owner=owner, merchant=merchant.strip()[:200],
+                             category=category, subcategory=subcategory, taught_by=teacher))
+    elif (lab.category, lab.subcategory) != (category, subcategory) or lab.taught_by != teacher:
+        lab.category, lab.subcategory, lab.taught_by = category, subcategory, teacher
+    else:
+        return
+
+    # Earlier imports of this payee that nobody described take it too.
+    squashed = func.lower(func.regexp_replace(Expense.merchant, "[^a-zA-Z0-9]", "", "g"))
+    q = (db.query(Expense)
+         .filter(Expense.merchant.isnot(None), squashed == k,
+                 Expense.category_source.in_(_REFILEABLE)))
+    if owner != EVERYONE:
+        q = q.filter(func.lower(Expense.paid_by) == owner.lower())
+    for row in q.all():
+        if (row.category, row.subcategory) != (category, subcategory):
+            row.category, row.subcategory, row.category_source = category, subcategory, "merchant"
+    db.flush()
+
+
+# What a statement import appends to the notes of an expense it merged with
+# ("... · PhonePe: SHREE KRISHNA ENTERPRISES") - routers/expenses.run_import.
+_MERGE_NOTE = re.compile(r"(?:^|·\s*)(?:PhonePe|Google Pay|GPay|Paytm|BHIM|Amazon Pay|CRED): (.+?)\s*$")
+
+
+def backfill() -> int:
+    """Once, while there are no labels yet: learn from every statement
+    payment people described before this module existed - imported rows
+    they rewrote, and their own entries an import merged with (whose payee
+    only survives in the notes). Oldest first, so the latest answer wins.
+    Returns how many labels it made."""
+    from database import get_session_factory
+    from models import Expense, MerchantLabel
+
+    db = get_session_factory()()
+    try:
+        if db.query(MerchantLabel.id).first():
+            return 0
+        rows = (db.query(Expense)
+                .filter(Expense.category_source.in_(("llm", "user", "rules")),
+                        or_(Expense.merchant.isnot(None), Expense.notes.like("%: %")))
+                .order_by(Expense.date, Expense.id).all())
+        for e in rows:
+            if not e.merchant:
+                m = _MERGE_NOTE.search(e.notes or "")
+                if not m:
+                    continue
+                e.merchant = m.group(1)[:200]
+            learn_from(db, e)
+        db.commit()
+        made = db.query(MerchantLabel).count()
+        if made:
+            print(f"[merchant-memory] learnt {made} payee(s) from earlier descriptions")
+        return made
+    finally:
+        db.close()
+
+
+def labels_for(db, keys, user_name: str) -> dict:
+    """{payee key: MerchantLabel} for the given keys as user_name sees them:
+    their own label for a payee first, else the one everyone shares."""
+    from models import MerchantLabel
+
+    keys = {k for k in keys if k}
+    if not keys:
+        return {}
+    rows = (db.query(MerchantLabel)
+            .filter(MerchantLabel.merchant_key.in_(keys),
+                    or_(MerchantLabel.owner == EVERYONE,
+                        func.lower(MerchantLabel.owner) == (user_name or "").lower()))
+            .all())
+    out: dict = {}
+    for lab in sorted(rows, key=lambda r: r.owner != EVERYONE):   # shared first, own overwrites
+        out[lab.merchant_key] = lab
+    return out

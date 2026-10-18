@@ -200,6 +200,7 @@ def _process(ids: set[int]) -> None:
                     e.venue = venues.get(i) if source == "llm" else None
                     e.category_source = source
             db.commit()
+        _teach(db, rows)
         _reindex(db, rows)
     finally:
         db.close()
@@ -233,6 +234,21 @@ def canonical_venue(db, v: str | None) -> str | None:
             if n > best_n:
                 best, best_n = name, n
     return best or v
+
+
+def _teach(db, rows) -> None:
+    """A statement payment the person described, now categorised, says what
+    its payee is - for every later import of it, theirs and other people's
+    (merchant_memory)."""
+    try:
+        import merchant_memory
+        for e in rows:
+            if e.category_source != "pending":
+                merchant_memory.learn_from(db, e)
+        db.commit()
+    except Exception as err:  # learning must never break categorising
+        db.rollback()
+        print(f"[classify] merchant learning failed: {err}")
 
 
 def _reindex(db, rows) -> None:

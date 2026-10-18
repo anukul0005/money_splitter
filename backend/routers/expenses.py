@@ -17,6 +17,7 @@ from activity import record_activity
 from spend_categories import categorize
 from statement_import import StatementLocked, is_self_transfer, own_accounts, parse_statement, time_bucket
 import expense_classifier
+import merchant_memory
 import payee_classifier
 
 router = APIRouter(prefix="/expenses", tags=["expenses"])
@@ -206,6 +207,10 @@ def update_expense(expense_id: int, payload: ExpenseCreate, background_tasks: Ba
         expense.txn_time = payload.txn_time
         expense.time_bucket = time_bucket(payload.txn_time)
     # settled_by is intentionally not reset on edit
+    if expense.category_source == "user":
+        # A category picked by hand on a statement payment teaches what its
+        # payee is; a rewritten description does so once it's categorised.
+        merchant_memory.learn_from(db, expense)
 
     summary = _summary(expense)
     record_activity(db, group, caller.name, "edited an expense", summary)
@@ -562,6 +567,12 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
         """Fill an existing monthly-group entry's blanks from its payment(s)."""
         first = parts[0]
         exp.txn_ref = ",".join(p.txn_id for p in parts if p.txn_id) or None
+        # The person's own description on a statement payee: what that
+        # payee is, for every later import (merchant_memory). Learnt now if
+        # the description is already categorised, else by the categoriser.
+        if not exp.merchant:
+            exp.merchant = first.merchant[:200]
+        merchant_memory.learn_from(db, exp)
         if first.time and not exp.txn_time:
             exp.txn_time = first.time
             exp.time_bucket = time_bucket(first.time)
@@ -646,10 +657,14 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
     # whose answers are saved as labels so a payee is asked about once.
     labels = {lab.payee_key: lab for lab in
               db.query(PayeeLabel).filter(func.lower(PayeeLabel.user_name) == me).all()}
+    # What people have taught by describing a payment to the payee by hand
+    # (merchant_memory) - anyone's, for a business. Beats the LLM's and the
+    # rules' guesses; only the caller's own explicit answer beats it.
+    taught = merchant_memory.labels_for(db, {_norm(t.merchant) for t in leftover}, caller.name)
     unknown: dict[str, list] = defaultdict(list)
     for t in leftover:
         key = _norm(t.merchant)
-        if key and key not in labels and categorize(t.merchant, t.amount)[0] in _UNPLACED:
+        if key and key not in labels and key not in taught and categorize(t.merchant, t.amount)[0] in _UNPLACED:
             unknown[key].append(t)
     llm = {"asked": len(unknown), "answered": 0, "error": None}
     if unknown and payee_classifier.available():
@@ -674,6 +689,10 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
     for t in leftover:
         lab = labels.get(_norm(t.merchant))
         line = {"date": t.date, "merchant": t.merchant, "amount": t.amount}
+        mem = taught.get(_norm(t.merchant))
+        if mem is not None and (lab is None or lab.source != "user"):
+            keep.append((t, mem.category, mem.subcategory, "merchant"))
+            continue
         if lab is not None and lab.decision != "spending":
             why = lab.decision.replace("_", " ") + (f" - {lab.note}" if lab.source == "llm" and lab.note else "")
             not_spending.append({**line, "reason": why, "by": lab.source})
@@ -681,7 +700,7 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
                 skips.append(("people" if lab.decision == "p2p" else "investment", t, why))
             continue
         if lab is not None:
-            keep.append((t, lab.category, lab.subcategory))
+            keep.append((t, lab.category, lab.subcategory, "import"))
             continue
         cat, sub = categorize(t.merchant, t.amount)
         if cat == "One-off payments":
@@ -690,12 +709,12 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
             not_spending.append({**line, "reason": "p2p - one-off payment to a person", "by": "rules"})
             skips.append(("people", t, "one-off payment to a person"))
             continue
-        keep.append((t, cat, sub))
+        keep.append((t, cat, sub, "import"))
 
     step("Saving", 0.92)
     created: list[Expense] = []
     groups_created: list[str] = []
-    for t, category, subcategory in keep:
+    for t, category, subcategory, cat_source in keep:
         y, m = t.date[:4], int(t.date[5:7])
         gname = f"MONTHLY EXPENSES {_MONTH_ABBR[m - 1]} {y}"
         group = monthly.get(gname)
@@ -711,7 +730,7 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
 
         exp = Expense(
             group_id=group.id, date=t.date, category=category, subcategory=subcategory,
-            category_source="import", title=t.merchant,
+            category_source=cat_source, title=t.merchant, merchant=t.merchant[:200],
             amount=t.amount, paid_by=caller.name, participants=None, divider=1,
             individual_amount=t.amount, payment_mode="upi", notes=None,
             txn_time=t.time, time_bucket=time_bucket(t.time), txn_ref=t.txn_id or None,

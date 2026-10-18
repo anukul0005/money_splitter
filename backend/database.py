@@ -217,6 +217,7 @@ _ADDED_COLUMNS = [
     ("credit_cards", "pdf_password_encrypted", "TEXT"),
     ("expenses", "venue", "VARCHAR(120)"),
     ("knowledge_items", "venue", "VARCHAR(200)"),
+    ("expenses", "merchant", "VARCHAR(200)"),
 ]
 
 # (index name, statement)
@@ -272,6 +273,11 @@ def _run_migrations(conn, text) -> None:
     for table, column, ddl in _ADDED_COLUMNS:
         if table in tables and (table, column) not in have:
             _ddl(conn, text, f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {ddl}")
+            if (table, column) == ("expenses", "merchant"):
+                # Imports until now kept the payee only as the title - which
+                # is still the payee wherever nobody has rewritten it.
+                _ddl(conn, text, "UPDATE expenses SET merchant = title "
+                                 "WHERE category_source = 'import' AND merchant IS NULL")
     for name, sql in _ADDED_INDEXES:
         if name not in indexes:
             _ddl(conn, text, sql)
