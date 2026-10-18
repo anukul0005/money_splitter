@@ -38,12 +38,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[warn] pending categorisation sweep failed (non-fatal): {e}")
     # Once: learn payees from descriptions people wrote before the shared
-    # merchant memory existed - see merchant_memory.backfill.
-    try:
-        import merchant_memory
-        merchant_memory.backfill()
-    except Exception as e:
-        print(f"[warn] merchant memory backfill failed (non-fatal): {e}")
+    # merchant memory existed - see merchant_memory.backfill. In a thread:
+    # it walks every described statement payment, which is not something
+    # the app should wait on to start serving.
+    def _merchant_backfill():
+        try:
+            import merchant_memory
+            merchant_memory.backfill()
+        except Exception as e:
+            print(f"[warn] merchant memory backfill failed (non-fatal): {e}")
+    import threading
+    threading.Thread(target=_merchant_backfill, daemon=True, name="merchant-backfill").start()
     # Woken after 12:30 IST with today's daily jobs not yet run (the cron
     # ping was refused, say)? Run them now - see routers/cron.py.
     cron.maybe_catch_up()

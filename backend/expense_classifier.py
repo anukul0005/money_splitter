@@ -245,10 +245,17 @@ def _teach(db, rows) -> None:
         for e in rows:
             if e.category_source != "pending":
                 merchant_memory.learn_from(db, e)
+                merchant_memory.fill_venue(db, e)   # "lunch" at a place someone named
+        ids = {e.id for e in rows}
+        others = [i for i in merchant_memory.touched(db) if i not in ids]
         db.commit()
     except Exception as err:  # learning must never break categorising
         db.rollback()
         print(f"[classify] merchant learning failed: {err}")
+        return
+    if others:   # earlier payments to a payee just learnt - this thread can wait on them
+        from models import Expense
+        _reindex(db, db.query(Expense).filter(Expense.id.in_(others)).all())
 
 
 def _reindex(db, rows) -> None:

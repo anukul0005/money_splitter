@@ -211,12 +211,16 @@ def update_expense(expense_id: int, payload: ExpenseCreate, background_tasks: Ba
         # A category picked by hand on a statement payment teaches what its
         # payee is; a rewritten description does so once it's categorised.
         merchant_memory.learn_from(db, expense)
+        merchant_memory.fill_venue(db, expense)
 
     summary = _summary(expense)
     record_activity(db, group, caller.name, "edited an expense", summary)
 
+    refiled = [i for i in merchant_memory.touched(db) if i != expense.id]
     db.commit()
     db.refresh(expense)
+    if refiled:
+        background_tasks.add_task(_index_many_bg, refiled)
 
     # Notification first, then the slow work - tasks run in the order added,
     # and a restart during the ~7s embedding call used to kill the process
@@ -573,6 +577,7 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
         if not exp.merchant:
             exp.merchant = first.merchant[:200]
         merchant_memory.learn_from(db, exp)
+        merchant_memory.fill_venue(db, exp)   # "lunch" at a place someone named
         if first.time and not exp.txn_time:
             exp.txn_time = first.time
             exp.time_bucket = time_bucket(first.time)
@@ -691,7 +696,7 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
         line = {"date": t.date, "merchant": t.merchant, "amount": t.amount}
         mem = taught.get(_norm(t.merchant))
         if mem is not None and (lab is None or lab.source != "user"):
-            keep.append((t, mem.category, mem.subcategory, "merchant"))
+            keep.append((t, mem.category, mem.subcategory, "merchant", mem.venue))
             continue
         if lab is not None and lab.decision != "spending":
             why = lab.decision.replace("_", " ") + (f" - {lab.note}" if lab.source == "llm" and lab.note else "")
@@ -700,7 +705,7 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
                 skips.append(("people" if lab.decision == "p2p" else "investment", t, why))
             continue
         if lab is not None:
-            keep.append((t, lab.category, lab.subcategory, "import"))
+            keep.append((t, lab.category, lab.subcategory, "import", None))
             continue
         cat, sub = categorize(t.merchant, t.amount)
         if cat == "One-off payments":
@@ -709,12 +714,12 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
             not_spending.append({**line, "reason": "p2p - one-off payment to a person", "by": "rules"})
             skips.append(("people", t, "one-off payment to a person"))
             continue
-        keep.append((t, cat, sub, "import"))
+        keep.append((t, cat, sub, "import", None))
 
     step("Saving", 0.92)
     created: list[Expense] = []
     groups_created: list[str] = []
-    for t, category, subcategory, cat_source in keep:
+    for t, category, subcategory, cat_source, venue in keep:
         y, m = t.date[:4], int(t.date[5:7])
         gname = f"MONTHLY EXPENSES {_MONTH_ABBR[m - 1]} {y}"
         group = monthly.get(gname)
@@ -730,7 +735,8 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
 
         exp = Expense(
             group_id=group.id, date=t.date, category=category, subcategory=subcategory,
-            category_source=cat_source, title=t.merchant, merchant=t.merchant[:200],
+            # A place someone named is shown by that name, not the payee's.
+            category_source=cat_source, title=venue or t.merchant, merchant=t.merchant[:200], venue=venue,
             amount=t.amount, paid_by=caller.name, participants=None, divider=1,
             individual_amount=t.amount, payment_mode="upi", notes=None,
             txn_time=t.time, time_bucket=time_bucket(t.time), txn_ref=t.txn_id or None,
@@ -758,7 +764,10 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
     # Ids read before the commit: afterwards each expense is expired, and
     # reading .id would cost one SELECT per row.
     db.flush()
+    # Re-indexed afterwards with the new rows: earlier payments a label
+    # learnt during this import re-filed or named (merchant_memory).
     created_ids = [e.id for e in created]
+    created_ids += [i for i in merchant_memory.touched(db) if i not in set(created_ids)]
     db.commit()
 
     return {

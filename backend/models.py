@@ -853,6 +853,10 @@ class MerchantLabel(Base):
     merchant = Column(String(200), nullable=False)
     category = Column(String(100), nullable=False)
     subcategory = Column(String(100), nullable=True)
+    # The place to eat the person named in that description ("Lunch at
+    # McDonald's" on a "CONNAUGHT PLAZA REST" payment -> "McDonald's"):
+    # every payment to the payee is then that place, under that name.
+    venue = Column(String(120), nullable=True)
     taught_by = Column(String(100), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

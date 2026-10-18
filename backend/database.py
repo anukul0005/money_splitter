@@ -218,6 +218,7 @@ _ADDED_COLUMNS = [
     ("expenses", "venue", "VARCHAR(120)"),
     ("knowledge_items", "venue", "VARCHAR(200)"),
     ("expenses", "merchant", "VARCHAR(200)"),
+    ("merchant_labels", "venue", "VARCHAR(120)"),
 ]
 
 # (index name, statement)
