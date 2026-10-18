@@ -21,6 +21,9 @@ class UserOut(BaseModel):
     name: str
     is_admin: bool
     created_at: Optional[datetime] = None
+    # Shown beside a username wherever people are picked, so two "Ajay"s can
+    # be told apart - see models.User.full_name.
+    full_name: Optional[str] = None
     # Deliberately no recovery fields, and no email, here: UserOut is
     # returned by list_users, which would otherwise hand out every account's
     # recovery question and email address in one response. The reset page
@@ -41,8 +44,6 @@ class UserMeOut(UserOut):
     daily_summary: bool = False
     # The drinks side of the app - see models.User.full_access.
     has_full_access: bool = False
-    # Optional display name - see models.User.full_name.
-    full_name: Optional[str] = None
     # Pay and when it's credited - see models.User.
     monthly_salary: Optional[float] = None
     salary_day: Optional[str] = None
