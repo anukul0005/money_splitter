@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import threading
 import time
@@ -303,6 +304,9 @@ _CREDIT_REPAYMENT_PAYEES = (
 _CREDIT_REPAYMENT_EXACT = {"cred"}
 
 
+HIDDEN_PERSON = "Hidden person"
+
+
 def _norm(name: str) -> str:
     """A payee name with case, spaces and punctuation dropped - PhonePe
     writes "DIVYANK  CHAUDHARY" and "Divyank Chaudhary" for one person."""
@@ -543,7 +547,12 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
     # a payee who is also paid for real spending (a bike dealer that later
     # does the servicing).
     excluded_txns = {e[4:] for e in entries if e.startswith("txn:")}
-    excluded = {_norm(e) for e in entries if not e.startswith("txn:")}
+    # "hidden:<name>" excludes a payee like a plain entry, but the app never
+    # shows the name: what it skips is recorded as "Hidden person" (someone
+    # removed from the app whose old payments should still be left out).
+    hidden = {_norm(e[7:]) for e in entries if e.startswith("hidden:")}
+    excluded = {_norm(e[7:] if e.startswith("hidden:") else e)
+                for e in entries if not e.startswith("txn:")}
     leftover = []
     # Investments and money sent to people: not spending, but kept so the
     # month's group can show them (StatementSkip).
@@ -595,6 +604,8 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
             self_transfers.append({"date": t.date, "merchant": t.merchant, "amount": t.amount})
             continue
         if _norm(t.merchant) in excluded or t.txn_id in excluded_txns:
+            if _norm(t.merchant) in hidden:
+                t = dataclasses.replace(t, merchant=HIDDEN_PERSON)
             friends.append({"date": t.date, "merchant": t.merchant, "amount": t.amount})
             skips.append(("people", t, "excluded payee"))
             continue
