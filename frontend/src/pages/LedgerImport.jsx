@@ -105,11 +105,11 @@ export default function LedgerImport() {
               You'll check every row before anything is saved.
             </p>
             <div className="flex gap-2">
-              <button type="button" disabled={busy} onClick={() => cameraRef.current?.click()} className="btn-primary text-sm disabled:opacity-50">
+              <button type="button" disabled={busy} onClick={() => cameraRef.current?.click()} className="btn-primary text-[11.9px] disabled:opacity-50">
                 📷 Take photo
               </button>
               <button type="button" disabled={busy} onClick={() => galleryRef.current?.click()}
-                className="w-full py-3 text-sm font-bold text-gray-700 bg-white border border-amber-300 rounded-md disabled:opacity-50">
+                className="w-full py-3 text-[11.9px] font-bold text-gray-700 bg-white border border-amber-300 rounded-md disabled:opacity-50">
                 🖼️ From gallery
               </button>
             </div>
