@@ -45,3 +45,7 @@ apikey_hf.txt
 # Gemini API key pasted in while setting up the notebook reader - belongs in
 # .env and Render, never the repo.
 apikey_gemini.txt
+
+# secrets/ holds the ENCRYPTED key backup (*.enc, committed) plus the scripts.
+# The decrypted plaintext (*.txt) must never be committed - only the .enc is.
+secrets/*.txt
