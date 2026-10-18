@@ -6,7 +6,7 @@ and English mixed - into rows: an item, a total and each person's share.
       गला सेट         2,40,000    150     90 th
       मांग टीका          70,000     50     20 th
 
-A vision model (Gemini 2.5 Pro, Google AI Studio free tier - GEMINI_API_KEY)
+A vision model (Gemini 2.5 Flash, Google AI Studio free tier - GEMINI_API_KEY)
 transcribes the table; it gets digits mostly right and handwriting words often wrong, so:
   1. the prompt carries what this person has taught it before (LedgerHint):
      which column letter is whom in this group, and words it misread;
@@ -29,10 +29,12 @@ import urllib.error
 import urllib.request
 
 # Google AI Studio's OpenAI-compatible endpoint, so the request below is the
-# same shape the rest of the app already uses. Override the model with
-# LEDGER_VISION_MODEL if ever needed.
+# same shape the rest of the app already uses. Flash is the model that stays
+# free on the Google AI Studio free tier (generous daily quota, no card); 2.5
+# Pro's free tier is tiny and is moving behind billing, so it is not the
+# default. Override with LEDGER_VISION_MODEL (e.g. gemini-2.5-pro) if ever needed.
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-VISION_MODEL = os.getenv("LEDGER_VISION_MODEL", "gemini-2.5-pro")
+VISION_MODEL = os.getenv("LEDGER_VISION_MODEL", "gemini-2.5-flash")
 
 _PROMPT = """A photo of a handwritten Indian expense page, Hindi (Devanagari) and English mixed. It is a table:
 the first column names the item, then amount columns headed by letters or words. Rules:
@@ -69,7 +71,7 @@ def _image_b64(raw: bytes) -> str:
 
 
 def _ask_vision(prompt: str, image_b64: str) -> dict:
-    """Send the page to Gemini 2.5 Pro and parse its JSON reply. Raises
+    """Send the page to Gemini (2.5 Flash by default) and parse its JSON reply. Raises
     RuntimeError when no key is set or the request fails."""
     from database import get_settings
     key = get_settings().gemini_api_key
