@@ -107,31 +107,51 @@ def learn(db, merchant: str, category: str, subcategory: str | None, teacher: st
     if not is_food(category, subcategory):
         venue = None
     if lab is None:
-        db.add(MerchantLabel(merchant_key=k, owner=owner, merchant=merchant.strip()[:200],
-                             category=category, subcategory=subcategory, venue=venue, taught_by=teacher))
+        lab = MerchantLabel(merchant_key=k, owner=owner, merchant=merchant.strip()[:200],
+                            category=category, subcategory=subcategory, venue=venue, taught_by=teacher)
+        db.add(lab)
     elif (lab.category, lab.subcategory, lab.venue, lab.taught_by) != (category, subcategory, venue, teacher):
         lab.category, lab.subcategory, lab.venue, lab.taught_by = category, subcategory, venue, teacher
     else:
         return
+    apply(db, lab, old_venue)
 
-    # Every earlier payment to this payee: the ones nobody described take
-    # the whole answer; the ones people did keep their own category, and
-    # take the place's name when theirs is food and names no place (or the
-    # name this payee had before).
+
+def _refileable(row) -> bool:
+    """Imported and never described by a person - including imports from
+    before category_source was kept, whose title is still the payee name."""
+    return row.category_source in _REFILEABLE or (
+        row.category_source is None and key(row.title) == key(row.merchant))
+
+
+def apply(db, lab, old_venue: str | None = None) -> None:
+    """Bring every payment to lab's payee in line with it: the ones nobody
+    described take the whole answer; the ones people did keep their own
+    category, and take the place's name when theirs is food and names no
+    place of its own - none, the payee's bank name, or the name this payee
+    had before (old_venue)."""
+    from models import Expense
+
+    # The app's sessions don't autoflush: payee names just recorded on rows
+    # (an import's merge, the backfill) must reach the database before the
+    # match below can see them.
+    db.flush()
     squashed = func.lower(func.regexp_replace(Expense.merchant, "[^a-zA-Z0-9]", "", "g"))
-    q = db.query(Expense).filter(Expense.merchant.isnot(None), squashed == k)
-    if owner != EVERYONE:
-        q = q.filter(func.lower(Expense.paid_by) == owner.lower())
+    q = db.query(Expense).filter(Expense.merchant.isnot(None), squashed == lab.merchant_key)
+    if lab.owner != EVERYONE:
+        q = q.filter(func.lower(Expense.paid_by) == lab.owner.lower())
+    cat, sub, venue = lab.category, lab.subcategory, lab.venue
     changed = []
     for row in q.all():
-        if row.category_source in _REFILEABLE:
+        if _refileable(row):
             title = venue or row.merchant
-            if (row.category, row.subcategory, row.venue, row.title) != (category, subcategory, venue, title):
-                row.category, row.subcategory, row.category_source = category, subcategory, "merchant"
+            if (row.category, row.subcategory, row.venue, row.title, row.category_source) \
+                    != (cat, sub, venue, title, "merchant"):
+                row.category, row.subcategory, row.category_source = cat, sub, "merchant"
                 row.venue, row.title = venue, title
                 changed.append(row.id)
-        elif venue and is_food(row.category, row.subcategory) and row.venue in (None, old_venue) \
-                and row.venue != venue:
+        elif venue and row.venue != venue and is_food(row.category, row.subcategory) and (
+                row.venue in (None, old_venue) or key(row.venue) == key(row.merchant)):
             row.venue = venue
             changed.append(row.id)
     _touched(db, changed)
@@ -158,15 +178,17 @@ _MERGE_NOTE = re.compile(r"(?:^|·\s*)(?:PhonePe|Google Pay|GPay|Paytm|BHIM|Amaz
 
 # Marks the backfill as done. Not a payee key - those are letters and digits
 # only - so no import ever matches it. Bump the version to run it again
-# after learning something new (v2: places to eat).
-_BACKFILL_MARK = "#backfill-v2"
+# after learning something new (v2: places to eat; v3: imports from before
+# category_source was kept).
+_BACKFILL_MARK = "#backfill-v3"
 
 
 def backfill() -> int:
-    """Once per _BACKFILL_MARK: learn from every statement payment people
-    described before - imported rows they rewrote, and their own entries an
-    import merged with (whose payee only survives in the notes). Oldest
-    first, so the latest answer wins. Returns how many labels there are."""
+    """Once per _BACKFILL_MARK: record the payee of every statement payment
+    that lacks one - from the merge note on an entry an import merged with,
+    else, on an import nobody touched, its title - then learn from every
+    one people described (oldest first, so the latest answer wins) and
+    bring every payment in line with every label. Returns the label count."""
     from database import get_session_factory
     from models import Expense, MerchantLabel
 
@@ -175,18 +197,24 @@ def backfill() -> int:
         if db.query(MerchantLabel.id).filter(MerchantLabel.merchant_key == _BACKFILL_MARK).first():
             return 0
         rows = (db.query(Expense)
-                .filter(Expense.category_source.in_(("llm", "user", "rules")),
-                        or_(Expense.merchant.isnot(None), Expense.notes.like("%: %")))
+                .filter(or_(Expense.merchant.isnot(None), Expense.txn_ref.isnot(None),
+                            Expense.notes.like("%: %")))
                 .order_by(Expense.date, Expense.id).all())
         for e in rows:
-            if not e.merchant:
-                m = _MERGE_NOTE.search(e.notes or "")
-                if not m:
-                    continue
+            if e.merchant:
+                continue
+            m = _MERGE_NOTE.search(e.notes or "")
+            if m:
                 e.merchant = m.group(1)[:200]
+            elif e.txn_ref and e.category_source in (None, "import") and e.title:
+                e.merchant = e.title[:200]
+        for e in rows:
             learn_from(db, e)
+        for lab in db.query(MerchantLabel).filter(MerchantLabel.owner != "#system").all():
+            apply(db, lab)
         for e in rows:      # "lunch" there before anyone named the place
             fill_venue(db, e)
+        db.query(MerchantLabel).filter(MerchantLabel.owner == "#system").delete()
         db.add(MerchantLabel(merchant_key=_BACKFILL_MARK, owner="#system", merchant="-",
                              category="-", taught_by="#system"))
         changed = touched(db)

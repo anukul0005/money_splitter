@@ -591,6 +591,11 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
 
     def link(exp, parts) -> None:
         exp.txn_ref = ",".join(p.txn_id for p in parts if p.txn_id) or None
+        # As in merge: the payer's description teaches what the payee is.
+        if not exp.merchant:
+            exp.merchant = parts[0].merchant[:200]
+        merchant_memory.learn_from(db, exp)
+        merchant_memory.fill_venue(db, exp)
         how = f" - paid in {len(parts)} parts" if len(parts) > 1 else ""
         for p in parts:
             linked.append({"date": p.date, "merchant": p.merchant, "amount": p.amount,
