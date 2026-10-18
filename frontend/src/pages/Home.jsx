@@ -103,59 +103,29 @@ export default function Home() {
   // a single-member one, so every one of a person's own personal trackers
   // (Monthly Expenses Aug, Sep, ...) combines into the one master sharing
   // their own name, exactly like a recurring trip combines into one master
-  // sharing that same group of friends. Unsettled entries show first;
-  // settled ones are tucked behind a "show settled" toggle.
-  const unsettledGroupIds = new Set(balances.map((b) => b.group_id))
-  // group_id -> unsettled amount, used to rank what the user sees first
-  const netByGroup = Object.fromEntries(balances.map((b) => [b.group_id, Math.abs(b.net)]))
+  // sharing that same group of friends.
   // Historical groups are included here (unlike activeOverview above) so they
   // still show up inside their super group on Home, each carrying its own
-  // "Historical" badge via GroupCard — they're just always settled, so they
-  // land behind "Show settled" rather than among the top unsettled cards.
+  // "Historical" badge via GroupCard.
   const { masters: everyMaster, solo: soloGroups } = buildMasterGroups(myGroups, 1, user?.name)
-  // A single-member master can never carry a real balance - nothing to
-  // settle with just yourself - so it would otherwise always sink to
-  // "settled" and sit hidden behind "Show more" no matter how many months
-  // of personal tracking are in it. Pulled out into its own always-visible
-  // section instead of competing with the debt-ranked list below.
+  // A single-member master (personal tracking - Monthly Expenses) has its
+  // own always-visible section instead of competing with the list below.
   const personalMasters = everyMaster.filter((m) => m.names.length === 1)
-  const allMasters       = everyMaster.filter((m) => m.names.length > 1)
-  const unsettledMasters = allMasters.filter((m) => m.groups.some((g) => unsettledGroupIds.has(g.id)))
-  const settledMasters   = allMasters.filter((m) => !m.groups.some((g) => unsettledGroupIds.has(g.id)))
-  const unsettledSolo    = soloGroups.filter((g) => unsettledGroupIds.has(g.id))
-  const settledSolo      = soloGroups.filter((g) => !unsettledGroupIds.has(g.id))
+  const allMasters      = everyMaster.filter((m) => m.names.length > 1)
 
-  // Only the three biggest unsettled entries show by default; the rest sit
-  // behind "Show all". A master's weight is everything unsettled inside it.
-  const unsettledEntries = [
-    ...unsettledMasters.map((m) => ({
-      key: `m-${m.key}`,
-      amount: m.groups.reduce((s, g) => s + (netByGroup[g.id] ?? 0), 0),
-      node: <MasterGroupCard key={m.key} master={m} />,
-    })),
-    ...unsettledSolo.map((g) => ({
-      key: `g-${g.id}`,
-      amount: netByGroup[g.id] ?? 0,
-      node: <GroupCard key={g.id} group={g} />,
-    })),
-  ].sort((a, b) => b.amount - a.amount)
-
-  // Up to three show straight away: the biggest unsettled first, settled
-  // ones filling any space left - so someone whose groups are all settled
-  // (or who has just one) still sees them, not an empty list and a button.
-  // A "Show more" that would reveal a single group isn't worth the tap, so
-  // that one shows too.
-  const TOP_N = 3
+  // The four most recently used show straight away, settled or not; the
+  // rest sit behind "Show more". "Used" is a group's latest expense (else
+  // when it was made - the server's last_activity); a master counts its
+  // most recent group.
+  const lastUsed = (gs) => gs.reduce((d, g) => ((g.last_activity || '') > d ? g.last_activity || '' : d), '')
   const ordered = [
-    ...unsettledEntries,
-    ...settledMasters.map((m) => ({ key: `m-${m.key}`, node: <MasterGroupCard key={m.key} master={m} /> })),
-    ...settledSolo.map((g) => ({ key: `g-${g.id}`, node: <GroupCard key={g.id} group={g} /> })),
-  ]
-  const shownCount   = ordered.length - TOP_N <= 1 ? ordered.length : TOP_N
-  const shownEntries = ordered.slice(0, shownCount)
-  const hiddenEntries = ordered.slice(shownCount)
-  const hiddenCount  = hiddenEntries.length
-  const allShownUnsettled = shownEntries.length > 0 && shownEntries.length <= unsettledEntries.length
+    ...allMasters.map((m) => ({ key: `m-${m.key}`, used: lastUsed(m.groups), node: <MasterGroupCard key={m.key} master={m} /> })),
+    ...soloGroups.map((g) => ({ key: `g-${g.id}`, used: lastUsed([g]), node: <GroupCard key={g.id} group={g} /> })),
+  ].sort((a, b) => b.used.localeCompare(a.used))
+  const SHOWN = 4
+  const shownEntries  = ordered.slice(0, SHOWN)
+  const hiddenEntries = ordered.slice(SHOWN)
+  const hiddenCount   = hiddenEntries.length
 
   return (
     <div className="pb-24 md:pb-8">
@@ -263,12 +233,12 @@ export default function Home() {
           </button>
         </div>
 
-        {/* Groups (every group linked to a master group by members; unsettled first, settled behind a toggle) */}
+        {/* Groups (every group linked to a master group by members; the four most recently used first, the rest behind a toggle) */}
         {(allMasters.length > 0 || soloGroups.length > 0) && (
           <div>
             <div className="flex items-center justify-between mb-2">
               <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">
-                {allShownUnsettled ? 'Top unsettled groups' : 'Groups'}
+                Recent groups
               </p>
               <button
                 className="text-xs font-bold text-brand-500"
