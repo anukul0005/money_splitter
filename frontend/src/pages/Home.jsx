@@ -140,10 +140,22 @@ export default function Home() {
     })),
   ].sort((a, b) => b.amount - a.amount)
 
+  // Up to three show straight away: the biggest unsettled first, settled
+  // ones filling any space left - so someone whose groups are all settled
+  // (or who has just one) still sees them, not an empty list and a button.
+  // A "Show more" that would reveal a single group isn't worth the tap, so
+  // that one shows too.
   const TOP_N = 3
-  const topUnsettled  = unsettledEntries.slice(0, TOP_N)
-  const restUnsettled = unsettledEntries.slice(TOP_N)
-  const hiddenCount   = restUnsettled.length + settledMasters.length + settledSolo.length
+  const ordered = [
+    ...unsettledEntries,
+    ...settledMasters.map((m) => ({ key: `m-${m.key}`, node: <MasterGroupCard key={m.key} master={m} /> })),
+    ...settledSolo.map((g) => ({ key: `g-${g.id}`, node: <GroupCard key={g.id} group={g} /> })),
+  ]
+  const shownCount   = ordered.length - TOP_N <= 1 ? ordered.length : TOP_N
+  const shownEntries = ordered.slice(0, shownCount)
+  const hiddenEntries = ordered.slice(shownCount)
+  const hiddenCount  = hiddenEntries.length
+  const allShownUnsettled = shownEntries.length > 0 && shownEntries.length <= unsettledEntries.length
 
   return (
     <div className="pb-24 md:pb-8">
@@ -256,7 +268,7 @@ export default function Home() {
           <div>
             <div className="flex items-center justify-between mb-2">
               <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">
-                {topUnsettled.length > 0 ? 'Top unsettled groups' : 'Groups'}
+                {allShownUnsettled ? 'Top unsettled groups' : 'Groups'}
               </p>
               <button
                 className="text-xs font-bold text-brand-500"
@@ -266,16 +278,14 @@ export default function Home() {
               </button>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {topUnsettled.map((e) => e.node)}
+              {shownEntries.map((e) => e.node)}
             </div>
 
             {hiddenCount > 0 && (
               showSettled ? (
                 <>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-                    {restUnsettled.map((e) => e.node)}
-                    {settledMasters.map((m) => <MasterGroupCard key={m.key} master={m} />)}
-                    {settledSolo.map((g) => <GroupCard key={g.id} group={g} />)}
+                    {hiddenEntries.map((e) => e.node)}
                   </div>
                   <button
                     onClick={() => setShowSettled(false)}
