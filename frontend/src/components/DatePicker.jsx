@@ -1,5 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
+const PANEL_W = 256    // w-64
+const PANEL_H = 330    // tallest month (6 rows) with header and footer
+const GAP = 4
+const EDGE = 8
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
 const pad2 = (n) => String(n).padStart(2, '0')
 const toValue = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
@@ -21,10 +26,39 @@ export default function DatePicker({ value, onChange, placeholder = 'Select date
   const selected = fromValue(value)
   const [viewMonth, setViewMonth] = useState(selected || new Date())
   const ref = useRef(null)
+  const panelRef = useRef(null)
+  const [pos, setPos] = useState(null)
+
+  // The calendar floats over the page (a portal, position: fixed) rather
+  // than inside the field's box: in a modal or any scrolling card it was cut
+  // off, and from a right-hand column it ran off the screen. Placed under
+  // the field - above it when there's no room below - and kept on screen.
+  useLayoutEffect(() => {
+    if (!open) return
+    const place = () => {
+      const r = ref.current?.getBoundingClientRect()
+      if (!r) return
+      const vw = window.innerWidth, vh = window.innerHeight
+      const left = Math.min(Math.max(EDGE, r.left), vw - PANEL_W - EDGE)
+      const below = vh - r.bottom - GAP - EDGE
+      const top = below >= PANEL_H || r.top < PANEL_H ? r.bottom + GAP : r.top - GAP - PANEL_H
+      setPos({ left, top: Math.max(EDGE, top) })
+    }
+    place()
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)   // any scrolling ancestor, too
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
+  }, [open])
 
   useEffect(() => {
     if (!open) return
-    const onClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    const onClick = (e) => {
+      if (ref.current?.contains(e.target) || panelRef.current?.contains(e.target)) return
+      setOpen(false)
+    }
     document.addEventListener('mousedown', onClick)
     document.addEventListener('touchstart', onClick, { passive: true })
     return () => {
@@ -66,8 +100,9 @@ export default function DatePicker({ value, onChange, placeholder = 'Select date
           <path d="M2 6.5h12M5 1.5v3M11 1.5v3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
         </svg>
       </button>
-      {open && (
-        <div className="absolute left-0 top-full mt-1 z-30 bg-white border border-amber-200 rounded-md shadow-lg p-3 w-64">
+      {open && pos && createPortal(
+        <div ref={panelRef} style={{ position: 'fixed', left: pos.left, top: pos.top, width: PANEL_W }}
+          className="z-[100] bg-white border border-amber-200 rounded-md shadow-lg p-3">
           <div className="flex items-center justify-between mb-2">
             <button
               type="button" onClick={() => setViewMonth(new Date(y, m - 1, 1))}
@@ -110,7 +145,8 @@ export default function DatePicker({ value, onChange, placeholder = 'Select date
               >Clear</button>
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )

@@ -156,7 +156,7 @@ export default function RecordPaymentModal({ onClose, onSaved, prefillFriend, pa
             <div>
               <label className="label text-[10px] mb-1">Amount (₹)</label>
               <input
-                className="input py-2.5 font-bold"
+                className="input font-bold"
                 type="number"
                 min="0.01"
                 step="0.01"
@@ -174,7 +174,7 @@ export default function RecordPaymentModal({ onClose, onSaved, prefillFriend, pa
           <div>
             <label className="label text-[10px] mb-1">Note (optional)</label>
             <input
-              className="input py-2.5"
+              className="input"
               placeholder="e.g. UPI, cash"
               value={form.note}
               onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
