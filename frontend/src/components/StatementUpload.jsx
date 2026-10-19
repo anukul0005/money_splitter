@@ -8,7 +8,7 @@ import StatementImportResult from './StatementImportResult'
 const APPS = [
   { key: 'gpay',    label: 'Google Pay', hint: 'PDF statement',       accept: '.pdf,application/pdf' },
   { key: 'phonepe', label: 'PhonePe',    hint: 'CSV or PDF statement', accept: '.csv,text/csv,.pdf,application/pdf' },
-  { key: 'paytm',   label: 'Paytm',      hint: 'Coming soon',          accept: null },
+  { key: 'paytm',   label: 'Paytm',      hint: 'PDF statement',       accept: '.pdf,application/pdf' },
 ]
 // For a single "upload a statement" button with no app picker.
 export const ANY_STATEMENT = { key: 'any', label: 'statement', accept: '.csv,text/csv,.pdf,application/pdf' }

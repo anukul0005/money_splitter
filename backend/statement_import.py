@@ -1,4 +1,4 @@
-"""Reading a payment-app statement (PhonePe CSV, Google Pay PDF, ...) into
+"""Reading a payment-app statement (PhonePe CSV/PDF, Google Pay PDF, Paytm PDF) into
 plain transaction rows.
 
 Parsing only - deciding what to do with each row (create it, merge it into
@@ -301,10 +301,91 @@ def parse_phonepe_pdf(lines: list[str]) -> list[StatementTxn]:
     return txns
 
 
+_PAYTM_PERIOD = re.compile(r"(\d{2}) ([A-Z]{3})'(\d{2}) - (\d{2}) ([A-Z]{3})'(\d{2})")
+_PAYTM_HEAD = re.compile(r"^(\d{2}) ([A-Z][a-z]{2}) (.+?) ([+-]) Rs\.\s?([\d,]+(?:\.\d+)?)$")
+_PAYTM_TIME = re.compile(r"^(\d{1,2}:\d{2} [AP]M)\b")
+_PAYTM_REF = re.compile(r"UPI Ref No:\s*(\d+)")
+_PAYTM_PREFIXES = ("Paid to ", "Money sent to ", "Money received from ", "Received from ")
+
+
+def _paytm_name(details: str) -> str:
+    """The payee out of a Paytm row's mixed-up first line: its columns are
+    printed side by side, so the name runs into "Tag: ..." / "Note: ..."
+    and the account. "Recharge for Delhi Metro Card Number" -> "Delhi
+    Metro recharge"."""
+    name = re.split(r" (?:Tag|Note):", details, maxsplit=1)[0].strip()
+    for p in _PAYTM_PREFIXES:
+        if name.startswith(p):
+            name = name[len(p):]
+            break
+    m = re.match(r"^Recharge for (.+?)(?: Card Number)?$", name)
+    if m:
+        name = f"{m.group(1)} recharge"
+    return name.strip() or "Paytm payment"
+
+
+def parse_paytm_pdf(lines: list[str]) -> list[StatementTxn]:
+    """Every transaction of a Paytm UPI statement PDF, from its pdf_lines.
+
+    Each one is a block of four or more lines, the columns run together:
+        28 Sep Paid to DOTPE Tag: Union Bank - Rs.82.96
+        3:15 PM
+        UPI ID: paytm-52165157@ptybl on # Food Of India - 94
+        UPI Ref No: 299914731403
+    Rows carry no year: it comes from the statement's period ("19 OCT'25 -
+    18 OCT'26"), which is at most a year long. "-" is money paid, "+"
+    received. A payment to a ccbillpayment UPI id is a credit card bill,
+    named so the import skips it as a repayment. Raises ValueError when
+    this isn't one.
+    """
+    if not any("Paytm Statement for" in ln for ln in lines) \
+            or not any("UPI Ref No" in ln for ln in lines):
+        raise ValueError("This PDF isn't a Paytm statement.")
+    period = next((m for m in map(_PAYTM_PERIOD.search, lines[:12]) if m), None)
+    if period is None:
+        raise ValueError("Couldn't find this Paytm statement's period.")
+    end = datetime.strptime(f"{period.group(4)} {period.group(5).title()} {period.group(6)}", "%d %b %y").date()
+
+    txns: list[StatementTxn] = []
+    card_bills: set[int] = set()
+    cur: StatementTxn | None = None
+    for ln in lines:
+        head = _PAYTM_HEAD.match(ln)
+        if head:
+            day, mon, details, sign, amount = head.groups()
+            d = datetime.strptime(f"{day} {mon} {end.year}", "%d %b %Y").date()
+            if d > end:
+                d = d.replace(year=end.year - 1)
+            cur = StatementTxn(
+                date=d.isoformat(), time=None, merchant=_paytm_name(details), txn_id="",
+                kind="Credit" if sign == "+" else "Debit",
+                amount=round(float(amount.replace(",", "")), 2), source="Paytm",
+            )
+            txns.append(cur)
+            continue
+        if cur is None:
+            continue
+        tm = _PAYTM_TIME.match(ln)
+        if tm and cur.time is None:
+            cur.time = datetime.strptime(tm.group(1), "%I:%M %p").strftime("%H:%M")
+        ref = _PAYTM_REF.search(ln)
+        if ref and not cur.txn_id:
+            cur.txn_id = ref.group(1)
+        if "ccbillpayment" in ln.lower().replace(" ", ""):
+            card_bills.add(id(cur))
+    for t in txns:
+        if id(t) in card_bills:
+            t.merchant = f"Credit card bill via {t.merchant}"
+    if not txns:
+        raise ValueError("No transactions found in this Paytm statement.")
+    return txns
+
+
 # Every statement type the import understands, tried in order.
 PDF_FORMATS: list[tuple[str, Callable[[list[str]], list[StatementTxn]]]] = [
     ("Google Pay", parse_gpay_pdf),
     ("PhonePe", parse_phonepe_pdf),
+    ("Paytm", parse_paytm_pdf),
 ]
 CSV_FORMATS: list[tuple[str, Callable[[bytes], list[StatementTxn]]]] = [
     ("PhonePe", parse_phonepe_csv),

@@ -308,6 +308,9 @@ _CREDIT_REPAYMENT_PAYEES = (
     "iloancredit", "credclub", "credccbp", "ccbp", "billpaidcreditcard",
     "snapmint", "simpl", "paytmpostpaid", "flipkartpaylater", "slicepay",
     "zipcash", "olafinancialservices", "axisecoll", "shriramtransportfina",
+    # Paytm statements: a card bill paid to a ccbillpayment UPI id is named
+    # "Credit card bill via ..." (statement_import.parse_paytm_pdf).
+    "creditcardbill",
 )
 # Too short to match as a substring ("cred" is inside "credit").
 _CREDIT_REPAYMENT_EXACT = {"cred"}
