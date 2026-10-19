@@ -83,6 +83,7 @@ export const readLedgerPage     = (groupId, file) => {
   return api.post('/ledger/read', fd)
 }
 export const saveLedgerPage     = (body)     => api.post('/ledger/save', body)
+export const saveLedgerBill     = (body)     => api.post('/ledger/save-bill', body)
 export const scanReceipt        = (file)     => {
   const fd = new FormData()
   fd.append('file', file)

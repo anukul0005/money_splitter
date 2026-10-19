@@ -5,6 +5,10 @@ Each row becomes one expense with each person's share as a custom split.
 The page records what each person spent, not money anyone owes, so every
 share is marked as covered by the person it belongs to (settled_by): the
 group shows who spent what, and nobody owes anybody.
+
+A printed bill photographed here is different: no per-person columns, one
+person paid. Each line item becomes its own ordinary group expense, split
+equally between the members chosen (save_bill).
 """
 from __future__ import annotations
 
@@ -61,11 +65,12 @@ def read_ledger_page(group_id: int = Form(...), file: UploadFile = File(...),
     except Exception as e:
         raise HTTPException(502, f"Couldn't read that page - try a sharper, straighter photo. ({str(e)[:150]})")
     if page.get("kind") == "bill":
-        # A printed bill has no per-person columns: it's one expense, split
-        # the usual way on the add-expense form the page hands it to.
-        if not page.get("total"):
-            raise HTTPException(502, "That looks like a bill, but its total couldn't be read - try a sharper photo.")
-        return page
+        # A printed bill has no per-person columns: each line item becomes
+        # its own group expense, paid by one member and split the usual way
+        # (/ledger/save-bill).
+        if not page.get("items"):
+            raise HTTPException(502, "That looks like a bill, but its items couldn't be read - try a sharper photo.")
+        return {**page, "members": members}
     mapping = {}
     for col in page["share_columns"]:
         guess = columns.get(col)
@@ -136,3 +141,66 @@ def save_ledger_page(payload: LedgerSave, background_tasks: BackgroundTasks,
     for i in ids:
         background_tasks.add_task(expense_classifier.enqueue, i)
     return {"created": len(ids), "total": round(sum(e.amount for e in created), 2), "expense_ids": ids}
+
+
+class BillItem(BaseModel):
+    title: str
+    amount: float
+
+
+class BillSave(BaseModel):
+    group_id: int
+    date: str | None = None
+    merchant: str | None = None
+    paid_by: str
+    participants: list[str]           # who each item is split between, equally
+    items: list[BillItem]
+
+
+@router.post("/save-bill", response_model=dict)
+def save_bill(payload: BillSave, background_tasks: BackgroundTasks,
+              db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """A printed bill read off a notebook-page photo: each line item its own
+    ordinary group expense - one payer, split equally between the chosen
+    members, who then owe their share as with any expense. Categorised one
+    by one, so a bill of groceries and a kitchen tool files them apart."""
+    group = member_group(payload.group_id, caller, db, with_history=False)
+    members = {m.name.lower(): m.name for m in group.members}
+    payer = members.get(payload.paid_by.strip().lower())
+    if not payer:
+        raise HTTPException(400, f"{payload.paid_by} isn't in this group")
+    parts = []
+    for name in payload.participants:
+        if name.strip().lower() not in members:
+            raise HTTPException(400, f"{name} isn't in this group")
+        if members[name.strip().lower()] not in parts:
+            parts.append(members[name.strip().lower()])
+    if not parts:
+        raise HTTPException(400, "Choose who the bill is split between")
+    merchant = (payload.merchant or "").strip()[:150]
+    created = []
+    for it in payload.items:
+        title = (it.title or "").strip()
+        if not title or not it.amount or it.amount <= 0:
+            continue
+        amount = round(float(it.amount), 2)
+        e = Expense(
+            group_id=group.id, date=payload.date, title=title[:200], amount=amount,
+            paid_by=payer, participants=",".join(parts), divider=len(parts),
+            individual_amount=round(amount / len(parts), 2),
+            category_source="pending",
+            notes=f"From a {merchant} bill" if merchant else "From a bill",
+        )
+        db.add(e)
+        created.append(e)
+    if not created:
+        raise HTTPException(400, "Nothing to save")
+    db.flush()
+    ids = [e.id for e in created]
+    total = round(sum(e.amount for e in created), 2)
+    record_activity(db, group, caller.name, "added expenses from a bill",
+                    f"{len(ids)} items{f' from {merchant}' if merchant else ''}, ₹{total:,.0f} paid by {payer}")
+    db.commit()
+    for i in ids:
+        background_tasks.add_task(expense_classifier.enqueue, i)
+    return {"created": len(ids), "total": total, "expense_ids": ids}

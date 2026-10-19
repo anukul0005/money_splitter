@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { getGroup, readLedgerPage, saveLedgerPage } from '../api'
+import { getGroup, readLedgerPage, saveLedgerBill, saveLedgerPage } from '../api'
+import { useUser } from '../UserContext'
+import { dn } from '../utils/displayName'
 
 const INR = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
 const today = () => new Date().toISOString().slice(0, 10)
@@ -25,6 +27,12 @@ export default function LedgerImport() {
   const [mapping, setMapping] = useState({})       // column -> member ('' = skip)
   const [rows, setRows]       = useState([])       // [{ title, read_as, total, shares: {column: amount}, notes }]
   const [date, setDate]       = useState(today())
+  // A printed bill instead of a notebook page: one payer, each item its own
+  // expense split equally between splitWith (routers/ledger.save_bill).
+  const user = useUser()
+  const [items, setItems]         = useState([])   // [{ title, amount }]
+  const [paidBy, setPaidBy]       = useState('')
+  const [splitWith, setSplitWith] = useState([])
 
   useEffect(() => { getGroup(id).then((r) => setGroup(r.data)).catch(() => {}) }, [id])
 
@@ -36,9 +44,12 @@ export default function LedgerImport() {
       // squeezing it here first loses handwriting detail.
       const { data } = await readLedgerPage(id, file)
       if (data.kind === 'bill') {
-        // A printed bill, not a notebook page: one expense, filled in on
-        // the ordinary form, where who paid and how it splits are chosen.
-        nav(`/add?group=${id}`, { state: { bill: data } })
+        setPage(data)
+        setItems(data.items.map((i) => ({ title: i.label, amount: i.amount })))
+        if (data.date) setDate(data.date)
+        const me = data.members.find((m) => m.toLowerCase() === (user?.name || '').toLowerCase())
+        setPaidBy(me || (data.members.length === 1 ? data.members[0] : ''))
+        setSplitWith(data.members)
         return
       }
       setPage(data)
@@ -66,6 +77,26 @@ export default function LedgerImport() {
   const dupMember = Object.values(mapping).filter(Boolean).length !== new Set(Object.values(mapping).filter(Boolean)).size
   const allOk = rows.length > 0 && rows.every(rowOk) && !unmapped.length && !dupMember
   const grand = rows.reduce((s, r) => s + num(r.total), 0)
+
+  const goodItems = items.filter((it) => it.title.trim() && num(it.amount) > 0)
+  const itemsSum = goodItems.reduce((s, it) => s + num(it.amount), 0)
+  const billOk = goodItems.length > 0 && paidBy && splitWith.length > 0
+  const toggleSplit = (m) => setSplitWith((s) => (s.includes(m) ? s.filter((x) => x !== m) : [...s, m]))
+  const setItem = (i, patch) => setItems((xs) => xs.map((x, j) => (j === i ? { ...x, ...patch } : x)))
+
+  const saveBill = async () => {
+    setBusy(true); setError('')
+    try {
+      await saveLedgerBill({
+        group_id: Number(id), date, merchant: page.merchant, paid_by: paidBy, participants: splitWith,
+        items: goodItems.map((it) => ({ title: it.title.trim(), amount: num(it.amount) })),
+      })
+      nav(`/groups/${id}`)
+    } catch (err) {
+      setError(err.response?.data?.detail || "Couldn't save these.")
+      setBusy(false)
+    }
+  }
 
   const save = async () => {
     setBusy(true); setError('')
@@ -108,8 +139,8 @@ export default function LedgerImport() {
           <div className="card space-y-3">
             <p className="text-sm text-gray-700">
               Photograph a handwritten page of expenses - Hindi or English, an amount column per person.
-              You'll check every row before anything is saved. A printed bill works too: it opens as one
-              expense to split.
+              You'll check every row before anything is saved. A printed bill works too: each item
+              becomes its own expense.
             </p>
             <div className="flex gap-2">
               <button type="button" disabled={busy} onClick={() => cameraRef.current?.click()} className="btn-primary text-[11.9px] disabled:opacity-50">
@@ -128,10 +159,82 @@ export default function LedgerImport() {
 
         {error && <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-md px-4 py-3">{error}</p>}
 
-        {page && (
+        {page?.kind === 'bill' && (
           <>
             <div className="card space-y-3">
-              {page.title && <p className="text-xs text-gray-500">Page: <b className="text-gray-800">{page.title}</b></p>}
+              <p className="text-xs text-gray-500">
+                Bill{page.merchant && <>: <b className="text-gray-800">{page.merchant}</b></>} · each item becomes its own expense
+              </p>
+              <div>
+                <label htmlFor="bill-date" className="label">Date</label>
+                <input id="bill-date" type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} />
+              </div>
+              <div>
+                <label htmlFor="bill-payer" className="label">Paid by</label>
+                <select id="bill-payer" className="input" value={paidBy} onChange={(e) => setPaidBy(e.target.value)}>
+                  <option value="">Choose who paid</option>
+                  {page.members.map((m) => <option key={m} value={m}>{dn(m, page.members)}</option>)}
+                </select>
+              </div>
+              <div>
+                <p className="label">Split between</p>
+                <div className="flex flex-wrap gap-2">
+                  {page.members.map((m) => {
+                    const on = splitWith.includes(m)
+                    return (
+                      <button key={m} type="button" onClick={() => toggleSplit(m)} aria-pressed={on}
+                        className={`px-3 py-1.5 rounded-full text-xs font-bold border ${on ? 'bg-brand-500 text-white border-brand-500' : 'bg-white text-gray-600 border-amber-300'}`}>
+                        {dn(m, page.members)}
+                      </button>
+                    )
+                  })}
+                </div>
+                {!splitWith.length && <p className="text-xs text-red-600 mt-1">Pick at least one person.</p>}
+              </div>
+            </div>
+
+            {items.map((it, i) => (
+              <div key={i} className="card space-y-2">
+                <div className="flex items-start gap-2">
+                  <input className="input flex-1 font-semibold" value={it.title} aria-label="Item"
+                    onChange={(e) => setItem(i, { title: e.target.value })} />
+                  <button type="button" onClick={() => setItems((xs) => xs.filter((_, j) => j !== i))}
+                    className="text-gray-400 hover:text-red-500 px-2 py-2.5" aria-label="Remove item">✕</button>
+                </div>
+                <div className="flex items-center gap-3">
+                  <input className="input w-36 font-bold" inputMode="decimal" value={it.amount} aria-label="Amount"
+                    onChange={(e) => setItem(i, { amount: e.target.value.replace(/[^\d.]/g, '') })} />
+                  {splitWith.length > 0 && num(it.amount) > 0 && (
+                    <span className="text-[11px] text-gray-500">{INR(num(it.amount) / splitWith.length)} each · {splitWith.length} {splitWith.length === 1 ? 'person' : 'people'}</span>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            <button type="button" onClick={() => setItems((xs) => [...xs, { title: '', amount: '' }])}
+              className="w-full py-2.5 text-xs font-bold text-gray-600 bg-white border border-dashed border-amber-300 rounded-md">
+              + Add an item
+            </button>
+
+            {page.total != null && Math.abs(itemsSum - page.total) > 1 && (
+              <p className="text-[11px] font-bold text-amber-700">
+                ⚠ Items add up to {INR(itemsSum)}, the bill's total is {INR(page.total)} - a discount or round-off line? Add it as an item if it should count.
+              </p>
+            )}
+
+            <button type="button" onClick={saveBill} disabled={busy || !billOk} className="btn-primary disabled:opacity-50">
+              {busy ? 'Saving…' : `Save ${goodItems.length} expense${goodItems.length === 1 ? '' : 's'} · ${INR(itemsSum)}`}
+            </button>
+            <button type="button" onClick={() => { setPage(null); setItems([]) }} className="w-full text-xs font-bold text-gray-500 py-2">
+              Read a different photo
+            </button>
+          </>
+        )}
+
+        {page && page.kind !== 'bill' && (
+          <>
+            <div className="card space-y-3">
+              {page.title &&<p className="text-xs text-gray-500">Page: <b className="text-gray-800">{page.title}</b></p>}
               <div>
                 <label htmlFor="ledger-date" className="label">Date of these expenses</label>
                 <input id="ledger-date" type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} />
