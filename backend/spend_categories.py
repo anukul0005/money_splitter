@@ -115,6 +115,21 @@ _BUSINESS = re.compile(r"enterprise|traders|private|pvt|ltd|limited|llp|services
                        r"technolog|india|rzp|razorpay|payu|paytm@|@|ventures|associates|group", re.I)
 
 
+# A tea stall is never paid more than this in one go. A bigger payment to
+# one is something else using a stall's UPI name - betting collections do
+# ("GHOLAP TEA STALL AND TEA WHOLESALER", Rs 4,500) - so it is filed as
+# unclassified, and is no place to eat.
+TEA_STALL_MAX = 1000
+_TEA_STALL = re.compile(r"\b(tea|chai|chay|chaay)\s*(stall|stal|tapri|point|post|corner|wala|walla|stand|kiosk|"
+                        r"shop|centre|center|junction)\b|\btapri\b|\bchaiwala\b", re.I)
+UNCLASSIFIED = ("Other", "Unclassified merchant")
+
+
+def tea_stall_overpaid(amount, *names) -> bool:
+    """A single payment over TEA_STALL_MAX to anything named as a tea stall."""
+    return (amount or 0) > TEA_STALL_MAX and any(_TEA_STALL.search(n or "") for n in names)
+
+
 def _rule(text: str) -> tuple[str, str] | None:
     t = (text or "").lower()
     for c, s, rx in _COMPILED:
@@ -125,6 +140,8 @@ def _rule(text: str) -> tuple[str, str] | None:
 
 def categorize(payee: str, amount: float, linked_title: str | None = None) -> tuple[str, str]:
     """(category, subcategory) for one payment."""
+    if tea_stall_overpaid(amount, payee, linked_title):
+        return UNCLASSIFIED
     hit = _rule(payee)
     if hit:
         return hit

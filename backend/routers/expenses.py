@@ -14,7 +14,7 @@ from models import BankPassword, Group, Expense, Loan, Member, PayeeLabel, State
 from schemas import ExpenseCreate, ExpenseOut
 from emailer import notify_group_activity_bg
 from activity import record_activity
-from spend_categories import categorize
+from spend_categories import UNCLASSIFIED, categorize, tea_stall_overpaid
 from statement_import import StatementLocked, is_self_transfer, own_accounts, parse_statement, time_bucket
 import expense_classifier
 import merchant_memory
@@ -674,6 +674,8 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
     unknown: dict[str, list] = defaultdict(list)
     for t in leftover:
         key = _norm(t.merchant)
+        if tea_stall_overpaid(t.amount, t.merchant):
+            continue                  # decided below, whatever anyone says - not worth an LLM call
         if key and key not in labels and key not in taught and categorize(t.merchant, t.amount)[0] in _UNPLACED:
             unknown[key].append(t)
     llm = {"asked": len(unknown), "answered": 0, "error": None}
@@ -699,6 +701,11 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
     for t in leftover:
         lab = labels.get(_norm(t.merchant))
         line = {"date": t.date, "merchant": t.merchant, "amount": t.amount}
+        if tea_stall_overpaid(t.amount, t.merchant) and not (lab is not None and lab.source == "user"):
+            # More than a tea stall is ever paid: not tea, and no place to
+            # eat - unclassified, over any label's or the LLM's view.
+            keep.append((t, *UNCLASSIFIED, "import", None))
+            continue
         mem = taught.get(_norm(t.merchant))
         if mem is not None and (lab is None or lab.source != "user"):
             keep.append((t, mem.category, mem.subcategory, "merchant", mem.venue))

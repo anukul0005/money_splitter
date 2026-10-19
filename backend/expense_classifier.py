@@ -200,6 +200,7 @@ def _process(ids: set[int]) -> None:
                     e.venue = venues.get(i) if source == "llm" else None
                     e.category_source = source
             db.commit()
+        _guard(db, rows)
         _teach(db, rows)
         _reindex(db, rows)
     finally:
@@ -234,6 +235,18 @@ def canonical_venue(db, v: str | None) -> str | None:
             if n > best_n:
                 best, best_n = name, n
     return best or v
+
+
+def _guard(db, rows) -> None:
+    """Answers no plausible payment has: more than a tea stall is ever paid
+    (spend_categories.TEA_STALL_MAX) is unclassified and no place to eat,
+    whatever the description led the LLM to say."""
+    from spend_categories import UNCLASSIFIED, tea_stall_overpaid
+    for e in rows:
+        if e.category_source in ("llm", "rules") and tea_stall_overpaid(e.amount, e.title, e.merchant, e.venue):
+            e.category, e.subcategory = UNCLASSIFIED
+            e.venue = None
+    db.commit()
 
 
 def _teach(db, rows) -> None:

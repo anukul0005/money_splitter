@@ -28,7 +28,7 @@ import re
 
 from sqlalchemy import func, or_
 
-from spend_categories import _ANONYMOUS, _BUSINESS, _rule
+from spend_categories import _ANONYMOUS, _BUSINESS, _rule, tea_stall_overpaid
 
 # Categories that say nothing about a payee - not worth remembering.
 _UNINFORMATIVE = {"Other", "Small vendors", "One-off payments"}
@@ -81,6 +81,8 @@ def learn_from(db, e) -> None:
     teaches even with the payee name left as the title."""
     if not (e.merchant and e.category and not e.parts):
         return
+    if tea_stall_overpaid(e.amount, e.title, e.merchant, e.venue):
+        return          # not what this payee is - see spend_categories.TEA_STALL_MAX
     if not (_described(e) or e.category_source == "user"):
         return
     if e.category_source not in ("llm", "user", "rules") or e.category in _UNINFORMATIVE:
@@ -143,6 +145,8 @@ def apply(db, lab, old_venue: str | None = None) -> None:
     cat, sub, venue = lab.category, lab.subcategory, lab.venue
     changed = []
     for row in q.all():
+        if tea_stall_overpaid(row.amount, row.title, row.merchant):
+            continue        # stays unclassified, whatever the payee usually is
         if _refileable(row):
             title = venue or row.merchant
             if (row.category, row.subcategory, row.venue, row.title, row.category_source) \
@@ -163,6 +167,8 @@ def fill_venue(db, e) -> None:
     someone named but e itself names no place ("lunch" on a CONNAUGHT
     PLAZA REST payment -> McDonald's). The caller commits."""
     if not (e.merchant and not e.venue and is_food(e.category, e.subcategory)):
+        return
+    if tea_stall_overpaid(e.amount, e.title, e.merchant):
         return
     lab = labels_for(db, {key(e.merchant)}, e.paid_by).get(key(e.merchant))
     if lab is not None and lab.venue:
