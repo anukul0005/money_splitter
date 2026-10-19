@@ -4,15 +4,10 @@ import { getActivity, markActivitySeen } from '../api'
 import { useUser } from '../UserContext'
 import LoadingSpinner from '../components/LoadingSpinner'
 
-const ICONS = {
-  'added an expense':            '💸',
-  'edited an expense':           '✏️',
-  'deleted an expense':          '🗑️',
-  'recorded a payment':          '✅',
-  'deleted a payment':           '↩️',
-  'created a new group':         '👥',
-  'created a new monthly group': '🗓️',
-  'updated the group':           '⚙️',
+/** A summary with its rupee amounts in bold - the part people scan for. */
+function withAmounts(text) {
+  return text.split(/(₹\s?[\d,]+(?:\.\d+)?)/).map((part, i) =>
+    i % 2 ? <b key={i} className="font-bold text-gray-900">{part}</b> : part)
 }
 
 /** Full date + time, e.g. "1 Sep 2026, 4:05 pm". */
@@ -86,7 +81,6 @@ export default function Notifications() {
       <div className="px-5 mt-5 max-w-2xl">
         {items.length === 0 && (
           <div className="text-center py-20">
-            <p className="text-3xl mb-2">🔔</p>
             <p className="text-sm text-gray-400">
               Nothing yet — activity in your groups will show up here.
             </p>
@@ -105,9 +99,6 @@ export default function Notifications() {
                     a.unread ? 'border-brand-300 bg-brand-50/40' : ''
                   }`}
                 >
-                  <span className="text-lg leading-none mt-0.5 flex-shrink-0">
-                    {ICONS[a.verb] ?? '•'}
-                  </span>
                   <span className="flex-1 min-w-0">
                     <span className="block text-sm font-semibold text-gray-900 leading-snug">
                       {a.actor ? `${a.actor} ` : ''}{a.verb}
@@ -116,7 +107,7 @@ export default function Notifications() {
                       )}
                     </span>
                     {a.summary && (
-                      <span className="block text-xs text-gray-600 mt-1">{a.summary}</span>
+                      <span className="block text-xs text-gray-600 mt-1">{withAmounts(a.summary)}</span>
                     )}
                     <span className="block text-[10px] text-gray-400 mt-1">{stamp(a.created_at)}</span>
                   </span>
