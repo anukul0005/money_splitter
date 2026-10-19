@@ -91,6 +91,12 @@ def _ask_vision(prompt: str, image_b64: str) -> dict:
         with urllib.request.urlopen(req, timeout=120) as resp:
             content = json.loads(resp.read().decode())["choices"][0]["message"]["content"]
     except urllib.error.HTTPError as e:
+        if e.code == 429:
+            raise RuntimeError("The notebook reader has hit its free Gemini limit for now - "
+                               "try again in a minute (or tomorrow, if it's the daily limit).") from None
+        if e.code in (401, 403):
+            raise RuntimeError("The notebook reader's Gemini key was refused - "
+                               "check GEMINI_API_KEY on the server.") from None
         detail = e.read().decode(errors="replace")[:200]
         raise RuntimeError(f"Gemini rejected the page ({e.code}): {detail}") from None
     except (urllib.error.URLError, KeyError, ValueError, TimeoutError) as e:

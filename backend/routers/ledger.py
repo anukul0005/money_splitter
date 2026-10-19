@@ -55,6 +55,9 @@ def read_ledger_page(group_id: int = Form(...), file: UploadFile = File(...),
     columns, words = _hints(db, caller.id, group.id)
     try:
         page = ledger_reader.read_page(file.file.read(), columns, words)
+    except RuntimeError as e:
+        # No key, Gemini down or over its quota - nothing a better photo fixes.
+        raise HTTPException(503, str(e)[:200])
     except Exception as e:
         raise HTTPException(502, f"Couldn't read that page - try a sharper, straighter photo. ({str(e)[:150]})")
     mapping = {}
