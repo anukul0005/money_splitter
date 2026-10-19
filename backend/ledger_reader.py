@@ -37,8 +37,17 @@ import urllib.request
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 VISION_MODEL = os.getenv("LEDGER_VISION_MODEL", "gemini-3.8-flash")
 
-_PROMPT = """A photo of a handwritten Indian expense page, Hindi (Devanagari) and English mixed. It is a table:
-the first column names the item, then amount columns headed by letters or words. Rules:
+_PROMPT = """This photo is one of two things. Decide which first.
+
+(A) A PRINTED bill, tax invoice, cash memo or shop receipt - a seller's name, GST/GSTIN, HSN codes, Qty/Rate,
+CGST/SGST/IGST, MRP, a grand total. Its columns are NOT people. Reply with only JSON:
+{{"kind": "bill", "merchant": "the seller's shop or brand name", "date": "YYYY-MM-DD" or null,
+"items": [{{"label": "what the line item is, in plain words - the product description, never the HSN code",
+"amount": the line's final amount including its tax}}],
+"subtotal": number or null, "tax": total tax or null, "total": the grand total payable}}
+
+(B) A HANDWRITTEN Indian expense page, Hindi (Devanagari) and English mixed. It is a table:
+the first column names the item, then amount columns headed by people's letters or names. Rules:
 - Copy each item exactly as written, in its own script; do not guess a meaning first. Then give a short English gloss.
   Common words: सोने का सेट = gold set, गला = necklace, मांग टीका = maang tikka, अंगूठी = ring, साड़ी = saree,
   सूट = suit, सामान = items, खर्च = expense, किराया = rent, कुल = total.
@@ -47,8 +56,13 @@ the first column names the item, then amount columns headed by letters or words.
 - The share columns of a row add up to its total column - use that to read unclear digits.
 - A number alone on a line belongs to the item text on that line or beside it. Never invent a 'Total' row.
 {hints}
-Reply with only JSON: {{"title": str, "columns": [str], "rows": [{{"section": str|null, "item": str,
-"item_en": str, "amounts": {{"<column heading as written>": number|null}}}}]}}"""
+For (B) reply with only JSON: {{"kind": "ledger", "title": str, "columns": [str], "rows": [{{"section": str|null,
+"item": str, "item_en": str, "amounts": {{"<column heading as written>": number|null}}}}]}}"""
+
+# Column headings that only ever belong to a printed bill - a reply that
+# called the page a ledger but used these is a bill all the same.
+_BILL_COLUMNS = {"cgst", "sgst", "igst", "gst", "hsn", "hsnsac", "sac", "qty", "rate", "mrp", "net",
+                 "taxable", "taxablevalue", "amount", "amt", "disc", "discount", "uom"}
 
 
 def _hints_text(columns: dict[str, str], words: dict[str, str]) -> str:
@@ -147,10 +161,34 @@ def fix_row(total: float | None, shares: dict[str, float | None]) -> tuple[float
     return total, s, notes
 
 
+def _money(v) -> float | None:
+    n = _num(v)
+    return round(n, 2) if n else None
+
+
+def _bill(page: dict) -> dict:
+    """A printed bill as one receipt - the shape the receipt scan gives
+    (Expense.receipt_json), for the ordinary add-expense form to split."""
+    items = []
+    for it in page.get("items") or []:
+        if isinstance(it, dict) and str(it.get("label") or "").strip() and _money(it.get("amount")):
+            items.append({"label": str(it["label"]).strip()[:120], "amount": _money(it["amount"])})
+    total = _money(page.get("total")) or (round(sum(i["amount"] for i in items), 2) if items else None)
+    date = page.get("date") if isinstance(page.get("date"), str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", page["date"]) else None
+    return {"kind": "bill", "merchant": str(page.get("merchant") or "").strip()[:200] or None, "date": date,
+            "items": items, "subtotal": _money(page.get("subtotal")), "tax": _money(page.get("tax")), "total": total}
+
+
 def read_page(raw: bytes, column_hints: dict[str, str], word_hints: dict[str, str]) -> dict:
-    """{"title", "columns", "total_column", "rows": [{"section", "item",
-    "item_en", "total", "shares": {column: amount}, "notes", "ok"}]}"""
+    """A handwritten ledger: {"kind": "ledger", "title", "columns",
+    "total_column", "rows": [{"section", "item", "item_en", "total",
+    "shares": {column: amount}, "notes", "ok"}]}. A printed bill: _bill()."""
     page = _ask_vision(_PROMPT.format(hints=_hints_text(column_hints, word_hints)), _image_b64(raw))
+    cols = {re.sub(r"[^a-z]", "", str(c).lower()) for c in (page.get("columns") or [])}
+    if page.get("kind") == "bill" or len(cols & _BILL_COLUMNS) >= 2:
+        if page.get("kind") != "bill":     # called a ledger, but its columns are a bill's
+            page = _ask_vision(_PROMPT.format(hints="") + "\nThis photo is (A), a printed bill.", _image_b64(raw))
+        return _bill(page)
     raw_rows = [r for r in (page.get("rows") or []) if isinstance(r, dict)]
     # A "column" with no number anywhere under it is a heading the model
     # mistook for one (the page title, the item column).
@@ -171,8 +209,10 @@ def read_page(raw: bytes, column_hints: dict[str, str], word_hints: dict[str, st
         item = str(r["item"]).strip()
         total, shares, notes = fix_row(_num(amounts.get(total_col)) if total_col else None,
                                        {c: _num(amounts.get(c)) for c in share_cols})
+        total = round(total, 2) if total else total
+        shares = {c: round(v, 2) for c, v in shares.items()}
         rows.append({"section": r.get("section"), "item": item, "item_en": str(r.get("item_en") or item).strip(),
                      "total": total, "shares": shares, "notes": notes,
                      "ok": total is not None and abs(sum(shares.values()) - total) <= 1})
-    return {"title": page.get("title"), "columns": columns, "total_column": total_col,
+    return {"kind": "ledger", "title": page.get("title"), "columns": columns, "total_column": total_col,
             "share_columns": share_cols, "rows": rows}

@@ -60,6 +60,12 @@ def read_ledger_page(group_id: int = Form(...), file: UploadFile = File(...),
         raise HTTPException(503, str(e)[:200])
     except Exception as e:
         raise HTTPException(502, f"Couldn't read that page - try a sharper, straighter photo. ({str(e)[:150]})")
+    if page.get("kind") == "bill":
+        # A printed bill has no per-person columns: it's one expense, split
+        # the usual way on the add-expense form the page hands it to.
+        if not page.get("total"):
+            raise HTTPException(502, "That looks like a bill, but its total couldn't be read - try a sharper photo.")
+        return page
     mapping = {}
     for col in page["share_columns"]:
         guess = columns.get(col)

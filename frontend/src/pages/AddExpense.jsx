@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { getGroups, createExpense, scanReceipt } from '../api'
 import { useStatementUpload, ANY_STATEMENT } from '../components/StatementUpload'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -69,6 +69,30 @@ export default function AddExpense() {
   })
 
   const amountRef = useRef(null)
+  const location = useLocation()
+
+  // A printed bill photographed on a group's Notebook page arrives here as
+  // if it had been scanned on this form: one expense, split the usual way.
+  useEffect(() => {
+    const bill = location.state?.bill
+    if (!bill) return
+    const itemNote = (bill.items || []).map((i) => i.label).filter(Boolean).join(', ')
+    setForm((f) => ({
+      ...f,
+      title:  bill.merchant || f.title,
+      amount: bill.total != null ? String(bill.total) : f.amount,
+      date:   bill.date || f.date,
+      notes:  itemNote || f.notes,
+    }))
+    setScanInfo({
+      provider: 'Gemini', confidence: 90, extractionMethod: 'llm',
+      extracted: { merchant: bill.merchant, date: bill.date, items: bill.items, total: bill.total },
+    })
+    setReceipt({ merchant: bill.merchant, items: bill.items || [], subtotal: bill.subtotal, tax: bill.tax,
+                 total: bill.total, provider: 'Gemini', method: 'llm' })
+    // Read once: going back and forward again mustn't re-fill an edited form.
+    nav(`${location.pathname}${location.search}`, { replace: true, state: null })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     getGroups()

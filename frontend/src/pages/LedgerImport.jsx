@@ -35,6 +35,12 @@ export default function LedgerImport() {
       // Sent as taken: the server scales it to what the reader reads best -
       // squeezing it here first loses handwriting detail.
       const { data } = await readLedgerPage(id, file)
+      if (data.kind === 'bill') {
+        // A printed bill, not a notebook page: one expense, filled in on
+        // the ordinary form, where who paid and how it splits are chosen.
+        nav(`/add?group=${id}`, { state: { bill: data } })
+        return
+      }
       setPage(data)
       setMapping(Object.fromEntries(data.share_columns.map((c) => [c, data.mapping[c] || ''])))
       setRows(data.rows.map((r) => ({
@@ -102,7 +108,8 @@ export default function LedgerImport() {
           <div className="card space-y-3">
             <p className="text-sm text-gray-700">
               Photograph a handwritten page of expenses - Hindi or English, an amount column per person.
-              You'll check every row before anything is saved.
+              You'll check every row before anything is saved. A printed bill works too: it opens as one
+              expense to split.
             </p>
             <div className="flex gap-2">
               <button type="button" disabled={busy} onClick={() => cameraRef.current?.click()} className="btn-primary text-[11.9px] disabled:opacity-50">
