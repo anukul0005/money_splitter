@@ -221,20 +221,9 @@ def _squash(v: str) -> str:
 def canonical_venue(db, v: str | None) -> str | None:
     """An existing spelling of the same place when there is one - "Zafar
     Omlet Corner" becomes the "Zafar Omelet Corner" already on file - so one
-    place doesn't split into two in the knowledge base."""
-    if not v:
-        return v
-    from difflib import SequenceMatcher
-    from sqlalchemy import func as f
-    from models import Expense
-    key = _squash(v)
-    best, best_n = None, 0
-    for name, n in (db.query(Expense.venue, f.count()).filter(Expense.venue.isnot(None)).group_by(Expense.venue)):
-        k = _squash(name)
-        if k == key or (min(len(k), len(key)) >= 6 and SequenceMatcher(None, k, key).ratio() >= 0.9):
-            if n > best_n:
-                best, best_n = name, n
-    return best or v
+    place doesn't split into two in the knowledge base. See places.py."""
+    from places import canonical
+    return canonical(db, v)
 
 
 def _guard(db, rows) -> None:

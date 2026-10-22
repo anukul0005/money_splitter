@@ -861,6 +861,20 @@ class MerchantLabel(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class PlaceAlias(Base):
+    """Another name for a place to eat, and the name it goes by: "Zafar Egg
+    Corner" -> "Zafar Omelet Corner". For merges no spelling rule could make
+    - see places.py. `alias_key` is places.place_key of the other name."""
+
+    __tablename__ = "place_aliases"
+
+    id = Column(Integer, primary_key=True, index=True)
+    alias_key = Column(String(200), nullable=False, unique=True, index=True)
+    name = Column(String(120), nullable=False)
+    created_by = Column(String(100), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class StatementSkip(Base):
     """A statement payment the import deliberately didn't add as spending
     but that is still worth seeing in its month: an investment, or money

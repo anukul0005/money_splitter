@@ -554,9 +554,10 @@ def index_expense(db: Session, expense, group_id: int | None = None) -> str | No
     never stop somebody recording what they spent.
     """
     from models import KnowledgeItem
+    from places import canonical
 
     t = expense_text(expense)
-    venue = getattr(expense, "venue", None)
+    venue = canonical(db, getattr(expense, "venue", None))
     # A named restaurant, cafe or bar is a place to eat - whatever the regexes
     # make of the words around it. (A liquor shop's bottles stay drinks.)
     is_place = bool(venue) and (expense.category == "Food & Dining"
@@ -601,6 +602,11 @@ def index_expense(db: Session, expense, group_id: int | None = None) -> str | No
     row.label = brand or (venue if is_place else None) or _label(t)
     row.matched_brand = brand
     row.venue = venue if is_place else None
+    if kind == FOOD and not row.venue and brand:
+        # Named only by its price-list match ("Nexe’s chinese"): under the
+        # name the place already goes by ("Nexe Chinese"), so its visits
+        # join that place rather than listing it twice.
+        row.venue = canonical(db, brand)
     row.match_score = round(score, 4)
     row.amount = float(expense.amount or 0)
     row.per_head = round(float(expense.amount or 0) / heads, 2)
