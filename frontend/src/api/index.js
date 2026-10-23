@@ -129,6 +129,7 @@ export const markChargePaid    = (id)        => api.post(`/loans/bills/charges/$
 export const repayBill         = (id, data)  => api.post(`/loans/bills/${id}/repay`, data)
 export const updateBillDay     = (id, data)  => api.patch(`/loans/bills/${id}`, data)
 export const stopBill          = (id)        => api.delete(`/loans/bills/${id}`)
+export const stopBillMember    = (id, member) => api.post(`/loans/bills/${id}/stop-member`, { member })
 
 // ── Credit Cards (Gmail-connected statement scanning) ──────────────────────────
 export const getGmailStatus     = ()          => api.get('/gmail/status')

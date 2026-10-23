@@ -175,8 +175,10 @@ def _bill_out(bill: RecurringBill) -> dict:
 def list_all(db: Session = Depends(get_db), caller: User = Depends(current_user)):
     me = caller.name
     loans = [l for l in db.query(Loan).all() if _same(l.lender, me) or _same(l.borrower, me)]
+    # Someone who stopped a bill still sees it while they owe on it.
     bills = [b for b in db.query(RecurringBill).filter(RecurringBill.active == True).all()  # noqa: E712
-             if _same(b.payer, me) or any(_same(m, me) for m in b.members.split(","))]
+             if _same(b.payer, me) or any(_same(m, me) for m in b.members.split(","))
+             or any(_same(c.member, me) and not c.paid for c in b.charges)]
 
     owe: dict[str, float] = {}    # what the caller owes, by person
     owed: dict[str, float] = {}   # what the caller is owed, by person
@@ -382,6 +384,40 @@ def update_bill_day(bill_id: int, payload: BillDayIn, db: Session = Depends(get_
     bill.day_of_month = payload.day_of_month
     db.commit()
     db.refresh(bill)
+    return _bill_out(bill)
+
+
+class BillMemberStop(BaseModel):
+    member: str
+
+
+@router.post("/bills/{bill_id}/stop-member", response_model=dict)
+def stop_bill_member(bill_id: int, payload: BillMemberStop, db: Session = Depends(get_db),
+                     caller: User = Depends(current_user)):
+    """One person leaves a shared bill: from next month they aren't charged
+    and the bill is split between whoever's left. What they already owe
+    stays owed - their card stays up until it's paid. The payer can stop
+    anyone; anyone can stop their own share."""
+    bill = db.query(RecurringBill).filter(RecurringBill.id == bill_id).first()
+    if not bill or not (_same(bill.payer, caller.name) or _same(payload.member, caller.name)):
+        raise HTTPException(404, "Bill not found")
+    if _same(payload.member, bill.payer):
+        raise HTTPException(400, "The person paying the bill can't leave it - stop the whole bill instead")
+    members = [m for m in bill.members.split(",") if m]
+    if not any(_same(m, payload.member) for m in members):
+        raise HTTPException(400, f"{payload.member} isn't on {bill.title} any more")
+    members = [m for m in members if not _same(m, payload.member)]
+    bill.members = ",".join(members)
+    db.commit()
+    db.refresh(bill)
+    share = bill.amount / max(len(members), 1)
+    who = payload.member
+    still = [m for m in members if not _same(m, bill.payer)]
+    lines = [f"{who} has stopped {bill.title} (stopped by {caller.name}). They won't be charged from next month."]
+    if still:
+        lines.append(f"From next month it's split {len(members)} ways: ₹{share:,.2f} each.")
+    for person in {who, bill.payer, *still} - {caller.name}:
+        send_notice(db, person, f"{who} stopped {bill.title}", lines, f"{who} stopped {bill.title}")
     return _bill_out(bill)
 
 

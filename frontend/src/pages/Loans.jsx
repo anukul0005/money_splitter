@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   getLoans, createLoan, repayLoan, deleteLoan,
-  createBill, stopBill, repayBill, updateBillDay, getFriends,
+  createBill, stopBill, stopBillMember, repayBill, updateBillDay, getFriends,
   listUpiIdsFor, createPaymentClaim,
 } from '../api'
 import { MONEY_CHANGED } from '../components/PaymentClaimsInbox'
@@ -452,14 +452,25 @@ export default function Loans() {
                   const due = charges.filter((c) => !c.paid).reduce((s, c) => s + c.share, 0)
                   const notBilledYet = charges.length === 0
                   const paidOff = !notBilledYet && due <= 0.01
+                  const stopped = !b.members.some((x) => same(x, m))
+                  const left = b.members.length - (stopped ? 0 : 1)
+                  const stopFor = () => {
+                    const who = iPay ? dn(m) : 'you'
+                    const after = left > 1 ? ` ${b.title} will then be split ${left} ways (${INR(b.amount / left)} each).` : ''
+                    const owing = due > 0.01 ? ` The ${INR(due)} already due stays owed.` : ''
+                    if (confirm(`Stop ${b.title} for ${who}? No more monthly charges from next month.${after}${owing}`)) {
+                      run(() => stopBillMember(b.id, m))
+                    }
+                  }
                   return (
                     <div key={m} className={`card ${paidOff ? 'opacity-60' : ''}`}>
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="text-sm font-bold text-gray-900">
                             {iPay ? `${dn(m)} owes you` : `You owe ${dn(b.payer)}`}
+                            {stopped && <span className="ml-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">Stopped</span>}
                           </p>
-                          <p className="text-xs text-gray-400 mt-0.5">{b.title} · {INR(share)}/month</p>
+                          <p className="text-xs text-gray-400 mt-0.5">{b.title} · {stopped ? 'no longer billed' : `${INR(share)}/month`}</p>
                         </div>
                         <p className={`text-base font-black shrink-0 ${notBilledYet ? 'text-gray-400' : paidOff ? 'text-gray-400' : iPay ? 'text-green-600' : 'text-red-600'}`}>
                           {notBilledYet ? 'Not billed yet' : paidOff ? 'Paid' : INR(due)}
@@ -492,6 +503,13 @@ export default function Loans() {
                       )}
                       {openPayKey === `bill-${b.id}-${m}` && (
                         <PayPanel personName={b.payer} amount={due} note={`${b.title} - ${dn(m)}`} kind="bill" refId={b.id} />
+                      )}
+                      {!stopped && (
+                        <div className="flex justify-end mt-2">
+                          <button onClick={stopFor} className="text-[11px] font-bold text-gray-400 hover:text-red-500">
+                            {iPay ? `Stop for ${dn(m)}` : 'Stop my subscription'}
+                          </button>
+                        </div>
                       )}
                     </div>
                   )
