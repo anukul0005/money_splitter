@@ -1,6 +1,7 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+import settle_up
 from activity import record_activity
 from auth import caller_groups, current_user, is_member, member_group
 from database import get_db
@@ -57,6 +58,13 @@ def payments_between(b: str, db: Session = Depends(get_db),
         if bl in (p.from_member.lower(), p.to_member.lower())
     ]
 
+    # A dashboard settlement is one transfer however many groups it was
+    # spread over (settle_up.py): shown once, for what was actually paid,
+    # under the piece that stands for it - whose id edits/deletes it whole.
+    pieces: dict[str, list[Payment]] = {}
+    single = []
+    for p in rows:
+        (pieces.setdefault(p.settlement_ref, []) if p.settlement_ref else single).append(p)
     out = [{
         "id": p.id,
         "group_id": p.group_id,
@@ -67,9 +75,31 @@ def payments_between(b: str, db: Session = Depends(get_db),
         "date": p.date,
         "note": p.note,
         "recorded_at": p.created_at.isoformat() if p.created_at else None,
-    } for p in rows]
+    } for p in single]
+    for ref, ps in pieces.items():
+        lead = min((p for p in ps if p.settlement_amount is not None), key=lambda p: p.id, default=None)
+        if lead is None:
+            continue
+        spread = {p.group_id for p in ps if p.amount > 0.01}
+        out.append({
+            "id": lead.id,
+            "group_id": lead.group_id,
+            "group_name": groups.get(lead.group_id, "") if len(spread) <= 1 else f"across {len(spread)} groups",
+            "from_member": lead.from_member,
+            "to_member": lead.to_member,
+            "amount": lead.settlement_amount,
+            "date": lead.date,
+            "note": lead.note,
+            "recorded_at": lead.created_at.isoformat() if lead.created_at else None,
+        })
     out.sort(key=lambda r: (r["recorded_at"] or "", r["id"]), reverse=True)
     return out
+
+
+def _lead(db: Session, ref: str) -> Payment:
+    """The piece of a settlement that stands for the whole transfer."""
+    return (db.query(Payment).filter(Payment.settlement_ref == ref, Payment.settlement_amount.isnot(None))
+            .order_by(Payment.id).first())
 
 
 def _busiest_group(groups: list[Group]) -> Group:
@@ -138,45 +168,34 @@ def _resolve_group(db: Session, frm: str, to: str, ignore_payment_id: int | None
     return _busiest_group(shared)
 
 
+def _settle_and_log(db: Session, caller: User, payload: PaymentAuto, verb: str,
+                    before: str | None = None) -> tuple[Payment, Group, str]:
+    """settle_up.settle plus its one activity entry - in the group of the
+    piece that stands for the transfer."""
+    lead = settle_up.settle(db, caller, payload.from_member.strip(), payload.to_member.strip(),
+                            payload.amount, payload.date, payload.note)
+    group = db.query(Group).filter(Group.id == lead.group_id).first()
+    covered = settle_up.describe(db, lead.settlement_ref)
+    after = f"{lead.from_member} paid {lead.to_member} {_INR(lead.settlement_amount)}" \
+            + (f" - settles {covered}" if covered else "")
+    summary = after if not before else f"{before} → {after}"
+    record_activity(db, group, caller.name, verb, summary)
+    return lead, group, summary
+
+
 @router.post("/auto", response_model=PaymentOut, status_code=201)
 def create_payment_auto(payload: PaymentAuto, background_tasks: BackgroundTasks,
                         db: Session = Depends(get_db),
                         caller: User = Depends(current_user)):
-    """Record a transfer without naming a group — the debt decides where it lands.
-
-    One transfer is one record. We attach the whole amount to the group where
-    `from_member` owes `to_member` the most, rather than carving it into a row
-    per group. The pair's overall balance comes out identical either way; a
-    single row is what the user actually did.
-    """
-    frm, to = payload.from_member.strip(), payload.to_member.strip()
-    group = _resolve_group(db, frm, to)
-    # You can record a payment on someone else's behalf, but only inside a
-    # group you're in — otherwise this endpoint would write into any group.
-    if not is_member(group, caller):
-        raise HTTPException(403, f"You're not in {group.name}")
-
-    names = {m.name.lower(): m.name for m in group.members}
-    payment = Payment(
-        group_id=group.id,
-        from_member=names[frm.lower()],
-        to_member=names[to.lower()],
-        amount=round(payload.amount, 2),
-        date=payload.date,
-        note=payload.note,
-    )
-    db.add(payment)
-
-    recorder = caller.name
-    summary = f"{payment.from_member} paid {payment.to_member} {_INR(payment.amount)}"
-    record_activity(db, group, recorder, "recorded a payment", summary)
-
+    """Record a transfer without naming a group - the dashboard's "Record a
+    payment". It pays down whatever is owed between the two wherever it
+    sits: each group, loan and bill share, so every screen shows the same
+    settled state as the dashboard (settle_up.py)."""
+    lead, group, summary = _settle_and_log(db, caller, payload, "recorded a payment")
     db.commit()
-    db.refresh(payment)
-
-    background_tasks.add_task(notify_group_activity_bg, group.id, recorder, "recorded a payment", summary)
-
-    return payment
+    db.refresh(lead)
+    background_tasks.add_task(notify_group_activity_bg, group.id, caller.name, "recorded a payment", summary)
+    return lead
 
 
 @router.put("/{payment_id}", response_model=PaymentOut)
@@ -194,6 +213,18 @@ def update_payment(payment_id: int, payload: PaymentAuto, background_tasks: Back
     if not payment:
         raise HTTPException(404, "Payment not found")
     member_group(payment.group_id, caller, db)   # must be in the group it belongs to
+
+    if payment.settlement_ref:
+        # A dashboard settlement: taken back whole and spread again from
+        # the corrected figures.
+        lead0 = _lead(db, payment.settlement_ref)
+        before = f"{lead0.from_member} paid {lead0.to_member} {_INR(lead0.settlement_amount)}"
+        settle_up.undo(db, payment.settlement_ref)
+        lead, group, summary = _settle_and_log(db, caller, payload, "edited a payment", before)
+        db.commit()
+        db.refresh(lead)
+        background_tasks.add_task(notify_group_activity_bg, group.id, caller.name, "edited a payment", summary)
+        return lead
 
     frm, to = payload.from_member.strip(), payload.to_member.strip()
     pair_changed = (
@@ -288,6 +319,16 @@ def delete_payment(payment_id: int, background_tasks: BackgroundTasks,
         raise HTTPException(404, "Payment not found")
 
     group = member_group(payment.group_id, caller, db)
+    if payment.settlement_ref:
+        # Every piece of a dashboard settlement goes, and what it paid off
+        # - loan repayments, bill shares - is open again.
+        lead = _lead(db, payment.settlement_ref)
+        summary = f"{lead.from_member} → {lead.to_member} {_INR(lead.settlement_amount)}"
+        record_activity(db, group, caller.name, "deleted a payment", summary)
+        settle_up.undo(db, payment.settlement_ref)
+        db.commit()
+        background_tasks.add_task(notify_group_activity_bg, group.id, caller.name, "deleted a payment", summary)
+        return
     summary = f"{payment.from_member} → {payment.to_member} {_INR(payment.amount)}"
     # Whoever is logged in did this, not necessarily the person who paid
     record_activity(db, group, caller.name, "deleted a payment", summary)

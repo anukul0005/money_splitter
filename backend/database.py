@@ -219,6 +219,10 @@ _ADDED_COLUMNS = [
     ("knowledge_items", "venue", "VARCHAR(200)"),
     ("expenses", "merchant", "VARCHAR(200)"),
     ("merchant_labels", "venue", "VARCHAR(120)"),
+    ("payments", "settlement_ref", "VARCHAR(32)"),
+    ("payments", "settlement_amount", "DOUBLE PRECISION"),
+    ("loan_payments", "settlement_ref", "VARCHAR(32)"),
+    ("recurring_charges", "settlement_ref", "VARCHAR(32)"),
 ]
 
 # (index name, statement)

@@ -241,6 +241,13 @@ class Payment(Base):
     amount = Column(Float, nullable=False)
     date = Column(String(20), nullable=True)
     note = Column(Text, nullable=True)
+    # One transfer recorded from the dashboard is spread over every group,
+    # loan and bill the two people have between them (settle_up.py); all
+    # its pieces share this ref, so editing or deleting it moves them all.
+    settlement_ref = Column(String(32), nullable=True, index=True)
+    # On the pieces paid by the settlement's payer: the whole transfer as
+    # recorded. NULL on a piece netting a debt the other way.
+    settlement_amount = Column(Float, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     group = relationship("Group", back_populates="payments")
@@ -656,6 +663,7 @@ class LoanPayment(Base):
     loan_id = Column(Integer, ForeignKey("loans.id", ondelete="CASCADE"), nullable=False, index=True)
     amount = Column(Float, nullable=False)
     date = Column(String(10), nullable=False)   # ISO
+    settlement_ref = Column(String(32), nullable=True, index=True)   # see Payment.settlement_ref
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     loan = relationship("Loan", back_populates="payments")
@@ -700,6 +708,7 @@ class RecurringCharge(Base):
     share = Column(Float, nullable=False)
     paid = Column(Boolean, nullable=False, default=False)
     paid_on = Column(String(10), nullable=True)
+    settlement_ref = Column(String(32), nullable=True, index=True)   # paid by a dashboard settlement
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     bill = relationship("RecurringBill", back_populates="charges")
