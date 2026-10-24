@@ -327,10 +327,33 @@ SKIP_LAST_PAGES = {"ICICI Bank": 8}
 MIN_PAGES = 3           # never read fewer than this, whatever the rule says
 
 
+# A heading after which a bank's statement has nothing but offers, rewards
+# and terms. SBI Card's "Savings and Benefits" section comes after the last
+# transaction: that page's text before the heading is kept, it and every
+# page after it are not read.
+STOP_AT = {"SBI Card": re.compile(r"^[^\w\n]*savings\s*(?:and|&)\s*benefits", re.I | re.M)}
+
+
 def pages_to_read(bank: str, total: int) -> int:
     """How many pages, from the start, hold the statement itself."""
     skip = SKIP_LAST_PAGES.get(bank, 0)
     return max(total - skip, min(MIN_PAGES, total))
+
+
+def statement_text(bank: str, pages: list[str]) -> tuple[str, int]:
+    """(the statement's own text, how many pages it came from): the pages
+    pages_to_read keeps, cut at the bank's STOP_AT heading when it has one."""
+    keep = pages_to_read(bank, len(pages))
+    stop = STOP_AT.get(bank)
+    if stop:
+        for i, page in enumerate(pages):
+            for m in stop.finditer(page):
+                text = "\n".join(pages[:i] + [page[:m.start()]])
+                # A mention before the statement has even started (a
+                # contents line on page 1) isn't the end of it.
+                if len(text.strip()) >= 300:
+                    return text, i + 1
+    return "\n".join(pages[:keep]), keep
 
 
 def pdf_pages(pdf_bytes: bytes, passwords: list[str]) -> list[str] | None:
@@ -365,42 +388,53 @@ def _step(bill_id: int, text: str) -> None:
         _status[bill_id] = {"status": "reading", "step": text}
 
 
-def _run(user_id: int, bill_id: int) -> None:
+def read_bill(db, user_id: int, bill_id: int, step=lambda text: None) -> dict:
+    """Open the bill's statement email, unlock its PDF with the saved
+    passwords, read it and save the breakup on the bill (details_json).
+    Raises RuntimeError saying what stopped it. Used by the "Read" button
+    (via start) and by the daily auto-sync (card_autosync.py)."""
     import secret_box
-    from database import get_session_factory
-    from models import BankPassword, CreditCardStatement, GmailConnection
+    from models import BankPassword, CreditCard, CreditCardStatement, GmailConnection, User
     from statement_sync import _first_pdf_attachment, _gmail_service
+    bill = db.get(CreditCardStatement, bill_id)
+    conn = db.query(GmailConnection).filter(GmailConnection.user_id == user_id).first()
+    if not bill or not conn:
+        raise RuntimeError("Gmail isn't connected" if bill else "Bill not found")
+    service = _gmail_service(conn)
+    msg = service.users().messages().get(userId="me", id=bill.gmail_message_id, format="full").execute()
+    pdf = _first_pdf_attachment(service, bill.gmail_message_id, msg.get("payload", {}))
+    if not pdf:
+        raise RuntimeError("This bill's email has no PDF statement attached, so there's no breakup to read")
+    step("Unlocking the PDF…")
+    passwords = [p for p in (secret_box.decrypt(b.password_encrypted) for b in
+                             db.query(BankPassword).filter(BankPassword.user_id == user_id)) if p]
+    card = db.get(CreditCard, bill.card_id) if bill.card_id else None
+    if card:
+        from card_bills import passwords_for
+        passwords = passwords_for(card, passwords)
+    pages = pdf_pages(pdf, passwords)
+    if not pages or len("".join(pages).strip()) < 100:
+        raise RuntimeError("The PDF couldn't be opened with the saved passwords")
+    bank = card.bank if card else bill.bank
+    text, used = statement_text(bank, pages)
+    step(f"Reading pages 1–{used} of {len(pages)}…")
+    owner = db.get(User, user_id)
+    details = read_statement(text, user_history(db, owner.name) if owner else None)
+    # stopped_at: whether the bank's end-of-statement heading (STOP_AT) was
+    # found - so a layout change that stops it matching shows up.
+    details["pages"] = {"read": used, "total": len(pages),
+                        "stopped_at": STOP_AT[bank].pattern if bank in STOP_AT and
+                        any(STOP_AT[bank].search(p) for p in pages[:used]) else None}
+    bill.details_json = json.dumps(details)
+    db.commit()
+    return details
+
+
+def _run(user_id: int, bill_id: int) -> None:
+    from database import get_session_factory
     db = get_session_factory()()
     try:
-        bill = db.get(CreditCardStatement, bill_id)
-        conn = db.query(GmailConnection).filter(GmailConnection.user_id == user_id).first()
-        if not bill or not conn:
-            raise RuntimeError("Gmail isn't connected" if bill else "Bill not found")
-        service = _gmail_service(conn)
-        msg = service.users().messages().get(userId="me", id=bill.gmail_message_id, format="full").execute()
-        pdf = _first_pdf_attachment(service, bill.gmail_message_id, msg.get("payload", {}))
-        if not pdf:
-            raise RuntimeError("This bill's email has no PDF statement attached, so there's no breakup to read")
-        _step(bill_id, "Unlocking the PDF…")
-        passwords = [p for p in (secret_box.decrypt(b.password_encrypted) for b in
-                                 db.query(BankPassword).filter(BankPassword.user_id == user_id)) if p]
-        from models import CreditCard
-        card = db.get(CreditCard, bill.card_id) if bill.card_id else None
-        if card:
-            from card_bills import passwords_for
-            passwords = passwords_for(card, passwords)
-        pages = pdf_pages(pdf, passwords)
-        if not pages or len("".join(pages).strip()) < 100:
-            raise RuntimeError("The PDF couldn't be opened with the saved passwords")
-        keep = pages_to_read(card.bank if card else bill.bank, len(pages))
-        text = "\n".join(pages[:keep])
-        _step(bill_id, f"Reading pages 1–{keep} of {len(pages)}…")
-        from models import User
-        owner = db.get(User, user_id)
-        details = read_statement(text, user_history(db, owner.name) if owner else None)
-        details["pages"] = {"read": keep, "total": len(pages)}
-        bill.details_json = json.dumps(details)
-        db.commit()
+        read_bill(db, user_id, bill_id, lambda text: _step(bill_id, text))
         with _lock:
             _status.pop(bill_id, None)
     except Exception as e:

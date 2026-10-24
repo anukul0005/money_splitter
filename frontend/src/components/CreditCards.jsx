@@ -275,6 +275,9 @@ export default function CreditCards({ initialMsg = '' }) {
               <p className="text-[11px] text-gray-400 mt-0.5">
                 {gmail.last_synced_at ? `Last searched ${new Date(gmail.last_synced_at).toLocaleString('en-IN')}` : 'Not searched yet'}
               </p>
+              <p className="text-[11px] text-green-700 font-semibold mt-0.5">
+                Auto-sync on · each bill is fetched, unlocked and read daily after its bill date
+              </p>
             </div>
             <button onClick={() => confirm('Disconnect Gmail? Bills already found stay saved.') && run(() => disconnectGmail())}
               className="text-xs font-bold text-gray-400 hover:text-red-500 shrink-0">Disconnect</button>

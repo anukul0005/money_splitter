@@ -220,6 +220,11 @@ def daily_jobs(db: Session) -> dict:
     from loan_jobs import run_bills, run_loan_reminders
     loan_summary = {**run_bills(db, today), **run_loan_reminders(db, today)}
 
+    # Credit card bills due by today: fetched from Gmail, unlocked, read -
+    # in the background, see card_autosync.py.
+    import card_autosync
+    card_autosync.start(today)
+
     # Yesterday's spending, for whoever turned it on (User.daily_summary).
     from daily_summary import summarise
     summaries_sent, summaries_failed = [], []
@@ -235,7 +240,7 @@ def daily_jobs(db: Session) -> dict:
             db.rollback()
             summaries_failed.append(f"{user.name}: {e}")
 
-    return {"date": iso_today, "birthdays_today": sent, **loan_summary,
+    return {"date": iso_today, "birthdays_today": sent, **loan_summary, "card_sync": "started",
             "daily_summaries_sent": summaries_sent, "daily_summaries_failed": summaries_failed,
             "skipped_no_email": skipped_no_email, "failed": failed,
             "memories_sent": memory_groups, "memories_failed": memory_failed,
