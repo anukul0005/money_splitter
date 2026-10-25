@@ -231,6 +231,9 @@ export const searchFood        = (p)    => api.get('/food/search', { params: p }
 export const listPlaceNames    = (city) => api.get('/food/names', { params: { city } })
 export const getMyPlaces       = ()     => api.get('/food/my-places')
 export const getMyPlaceVisits  = (name) => api.get('/food/my-places/visits', { params: { name } })
+// Bottles I've had - read from drink expenses' descriptions and notes (backend bottles.py)
+export const getMyBottles      = ()     => api.get('/drinks/my-bottles')
+export const getBottlePurchases = (name, size) => api.get('/drinks/my-bottles/purchases', { params: { name, size } })
 
 // ── Forecast ───────────────────────────────────────────────────────────────────
 // Two directions on the same question. /budget splits one total into a

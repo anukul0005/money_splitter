@@ -203,6 +203,7 @@ def _process(ids: set[int]) -> None:
         _guard(db, rows)
         _teach(db, rows)
         _reindex(db, rows)
+        _bottles(db, rows)
     finally:
         db.close()
 
@@ -224,6 +225,21 @@ def canonical_venue(db, v: str | None) -> str | None:
     place doesn't split into two in the knowledge base. See places.py."""
     from places import canonical
     return canonical(db, v)
+
+
+def _bottles(db, rows) -> None:
+    """A drink expense just categorised: read the bottles it names, for
+    "Bottles I've had" (bottles.py). Never allowed to break categorising."""
+    drinks = [e for e in rows if e.category == "Alcohol"]
+    if not drinks:
+        return
+    try:
+        import bottles
+        bottles.scan(db, drinks)
+        db.commit()
+    except Exception as err:
+        db.rollback()
+        print(f"[classify] bottle reading failed: {err}")
 
 
 def _guard(db, rows) -> None:

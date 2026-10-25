@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   getRecommendMeta, getRecommendation, getFriends, searchRecommend, listBrands,
-  logRecommendShown, getRecommendEventsSummary,
+  logRecommendShown, getRecommendEventsSummary, getMyBottles,
 } from '../api'
 
 import Dropdown from '../components/Dropdown'
@@ -240,6 +240,33 @@ function MatchBreakdown({ score, breakdown, weights, open, onToggle }) {
  * subject in India, so the state matters more than anything else) and what
  * this exact set of people has actually bought together before.
  */
+// Every bottle you've had, from your drink expenses - a summary that opens
+// the full list (/drinks/bottles, pages/MyBottles.jsx). Shown while it's
+// still being read, too: opening it is what reads the rest.
+function YourBottles() {
+  const nav = useNavigate()
+  const [data, setData] = useState(null)
+  useEffect(() => { getMyBottles().then((r) => setData(r.data)).catch(() => setData(null)) }, [])
+  if (!data || (data.bottles.length === 0 && !data.unread)) return null
+  const list = data.bottles
+  return (
+    <button onClick={() => nav('/drinks/bottles')} className="card w-full text-left active:scale-[0.99] transition-transform">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Bottles I've had</p>
+          <p className="text-sm font-bold text-gray-900 mt-1">
+            {list.length ? `${list.length} bottles, from your drink expenses` : 'Reading your drink expenses…'}
+          </p>
+          {list.length > 0 && (
+            <p className="text-[11px] text-gray-500 mt-0.5 truncate">{list.slice(0, 4).map((b) => b.name).join(' · ')}</p>
+          )}
+        </div>
+        <span className="text-brand-500 text-lg font-bold shrink-0">›</span>
+      </div>
+    </button>
+  )
+}
+
 /** Drinks, food and the party forecast for people with full access;
  *  everyone else gets the food recommender on its own (no tabs, no mention
  *  of the rest) - see UserContext.hasFullAccess. */
@@ -681,6 +708,7 @@ function DrinksRecommend() {
       </div>
 
       <div className="px-5 mt-4 space-y-4 max-w-2xl">
+        <YourBottles />
         <div className="card space-y-3">
           {/* State first: alcohol is taxed per state, so it drives every price.
               Dropdown, not a native <select> - a native one's open list is a

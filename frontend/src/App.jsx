@@ -8,6 +8,7 @@ import Groups      from './pages/Groups'
 import GroupDetail from './pages/GroupDetail'
 import AddExpense  from './pages/AddExpense'
 import LedgerImport      from './pages/LedgerImport'
+import MyBottles         from './pages/MyBottles'
 import NewGroup    from './pages/NewGroup'
 import MonthlyGroup from './pages/MonthlyGroup'
 import EditGroup   from './pages/EditGroup'
@@ -133,6 +134,7 @@ export default function App() {
                 <Route path="/insights" element={<Insights />} />
                 <Route path="/credit-cards/card/:id" element={<CardBill />} />
                 <Route path="/food/places" element={<MyPlaces />} />
+                <Route path="/drinks/bottles" element={<MyBottles />} />
                 <Route path="/master/:key" element={<MasterGroupDetail />} />
                 <Route path="/friends/:name" element={<FriendDetail />} />
                 <Route path="/account" element={<Account />} />

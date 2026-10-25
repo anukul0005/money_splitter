@@ -918,6 +918,34 @@ class MerchantLabel(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class DrinkBottle(Base):
+    """A bottle (or can) one expense bought, as read from its description,
+    notes and receipt (bottles.py): "Old Monk", half (375 ml), 1, Rs 640.
+    `price_each` is null when the expense doesn't say what this bottle cost
+    (several bottles, one total). Feeds "Bottles I've had"."""
+
+    __tablename__ = "drink_bottles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    expense_id = Column(Integer, ForeignKey("expenses.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(120), nullable=False)
+    size = Column(String(30), nullable=True)        # "quarter", "half", "full", "can", "pint"...
+    size_ml = Column(Integer, nullable=True)
+    qty = Column(Integer, nullable=False, default=1)
+    price_each = Column(Float, nullable=True)
+
+
+class DrinkScan(Base):
+    """That an expense's text has been read for bottles (bottles.py), and
+    what the text was - an edit changes the hash, so it's read again."""
+
+    __tablename__ = "drink_scans"
+
+    expense_id = Column(Integer, ForeignKey("expenses.id", ondelete="CASCADE"), primary_key=True)
+    text_hash = Column(String(64), nullable=False)
+    scanned_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class PlaceAlias(Base):
     """Another name for a place to eat, and the name it goes by: "Zafar Egg
     Corner" -> "Zafar Omelet Corner". For merges no spelling rule could make
