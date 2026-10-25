@@ -16,7 +16,9 @@ settle() spreads the transfer instead, each piece no larger than the debt
 it pays:
   1. whatever the receiver owes the payer anywhere is netted off first - a
      payment the other way in that group, their bill shares marked paid,
-     their loan repaid - and adds to what there is to spend;
+     their loan repaid - against the payer's debts of the same kind only
+     (group against group...), so no bill or loan is marked paid by
+     anything but the cash itself;
   2. the payer's unpaid bill shares, oldest first (only whole shares);
   3. their loans, by due date;
   4. each group where they owe, by exactly what's owed there -
@@ -135,21 +137,42 @@ def settle(db, caller: User, frm: str, to: str, amount: float, when: str | None,
     meant = {k for k, total in by_kind.items() if total > 0.01 and abs(total - amount) <= 1}
     first = lambda x: ((0,) + x[0][1:]) if x[1] in meant else x[0]
 
-    left = amount
+    # Debts the other way are netted off - but each against the payer's
+    # debts of the same kind: group against group, bill against bill, loan
+    # against loan. Only the cash itself pays across kinds. Pooling the two
+    # let a ₹334 payment mark ₹767 of Netflix paid, funded by what Anukul
+    # owed Anubhav in other groups.
     for _, kind, obj, amt in sorted(owed_by_receiver, key=lambda x: x[0]):
         clear(kind, obj, amt, to, frm, False)
-        left += amt
-    for _, kind, obj, amt in sorted(owed_by_payer, key=first):
-        if left <= 0.01:
-            break
+    credit: dict[str, float] = {}
+    for _, kind, _o, amt in owed_by_receiver:
+        credit[kind] = credit.get(kind, 0) + amt
+    todo = [list(x) for x in sorted(owed_by_payer, key=first)]   # [order, kind, obj, still owed]
+
+    def take(item, budget: float) -> float:
+        """Pay `item` out of `budget`; returns how much it used."""
+        _, kind, obj, amt = item
+        if amt <= 0.01 or budget <= 0.01:
+            return 0.0
         if kind == "charge":
-            if left + 0.01 >= amt:            # a bill share is paid whole or not at all
-                clear(kind, obj, amt, frm, to, True)
-                left -= amt
-            continue
-        part = min(left, amt)
+            if budget + 0.01 < amt:          # a bill share is paid whole or not at all
+                return 0.0
+            part = amt
+        else:
+            part = min(budget, amt)
         clear(kind, obj, part, frm, to, True)
-        left -= part
+        item[3] = round(amt - part, 2)
+        return part
+
+    for item in todo:                         # 1. netting, kind by kind
+        credit[item[1]] = credit.get(item[1], 0) - take(item, credit.get(item[1], 0))
+    spare = sum(v for v in credit.values() if v > 0.01)
+    for item in todo:                         # 2. the other person owed more of a kind than
+        spare -= take(item, spare)            #    they're owed in it: still netted, books balance
+    cash = amount
+    for item in todo:                         # 3. the cash
+        cash -= take(item, cash)
+    left = cash + spare
     if left > 0.01:
         pay(_credit_group(groups), frm, to, left, True)
     if not any(p.settlement_amount is not None for p in rows):
