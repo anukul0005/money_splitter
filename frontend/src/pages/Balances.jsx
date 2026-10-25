@@ -118,12 +118,17 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
   const byDate = (a, b) => (since(a) > since(b) ? 1 : -1)
   const same_ = groups.filter((g) => (owing ? g.net < 0 : g.net > 0)).sort(byDate)
   const opposite = groups.filter((g) => (owing ? g.net > 0 : g.net < 0)).sort(byDate)
-  const timeline = same_.map((g) => ({ kind: 'group', key: `g${g.group_id}`, data: g }))
+  // One dated timeline, oldest first: each group by when it began, each
+  // payment on the day it was paid - so a payment sits among the groups it
+  // came after, not in a list of its own.
+  const timeline = [
+    ...same_.map((g) => ({ kind: 'group', key: `g${g.group_id}`, at: since(g), data: g })),
+    ...(payments || []).map((p) => ({ kind: 'payment', key: `p${p.id}`,
+                                      at: (p.date || p.recorded_at || '').slice(0, 10), data: p })),
+  ].sort((a, b) => (a.at === b.at ? (a.kind === 'group' ? -1 : 1) : a.at > b.at ? 1 : -1))
   // What each group came to from its expenses alone - against what's left
   // now, the part already paid in it.
   const originally = Object.fromEntries((row.groups || []).map((g) => [g.group_id, g.net]))
-  const paid = [...(payments || [])].sort((a, b) =>
-    ((b.recorded_at || b.date || '') > (a.recorded_at || a.date || '') ? 1 : -1))
 
   return (
     <div className={`card ${loanOnly ? 'border-l-4 border-l-orange-400' : ''}`}>
@@ -233,6 +238,24 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
               them apart from the group rows. */}
           {row.loanItems.filter((it) => it.tag === 'Bill').map((it) => <LoanItem key={it.key} it={it} nav={nav} />)}
           {timeline.map((row2) => {
+            if (row2.kind === 'payment') {
+              const p = row2.data
+              // A thin rule rather than a boxed row: money that moved,
+              // not another debt.
+              return (
+                <div key={row2.key} className="w-full flex items-center gap-2 py-0.5">
+                  <span className="h-px flex-1 bg-green-200" />
+                  <span className="flex items-center gap-1.5 text-[10.84px] font-bold text-green-700 whitespace-nowrap">
+                    <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                    {dn(p.from_member)} paid {dn(p.to_member)} {INR(p.amount)}
+                    <span className="font-normal text-gray-400">· {stamp(p.date || p.recorded_at)}</span>
+                  </span>
+                  <span className="h-px flex-1 bg-green-200" />
+                </div>
+              )
+            }
             const now = Math.abs(row2.data.net)
             const signed = originally[row2.data.group_id]
             // Same direction as it started, and less of it: part-paid. (A
@@ -269,27 +292,6 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
                   <span className="text-[0.739rem] font-semibold text-gray-600 flex-1 min-w-0 truncate">{g.name}</span>
                   <span className="text-[0.739rem] font-bold text-gray-500 flex-shrink-0">−{INR(Math.abs(g.net))}</span>
                 </button>
-              ))}
-            </>
-          )}
-
-          {/* Payments already made - each a thin rule rather than a boxed
-              row, so it reads as money that has moved, not another debt. */}
-          {paid.length > 0 && (
-            <>
-              <p className="text-[9.85px] font-bold text-gray-400 uppercase tracking-widest pt-2">Paid so far</p>
-              {paid.map((p) => (
-                <div key={`p${p.id}`} className="w-full flex items-center gap-2 py-0.5">
-                  <span className="h-px flex-1 bg-green-200" />
-                  <span className="flex items-center gap-1.5 text-[10.84px] font-bold text-green-700 whitespace-nowrap">
-                    <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                    </svg>
-                    {dn(p.from_member)} paid {dn(p.to_member)} {INR(p.amount)}
-                    <span className="font-normal text-gray-400">· {stamp(p.recorded_at || p.date)}</span>
-                  </span>
-                  <span className="h-px flex-1 bg-green-200" />
-                </div>
               ))}
             </>
           )}
