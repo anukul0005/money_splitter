@@ -43,13 +43,17 @@ def key(merchant: str | None) -> str:
     return "".join(ch for ch in (merchant or "").lower() if ch.isalnum())
 
 
-def _scope(merchant: str, teacher: str) -> str | None:
+def _scope(merchant: str, teacher: str, venue: str | None = None) -> str | None:
     """Who a label for this payee applies to: EVERYONE for a business, the
-    teacher alone for a person's name, None for an anonymous payee."""
+    teacher alone for a person's name, None for an anonymous payee.
+
+    A person's name that turned out to be a place to eat ("Mr Akhilesh
+    Rajak" is Patiala Seekh Kabab) is that shop's UPI account, not a friend
+    - so it's shared like any business: whoever pays it next is eating there."""
     m = (merchant or "").strip()
     if len(key(m)) < 4 or "*" in m or _ANONYMOUS.search(m) or sum(c.isdigit() for c in m) >= 6:
         return None
-    return EVERYONE if (_rule(m) or _BUSINESS.search(m)) else teacher
+    return EVERYONE if (venue or _rule(m) or _BUSINESS.search(m)) else teacher
 
 
 def _described(e) -> bool:
@@ -115,10 +119,13 @@ def learn(db, merchant: str, category: str, subcategory: str | None, teacher: st
           venue: str | None = None) -> None:
     from models import Expense, MerchantLabel
 
-    owner = _scope(merchant, teacher)
+    owner = _scope(merchant, teacher, venue if is_food(category, subcategory) else None)
     if owner is None:
         return
     k = key(merchant)
+    if owner != EVERYONE and db.query(MerchantLabel.id).filter(
+            MerchantLabel.merchant_key == k, MerchantLabel.owner == EVERYONE).first():
+        owner = EVERYONE     # already known to everyone as a place: "lunch" there updates that
     lab = (db.query(MerchantLabel)
            .filter(MerchantLabel.merchant_key == k, MerchantLabel.owner == owner).first())
     old_venue = lab.venue if lab else None
@@ -206,8 +213,31 @@ _MERGE_NOTE = re.compile(r"(?:^|·\s*)(?:PhonePe|Google Pay|GPay|Paytm|BHIM|Amaz
 # only - so no import ever matches it. Bump the version to run it again
 # after learning something new (v2: places to eat; v3: imports from before
 # category_source was kept; v4: descriptions naming a known place the AI
-# didn't read as one).
-_BACKFILL_MARK = "#backfill-v4"
+# didn't read as one; v5: person-named payees that are places to eat
+# shared with everyone).
+_BACKFILL_MARK = "#backfill-v5"
+
+
+def share_places(db) -> int:
+    """Labels kept for their teacher alone because the payee is a person's
+    name, but which name a place to eat: shared with everyone (_scope).
+    Returns how many."""
+    from models import MerchantLabel
+    n = 0
+    for lab in db.query(MerchantLabel).filter(MerchantLabel.venue.isnot(None),
+                                              MerchantLabel.owner.notin_([EVERYONE, "#system"])).all():
+        shared = (db.query(MerchantLabel)
+                  .filter(MerchantLabel.merchant_key == lab.merchant_key, MerchantLabel.owner == EVERYONE).first())
+        if shared:
+            db.delete(lab)            # the shared one already says what this payee is
+            target = shared
+        else:
+            lab.owner = EVERYONE
+            target = lab
+        db.flush()
+        apply(db, target)
+        n += 1
+    return n
 
 
 def backfill() -> int:
@@ -238,6 +268,7 @@ def backfill() -> int:
         for e in rows:
             recognise_place(db, e)
             learn_from(db, e)
+        share_places(db)
         for lab in db.query(MerchantLabel).filter(MerchantLabel.owner != "#system").all():
             apply(db, lab)
         for e in rows:      # "lunch" there before anyone named the place
