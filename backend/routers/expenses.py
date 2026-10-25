@@ -579,6 +579,7 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
         # the description is already categorised, else by the categoriser.
         if not exp.merchant:
             exp.merchant = first.merchant[:200]
+        merchant_memory.recognise_place(db, exp)   # a known place the AI missed
         merchant_memory.learn_from(db, exp)
         merchant_memory.fill_venue(db, exp)   # "lunch" at a place someone named
         if first.time and not exp.txn_time:
@@ -597,6 +598,7 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
         # As in merge: the payer's description teaches what the payee is.
         if not exp.merchant:
             exp.merchant = parts[0].merchant[:200]
+        merchant_memory.recognise_place(db, exp)
         merchant_memory.learn_from(db, exp)
         merchant_memory.fill_venue(db, exp)
         how = f" - paid in {len(parts)} parts" if len(parts) > 1 else ""

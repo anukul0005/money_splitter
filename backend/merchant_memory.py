@@ -74,6 +74,26 @@ def touched(db) -> list[int]:
     return sorted(db.info.pop("merchant_touched", set()))
 
 
+def recognise_place(db, e) -> bool:
+    """A statement payment described by a person whose words name a place
+    to eat already on file - "Mr Akhilesh Rajak - patiyala seekh kabab" -
+    gets that place and its usual category, whatever the AI made of it
+    (it said "Small vendors", no venue). Call before learn_from, which then
+    teaches the payee. True when it changed e."""
+    from places import known_place_in
+    if not (e.merchant and not e.venue and _described(e)) or e.parts:
+        return False
+    hit = known_place_in(db, f"{e.title or ''} {e.notes or ''}")
+    if not hit:
+        return False
+    e.venue = hit[0]
+    if not is_food(e.category, e.subcategory):
+        e.category, e.subcategory = hit[1], hit[2]
+    if e.id:
+        _touched(db, [e.id])
+    return True
+
+
 def learn_from(db, e) -> None:
     """Remember what e's payee is, when e is a statement payment a person
     described and that description has been categorised. Call after the
@@ -185,8 +205,9 @@ _MERGE_NOTE = re.compile(r"(?:^|·\s*)(?:PhonePe|Google Pay|GPay|Paytm|BHIM|Amaz
 # Marks the backfill as done. Not a payee key - those are letters and digits
 # only - so no import ever matches it. Bump the version to run it again
 # after learning something new (v2: places to eat; v3: imports from before
-# category_source was kept).
-_BACKFILL_MARK = "#backfill-v3"
+# category_source was kept; v4: descriptions naming a known place the AI
+# didn't read as one).
+_BACKFILL_MARK = "#backfill-v4"
 
 
 def backfill() -> int:
@@ -215,6 +236,7 @@ def backfill() -> int:
             elif e.txn_ref and e.category_source in (None, "import") and e.title:
                 e.merchant = e.title[:200]
         for e in rows:
+            recognise_place(db, e)
             learn_from(db, e)
         for lab in db.query(MerchantLabel).filter(MerchantLabel.owner != "#system").all():
             apply(db, lab)

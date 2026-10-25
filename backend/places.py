@@ -73,6 +73,60 @@ def canonical(db, name: str | None) -> str | None:
     return best or name
 
 
+FOOD_CATEGORIES = ("Food & Dining",)
+
+
+def known_place_in(db, text: str | None) -> tuple[str, str, str | None] | None:
+    """A place already on file named somewhere in this text - (name,
+    category, subcategory) as its visits are usually filed - else None.
+
+    The AI reads "Mr Akhilesh Rajak - patiyala seekh kabab" as a street
+    vendor with no venue; but Patiala Seekh Kabab has two dozen visits on
+    file, and the description names it. Exact for short names (they'd
+    otherwise match by accident), near spellings for longer ones
+    ("patiyala" / "Patiala"), the longest match wins."""
+    from sqlalchemy import func
+    from models import Expense, PlaceAlias
+
+    tkey = place_key(text)
+    if len(tkey) < 6:
+        return None
+    # The places on file, read once per session - a history pass asks this
+    # for hundreds of descriptions.
+    if "place_catalogue" not in db.info:
+        names: dict[str, str] = {}                     # key -> canonical name
+        usual: dict[str, tuple[str, str | None, int]] = {}
+        for venue, cat, sub, n in (db.query(Expense.venue, Expense.category, Expense.subcategory, func.count())
+                                   .filter(Expense.venue.isnot(None), Expense.category.in_(FOOD_CATEGORIES))
+                                   .group_by(Expense.venue, Expense.category, Expense.subcategory)):
+            names[place_key(venue)] = venue
+            if n > usual.get(venue, ("", None, 0))[2]:
+                usual[venue] = (cat, sub, n)
+        for a in db.query(PlaceAlias).all():
+            if a.name in usual:
+                names.setdefault(a.alias_key, a.name)
+        db.info["place_catalogue"] = (names, usual, sorted(names, key=len, reverse=True))
+    names, usual, by_length = db.info["place_catalogue"]
+
+    def found(key: str) -> bool:
+        if len(key) < 6:
+            return False
+        if key in tkey:
+            return True
+        if len(key) < 10:
+            return False
+        w = len(key)
+        return any(SequenceMatcher(None, key, tkey[i:i + w]).ratio() >= 0.9
+                   for i in range(0, max(len(tkey) - w, 0) + 1))
+
+    for key in by_length:
+        if found(key):
+            name = names[key]
+            cat, sub, _ = usual[name]
+            return name, cat, sub
+    return None
+
+
 def merge(db, names: list[str], into: str, by: str = "") -> int:
     """Make every name in `names` the place `into`: remembered for the
     future (PlaceAlias), and renamed on every expense, knowledge-base row

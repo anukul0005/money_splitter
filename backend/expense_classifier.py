@@ -246,6 +246,7 @@ def _teach(db, rows) -> None:
         import merchant_memory
         for e in rows:
             if e.category_source != "pending":
+                merchant_memory.recognise_place(db, e)    # a known place the AI missed
                 merchant_memory.learn_from(db, e)
                 merchant_memory.fill_venue(db, e)   # "lunch" at a place someone named
         ids = {e.id for e in rows}
