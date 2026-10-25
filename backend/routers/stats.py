@@ -192,6 +192,9 @@ def compute_friend_balances(db: Session, name: str) -> list[dict]:
     display: dict[str, str] = {}
     # friend -> group_id -> net owed between `name` and that friend in that group
     per_group: dict[str, dict[int, float]] = defaultdict(lambda: defaultdict(float))
+    # The same, after payments: what's still owed in each group - the
+    # breakdown of the overall figure as it stands now.
+    per_group_live: dict[str, dict[int, float]] = defaultdict(lambda: defaultdict(float))
     group_names: dict[int, str] = {}
 
     for g in groups:
@@ -224,9 +227,11 @@ def compute_friend_balances(db: Session, name: str) -> list[dict]:
                 continue
             if dl == name_l and cl != name_l:
                 net[cl] = net.get(cl, 0.0) - amt
+                per_group_live[cl][g.id] -= amt
                 display.setdefault(cl, creditor)
             elif cl == name_l and dl != name_l:
                 net[dl] = net.get(dl, 0.0) + amt
+                per_group_live[dl][g.id] += amt
                 display.setdefault(dl, debtor)
 
         for (debtor, creditor), amt in frozen_debts.items():
@@ -246,7 +251,13 @@ def compute_friend_balances(db: Session, name: str) -> list[dict]:
             if abs(amt) > 0.01
         ]
         breakdown.sort(key=lambda r: -abs(r["net"]))
-        result.append({"name": display[k], "net": round(v, 2), "groups": breakdown})
+        live = [
+            {"group_id": gid, "name": group_names.get(gid, ""), "net": round(amt, 2)}
+            for gid, amt in per_group_live.get(k, {}).items()
+            if abs(amt) > 0.01
+        ]
+        live.sort(key=lambda r: -abs(r["net"]))
+        result.append({"name": display[k], "net": round(v, 2), "groups": breakdown, "live_groups": live})
 
     result.sort(key=lambda r: (-abs(r["net"]), r["name"].lower()))
     return result

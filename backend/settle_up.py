@@ -19,7 +19,9 @@ it pays:
      their loan repaid - and adds to what there is to spend;
   2. the payer's unpaid bill shares, oldest first (only whole shares);
   3. their loans, by due date;
-  4. each group where they owe, by exactly what's owed there;
+  4. each group where they owe, by exactly what's owed there -
+     except that a payment equal to one kind's total (all group debts, all
+     bill shares, all loans) pays that kind first;
   5. anything left is an overpayment, held as credit in a two-person group
      where possible, where it can't leak to anyone else.
 Every piece carries one settlement_ref, so undo() reverses the lot - the
@@ -121,11 +123,23 @@ def settle(db, caller: User, frm: str, to: str, amount: float, when: str | None,
         else:
             db.add(LoanPayment(loan_id=obj.id, amount=round(amt, 2), date=when, settlement_ref=ref))
 
+    # A payment that matches one kind of debt to the rupee - the group total,
+    # the bill shares, the loans - was meant for that: it's paid first, and
+    # what stays open is the rest. (Anubhav paid exactly his ₹1,492 of group
+    # debts; bills first would have left groups owing and Netflix "paid".)
+    by_kind: dict[str, float] = {}
+    for _, kind, _o, amt in owed_by_payer:
+        by_kind[kind] = by_kind.get(kind, 0) + amt
+    for _, kind, _o, amt in owed_by_receiver:
+        by_kind[kind] = by_kind.get(kind, 0) - amt
+    meant = {k for k, total in by_kind.items() if total > 0.01 and abs(total - amount) <= 1}
+    first = lambda x: ((0,) + x[0][1:]) if x[1] in meant else x[0]
+
     left = amount
     for _, kind, obj, amt in sorted(owed_by_receiver, key=lambda x: x[0]):
         clear(kind, obj, amt, to, frm, False)
         left += amt
-    for _, kind, obj, amt in sorted(owed_by_payer, key=lambda x: x[0]):
+    for _, kind, obj, amt in sorted(owed_by_payer, key=first):
         if left <= 0.01:
             break
         if kind == "charge":

@@ -53,10 +53,14 @@ export function loanContributions(loansData, me) {
 export function combinedBalances(friends, loansData, me) {
   const rows = {}
   for (const f of friends ?? []) {
-    rows[key(f.name)] = { name: f.name, net: f.net ?? 0, groups: f.groups ?? [], loanItems: [] }
+    // groups: each group's amount from its expenses alone (the history);
+    // liveGroups: what's still owed in each after payments (the breakdown
+    // of `net` as it stands).
+    rows[key(f.name)] = { name: f.name, net: f.net ?? 0, groups: f.groups ?? [],
+                          liveGroups: f.live_groups ?? f.groups ?? [], loanItems: [] }
   }
   for (const [k, l] of Object.entries(loanContributions(loansData, me))) {
-    const row = rows[k] || { name: l.name, net: 0, groups: [], loanItems: [] }
+    const row = rows[k] || { name: l.name, net: 0, groups: [], liveGroups: [], loanItems: [] }
     row.net += l.net
     row.loanItems = l.items
     rows[k] = row

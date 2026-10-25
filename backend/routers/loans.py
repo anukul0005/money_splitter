@@ -175,10 +175,11 @@ def _bill_out(bill: RecurringBill) -> dict:
 def list_all(db: Session = Depends(get_db), caller: User = Depends(current_user)):
     me = caller.name
     loans = [l for l in db.query(Loan).all() if _same(l.lender, me) or _same(l.borrower, me)]
-    # Someone who stopped a bill still sees it while they owe on it.
+    # Someone who stopped a bill still sees it - what they owe on it, and
+    # once paid, the record that they did.
     bills = [b for b in db.query(RecurringBill).filter(RecurringBill.active == True).all()  # noqa: E712
              if _same(b.payer, me) or any(_same(m, me) for m in b.members.split(","))
-             or any(_same(c.member, me) and not c.paid for c in b.charges)]
+             or any(_same(c.member, me) for c in b.charges)]
 
     owe: dict[str, float] = {}    # what the caller owes, by person
     owed: dict[str, float] = {}   # what the caller is owed, by person

@@ -90,19 +90,17 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
     }
   }, [expanded])
 
-  const same_ = row.groups.filter((g) => (owing ? g.net < 0 : g.net > 0))
-  const opposite = row.groups.filter((g) => (owing ? g.net > 0 : g.net < 0))
-
-  // One dated timeline for the groups pushing the balance this way and the
-  // payments that clawed it back - interleaved in the order they actually
-  // happened, the same way FriendDetail tells this story, so it's visible
-  // which payment offset which group instead of the two feeling unrelated.
-  const timeline = [
-    ...same_.map((g) => ({ kind: 'group', key: `g${g.group_id}`, at: groupDates[g.group_id] || '', data: g })),
-    ...(payments || []).map((p) => ({
-      kind: 'payment', key: `p${p.id}`, at: (p.recorded_at || p.date || '').slice(0, 10), data: p,
-    })),
-  ].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
+  // What makes up the figure now: what's still owed in each group after
+  // payments (liveGroups), newest group first. A group a payment has
+  // cleared drops out, so these rows plus the loans & bills below add up
+  // to the number on the card. Payments are listed after, as history.
+  const groups = (row.liveGroups ?? row.groups).filter((g) => Math.abs(g.net) >= 1)   // paisa residue isn't a debt
+  const byDate = (a, b) => ((groupDates[b.group_id] || '') > (groupDates[a.group_id] || '') ? 1 : -1)
+  const same_ = groups.filter((g) => (owing ? g.net < 0 : g.net > 0)).sort(byDate)
+  const opposite = groups.filter((g) => (owing ? g.net > 0 : g.net < 0)).sort(byDate)
+  const timeline = same_.map((g) => ({ kind: 'group', key: `g${g.group_id}`, data: g }))
+  const paid = [...(payments || [])].sort((a, b) =>
+    ((b.recorded_at || b.date || '') > (a.recorded_at || a.date || '') ? 1 : -1))
 
   return (
     <div className={`card ${loanOnly ? 'border-l-4 border-l-orange-400' : ''}`}>
@@ -203,34 +201,20 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
 
       {expanded && (
         <div className="space-y-1.5 mt-3">
-          {timeline.map((row2) =>
-            row2.kind === 'group' ? (
-              <button key={row2.key} onClick={() => nav(`/groups/${row2.data.group_id}`)}
-                className={`w-full text-left flex items-center gap-2 rounded-md px-3 py-2 border transition-colors ${
-                  owing ? 'bg-red-50 border-red-100 hover:bg-red-100' : 'bg-green-50 border-green-200 hover:bg-green-100'
-                }`}>
-                <span className="text-[0.739rem] font-semibold text-gray-700 flex-1 min-w-0 truncate">{row2.data.name}</span>
-                <span className={`text-[0.739rem] font-black flex-shrink-0 ${owing ? 'text-red-700' : 'text-green-700'}`}>
-                  {INR(Math.abs(row2.data.net))}
-                </span>
-              </button>
-            ) : (
-              // A settlement - a thin rule with the amount on it, not a boxed
-              // row, so it reads as "this is what reduced the total above"
-              // rather than another debt of its own.
-              <div key={row2.key} className="w-full flex items-center gap-2 py-0.5">
-                <span className="h-px flex-1 bg-green-200" />
-                <span className="flex items-center gap-1.5 text-[10.84px] font-bold text-green-700 whitespace-nowrap">
-                  <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                  {row2.data.from_member} paid {row2.data.to_member} {INR(row2.data.amount)}
-                  <span className="font-normal text-gray-400">· {stamp(row2.data.recorded_at || row2.data.date)}</span>
-                </span>
-                <span className="h-px flex-1 bg-green-200" />
-              </div>
-            )
-          )}
+          <p className="text-[9.85px] font-bold text-gray-400 uppercase tracking-widest">
+            What makes up {INR(Math.abs(row.net))}
+          </p>
+          {timeline.map((row2) => (
+            <button key={row2.key} onClick={() => nav(`/groups/${row2.data.group_id}`)}
+              className={`w-full text-left flex items-center gap-2 rounded-md px-3 py-2 border transition-colors ${
+                owing ? 'bg-red-50 border-red-100 hover:bg-red-100' : 'bg-green-50 border-green-200 hover:bg-green-100'
+              }`}>
+              <span className="text-[0.739rem] font-semibold text-gray-700 flex-1 min-w-0 truncate">{row2.data.name}</span>
+              <span className={`text-[0.739rem] font-black flex-shrink-0 ${owing ? 'text-red-700' : 'text-green-700'}`}>
+                {INR(Math.abs(row2.data.net))}
+              </span>
+            </button>
+          ))}
 
           {/* Loans & recurring bills are a different kind of debt (no group,
               no expense split) - a dashed orange outline keeps them visually
@@ -255,6 +239,27 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
                   <span className="text-[0.739rem] font-semibold text-gray-600 flex-1 min-w-0 truncate">{g.name}</span>
                   <span className="text-[0.739rem] font-bold text-gray-500 flex-shrink-0">−{INR(Math.abs(g.net))}</span>
                 </button>
+              ))}
+            </>
+          )}
+
+          {/* Payments already made - each a thin rule rather than a boxed
+              row, so it reads as money that has moved, not another debt. */}
+          {paid.length > 0 && (
+            <>
+              <p className="text-[9.85px] font-bold text-gray-400 uppercase tracking-widest pt-2">Paid so far</p>
+              {paid.map((p) => (
+                <div key={`p${p.id}`} className="w-full flex items-center gap-2 py-0.5">
+                  <span className="h-px flex-1 bg-green-200" />
+                  <span className="flex items-center gap-1.5 text-[10.84px] font-bold text-green-700 whitespace-nowrap">
+                    <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                    {dn(p.from_member)} paid {dn(p.to_member)} {INR(p.amount)}
+                    <span className="font-normal text-gray-400">· {stamp(p.recorded_at || p.date)}</span>
+                  </span>
+                  <span className="h-px flex-1 bg-green-200" />
+                </div>
               ))}
             </>
           )}
