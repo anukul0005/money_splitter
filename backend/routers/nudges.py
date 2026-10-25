@@ -55,11 +55,11 @@ def balance_with(db: Session, me: str, other: str) -> tuple[float, list[tuple[st
             items.append((f"Loan{' - ' + l.note if l.note else ''}", due if _same(l.lender, me) else -due))
     for b in db.query(RecurringBill).filter(RecurringBill.active == True).all():  # noqa: E712
         if _same(b.payer, me):
-            due = sum(c.share for c in b.charges if _same(c.member, other) and not c.paid)
+            due = sum(c.due for c in b.charges if _same(c.member, other))
             if due > 0.01:
                 items.append((f"Bill - {b.title}", due))
         elif _same(b.payer, other):
-            due = sum(c.share for c in b.charges if _same(c.member, me) and not c.paid)
+            due = sum(c.due for c in b.charges if _same(c.member, me))
             if due > 0.01:
                 items.append((f"Bill - {b.title}", -due))
     return round(sum(v for _, v in items), 2), items

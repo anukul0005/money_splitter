@@ -204,19 +204,17 @@ def confirm(claim_id: int, background_tasks: BackgroundTasks,
             raise HTTPException(404, "Bill not found")
 
         def unpaid() -> float:
-            return sum(ch.share for ch in bill.charges if _same(ch.member, c.payer) and not ch.paid)
+            return sum(ch.due for ch in bill.charges if _same(ch.member, c.payer))
 
         before = unpaid()
         loans_router.repay_bill(c.ref_id, loans_router.BillRepayIn(member=c.payer, amount=c.amount),
                                 db=db, caller=caller)
         db.refresh(bill)
-        # A bill only tracks whole monthly shares - an amount smaller than
-        # the oldest one clears nothing, and "confirmed" with no change to
-        # the balance would be a lie.
+        # Part-payments count now, so only a bill with nothing owed on it
+        # leaves this unchanged - and "confirmed" with no change would be a lie.
         if unpaid() >= before - 0.01:
-            raise HTTPException(400, f"₹{c.amount:,.2f} doesn't cover a full month's share of "
-                                     f"{bill.title}, so there's nothing to mark paid - tap No and "
-                                     "ask them to pay the full share")
+            raise HTTPException(400, f"Nothing is owed on {bill.title} any more, so there's nothing "
+                                     "to mark paid - tap No")
     else:
         # A Balances-page claim is against the pair's net. A shared group is
         # where that normally lives; someone you only have loans with (no

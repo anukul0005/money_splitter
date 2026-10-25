@@ -19,11 +19,11 @@ it pays:
      their loan repaid - against the payer's debts of the same kind only
      (group against group...), so no bill or loan is marked paid by
      anything but the cash itself;
-  2. the payer's unpaid bill shares, oldest first (only whole shares);
+  2. the payer's unpaid recurring-bill shares - always first, whatever the
+     amount: oldest month first, the last one reached part-paid (₹165 of a
+     ₹167 month leaves ₹2 due on it);
   3. their loans, by due date;
-  4. each group where they owe, by exactly what's owed there -
-     except that a payment equal to one kind's total (all group debts, all
-     bill shares, all loans) pays that kind first;
+  4. each group where they owe, by exactly what's owed there;
   5. anything left is an overpayment, held as credit in a two-person group
      where possible, where it can't leak to anyone else.
 Every piece carries one settlement_ref, so undo() reverses the lot - the
@@ -36,7 +36,8 @@ from datetime import date as _date
 
 from fastapi import HTTPException
 
-from models import Group, Loan, LoanPayment, Payment, RecurringBill, RecurringCharge, User
+from models import (ChargePayment, Group, Loan, LoanPayment, Payment, RecurringBill, RecurringCharge, User,
+                    pay_charge, recheck_charge)
 
 
 def _same(a: str | None, b: str | None) -> bool:
@@ -104,10 +105,12 @@ def settle(db, caller: User, frm: str, to: str, amount: float, when: str | None,
     if party:   # loans and bills are only theirs to settle
         for c in (db.query(RecurringCharge).join(RecurringBill)      # active bills, as /loans/ counts them
                   .filter(RecurringCharge.paid == False, RecurringBill.active == True).all()):  # noqa: E712
+            if c.due <= 0.01:
+                continue
             if _same(c.member, frm) and _same(c.bill.payer, to):
-                owed_by_payer.append(((1, c.period), "charge", c, c.share))
+                owed_by_payer.append(((1, c.period), "charge", c, c.due))
             elif _same(c.member, to) and _same(c.bill.payer, frm):
-                owed_by_receiver.append(((1, c.period), "charge", c, c.share))
+                owed_by_receiver.append(((1, c.period), "charge", c, c.due))
         for l in db.query(Loan).all():
             due = outstanding(l)["total_due"]
             if due <= 0.01:
@@ -121,21 +124,13 @@ def settle(db, caller: User, frm: str, to: str, amount: float, when: str | None,
         if kind == "group":
             pay(obj, payer, receiver, amt, primary)
         elif kind == "charge":
-            obj.paid, obj.paid_on, obj.settlement_ref = True, when, ref
+            pay_charge(obj, amt, when, ref)       # a month can be part-paid: ₹165 of ₹167
         else:
             db.add(LoanPayment(loan_id=obj.id, amount=round(amt, 2), date=when, settlement_ref=ref))
 
-    # A payment that matches one kind of debt to the rupee - the group total,
-    # the bill shares, the loans - was meant for that: it's paid first, and
-    # what stays open is the rest. (Anubhav paid exactly his ₹1,492 of group
-    # debts; bills first would have left groups owing and Netflix "paid".)
-    by_kind: dict[str, float] = {}
-    for _, kind, _o, amt in owed_by_payer:
-        by_kind[kind] = by_kind.get(kind, 0) + amt
-    for _, kind, _o, amt in owed_by_receiver:
-        by_kind[kind] = by_kind.get(kind, 0) - amt
-    meant = {k for k, total in by_kind.items() if total > 0.01 and abs(total - amount) <= 1}
-    first = lambda x: ((0,) + x[0][1:]) if x[1] in meant else x[0]
+    # Recurring bills come first, whatever the amount - oldest month first,
+    # the last one reached part-paid - then loans, then groups.
+    first = lambda x: x[0]
 
     # Debts the other way are netted off - but each against the payer's
     # debts of the same kind: group against group, bill against bill, loan
@@ -154,12 +149,7 @@ def settle(db, caller: User, frm: str, to: str, amount: float, when: str | None,
         _, kind, obj, amt = item
         if amt <= 0.01 or budget <= 0.01:
             return 0.0
-        if kind == "charge":
-            if budget + 0.01 < amt:          # a bill share is paid whole or not at all
-                return 0.0
-            part = amt
-        else:
-            part = min(budget, amt)
+        part = round(min(budget, amt), 2)
         clear(kind, obj, part, frm, to, True)
         item[3] = round(amt - part, 2)
         return part
@@ -188,8 +178,12 @@ def undo(db, ref: str) -> None:
     repayments it made go, the bill shares it paid are unpaid again."""
     db.query(Payment).filter(Payment.settlement_ref == ref).delete(synchronize_session="fetch")
     db.query(LoanPayment).filter(LoanPayment.settlement_ref == ref).delete(synchronize_session="fetch")
+    for cp in db.query(ChargePayment).filter(ChargePayment.settlement_ref == ref).all():
+        charge = cp.charge
+        charge.payments.remove(cp)
+        recheck_charge(charge)
     for c in db.query(RecurringCharge).filter(RecurringCharge.settlement_ref == ref).all():
-        c.paid, c.paid_on, c.settlement_ref = False, None, None
+        c.paid, c.paid_on, c.settlement_ref = False, None, None     # paid whole, before part-payments
     db.flush()
 
 
@@ -198,7 +192,8 @@ def describe(db, ref: str) -> str:
     pays = db.query(Payment).filter(Payment.settlement_ref == ref).all()
     groups = {p.group_id for p in pays if p.amount > 0.01}
     loans = db.query(LoanPayment).filter(LoanPayment.settlement_ref == ref).count()
-    bills = db.query(RecurringCharge).filter(RecurringCharge.settlement_ref == ref).count()
+    bills = len({cp.charge_id for cp in db.query(ChargePayment).filter(ChargePayment.settlement_ref == ref)}) \
+        + db.query(RecurringCharge).filter(RecurringCharge.settlement_ref == ref).count()
     parts = []
     if groups:
         parts.append(f"{len(groups)} group{'s' if len(groups) != 1 else ''}")

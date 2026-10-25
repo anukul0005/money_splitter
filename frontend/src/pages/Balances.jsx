@@ -99,6 +99,9 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
   const same_ = groups.filter((g) => (owing ? g.net < 0 : g.net > 0)).sort(byDate)
   const opposite = groups.filter((g) => (owing ? g.net > 0 : g.net < 0)).sort(byDate)
   const timeline = same_.map((g) => ({ kind: 'group', key: `g${g.group_id}`, data: g }))
+  // What each group came to from its expenses alone - against what's left
+  // now, the part already paid in it.
+  const originally = Object.fromEntries((row.groups || []).map((g) => [g.group_id, g.net]))
   const paid = [...(payments || [])].sort((a, b) =>
     ((b.recorded_at || b.date || '') > (a.recorded_at || a.date || '') ? 1 : -1))
 
@@ -204,17 +207,32 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
           <p className="text-[9.85px] font-bold text-gray-400 uppercase tracking-widest">
             What makes up {INR(Math.abs(row.net))}
           </p>
-          {timeline.map((row2) => (
-            <button key={row2.key} onClick={() => nav(`/groups/${row2.data.group_id}`)}
-              className={`w-full text-left flex items-center gap-2 rounded-md px-3 py-2 border transition-colors ${
-                owing ? 'bg-red-50 border-red-100 hover:bg-red-100' : 'bg-green-50 border-green-200 hover:bg-green-100'
-              }`}>
-              <span className="text-[0.739rem] font-semibold text-gray-700 flex-1 min-w-0 truncate">{row2.data.name}</span>
-              <span className={`text-[0.739rem] font-black flex-shrink-0 ${owing ? 'text-red-700' : 'text-green-700'}`}>
-                {INR(Math.abs(row2.data.net))}
-              </span>
-            </button>
-          ))}
+          {timeline.map((row2) => {
+            const now = Math.abs(row2.data.net)
+            const signed = originally[row2.data.group_id]
+            // Same direction as it started, and less of it: part-paid. (A
+            // group that flipped the other way isn't "owed minus paid".)
+            const was = signed != null && Math.sign(signed) === Math.sign(row2.data.net) ? Math.abs(signed) : null
+            const partPaid = was != null && was - now >= 1
+            return (
+              <button key={row2.key} onClick={() => nav(`/groups/${row2.data.group_id}`)}
+                className={`w-full text-left rounded-md px-3 py-2 border transition-colors ${
+                  owing ? 'bg-red-50 border-red-100 hover:bg-red-100' : 'bg-green-50 border-green-200 hover:bg-green-100'
+                }`}>
+                <span className="flex items-center gap-2">
+                  <span className="text-[0.739rem] font-semibold text-gray-700 flex-1 min-w-0 truncate">{row2.data.name}</span>
+                  <span className={`text-[0.739rem] font-black flex-shrink-0 ${owing ? 'text-red-700' : 'text-green-700'}`}>
+                    {INR(now)}
+                  </span>
+                </span>
+                {partPaid && (
+                  <span className="block text-[9.85px] text-gray-500 mt-0.5">
+                    {INR(was)} owed − {INR(was - now)} paid = {INR(now)} now
+                  </span>
+                )}
+              </button>
+            )
+          })}
 
           {/* Loans & recurring bills are a different kind of debt (no group,
               no expense split) - a dashed orange outline keeps them visually

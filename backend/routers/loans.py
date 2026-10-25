@@ -19,7 +19,7 @@ from auth import caller_groups, current_user, is_member
 from database import get_db
 from emailer import send_notice
 from loan_calc import emi_plan, outstanding
-from models import Group, Loan, LoanPayment, RecurringBill, RecurringCharge, User
+from models import Group, Loan, LoanPayment, RecurringBill, RecurringCharge, User, pay_charge
 
 router = APIRouter(prefix="/loans", tags=["loans"])
 
@@ -165,7 +165,8 @@ def _bill_out(bill: RecurringBill) -> dict:
         "day_of_month": bill.day_of_month, "active": bill.active,
         "charges": [
             {"id": c.id, "period": c.period, "member": c.member, "share": c.share,
-             "paid": c.paid, "paid_on": c.paid_on}
+             "paid": c.paid, "paid_on": c.paid_on, "due": c.due,
+             "paid_so_far": round(c.share - c.due, 2) if not c.paid else c.share}
             for c in sorted(bill.charges, key=lambda c: (c.period, c.member), reverse=True)
         ],
     }
@@ -195,12 +196,12 @@ def list_all(db: Session = Depends(get_db), caller: User = Depends(current_user)
                 owed[l.borrower] = owed.get(l.borrower, 0) + due
     for b in bills:
         for c in b.charges:
-            if c.paid:
+            if c.due <= 0.01:
                 continue
             if _same(c.member, me):
-                owe[b.payer] = owe.get(b.payer, 0) + c.share
+                owe[b.payer] = owe.get(b.payer, 0) + c.due
             elif _same(b.payer, me):
-                owed[c.member] = owed.get(c.member, 0) + c.share
+                owed[c.member] = owed.get(c.member, 0) + c.due
 
     return {
         "loans": sorted(loan_rows, key=lambda r: (r["paid"], r["due_date"])),
@@ -325,6 +326,8 @@ def mark_charge_paid(charge_id: int, db: Session = Depends(get_db),
         raise HTTPException(404, "Charge not found")
     c.paid = not c.paid
     c.paid_on = date.today().isoformat() if c.paid else None
+    if not c.paid:
+        c.payments = []       # unticked: owed in full again, part-payments and all
     db.commit()
     return {"id": c.id, "paid": c.paid, "paid_on": c.paid_on}
 
@@ -345,19 +348,20 @@ def repay_bill(bill_id: int, payload: BillRepayIn, db: Session = Depends(get_db)
     if not (_same(bill.payer, caller.name) or _same(payload.member, caller.name)):
         raise HTTPException(404, "Bill not found")
     charges = sorted(
-        (c for c in bill.charges if _same(c.member, payload.member) and not c.paid),
+        (c for c in bill.charges if _same(c.member, payload.member) and c.due > 0.01),
         key=lambda c: c.period,
     )
     remaining = payload.amount
     today = date.today().isoformat()
     cleared = 0.0
+    # Oldest month first; the last one it reaches can be part-paid
+    # (₹165 of ₹167 leaves ₹2 due on that month).
     for c in charges:
-        if remaining + 0.01 < c.share:
+        if remaining <= 0.01:
             break
-        c.paid = True
-        c.paid_on = today
-        remaining -= c.share
-        cleared += c.share
+        part = pay_charge(c, remaining, today)
+        remaining -= part
+        cleared += part
     db.commit()
     db.refresh(bill)
     if cleared > 0:

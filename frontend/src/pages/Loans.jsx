@@ -449,7 +449,7 @@ export default function Loans() {
                 </div>
                 {debtors.map((m) => {
                   const charges = b.charges.filter((c) => same(c.member, m))
-                  const due = charges.filter((c) => !c.paid).reduce((s, c) => s + c.share, 0)
+                  const due = charges.filter((c) => !c.paid).reduce((s, c) => s + (c.due ?? c.share), 0)
                   const notBilledYet = charges.length === 0
                   const paidOff = !notBilledYet && due <= 0.01
                   const stopped = !b.members.some((x) => same(x, m))
@@ -482,7 +482,10 @@ export default function Loans() {
                             <div key={c.id} className="flex items-center justify-between text-[11px]">
                               <span className="text-gray-500">{c.period}</span>
                               <span className={c.paid ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}>
-                                {c.paid ? 'Paid ✓' : `${INR(c.share)} due`}
+                                {c.paid ? 'Paid ✓' : `${INR(c.due ?? c.share)} due`}
+                                {!c.paid && c.paid_so_far > 0.01 && (
+                                  <span className="font-normal text-gray-400"> · {INR(c.paid_so_far)} of {INR(c.share)} paid</span>
+                                )}
                               </span>
                             </div>
                           ))}

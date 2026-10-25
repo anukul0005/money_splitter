@@ -712,6 +712,54 @@ class RecurringCharge(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     bill = relationship("RecurringBill", back_populates="charges")
+    # Part-payments of this share (₹165 of a ₹167 month): `paid` turns true
+    # once they reach the share. A share ticked paid by hand has none.
+    payments = relationship("ChargePayment", back_populates="charge", cascade="all, delete-orphan",
+                            lazy="selectin", order_by="ChargePayment.id")
+
+    @property
+    def due(self) -> float:
+        """What's still owed on this share."""
+        if self.paid:
+            return 0.0
+        return round(max(self.share - sum(p.amount for p in self.payments), 0.0), 2)
+
+
+class ChargePayment(Base):
+    """Money paid towards one RecurringCharge - part of a month's share, or
+    all of it. `settlement_ref` when a dashboard settlement paid it, so
+    taking that settlement back takes this back too (settle_up.undo)."""
+
+    __tablename__ = "charge_payments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    charge_id = Column(Integer, ForeignKey("recurring_charges.id", ondelete="CASCADE"), nullable=False, index=True)
+    amount = Column(Float, nullable=False)
+    date = Column(String(10), nullable=True)
+    settlement_ref = Column(String(32), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    charge = relationship("RecurringCharge", back_populates="payments")
+
+
+def pay_charge(charge: "RecurringCharge", amount: float, when: str | None, ref: str | None = None) -> float:
+    """Put up to `amount` towards this share; returns how much it took.
+    Marks it paid once fully covered."""
+    part = round(min(amount, charge.due), 2)
+    if part <= 0.005:
+        return 0.0
+    charge.payments.append(ChargePayment(amount=part, date=when, settlement_ref=ref))
+    if charge.due <= 0.01:
+        charge.paid, charge.paid_on = True, when
+    return part
+
+
+def recheck_charge(charge: "RecurringCharge") -> None:
+    """After part-payments were taken away: paid only if what's left covers it."""
+    covered = sum(p.amount for p in charge.payments) >= charge.share - 0.01
+    charge.paid = covered
+    if not covered:
+        charge.paid_on = None
 
 
 class GmailConnection(Base):

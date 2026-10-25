@@ -37,11 +37,11 @@ export function loanContributions(loansData, me) {
     if (same(b.payer, me)) {
       const debtors = [...new Set(b.charges.map((c) => c.member))]
       for (const m of debtors) {
-        const due = b.charges.filter((c) => same(c.member, m) && !c.paid).reduce((s, c) => s + c.share, 0)
+        const due = b.charges.filter((c) => same(c.member, m) && !c.paid).reduce((s, c) => s + (c.due ?? c.share), 0)
         if (due > 0.01) add(m, due, { key: `bill${b.id}`, tag: 'Bill', label: b.title, amount: due, positive: true })
       }
     } else {
-      const due = b.charges.filter((c) => same(c.member, me) && !c.paid).reduce((s, c) => s + c.share, 0)
+      const due = b.charges.filter((c) => same(c.member, me) && !c.paid).reduce((s, c) => s + (c.due ?? c.share), 0)
       if (due > 0.01) add(b.payer, -due, { key: `bill${b.id}`, tag: 'Bill', label: b.title, amount: due, positive: false })
     }
   }
