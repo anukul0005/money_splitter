@@ -31,7 +31,18 @@ export default function Loans() {
 
   const [data, setData]       = useState(null)
   const [people, setPeople]   = useState([])
-  const [tab, setTab]         = useState(params.get('tab') === 'cards' ? 'cards' : 'loans')
+  const [tab, setTab]         = useState(['cards', 'bills'].includes(params.get('tab')) ? params.get('tab') : 'loans')
+  // Arriving from a balance breakdown's loan or bill row (?bill=7 / ?loan=3):
+  // that one is scrolled to and briefly highlighted.
+  const focus = params.get('bill') ? `bill-${params.get('bill')}` : params.get('loan') ? `loan-${params.get('loan')}` : null
+  const [flash, setFlash] = useState(focus)
+  useEffect(() => {
+    if (!data || !focus) return
+    const el = document.getElementById(focus)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    const t = setTimeout(() => setFlash(null), 2500)
+    return () => clearTimeout(t)
+  }, [data])   // eslint-disable-line react-hooks/exhaustive-deps
   const [error, setError]     = useState('')
   const [showForm, setShowForm] = useState(false)
 
@@ -352,7 +363,8 @@ export default function Loans() {
             const iOwe = same(l.borrower, me)
             const other = iOwe ? l.lender : l.borrower
             return (
-              <div key={l.id} className={`card ${l.paid ? 'opacity-60' : ''}`}>
+              <div key={l.id} id={`loan-${l.id}`}
+                className={`card scroll-mt-4 transition-shadow ${l.paid ? 'opacity-60' : ''} ${flash === `loan-${l.id}` ? 'ring-2 ring-brand-400' : ''}`}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="text-sm font-bold text-gray-900">
@@ -430,7 +442,8 @@ export default function Loans() {
               ? [...new Set([...b.members.filter((m) => !same(m, me)), ...b.charges.map((c) => c.member)])]
               : [me]
             return (
-              <div key={b.id} className="space-y-2">
+              <div key={b.id} id={`bill-${b.id}`}
+                className={`space-y-2 scroll-mt-4 rounded-lg transition-shadow ${flash === `bill-${b.id}` ? 'ring-2 ring-brand-400 ring-offset-4' : ''}`}>
                 <div className="flex items-center justify-between px-1">
                   <p className="text-xs font-bold text-gray-500">
                     {b.title} · {INR(share)} each · billed on the{' '}

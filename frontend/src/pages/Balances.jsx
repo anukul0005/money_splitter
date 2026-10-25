@@ -37,7 +37,11 @@ function ago(iso) {
 /** A loan or recurring bill in a balance breakdown. */
 function LoanItem({ it, nav }) {
   return (
-    <button onClick={() => nav('/loans')}
+    // Straight to that bill or loan, on its own tab: "bill7" -> /loans?tab=bills&bill=7
+    <button onClick={() => {
+      const [, kind, id] = it.key.match(/^(bill|loan)(\d+)$/) || []
+      nav(kind ? `/loans?tab=${kind === 'bill' ? 'bills' : 'loans'}&${kind}=${id}` : '/loans')
+    }}
       className="w-full text-left flex items-center gap-2 rounded-md px-3 py-2 border-2 border-dashed border-orange-200 bg-orange-50 hover:bg-orange-100 transition-colors">
       <span className="text-[8.87px] font-bold uppercase tracking-widest text-orange-600 flex-shrink-0">{it.tag}</span>
       <span className="text-[0.739rem] font-semibold text-gray-700 flex-1 min-w-0 truncate">{it.label}</span>
