@@ -195,6 +195,10 @@ def compute_friend_balances(db: Session, name: str) -> list[dict]:
     # The same, after payments: what's still owed in each group - the
     # breakdown of the overall figure as it stands now.
     per_group_live: dict[str, dict[int, float]] = defaultdict(lambda: defaultdict(float))
+    # When each group began - payments pay the oldest group first
+    # (settle_up), and the breakdown lists them in that order.
+    from settle_up import started
+    group_since: dict[int, str] = {}
     group_names: dict[int, str] = {}
 
     for g in groups:
@@ -204,6 +208,7 @@ def compute_friend_balances(db: Session, name: str) -> list[dict]:
             continue
 
         group_names[g.id] = g.name
+        group_since[g.id] = started(g)
 
         for n in member_names:
             if n.lower() != name_l:
@@ -252,11 +257,12 @@ def compute_friend_balances(db: Session, name: str) -> list[dict]:
         ]
         breakdown.sort(key=lambda r: -abs(r["net"]))
         live = [
-            {"group_id": gid, "name": group_names.get(gid, ""), "net": round(amt, 2)}
+            {"group_id": gid, "name": group_names.get(gid, ""), "net": round(amt, 2),
+             "since": group_since.get(gid)}
             for gid, amt in per_group_live.get(k, {}).items()
             if abs(amt) > 0.01
         ]
-        live.sort(key=lambda r: -abs(r["net"]))
+        live.sort(key=lambda r: r["since"] or "")
         result.append({"name": display[k], "net": round(v, 2), "groups": breakdown, "live_groups": live})
 
     result.sort(key=lambda r: (-abs(r["net"]), r["name"].lower()))

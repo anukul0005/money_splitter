@@ -34,6 +34,20 @@ function ago(iso) {
   return `${Math.round(mins / 1440)} days ago`
 }
 
+/** A loan or recurring bill in a balance breakdown. */
+function LoanItem({ it, nav }) {
+  return (
+    <button onClick={() => nav('/loans')}
+      className="w-full text-left flex items-center gap-2 rounded-md px-3 py-2 border-2 border-dashed border-orange-200 bg-orange-50 hover:bg-orange-100 transition-colors">
+      <span className="text-[8.87px] font-bold uppercase tracking-widest text-orange-600 flex-shrink-0">{it.tag}</span>
+      <span className="text-[0.739rem] font-semibold text-gray-700 flex-1 min-w-0 truncate">{it.label}</span>
+      <span className={`text-[0.739rem] font-black flex-shrink-0 ${it.positive ? 'text-green-700' : 'text-red-700'}`}>
+        {INR(it.amount)}
+      </span>
+    </button>
+  )
+}
+
 function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastNudge, onNudged }) {
   const [payments, setPayments] = useState(null)
 
@@ -95,7 +109,9 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
   // cleared drops out, so these rows plus the loans & bills below add up
   // to the number on the card. Payments are listed after, as history.
   const groups = (row.liveGroups ?? row.groups).filter((g) => Math.abs(g.net) >= 1)   // paisa residue isn't a debt
-  const byDate = (a, b) => ((groupDates[b.group_id] || '') > (groupDates[a.group_id] || '') ? 1 : -1)
+  // Oldest group first - the order a payment pays them in (settle_up.py).
+  const since = (g) => g.since || groupDates[g.group_id] || ''
+  const byDate = (a, b) => (since(a) > since(b) ? 1 : -1)
   const same_ = groups.filter((g) => (owing ? g.net < 0 : g.net > 0)).sort(byDate)
   const opposite = groups.filter((g) => (owing ? g.net > 0 : g.net < 0)).sort(byDate)
   const timeline = same_.map((g) => ({ kind: 'group', key: `g${g.group_id}`, data: g }))
@@ -207,6 +223,11 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
           <p className="text-[9.85px] font-bold text-gray-400 uppercase tracking-widest">
             What makes up {INR(Math.abs(row.net))}
           </p>
+          {/* In the order a payment pays them: bills, then groups oldest
+              first, then loans. Loans & bills are a different kind of debt
+              (no group, no expense split) - a dashed orange outline keeps
+              them apart from the group rows. */}
+          {row.loanItems.filter((it) => it.tag === 'Bill').map((it) => <LoanItem key={it.key} it={it} nav={nav} />)}
           {timeline.map((row2) => {
             const now = Math.abs(row2.data.net)
             const signed = originally[row2.data.group_id]
@@ -233,20 +254,7 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
               </button>
             )
           })}
-
-          {/* Loans & recurring bills are a different kind of debt (no group,
-              no expense split) - a dashed orange outline keeps them visually
-              apart from group rows instead of blending in as green/red boxes. */}
-          {row.loanItems.map((it) => (
-            <button key={it.key} onClick={() => nav('/loans')}
-              className="w-full text-left flex items-center gap-2 rounded-md px-3 py-2 border-2 border-dashed border-orange-200 bg-orange-50 hover:bg-orange-100 transition-colors">
-              <span className="text-[8.87px] font-bold uppercase tracking-widest text-orange-600 flex-shrink-0">{it.tag}</span>
-              <span className="text-[0.739rem] font-semibold text-gray-700 flex-1 min-w-0 truncate">{it.label}</span>
-              <span className={`text-[0.739rem] font-black flex-shrink-0 ${it.positive ? 'text-green-700' : 'text-red-700'}`}>
-                {INR(it.amount)}
-              </span>
-            </button>
-          ))}
+          {row.loanItems.filter((it) => it.tag !== 'Bill').map((it) => <LoanItem key={it.key} it={it} nav={nav} />)}
 
           {opposite.length > 0 && (
             <>

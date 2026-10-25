@@ -13,19 +13,19 @@ owing the most. Two things went wrong:
     Rs 1,939, and Rs 1,247 of it stopped counting between them.
 
 settle() spreads the transfer instead, each piece no larger than the debt
-it pays:
-  1. whatever the receiver owes the payer anywhere is netted off first - a
-     payment the other way in that group, their bill shares marked paid,
-     their loan repaid - against the payer's debts of the same kind only
-     (group against group...), so no bill or loan is marked paid by
-     anything but the cash itself;
-  2. the payer's unpaid recurring-bill shares - always first, whatever the
-     amount: oldest month first, the last one reached part-paid (₹165 of a
+it pays, in this order - each one paid off before the next, the last one
+reached part-paid:
+  1. the payer's recurring-bill shares, oldest month first (₹165 of a
      ₹167 month leaves ₹2 due on it);
+  2. each group where they owe, oldest group first (by its first expense);
   3. their loans, by due date;
-  4. each group where they owe, by exactly what's owed there;
-  5. anything left is an overpayment, held as credit in a two-person group
+  4. anything left is an overpayment, held as credit in a two-person group
      where possible, where it can't leak to anyone else.
+When the transfer settles everything between the two, what the receiver
+owes the payer is netted off too - a payment the other way in that group,
+their bill shares paid, their loan repaid - each kind against the payer's
+debts of the same kind, so every screen shows square. A part-payment
+moves only the cash.
 Every piece carries one settlement_ref, so undo() reverses the lot - the
 payment list shows it as one entry (routers/payments.payments_between).
 """
@@ -64,6 +64,15 @@ def _credit_group(groups: list[Group]) -> Group:
     return _busiest_group(pairs or groups)
 
 
+def started(g: Group) -> str:
+    """When a group began - its earliest expense, else when it was made.
+    "Oldest group first" goes by this."""
+    dates = [e.date for e in g.expenses if e.date]
+    if dates:
+        return min(dates)
+    return g.created_at.date().isoformat() if g.created_at else "9999"
+
+
 def settle(db, caller: User, frm: str, to: str, amount: float, when: str | None,
            note: str | None) -> Payment:
     """Record frm paying to `amount`, spread as above. Returns the piece that
@@ -99,9 +108,9 @@ def settle(db, caller: User, frm: str, to: str, amount: float, when: str | None,
         net = sum(v for (a, b), v in d.items() if _same(a, frm) and _same(b, to)) \
             - sum(v for (a, b), v in d.items() if _same(a, to) and _same(b, frm))
         if net > 0.01:
-            owed_by_payer.append(((3, -net), "group", g, net))
+            owed_by_payer.append(((2, started(g)), "group", g, net))
         elif net < -0.01:
-            owed_by_receiver.append(((3, net), "group", g, -net))
+            owed_by_receiver.append(((2, started(g)), "group", g, -net))
     if party:   # loans and bills are only theirs to settle
         for c in (db.query(RecurringCharge).join(RecurringBill)      # active bills, as /loans/ counts them
                   .filter(RecurringCharge.paid == False, RecurringBill.active == True).all()):  # noqa: E712
@@ -116,9 +125,9 @@ def settle(db, caller: User, frm: str, to: str, amount: float, when: str | None,
             if due <= 0.01:
                 continue
             if _same(l.borrower, frm) and _same(l.lender, to):
-                owed_by_payer.append(((2, l.due_date or ""), "loan", l, due))
+                owed_by_payer.append(((3, l.due_date or ""), "loan", l, due))
             elif _same(l.borrower, to) and _same(l.lender, frm):
-                owed_by_receiver.append(((2, l.due_date or ""), "loan", l, due))
+                owed_by_receiver.append(((3, l.due_date or ""), "loan", l, due))
 
     def clear(kind, obj, amt, payer, receiver, primary):
         if kind == "group":
@@ -128,21 +137,24 @@ def settle(db, caller: User, frm: str, to: str, amount: float, when: str | None,
         else:
             db.add(LoanPayment(loan_id=obj.id, amount=round(amt, 2), date=when, settlement_ref=ref))
 
-    # Recurring bills come first, whatever the amount - oldest month first,
-    # the last one reached part-paid - then loans, then groups.
-    first = lambda x: x[0]
+    # The order money goes: recurring bills (oldest month first), then
+    # groups (oldest group first), then loans - each paid off before the
+    # next, the last one reached part-paid.
+    todo = [list(x) for x in sorted(owed_by_payer, key=lambda x: x[0])]   # [order, kind, obj, still owed]
 
-    # Debts the other way are netted off - but each against the payer's
-    # debts of the same kind: group against group, bill against bill, loan
-    # against loan. Only the cash itself pays across kinds. Pooling the two
-    # let a ₹334 payment mark ₹767 of Netflix paid, funded by what Anukul
-    # owed Anubhav in other groups.
-    for _, kind, obj, amt in sorted(owed_by_receiver, key=lambda x: x[0]):
-        clear(kind, obj, amt, to, frm, False)
+    # Debts the other way are only netted off when this settles everything
+    # between the two - then every screen has to show square, and the
+    # groups where the receiver owes are cleared against the payer's. A
+    # part-payment moves only the cash, in the order above: netting it too
+    # reshuffled groups the person never paid towards. Even when netting,
+    # each kind only cancels its own kind (group against group, bill
+    # against bill) - pooled, a ₹334 payment once marked ₹767 of Netflix paid.
+    total = sum(x[3] for x in owed_by_payer) - sum(x[3] for x in owed_by_receiver)
     credit: dict[str, float] = {}
-    for _, kind, _o, amt in owed_by_receiver:
-        credit[kind] = credit.get(kind, 0) + amt
-    todo = [list(x) for x in sorted(owed_by_payer, key=first)]   # [order, kind, obj, still owed]
+    if amount >= total - 1:
+        for _, kind, obj, amt in sorted(owed_by_receiver, key=lambda x: x[0]):
+            clear(kind, obj, amt, to, frm, False)
+            credit[kind] = credit.get(kind, 0) + amt
 
     def take(item, budget: float) -> float:
         """Pay `item` out of `budget`; returns how much it used."""
