@@ -47,8 +47,16 @@ BANKS: dict[str, list[str]] = {
     "Standard Chartered": ["sc.com"],
     "American Express": ["americanexpress.com", "aexp.com", "welcome.americanexpress.com"],
     "OneCard": ["getonecard.app"],
+    "HSBC Bank": ["hsbc.co.in", "mail.hsbc.co.in", "notification.hsbc.co.in", "hsbc.com", "hsbc.bank.in"],
     "Other bank": [],
 }
+
+# Apps that send their own "your statement is ready" emails for cards they
+# track - the amount, never the bank's PDF. With a bank's own domains the
+# search can't reach them; with "Other bank" it can, and CRED's "New smart
+# statement for your HSBC Bank card" was saved as an HSBC bill with no PDF.
+AGGREGATORS = ("cred.club", "mobikwik", "paytm.com", "phonepe.com", "amazonpay", "slice", "uni.cards",
+               "freecharge", "bankbazaar", "paisabazaar")
 
 SEARCH_DAYS_AFTER = 7       # the statement email can lag the bill date by a few days
 CHECK_DAYS = 10             # a statement dated further than this from the bill date is another cycle
@@ -84,8 +92,19 @@ def card_name(card) -> str:
 def _query(card, d: date) -> str:
     domains = BANKS.get(card.bank) or []
     who = f"from:({' OR '.join(domains)})" if domains else '("credit card" statement)'
+    if not domains:
+        who += " " + " ".join(f"-from:{a}" for a in AGGREGATORS)
     start, end = d - timedelta(days=1), d + timedelta(days=SEARCH_DAYS_AFTER + 1)
     return f"{who} after:{start:%Y/%m/%d} before:{end:%Y/%m/%d}"
+
+
+def _is_pdf(part: dict) -> bool:
+    """A PDF however the bank attached it: named .pdf, or typed as one with
+    an odd name or none ("Statement", "application/octet-stream" + .PDF)."""
+    name = (part.get("filename") or "").strip().strip('"').lower()
+    mime = (part.get("mimeType") or "").lower()
+    return name.endswith(".pdf") or mime in ("application/pdf", "application/x-pdf") \
+        or (mime == "application/octet-stream" and ".pdf" in name)
 
 
 def _header(msg: dict, name: str) -> str:
@@ -107,9 +126,29 @@ def _score(card, subject: str, snippet: str, has_pdf: bool) -> int:
 
 
 def _has_pdf(part: dict) -> bool:
-    if part.get("filename", "").lower().endswith(".pdf"):
+    if _is_pdf(part):
         return True
     return any(_has_pdf(p) for p in part.get("parts", []) or [])
+
+
+def find_pdf_email(service, card, around: date) -> str | None:
+    """The bank's own email with a PDF attached, near a bill whose saved
+    email has none - the statement sometimes comes separately from the
+    "your bill is ready" email, or the saved one came from an app like
+    CRED. The best-scoring one within a week either side, or None."""
+    domains = BANKS.get(card.bank) or []
+    who = f"from:({' OR '.join(domains)})" if domains else \
+        '("credit card" statement) ' + " ".join(f"-from:{a}" for a in AGGREGATORS)
+    q = f"{who} has:attachment after:{around - timedelta(days=7):%Y/%m/%d} before:{around + timedelta(days=8):%Y/%m/%d}"
+    best = None
+    for m in service.users().messages().list(userId="me", q=q, maxResults=15).execute().get("messages", []):
+        msg = service.users().messages().get(userId="me", id=m["id"], format="full").execute()
+        if not _has_pdf(msg.get("payload", {})):
+            continue
+        score = _score(card, _header(msg, "subject"), msg.get("snippet", ""), True)
+        if score > 0 and (best is None or score > best[0]):
+            best = (score, m["id"])
+    return best[1] if best else None
 
 
 def _body_text(part: dict) -> str:

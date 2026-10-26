@@ -403,12 +403,29 @@ def read_bill(db, user_id: int, bill_id: int, step=lambda text: None) -> dict:
     service = _gmail_service(conn)
     msg = service.users().messages().get(userId="me", id=bill.gmail_message_id, format="full").execute()
     pdf = _first_pdf_attachment(service, bill.gmail_message_id, msg.get("payload", {}))
+    card = db.get(CreditCard, bill.card_id) if bill.card_id else None
+    if not pdf and card:
+        # The saved email carries no PDF (a "bill is ready" note, or an app
+        # like CRED's): the bank's own statement email nearby, if there is one.
+        step("Looking for the bank's statement email…")
+        from datetime import date as _date
+        import card_bills
+        around = _date.fromisoformat(bill.statement_date) if bill.statement_date else _date.today()
+        other = card_bills.find_pdf_email(service, card, around)
+        if other:
+            m2 = service.users().messages().get(userId="me", id=other, format="full").execute()
+            pdf = _first_pdf_attachment(service, other, m2.get("payload", {}))
+            if pdf and not db.query(CreditCardStatement).filter(
+                    CreditCardStatement.gmail_message_id == other, CreditCardStatement.id != bill.id).first():
+                bill.gmail_message_id = other            # read from the right email from now on
+                bill.email_subject = card_bills._header(m2, "subject")[:300]
+                bill.email_from = card_bills._header(m2, "from")[:200]
     if not pdf:
-        raise RuntimeError("This bill's email has no PDF statement attached, so there's no breakup to read")
+        raise RuntimeError("Neither this bill's email nor any statement email from the bank around it has a "
+                           "PDF attached, so there's no breakup to read")
     step("Unlocking the PDF…")
     passwords = [p for p in (secret_box.decrypt(b.password_encrypted) for b in
                              db.query(BankPassword).filter(BankPassword.user_id == user_id)) if p]
-    card = db.get(CreditCard, bill.card_id) if bill.card_id else None
     if card:
         from card_bills import passwords_for
         passwords = passwords_for(card, passwords)

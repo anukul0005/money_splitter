@@ -248,13 +248,20 @@ def _process_message(db: Session, service, user_id: int, message_id: str,
 
 
 def _first_pdf_attachment(service, message_id: str, part: dict) -> bytes | None:
-    filename = part.get("filename", "")
+    from card_bills import _is_pdf
     body = part.get("body", {})
-    if filename.lower().endswith(".pdf") and body.get("attachmentId"):
-        att = service.users().messages().attachments().get(
-            userId="me", messageId=message_id, id=body["attachmentId"],
-        ).execute()
-        return base64.urlsafe_b64decode(att["data"])
+    # Named .pdf or typed as a PDF (card_bills._is_pdf); fetched by its
+    # attachment id, or - a small one - carried in the part itself.
+    if _is_pdf(part) and (body.get("attachmentId") or body.get("data")):
+        if body.get("attachmentId"):
+            data = service.users().messages().attachments().get(
+                userId="me", messageId=message_id, id=body["attachmentId"],
+            ).execute()["data"]
+        else:
+            data = body["data"]
+        raw = base64.urlsafe_b64decode(data)
+        if b"%PDF" in raw[:1024]:          # really a PDF, not a mislabelled image
+            return raw
     for sub in part.get("parts", []) or []:
         found = _first_pdf_attachment(service, message_id, sub)
         if found:
