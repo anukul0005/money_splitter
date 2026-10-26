@@ -113,11 +113,15 @@ def known_place_in(db, text: str | None) -> tuple[str, str, str | None] | None:
             return False
         if key in tkey:
             return True
-        if len(key) < 10:
+        if len(key) < 7:
             return False
-        w = len(key)
-        return any(SequenceMatcher(None, key, tkey[i:i + w]).ratio() >= 0.9
-                   for i in range(0, max(len(tkey) - w, 0) + 1))
+        # Near spellings, a letter dropped or added: "khaopio" for Khao Piyo,
+        # "patiyala" for Patiala - windows one shorter, as long, one longer.
+        for w in (len(key) - 1, len(key), len(key) + 1):
+            if any(SequenceMatcher(None, key, tkey[i:i + w]).ratio() >= 0.9
+                   for i in range(0, max(len(tkey) - w, 0) + 1)):
+                return True
+        return False
 
     for key in by_length:
         if found(key):

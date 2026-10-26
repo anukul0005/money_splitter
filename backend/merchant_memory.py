@@ -57,8 +57,13 @@ def _scope(merchant: str, teacher: str, venue: str | None = None) -> str | None:
 
 
 def _described(e) -> bool:
-    """The title is the person's own words, not the payee name copied in."""
-    return bool(e.title) and key(e.title) != key(e.merchant)
+    """The person put their own words on it - a title that isn't just the
+    payee name copied in, or notes ("KHAO PIO (Snacks)" under a title left
+    as "NEERAJ KUMAR"). An import's own merge note ("PhonePe: X") isn't."""
+    def own(s: str | None) -> bool:
+        k = key(s)
+        return bool(k) and k != key(e.merchant)
+    return own(e.title) or own(_MERGE_NOTE.sub("", e.notes or ""))
 
 
 def is_food(category: str | None, subcategory: str | None) -> bool:
@@ -214,8 +219,9 @@ _MERGE_NOTE = re.compile(r"(?:^|·\s*)(?:PhonePe|Google Pay|GPay|Paytm|BHIM|Amaz
 # after learning something new (v2: places to eat; v3: imports from before
 # category_source was kept; v4: descriptions naming a known place the AI
 # didn't read as one; v5: person-named payees that are places to eat
-# shared with everyone).
-_BACKFILL_MARK = "#backfill-v5"
+# shared with everyone; v6: notes count as a description, and near
+# spellings of short place names match).
+_BACKFILL_MARK = "#backfill-v6"
 
 
 def share_places(db) -> int:
