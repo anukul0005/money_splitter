@@ -9,6 +9,7 @@ import GroupDetail from './pages/GroupDetail'
 import AddExpense  from './pages/AddExpense'
 import LedgerImport      from './pages/LedgerImport'
 import MyBottles         from './pages/MyBottles'
+import BettingAnalytics  from './pages/BettingAnalytics'
 import NewGroup    from './pages/NewGroup'
 import MonthlyGroup from './pages/MonthlyGroup'
 import EditGroup   from './pages/EditGroup'
@@ -28,7 +29,7 @@ import Balances      from './pages/Balances'
 import MasterGroupDetail from './pages/MasterGroupDetail'
 import FriendDetail      from './pages/FriendDetail'
 import Recommend         from './pages/Recommend'
-import { UserContext, RefreshUserContext, isAdmin } from './UserContext'
+import { UserContext, RefreshUserContext, isAdmin, isAnalyticsUser } from './UserContext'
 import { getMe, listUsersBasic } from './api'
 import { setDirectory } from './utils/displayName'
 
@@ -144,6 +145,9 @@ export default function App() {
                 {/* Admin-only: the route simply does not exist for others */}
                 {isAdmin(user) && (
                   <Route path="/admin/codes" element={<AdminCodes />} />
+                )}
+                {isAnalyticsUser(user) && (
+                  <Route path="/betting" element={<BettingAnalytics />} />
                 )}
               </Routes>
             </div>

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
-import { isAdmin } from '../UserContext'
+import { isAdmin, isAnalyticsUser } from '../UserContext'
 
 // Adding an expense is one tap from Home's quick actions and from "+ Add"
 // inside any group, so the bar is just the main pages, all alike.
@@ -67,6 +67,15 @@ export default function BottomNav({ user, onLogout }) {
             <>
               <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
               <div className="absolute bottom-14 right-0 bg-field-900 border border-field-700 rounded-md shadow-xl z-50 w-44 py-1">
+                {isAnalyticsUser(user) && (
+                  <NavLink
+                    to="/betting"
+                    onClick={() => setMenuOpen(false)}
+                    className="block w-full text-left px-4 py-2.5 text-xs font-semibold text-slate-300/60 hover:text-brand-400 hover:bg-field-800 transition-colors"
+                  >
+                    Betting analytics
+                  </NavLink>
+                )}
                 {isAdmin(user) && (
                   <NavLink
                     to="/admin/codes"

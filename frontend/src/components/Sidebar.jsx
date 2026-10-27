@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { isAdmin } from '../UserContext'
+import { isAdmin, isAnalyticsUser } from '../UserContext'
 
 function HomeIcon()    { return <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0h6" /></svg> }
 // Matches the bottom nav: sparkles rather than a cocktail glass, because the
@@ -64,6 +64,14 @@ export default function Sidebar({ user, onLogout }) {
               <p className="text-xs text-slate-300/50 font-medium">{user.key}</p>
             </div>
           </div>
+        )}
+        {isAnalyticsUser(user) && (
+          <NavLink
+            to="/betting"
+            className="block w-full text-left text-xs text-slate-300/50 hover:text-brand-400 font-semibold transition-colors tracking-widest py-1"
+          >
+            Betting analytics
+          </NavLink>
         )}
         {isAdmin(user) && (
           <NavLink

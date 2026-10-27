@@ -225,6 +225,10 @@ def daily_jobs(db: Session) -> dict:
     import card_autosync
     card_autosync.start(today)
 
+    # Yesterday's and today's ATP/WTA results for Betting analytics - see tennis_sync.py.
+    import tennis_sync
+    tennis_sync.start(today)
+
     # Yesterday's spending, for whoever turned it on (User.daily_summary).
     from daily_summary import summarise
     summaries_sent, summaries_failed = [], []
@@ -240,7 +244,7 @@ def daily_jobs(db: Session) -> dict:
             db.rollback()
             summaries_failed.append(f"{user.name}: {e}")
 
-    return {"date": iso_today, "birthdays_today": sent, **loan_summary, "card_sync": "started",
+    return {"date": iso_today, "birthdays_today": sent, **loan_summary, "card_sync": "started", "tennis_sync": "started",
             "daily_summaries_sent": summaries_sent, "daily_summaries_failed": summaries_failed,
             "skipped_no_email": skipped_no_email, "failed": failed,
             "memories_sent": memory_groups, "memories_failed": memory_failed,

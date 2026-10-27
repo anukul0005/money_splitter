@@ -17,3 +17,6 @@ export const isAdmin = (user) =>
  *  people given full access by an admin's code - and admins. Everyone else
  *  never sees it, or any mention of it. */
 export const hasFullAccess = (user) => !!user?.has_full_access || isAdmin(user)
+
+/** Betting analytics is Anukul's alone (backend routers/tennis.ANALYTICS_USERS). */
+export const isAnalyticsUser = (user) => user?.name?.toLowerCase() === 'anukul'
