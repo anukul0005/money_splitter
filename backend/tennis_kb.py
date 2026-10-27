@@ -123,6 +123,7 @@ KNOWN_SURFACES = {
     "tallinn": "Hard", "osaka open": "Hard", "kitzb": "Clay", "estoril": "Clay", "lausanne": "Clay",
     "hamburg open": "Clay", "newport": "Grass", "s-hertogenbosch": "Grass", "riyadh": "Hard",
     "jeddah": "Hard", "tennis in the land": "Hard", "monastir": "Hard", "merida open": "Hard",
+    "hsbc championships": "Grass", "auvergne": "Hard",     # Queen's Club; Lyon's indoor October event
 }
 GRAND_SLAMS = ("australian open", "roland garros", "french open", "wimbledon", "us open")
 FINALS = ("atp finals", "wta finals", "nitto atp finals", "masters cup", "tour finals")
@@ -215,6 +216,7 @@ class Players:
         self.by_name: dict[tuple, int] = {}
         self.by_espn: dict[tuple, int] = {}
         self.by_last: dict[tuple, list] = {}
+        self.by_tok: dict[tuple, set] = {}
         self.info: dict[tuple, dict] = {}
         # Who played most recently decides a shared name: "Zhang" means today's Zhang.
         recent: dict[tuple, int] = {}
@@ -234,8 +236,15 @@ class Players:
         for key in (f"{f} {l}".strip(), f"{l} {f}".strip()):
             if key:
                 self.by_name[(tour, key)] = pid
+                # Spacing aside: "Wang Xinyu" / "Xin Yu Wang", "O'Connell" / "Oconnell".
+                self.by_name[(tour, "#" + key.replace(" ", ""))] = pid
         if l:
             self.by_last.setdefault((tour, l), []).append(pid)
+        toks = frozenset(f"{f} {l}".split())
+        self.info[(tour, pid)]["tokens"] = toks
+        for t in toks:
+            if len(t) > 1:
+                self.by_tok.setdefault((tour, t), set()).add(pid)
         if espn:
             self.by_espn[(tour, str(espn))] = pid
 
@@ -243,10 +252,13 @@ class Players:
         if espn_id and (tour, str(espn_id)) in self.by_espn:
             return self.by_espn[(tour, str(espn_id))]
         if full_name:
-            pid = self.by_name.get((tour, norm(full_name)))
+            pid = self.by_name.get((tour, norm(full_name))) or self.by_name.get((tour, "#" + norm(full_name).replace(" ", "")))
             if pid:
                 return pid
             parts = norm(full_name).split()
+            pid = self._by_parts(tour, frozenset(parts))
+            if pid:
+                return pid
             if len(parts) >= 2:                                   # "J. Sinner" / initial + surname
                 cands = self.by_last.get((tour, " ".join(parts[1:])), [])
                 cands = [c for c in cands if norm(self.info[(tour, c)]["name"]).startswith(parts[0][0])]
@@ -263,6 +275,27 @@ class Players:
             if cands:
                 return max(cands, key=lambda c: self.recent.get((tour, c), 0))
         return None
+
+    def _by_parts(self, tour, parts: frozenset):
+        """A name with a part more or less than the player list's - "Daniel
+        Merida" / "Daniel Merida Aguilar", "Joel Josef Schwaerzler" / "Joel
+        Schwaerzler": all of one's words in the other, two at least shared.
+        The most recently active such player; None when it isn't clear."""
+        if len(parts) < 2:
+            return None
+        cands = set().union(*(self.by_tok.get((tour, t), set()) for t in parts if len(t) > 1))
+        fits = []
+        for c in cands:
+            toks = self.info[(tour, c)].get("tokens") or frozenset()
+            shared = len(parts & toks)
+            if shared >= 2 and (parts <= toks or toks <= parts):
+                fits.append((shared, self.recent.get((tour, c), 0), c))
+        if not fits:
+            return None
+        fits.sort(reverse=True)
+        if len(fits) > 1 and fits[0][:2] == fits[1][:2]:
+            return None                       # two players fit equally well: don't guess
+        return fits[0][2]
 
     def link_espn(self, tour, pid, espn_id) -> None:
         if espn_id and (tour, str(espn_id)) not in self.by_espn:

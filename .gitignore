@@ -46,6 +46,11 @@ apikey_hf.txt
 # .env and Render, never the repo.
 apikey_gemini.txt
 
+# The local tennis knowledge base (~70 MB) and its log - the scripts beside
+# them are committed; the app keeps its own copy in Postgres.
+Tennis_scraper/*.sqlite
+Tennis_scraper/*.log
+
 # secrets/ holds the ENCRYPTED key backup (*.enc, committed) plus the scripts.
 # The decrypted plaintext (*.txt) must never be committed - only the .enc is.
 secrets/*.txt
