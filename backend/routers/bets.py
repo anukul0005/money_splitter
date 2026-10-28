@@ -142,7 +142,8 @@ def promos(db: Session = Depends(get_db), caller: User = Depends(owner)):
     return {"max": PROMO_MAX, "today_is_friday": today.weekday() == 4,
             "pending": [d for d in reversed(_fridays(today)) if d not in have],
             "entries": [{"day": r.day, "stake": r.stake, "result": r.result, "profit": r.profit} for r in rows],
-            "won": sum(1 for r in rows if r.result == "won"), "profit": round(sum(r.profit for r in rows), 2)}
+            "won": sum(1 for r in rows if r.result == "won"), "lost": sum(1 for r in rows if r.result == "lost"),
+            "profit": round(sum(r.profit for r in rows), 2)}
 
 
 @router.post("/promos", response_model=dict)

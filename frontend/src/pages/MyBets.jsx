@@ -321,50 +321,61 @@ const friLabel = (s) => (s ? new Date(`${s}T00:00:00`).toLocaleDateString('en-IN
 
 /** 1xbet's Friday no-risk bet: every Friday since the current stretch began
  * is asked for until answered - the stake (up to ₹27k) and whether it won.
- * A win adds the stake as profit; a loss costs nothing. */
+ * A win adds the stake as profit; a loss costs nothing. One line until
+ * tapped open; a Friday waiting for an answer shows on that line. */
 function FridayPromo({ onSaved }) {
   const [d, setD] = useState(null)
+  const [open, setOpen] = useState(false)
   const [extra, setExtra] = useState('')        // another Friday to add by hand
-  const [showAll, setShowAll] = useState(false) // the answered Fridays, folded away
   const load = () => betsPromos().then((r) => setD(r.data)).catch(() => setD(null))
   useEffect(() => { load() }, [])
   if (!d) return null
   const save = (day, stake, result) => betsSavePromo({ day, stake, result }).then(() => { setExtra(''); load(); onSaved() })
   const remove = (x) => betsDeletePromo(x).then(() => { load(); onSaved() })
   const asks = [...d.pending, ...(extra && !d.pending.includes(extra) ? [extra] : [])]
+  const waiting = d.pending.length
   return (
-    <div className={`card ${d.pending.length ? 'border-brand-400 bg-amber-50' : ''}`}>
-      <div className="flex items-baseline gap-2">
-        <p className="text-sm font-black text-gray-900 flex-1">Friday no-risk bet</p>
-        {d.entries.length > 0 && <p className={`text-xs font-black ${pl(d.profit)}`}>+{inr(d.profit)} · {d.won} won</p>}
-      </div>
-      <p className="text-[10px] text-gray-500">
-        Stake up to ₹{d.max.toLocaleString('en-IN')}: a win adds the stake as profit, a loss costs nothing.
-        {d.pending.length > 0 && <b className="text-brand-600"> {d.pending.length} Friday{d.pending.length === 1 ? '' : 's'} to fill in.</b>}
-      </p>
-      {asks.length > 0 && (
-        <div className="mt-1">
-          {asks.map((day) => <PromoAsk key={day} day={day} max={d.max} onSave={save} />)}
-        </div>
-      )}
-      <div className="flex items-center gap-2 mt-2">
-        <span className="text-[10px] font-bold text-gray-400">Another Friday:</span>
-        <input type="date" value={extra} onChange={(e) => setExtra(e.target.value)}
-          className="px-2 py-1 rounded-md border border-amber-300 bg-white text-[11px] font-bold" />
-      </div>
-      {d.entries.length > 0 && (
-        <div className="mt-2 pt-2 border-t border-gray-200">
-          <button onClick={() => setShowAll(!showAll)} className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-0.5">
-            Answered ({d.entries.length}) {showAll ? '▴ hide' : '▾ show'}
-          </button>
-          {showAll && d.entries.map((x) => (
-            <div key={x.day} className="flex items-center gap-2 py-0.5 text-[11px]">
-              <span className="w-20 font-bold text-gray-700">{friLabel(x.day)}</span>
-              <span className="flex-1 text-gray-500">{x.result === 'skipped' ? "didn't use it" : `₹${x.stake.toLocaleString('en-IN')} · ${x.result}`}</span>
-              <span className={`font-black tabular-nums ${x.profit ? 'text-green-700' : 'text-gray-400'}`}>{x.profit ? `+${inr(x.profit)}` : '₹0'}</span>
-              <button onClick={() => remove(x.day)} className="text-gray-300 hover:text-red-500 px-1" aria-label="Remove">×</button>
+    <div className={`rounded-md border ${waiting ? 'border-brand-400 bg-amber-50' : 'border-amber-200 bg-cream'}`}>
+      <button onClick={() => setOpen(!open)} className="w-full flex items-center gap-2 px-3 py-2 text-left">
+        <span className="text-xs font-black text-gray-900">Friday no-risk bet</span>
+        {waiting > 0 && (
+          <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-brand-400 text-white">
+            {waiting === 1 ? `${friLabel(d.pending[0])} to fill in` : `${waiting} to fill in`}
+          </span>
+        )}
+        <span className="flex-1" />
+        {d.entries.length > 0 && (
+          <span className="text-[11px] text-gray-500 whitespace-nowrap">
+            <b className={pl(d.profit)}>+{inr(d.profit)}</b> · {d.won}W {d.lost}L
+          </span>
+        )}
+        <span className="text-gray-400 text-xs">{open ? '▴' : '▾'}</span>
+      </button>
+      {open && (
+        <div className="px-3 pb-3">
+          <p className="text-[10px] text-gray-500">
+            Stake up to ₹{d.max.toLocaleString('en-IN')}: a win adds the stake as profit, a loss costs nothing.
+          </p>
+          {asks.length > 0 && <div className="mt-1">{asks.map((day) => <PromoAsk key={day} day={day} max={d.max} onSave={save} />)}</div>}
+          <div className="flex items-center gap-2 mt-2">
+            <span className="text-[10px] font-bold text-gray-400">Another Friday:</span>
+            <input type="date" value={extra} onChange={(e) => setExtra(e.target.value)}
+              className="px-2 py-1 rounded-md border border-amber-300 bg-white text-[11px] font-bold" />
+          </div>
+          {d.entries.length > 0 && (
+            <div className="mt-2 pt-2 border-t border-gray-200">
+              {d.entries.map((x) => (
+                <div key={x.day} className="flex items-center gap-2 py-0.5 text-[11px]">
+                  <span className="w-20 font-bold text-gray-700">{friLabel(x.day)}</span>
+                  <span className={`flex-1 ${x.result === 'won' ? 'text-green-700' : x.result === 'lost' ? 'text-red-600' : 'text-gray-500'}`}>
+                    {x.result === 'skipped' ? "didn't use it" : `${x.result}${x.stake ? ` · ₹${x.stake.toLocaleString('en-IN')}` : ''}`}
+                  </span>
+                  <span className={`font-black tabular-nums ${x.profit ? 'text-green-700' : 'text-gray-400'}`}>{x.profit ? `+${inr(x.profit)}` : '₹0'}</span>
+                  <button onClick={() => remove(x.day)} className="text-gray-300 hover:text-red-500 px-1" aria-label="Remove">×</button>
+                </div>
+              ))}
             </div>
-          ))}
+          )}
         </div>
       )}
     </div>
