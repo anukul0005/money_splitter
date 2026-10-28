@@ -56,7 +56,8 @@ function ProfitChart({ points, start }) {
     : blocks.map((b) => ({ date: b.from, to: b.to, profit: b.profit, cumulative: b.cumulative + lead }))
   const end = cum + lead
 
-  const W = 640, H = 220, L = 58, R = 10, T = 14, B = 30
+  // drawn at about phone width so the labels show at real size; taller than wide-screen charts
+  const W = 380, H = 300, L = 46, R = 8, T = 18, B = 30
   const vals = [0, ...bars.map((b) => b.profit), ...bars.map((b) => b.cumulative)]
   const lo = Math.min(...vals), hi = Math.max(...vals), span = hi - lo || 1
   const y = (v) => T + ((hi - v) * (H - T - B)) / span
@@ -66,7 +67,7 @@ function ProfitChart({ points, start }) {
   const ticks = [hi, (hi + lo) / 2, lo, 0].filter((v, i, a) => a.findIndex((w) => Math.abs(w - v) < span * 0.08) === i)
   const short = (v) => `${v < 0 ? '−' : ''}₹${Math.abs(v) >= 1000 ? `${(Math.abs(v) / 1000).toFixed(1)}k` : Math.round(Math.abs(v))}`
   const dlab = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
-  const every = Math.max(1, Math.ceil(bars.length / 7))          // keep the date labels readable
+  const every = Math.max(1, Math.ceil(bars.length / 5))          // keep the date labels readable
   const line = bars.map((b, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(b.cumulative).toFixed(1)}`).join(' ')
   const best = bars.reduce((a, b) => (b.profit > a.profit ? b : a), bars[0])
   const worst = bars.reduce((a, b) => (b.profit < a.profit ? b : a), bars[0])
@@ -99,7 +100,7 @@ function ProfitChart({ points, start }) {
         {ticks.map((v) => (
           <g key={v}>
             <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke={v === 0 ? '#9ca3af' : '#eef0f3'} strokeDasharray={v === 0 ? '' : '3 3'} />
-            <text x={L - 6} y={y(v) + 3.5} textAnchor="end" fontSize="11" fill="#6b7280">{v === 0 ? '₹0' : short(v)}</text>
+            <text x={L - 5} y={y(v) + 4} textAnchor="end" fontSize="11" fill="#6b7280">{v === 0 ? '₹0' : short(v)}</text>
           </g>
         ))}
         {bars.map((b, i) => (
@@ -107,15 +108,15 @@ function ProfitChart({ points, start }) {
             <rect x={x(i) - bw / 2} width={bw} y={Math.min(y(b.profit), y(0))} height={Math.max(1, Math.abs(y(b.profit) - y(0)))}
               rx="2" fill={b.profit >= 0 ? '#86efac' : '#fca5a5'} opacity={hover == null || hover === i ? 1 : 0.45} />
             {!inBlock && bars.length <= 14 && b.profit !== 0 && (
-              <text x={x(i)} y={b.profit >= 0 ? y(b.profit) - 3 : y(b.profit) + 10} textAnchor="middle" fontSize="9"
+              <text x={x(i)} y={b.profit >= 0 ? y(b.profit) - 4 : y(b.profit) + 12} textAnchor="middle" fontSize="10" fontWeight="700"
                 fill={b.profit >= 0 ? '#15803d' : '#b91c1c'}>{short(b.profit)}</text>
             )}
           </g>
         ))}
-        <path d={line} fill="none" stroke={end >= 0 ? '#15803d' : '#b91c1c'} strokeWidth="2.2" strokeLinejoin="round" />
-        {bars.map((b, i) => <circle key={`c${b.date}`} cx={x(i)} cy={y(b.cumulative)} r="2.4" fill={end >= 0 ? '#15803d' : '#b91c1c'} />)}
+        <path d={line} fill="none" stroke={end >= 0 ? '#15803d' : '#b91c1c'} strokeWidth="2" strokeLinejoin="round" />
+        {bars.map((b, i) => <circle key={`c${b.date}`} cx={x(i)} cy={y(b.cumulative)} r="2.6" fill={end >= 0 ? '#15803d' : '#b91c1c'} />)}
         {bars.map((b, i) => (i % every === 0 || i === bars.length - 1) && (
-          <text key={`t${b.date}`} x={x(i)} y={H - 12} textAnchor="middle" fontSize="10" fill="#6b7280">{dlab(b.date)}</text>
+          <text key={`t${b.date}`} x={x(i)} y={H - 10} textAnchor="middle" fontSize="10" fill="#6b7280">{dlab(b.date)}</text>
         ))}
         {bars.map((b, i) => (
           <rect key={`h${b.date}`} x={L + step * i} width={step} y={T} height={H - T - B} fill="transparent" style={{ cursor: 'pointer' }}
@@ -519,7 +520,7 @@ export default function MyBets() {
                 </p>
               )}
             </div>
-            <div className="card"><ProfitChart points={s.curve} start={shown?.from} /></div>
+            <div className="card -mx-3 px-3 py-4"><ProfitChart points={s.curve} start={shown?.from} /></div>
             {!isPast && s.by_block?.length > 1 && (
               <Breakdown title="Every 10 days" rows={[...s.by_block].reverse()} fmt={blockLabel} onRow={pickBlock}
                 note="Newest first · tap a block to see just those 10 days." />
