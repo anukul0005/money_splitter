@@ -39,7 +39,7 @@ BLOCK_DAYS = 10
 # 1xbet's Friday no-risk bet: stake up to this; a win pays the stake as
 # profit, a loss costs nothing. Asked for every Friday from PROMO_FROM on.
 PROMO_MAX = 27000
-PROMO_FROM = "2026-10-30"
+PROMO_FROM = "2026-07-31"             # the first Friday of the current stretch (CURRENT_FROM)
 
 
 class PromoIn(BaseModel):
