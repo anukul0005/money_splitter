@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+import tennis_stats
 from auth import current_user
 from database import get_db
 from models import User
@@ -136,6 +137,21 @@ def player(tour: str, player_id: int, db: Session = Depends(get_db), _: User = D
             "by_year": [{"year": y, **_record(rs, player_id)} for y, rs in sorted(by_year.items(), reverse=True)][:8],
             "titles": sum(1 for r in rows if r["round"] == "F" and r["winner_id"] == player_id),
             "matches": [_match(r) for r in rows[:40]]}
+
+
+@router.get("/sets", response_model=dict)
+def sets(db: Session = Depends(get_db), _: User = Depends(owner)):
+    """Games-per-set histograms (tennis_stats): rows of [tour, surface,
+    best_of, set, {games: count}] - the page works out any over/under line
+    and filter from them - plus the tournaments for year-on-year."""
+    d = tennis_stats.data(db)
+    return {"rows": d["main"], "tournaments": d["tournaments"]}
+
+
+@router.get("/sets/tournament", response_model=dict)
+def sets_tournament(tour: str, name: str, db: Session = Depends(get_db), _: User = Depends(owner)):
+    """One tournament's games-per-set histograms, year by year: [year, set, {games: count}]."""
+    return {"tour": tour.upper(), "name": name, "rows": tennis_stats.tournament(db, tour.upper(), name)}
 
 
 @router.get("/h2h", response_model=dict)
