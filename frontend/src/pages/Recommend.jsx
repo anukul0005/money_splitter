@@ -46,26 +46,6 @@ const BOTTLES = [
 // same rule as the size picker.
 const KINDS = ['whisky', 'rum', 'vodka', 'gin']
 
-// One row per taste dimension /recommend can filter on (see the backend's
-// own _ASK_TASTE_WORDS - these words are sent to the server verbatim, not
-// reinterpreted here, so there is exactly one place that decides what
-// "smooth" means). Each row is a same-dimension pair: picking one clears
-// the other, tapping the picked one again clears back to "no preference" -
-// the same on/off/replace rule the size and kind pickers above already use.
-// A free-text box was tried here first and dropped: it needed a font small
-// enough to fit a whole sentence, which meant giving up the 16px floor that
-// stops iOS Safari zooming the page on focus - buttons need neither.
-const TASTE_TOGGLES = [
-  { label: 'Smoothness',  pos: ['smooth', 'Smooth'],   neg: ['harsh', 'Harsh'] },
-  { label: 'Smokiness',   pos: ['smoky', 'Smoky'],      neg: ['not smoky', 'Not smoky'] },
-  { label: 'Sweetness',   pos: ['sweet', 'Sweet'],      neg: ['dry', 'Dry'] },
-  { label: 'Spice',       pos: ['spicy', 'Spicy'],      neg: ['not spicy', 'Mild'] },
-  { label: 'Fruitiness',  pos: ['fruity', 'Fruity'],    neg: ['not fruity', 'Not fruity'] },
-  { label: 'Oak',         pos: ['oaky', 'Oaky'],        neg: ['not oaky', 'Not oaky'] },
-  { label: 'Intensity',   pos: ['strong', 'Strong'],    neg: ['light', 'Light'] },
-  { label: 'Ease',        pos: ['beginner', 'Beginner-friendly'], neg: null },
-]
-
 // Long lists are shown seven deep and the rest folded away, so the page opens
 // on a real shortlist instead of a wall of bottles.
 const TOP_N = 7
@@ -342,11 +322,6 @@ function DrinksRecommend() {
   // Same pattern again: which card's Stage 3 score breakdown is expanded.
   const [whyOpen, setWhyOpen] = useState(null)
 
-  // Stage 4: taste, same on/off/replace rule as bottles and kinds above -
-  // an array of the exact words the server's taste vocabulary knows (see
-  // TASTE_TOGGLES), sent straight through as the `taste` param.
-  const [taste, setTaste] = useState([])
-
   // Stage 5: fetched lazily, only once the stats panel is actually opened -
   // a page nobody expands should never pay for the request.
   const [eventStats, setEventStats] = useState(null)
@@ -455,14 +430,6 @@ function DrinksRecommend() {
     setPeople(String(next.length + 1))
   }
 
-  // Same-dimension pair, so picking one clears the other rather than
-  // letting "Smooth" and "Harsh" both be on at once - `siblingWords` is
-  // just that row's pos/neg words together.
-  const toggleTaste = (word, siblingWords) => setTaste((cur) => {
-    const withoutPair = cur.filter((w) => !siblingWords.includes(w))
-    return cur.includes(word) ? withoutPair : [...withoutPair, word]
-  })
-
   // Fire-and-forget: logging an impression is bookkeeping for Stage 5, not
   // something the person looking at their results should ever wait on.
   // Never awaited by a caller, and its own failure is swallowed rather than
@@ -495,7 +462,6 @@ function DrinksRecommend() {
         bottle: bottles.length ? bottles.join(',') : 'any',
         kind: kinds.join(','),
         names: withWho.join(','),
-        taste: taste.join(','),
       })
       setResult(r.data)
       logShown(r.data, 'recommend', null)
@@ -848,56 +814,6 @@ function DrinksRecommend() {
                 ? 'Nothing picked — whisky, rum, vodka and gin all show. Tap any you fancy, tap again to clear.'
                 : `Only ${kinds.join(', ')} — beer is unaffected by this.`}
             </p>
-          </div>
-
-          {/* Stage 4, as buttons rather than typed text - see TASTE_TOGGLES.
-              A word here is dropped instead of applied if it would empty an
-              otherwise non-empty list (most bottles' taste numbers are a
-              category-level guess, not a real per-bottle rating - see the
-              backend's own note on this), so tapping "Smooth" never trades
-              a real answer for an empty page. */}
-          <div>
-            <label className="label">Taste (optional)</label>
-            <div className="space-y-1.5">
-              {TASTE_TOGGLES.map(({ label, pos, neg }) => {
-                const siblingWords = [pos[0], neg?.[0]].filter(Boolean)
-                return (
-                  <div key={label} className="flex items-center gap-2">
-                    <span className="text-[10px] font-semibold text-gray-500 w-20 flex-shrink-0">
-                      {label}
-                    </span>
-                    <div className="flex gap-1.5 flex-1">
-                      {[pos, neg].filter(Boolean).map(([word, text]) => (
-                        <button
-                          key={word}
-                          type="button"
-                          aria-pressed={taste.includes(word)}
-                          onClick={() => toggleTaste(word, siblingWords)}
-                          className={`flex-1 rounded-md px-2 py-1.5 text-[11px] font-bold border transition-all ${
-                            taste.includes(word)
-                              ? 'bg-brand-400 border-brand-400 text-white'
-                              : 'bg-cream border-amber-200 text-gray-500 hover:bg-amber-50'
-                          }`}
-                        >
-                          {text}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-            <p className="text-[10px] text-gray-400 mt-1">
-              {taste.length === 0
-                ? 'Nothing picked — no taste filter. Tap any you fancy, tap again to clear.'
-                : `Looking for ${taste.join(', ')}.`}
-            </p>
-            {result?.taste_filter_applied === false && taste.length > 0 && (
-              <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-100 rounded-md px-2 py-1.5 mt-1">
-                Not enough per-bottle taste data here to narrow by that yet —
-                showing everything else that matched instead.
-              </p>
-            )}
           </div>
 
           <button onClick={run} className="btn-primary" disabled={busy || !canRun}>
