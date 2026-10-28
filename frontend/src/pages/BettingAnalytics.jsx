@@ -667,27 +667,16 @@ const lineName = (ln) => `${ln < 0 ? 'under' : 'over'} ${Math.abs(ln)}`
 
 function Patterns() {
   const [rows, setRows] = useState(null)
-  const [first, setFirst] = useState(1)
+  const first = 1                              // set 1 -> set 2
+  const since = 2016                           // matches from 2016 on
   const [cond, setCond] = useState(10.5)
   const [out, setOut] = useState(-8.5)
   const [surface, setSurface] = useState('all')
   const [bo, setBo] = useState('all')
-  const [since, setSince] = useState(2016)
   useEffect(() => {
-    setRows(null)
     tennisPatterns(since).then((r) => setRows(r.data.rows)).catch(() => setRows([]))
-  }, [since])
-  const sinceSel = (
-    <div className="flex items-center gap-2 text-xs">
-      <span className="font-bold text-gray-500">Matches from</span>
-      <select value={since} onChange={(e) => setSince(+e.target.value)}
-        className="px-2 py-1.5 rounded-md border border-amber-300 bg-white font-bold">
-        {[[2016, '2016 on (after 2015)'], [2019, '2019 on'], [2020, '2020 on (after 2019)'],
-          [2023, '2023 on'], [2025, '2025 on']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-      </select>
-    </div>
-  )
-  if (!rows) return <div className="space-y-3"><div className="card">{sinceSel}</div><p className="text-xs text-gray-400 text-center py-6">Working out every pair of sets…</p></div>
+  }, [])
+  if (!rows) return <p className="text-xs text-gray-400 text-center py-6">Working out every pair of sets since 2016…</p>
 
   // row: [tour, surface, best_of, first set, games in it, games in the next, same winner, matches]
   const base = rows.filter((r) => r[3] === first && (surface === 'all' || r[1] === surface) && (bo === 'all' || String(r[2]) === bo))
@@ -713,15 +702,12 @@ function Patterns() {
       <div className="card space-y-2">
         <div className="flex gap-2 flex-wrap">
           {[[10.5, -8.5, 'Close set 1 → set 2 under 8.5'], [-8.5, 8.5, 'Set 1 under 8.5 → set 2 over 8.5']].map(([c, o, l]) => (
-            <button key={l} onClick={() => { setFirst(1); setCond(c); setOut(o) }}
-              className={`px-2.5 py-1.5 rounded-md text-[11px] font-bold border ${first === 1 && cond === c && out === o
+            <button key={l} onClick={() => { setCond(c); setOut(o) }}
+              className={`px-2.5 py-1.5 rounded-md text-[11px] font-bold border ${cond === c && out === o
                 ? 'bg-brand-400 text-white border-brand-400' : 'bg-white text-gray-700 border-amber-300'}`}>{l}</button>
           ))}
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <Seg value={String(first)} onChange={(v) => setFirst(+v)} options={[['1', 'Set 1 → Set 2'], ['2', 'Set 2 → Set 3']]} />
-        </div>
-        {sinceSel}
+        <p className="text-[11px] font-bold text-gray-500">Matches from 2016 on</p>
         <div className="grid grid-cols-[auto_1fr] items-center gap-2 text-xs">
           <span className="font-bold text-gray-500">If {A} is</span>
           <select value={cond} onChange={(e) => setCond(+e.target.value)} className="px-2 py-1.5 rounded-md border border-amber-300 bg-white font-bold">
