@@ -966,24 +966,26 @@ export default function BettingAnalytics() {
             My bets ›
           </button>
         </div>
-        <p className="text-[11px] text-gray-400 mt-0.5">
-          {sum ? `ATP & WTA tour · ${Number(sum.n).toLocaleString('en-IN')} matches · ${fmtShort(sum.first)} – ${fmtShort(sum.last)}` : 'ATP & WTA tour results'}
-          {sum?.refreshing && !fresh ? ' · fetching the latest results…'
-            : sum?.last_update ? ` · updated ${fmtShort(sum.last_update.slice(0, 10))} ${sum.last_update.slice(11, 16)} UTC` : ''}
-        </p>
-        <div className="flex items-center gap-2 mt-3 flex-wrap">
-          <div className="flex rounded-md border border-amber-300 overflow-hidden">
-            {[['results', 'Results'], ['players', 'Players'], ['sets', 'Sets'], ['patterns', 'Patterns']].map(([k, l]) => (
-              <button key={k} onClick={() => setTab(k)}
-                className={`px-3 py-1.5 text-xs font-bold ${tab === k ? 'bg-brand-400 text-white' : 'bg-white text-gray-600'}`}>{l}</button>
-            ))}
-          </div>
-          <div className="flex rounded-md border border-amber-300 overflow-hidden ml-auto">
+        <div className="flex items-center gap-2 mt-1">
+          <p className="flex-1 min-w-0 text-[11px] leading-snug text-gray-400">
+            {sum ? `${Number(sum.n).toLocaleString('en-IN')} matches · 2000 – ${fmtShort(sum.last)}` : 'ATP & WTA tour results'}
+            <br />
+            {sum?.refreshing && !fresh ? 'fetching the latest results…'
+              : sum?.last_update ? `updated ${new Date(`${sum.last_update.slice(0, 19)}Z`).toLocaleString('en-IN',
+                { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}
+          </p>
+          <div className="flex flex-shrink-0 rounded-md border border-amber-300 overflow-hidden">
             {TOURS.map(([k, l]) => (
               <button key={k} onClick={() => setTour(k)}
-                className={`px-2.5 py-1.5 text-xs font-bold ${tour === k ? 'bg-field-950 text-white' : 'bg-white text-gray-600'}`}>{l}</button>
+                className={`px-2 py-1 text-[11px] font-bold ${tour === k ? 'bg-field-950 text-white' : 'bg-white text-gray-600'}`}>{l}</button>
             ))}
           </div>
+        </div>
+        <div className="grid grid-cols-4 mt-2.5 rounded-md border border-amber-300 overflow-hidden">
+          {[['results', 'Results'], ['players', 'Players'], ['sets', 'Sets'], ['patterns', 'Patterns']].map(([k, l]) => (
+            <button key={k} onClick={() => setTab(k)}
+              className={`py-1.5 text-xs font-bold ${tab === k ? 'bg-brand-400 text-white' : 'bg-white text-gray-600'}`}>{l}</button>
+          ))}
         </div>
       </div>
       <div className="px-5 mt-4 max-w-2xl">
