@@ -7,7 +7,8 @@ line (7.5, 8.5, 9.5...) is worked out from the same numbers. A set is
 complete when someone reached 6 with a two-game lead, or won it 7-6 /
 in a tie-break; the unfinished set of a retirement, walkovers and short
 formats (Next Gen 4-game sets) are left out, and so are best-of-five
-matches outside the Grand Slams (Davis Cup, Masters finals before 2007...).
+matches outside the Grand Slams (Davis Cup, Masters finals before 2007...)
+and carpet matches (off the tour since 2009).
 
 Besides sets 1-5 two match-level rows are kept: EVERY = the match's
 smallest set (every set over the line iff it is), ANY = its largest (at
@@ -138,6 +139,8 @@ def _build(db) -> dict:
     for tour, tname, surface, best_of, play, score in rows:
         games, full = sets_of(score)
         if not games:
+            continue
+        if surface == "Carpet":                # gone from the tour since 2009 - nothing to bet on
             continue
         surface = surface or "Unknown"
         bo = 5 if (best_of == 5 or len(games) > 3) else 3

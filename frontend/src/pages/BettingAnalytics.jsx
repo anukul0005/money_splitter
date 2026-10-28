@@ -243,7 +243,7 @@ function Players({ tour, sel, setSel, onH2H }) {
 const LINES = [6.5, 7.5, 8.5, 9.5, 10.5, 11.5, 12.5]
 const SET_ROWS = [['1', 'Set 1'], ['2', 'Set 2'], ['3', 'Set 3'], ['4', 'Set 4'], ['5', 'Set 5'],
   ['every', 'Every set'], ['any', 'Any set']]
-const SURFACES = ['Hard', 'Clay', 'Grass', 'Carpet']
+const SURFACES = ['Hard', 'Clay', 'Grass']
 const fmtN = (n) => Number(n).toLocaleString('en-IN')
 
 /** Adds histograms {games: count} into {n, over} for the line. */
@@ -365,7 +365,7 @@ function SetStats({ tour }) {
         <p className="text-sm font-black text-gray-900">{label} · over {line} games, set by set</p>
         <p className="text-[10px] text-gray-400 mb-2">
           A set over {line} has {Math.ceil(line)}+ games{line === 8.5 ? ' (6-3, 6-4, 7-5, 7-6 - not 6-0, 6-1, 6-2)' : ''}.
-          Completed sets only; best-of-five only at the Grand Slams. Every set / Any set: matches played out in full.
+          Completed sets only; best-of-five only at the Grand Slams; no carpet. Every set / Any set: matches played out in full.
         </p>
         <table className="w-full text-xs">
           <thead>
