@@ -116,6 +116,15 @@ def _record(rows, pid) -> dict:
     return {"won": w, "lost": len(rows) - w, "pct": round(100 * w / len(rows)) if rows else None}
 
 
+def _years(by_year, pid) -> list[dict]:
+    """Every year of the career, newest first - a year without a match (injury,
+    a break) is listed too, as 0-0."""
+    ys = [int(y) for y in by_year if y.isdigit()]
+    if not ys:
+        return []
+    return [{"year": str(y), **_record(by_year.get(str(y), []), pid)} for y in range(max(ys), min(ys) - 1, -1)]
+
+
 @router.get("/player/{tour}/{player_id}", response_model=dict)
 def player(tour: str, player_id: int, db: Session = Depends(get_db), _: User = Depends(owner)):
     """A player's profile for betting: record overall, by surface, by year,
@@ -137,7 +146,7 @@ def player(tour: str, player_id: int, db: Session = Depends(get_db), _: User = D
     return {"player": dict(p), "record": _record(rows, player_id),
             "last_12_months": _record([r for r in rows if (r["play_date"] or "") > recent_cut], player_id),
             "by_surface": {s: _record(rs, player_id) for s, rs in sorted(by_surface.items(), key=lambda x: -len(x[1]))},
-            "by_year": [{"year": y, **_record(rs, player_id)} for y, rs in sorted(by_year.items(), reverse=True)][:8],
+            "by_year": _years(by_year, player_id),
             "titles": sum(1 for r in rows if r["round"] == "F" and r["winner_id"] == player_id),
             "sets": tennis_stats.player_sets(rows, recent_cut, player_id),
             "sets_vs": tennis_stats.player_sets_vs(rows, recent_cut, player_id),

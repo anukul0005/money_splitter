@@ -198,14 +198,18 @@ function PlayerView({ sel, onPlayer, onH2H }) {
         <Safe what="set statistics"><PlayerSets rows={p.sets} vs={p.sets_vs} name={info.name} /></Safe>
       )}
       <div className="card">
-        <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">By year</p>
+        <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">
+          By year{p.by_year.length > 1 && <span className="normal-case tracking-normal font-semibold text-gray-400"> · {p.by_year[p.by_year.length - 1].year} – {p.by_year[0].year}</span>}
+        </p>
         {p.by_year.map((y) => (
           <div key={y.year} className="flex items-center gap-2 py-1 text-xs">
             <span className="w-10 font-bold text-gray-700">{y.year}</span>
             <div className="flex-1 h-2 bg-gray-100 rounded overflow-hidden">
               <div className="h-full bg-brand-400" style={{ width: `${y.pct || 0}%` }} />
             </div>
-            <span className="w-20 text-right text-gray-600">{y.won}–{y.lost} · {y.pct}%</span>
+            <span className="w-20 text-right text-gray-600">
+              {y.won + y.lost ? `${y.won}–${y.lost} · ${y.pct}%` : <span className="text-gray-400">no matches</span>}
+            </span>
           </div>
         ))}
       </div>
