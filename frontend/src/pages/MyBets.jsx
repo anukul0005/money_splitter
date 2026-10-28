@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { betsConnectUrl, betsList, betsProgress, betsStatus, betsSummary, betsSync } from '../api'
+import { betsConnectUrl, betsDeletePromo, betsList, betsProgress, betsPromos, betsSavePromo, betsStatus, betsSummary, betsSync } from '../api'
 
 /**
  * /my-bets - your 1xbet bets, read from the history emails 1xbet sends to
@@ -287,6 +287,80 @@ function MailCard({ st, onSynced }) {
   )
 }
 
+/** 1xbet's Friday no-risk bet: asked every Friday until answered - the
+ * stake (up to ₹27k) and whether it won. A win adds the stake as profit. */
+function FridayPromo({ onSaved }) {
+  const [d, setD] = useState(null)
+  const [day, setDay] = useState('')
+  const [stake, setStake] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [other, setOther] = useState(false)
+  const load = () => betsPromos().then((r) => {
+    setD(r.data)
+    setDay((cur) => cur || r.data.pending[0] || '')
+  }).catch(() => setD(null))
+  useEffect(() => { load() }, [])
+  if (!d) return null
+  const save = (result) => {
+    setErr('')
+    if (!day) { setErr('Pick the Friday'); return }
+    if (result !== 'skipped' && !(+stake > 0 && +stake <= d.max)) { setErr(`Stake between ₹1 and ₹${d.max.toLocaleString('en-IN')}`); return }
+    setBusy(true)
+    betsSavePromo({ day, stake: +stake || 0, result }).then(() => {
+      setStake(''); setDay(''); setOther(false); load(); onSaved()
+    }).catch((e) => setErr(e.response?.data?.detail || "Couldn't save")).finally(() => setBusy(false))
+  }
+  const remove = (x) => betsDeletePromo(x).then(() => { load(); onSaved() })
+  const asking = d.pending.length > 0 || other
+  const fri = (s) => (s ? new Date(`${s}T00:00:00`).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }) : '')
+  return (
+    <div className={`card ${d.pending.length ? 'border-brand-400 bg-amber-50' : ''}`}>
+      <div className="flex items-baseline gap-2">
+        <p className="text-sm font-black text-gray-900 flex-1">Friday no-risk bet</p>
+        {d.entries.length > 0 && <p className={`text-xs font-black ${pl(d.profit)}`}>+{inr(d.profit)} · {d.won} won</p>}
+      </div>
+      <p className="text-[10px] text-gray-500">Stake up to ₹{d.max.toLocaleString('en-IN')}: a win adds the stake as profit, a loss costs nothing.</p>
+      {asking ? (
+        <div className="mt-2 space-y-2">
+          <p className="text-xs font-bold text-gray-800">
+            {d.pending.length && !other ? `How did ${fri(day)}'s no-risk bet go?` : 'Which Friday?'}
+          </p>
+          {(other || d.pending.length > 1) && (
+            <input type="date" value={day} onChange={(e) => setDay(e.target.value)}
+              className="px-2 py-1.5 rounded-md border border-amber-300 bg-white text-xs font-bold" />
+          )}
+          <input className="input" type="number" inputMode="decimal" min="1" max={d.max} placeholder={`Stake (₹, up to ${d.max.toLocaleString('en-IN')})`}
+            value={stake} onChange={(e) => setStake(e.target.value)} />
+          <div className="flex gap-2">
+            <button disabled={busy} onClick={() => save('won')} className="flex-1 py-2 rounded-md bg-green-600 text-white text-sm font-black disabled:opacity-50">Won</button>
+            <button disabled={busy} onClick={() => save('lost')} className="flex-1 py-2 rounded-md bg-red-500 text-white text-sm font-black disabled:opacity-50">Lost</button>
+            <button disabled={busy} onClick={() => save('skipped')} className="px-3 py-2 rounded-md border border-amber-300 bg-white text-xs font-bold text-gray-600 disabled:opacity-50">Didn't use it</button>
+          </div>
+          {+stake > 0 && <p className="text-[10px] text-gray-500">Won = <b className="text-green-700">+{inr(Math.min(+stake, d.max))}</b> profit · Lost = ₹0</p>}
+          {other && <button onClick={() => { setOther(false); setDay(d.pending[0] || '') }} className="text-[11px] font-bold text-gray-400">Cancel</button>}
+        </div>
+      ) : (
+        <button onClick={() => { setOther(true); setDay('') }} className="mt-1 text-[11px] font-bold text-brand-600">+ Add a Friday</button>
+      )}
+      {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
+      {d.entries.length > 0 && (
+        <div className="mt-2 pt-2 border-t border-gray-100">
+          {d.entries.map((x) => (
+            <div key={x.day} className="flex items-center gap-2 py-0.5 text-[11px]">
+              <span className="w-24 font-bold text-gray-700">{fri(x.day)}</span>
+              <span className="flex-1 text-gray-500">{x.result === 'skipped' ? "didn't use it" : `₹${x.stake.toLocaleString('en-IN')} · ${x.result}`}</span>
+              <span className={`font-black tabular-nums ${x.profit ? 'text-green-700' : 'text-gray-400'}`}>{x.profit ? `+${inr(x.profit)}` : '₹0'}</span>
+              <button onClick={() => remove(x.day)} className="text-gray-300 hover:text-red-500" aria-label="Remove">×</button>
+            </div>
+          ))}
+          {!asking && d.pending.length === 0 && null}
+        </div>
+      )}
+    </div>
+  )
+}
+
 const shortDay = (d) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '')
 const longDay = (d) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '')
 const blockLabel = (lbl) => { const [a, b] = (lbl || '').split('|'); return `${shortDay(a)} – ${shortDay(b)}` }
@@ -338,7 +412,8 @@ export default function MyBets() {
     if (!st) return
     setS(null)
     betsSummary(shown ? { frm: shown.from, to: shown.to } : {}).then((r) => setS(r.data)).catch(() => setS({ total: null }))
-  }, [st, shown?.from, shown?.to])
+  }, [st, shown?.from, shown?.to, bump])
+  const [bump, setBump] = useState(0)           // a Friday answer changes the numbers: reload them
   const pickBlock = (lbl) => { const [from, to] = lbl.split('|'); setView({ from, to }); window.scrollTo({ top: 0, behavior: 'smooth' }) }
   const gmail = new URLSearchParams(loc.search).get('gmail')
   const t = s?.total
@@ -354,6 +429,7 @@ export default function MyBets() {
       <div className="px-5 mt-4 max-w-2xl space-y-3">
         {gmail === 'connected' && <p className="text-xs font-bold text-green-700">Gmail connected - tap "Check mail" to read your history.</p>}
         {gmail === 'error' && <p className="text-xs font-bold text-red-600">Gmail didn't connect - try again.</p>}
+        <FridayPromo onSaved={() => setBump((b) => b + 1)} />
         <ViewPicker views={views} view={shown} setView={setView} />
         {isPast && (
           <p className="text-[11px] text-gray-600 bg-gray-100 rounded-md px-3 py-2">
@@ -379,6 +455,11 @@ export default function MyBets() {
               <p className="text-[10px] text-gray-400 mt-2">
                 {Object.entries(t.statuses || {}).map(([k, v]) => `${(STATUS[k] || [k])[0]} ${v}`).join(' · ')}
               </p>
+              {t.promo?.fridays > 0 && (
+                <p className="text-[11px] text-gray-600 mt-1">
+                  Includes Friday no-risk bets: <b className="text-green-700">+{inr(t.promo.profit)}</b> ({t.promo.won} won, {t.promo.lost} lost)
+                </p>
+              )}
             </div>
             <div className="card"><ProfitChart points={s.curve} /></div>
             {!isPast && s.by_block?.length > 1 && (

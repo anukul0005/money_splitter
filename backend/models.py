@@ -853,6 +853,26 @@ class Bet(Base):
     __table_args__ = (UniqueConstraint("user_id", "bookmaker", "bet_key", name="uq_bet_key"),)
 
 
+class FridayPromo(Base):
+    """1xbet's Friday no-risk bet, as the person reports it (the app asks
+    each Friday): the stake (up to ₹27,000) and whether it won. A win pays
+    100% of the stake as profit; a loss costs nothing. Added to My bets'
+    profit for that day (routers/bets.py) - not to the money staked, since
+    none of it was at risk."""
+
+    __tablename__ = "friday_promos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    day = Column(String(10), nullable=False)        # the Friday, YYYY-MM-DD
+    stake = Column(Float, nullable=False, default=0)
+    result = Column(String(10), nullable=False)     # won / lost / skipped
+    profit = Column(Float, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("user_id", "day", name="uq_friday_promo_day"),)
+
+
 class BankPassword(Base):
     """The PDF-opening password for one bank's statements, for one user.
 

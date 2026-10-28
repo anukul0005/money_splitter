@@ -19,7 +19,7 @@ import bet_history
 from database import get_db
 from sqlalchemy import func
 
-from models import Bet, BetImport, BettingGmailConnection, User
+from models import Bet, BetImport, BettingGmailConnection, FridayPromo, User
 from routers.tennis import owner
 
 router = APIRouter(prefix="/bets", tags=["bets"])
@@ -34,6 +34,18 @@ STAKE_BUCKETS = [(0, 100, "under ₹100"), (100, 500, "₹100 – 499"), (500, 1
 # apart and shown only when asked for.
 CURRENT_FROM = "2026-07-29"
 BLOCK_DAYS = 10
+
+
+# 1xbet's Friday no-risk bet: stake up to this; a win pays the stake as
+# profit, a loss costs nothing. Asked for every Friday from PROMO_FROM on.
+PROMO_MAX = 27000
+PROMO_FROM = "2026-10-30"
+
+
+class PromoIn(BaseModel):
+    day: str                           # the Friday, YYYY-MM-DD
+    stake: float = 0
+    result: str                        # won / lost / skipped
 
 
 class SyncIn(BaseModel):
@@ -105,6 +117,65 @@ def _in_period(qry, frm: str, to: str):
     return qry
 
 
+# ── Friday no-risk bet ───────────────────────────────────────────────────────
+def _fridays(upto: date) -> list[str]:
+    d = date.fromisoformat(PROMO_FROM)
+    out = []
+    while d <= upto:
+        out.append(d.isoformat())
+        d += timedelta(days=7)
+    return out
+
+
+def _today() -> date:
+    from datetime import datetime, timezone
+    return (datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)).date()   # India
+
+
+@router.get("/promos", response_model=dict)
+def promos(db: Session = Depends(get_db), caller: User = Depends(owner)):
+    """Every Friday answered, and the Fridays still waiting for an answer
+    (from PROMO_FROM up to today) - the page asks about those."""
+    rows = db.query(FridayPromo).filter(FridayPromo.user_id == caller.id).order_by(FridayPromo.day.desc()).all()
+    have = {r.day for r in rows}
+    today = _today()
+    return {"max": PROMO_MAX, "today_is_friday": today.weekday() == 4,
+            "pending": [d for d in reversed(_fridays(today)) if d not in have],
+            "entries": [{"day": r.day, "stake": r.stake, "result": r.result, "profit": r.profit} for r in rows],
+            "won": sum(1 for r in rows if r.result == "won"), "profit": round(sum(r.profit for r in rows), 2)}
+
+
+@router.post("/promos", response_model=dict)
+def save_promo(body: PromoIn, db: Session = Depends(get_db), caller: User = Depends(owner)):
+    try:
+        day = date.fromisoformat(body.day)
+    except ValueError:
+        raise HTTPException(400, "Pick the Friday")
+    if day.weekday() != 4:
+        raise HTTPException(400, "The no-risk bet is on Fridays - pick a Friday")
+    if day > _today():
+        raise HTTPException(400, "That Friday hasn't come yet")
+    if body.result not in ("won", "lost", "skipped"):
+        raise HTTPException(400, "Won, lost or didn't use it")
+    stake = 0.0 if body.result == "skipped" else round(float(body.stake or 0), 2)
+    if body.result != "skipped" and not (0 < stake <= PROMO_MAX):
+        raise HTTPException(400, f"Stake between ₹1 and ₹{PROMO_MAX:,}")
+    row = db.query(FridayPromo).filter(FridayPromo.user_id == caller.id, FridayPromo.day == body.day).first()
+    if row is None:
+        row = FridayPromo(user_id=caller.id, day=body.day)
+        db.add(row)
+    row.stake, row.result = stake, body.result
+    row.profit = stake if body.result == "won" else 0.0    # 100% of the stake; a loss costs nothing
+    db.commit()
+    return {"day": row.day, "stake": row.stake, "result": row.result, "profit": row.profit}
+
+
+@router.delete("/promos/{day}", status_code=204)
+def delete_promo(day: str, db: Session = Depends(get_db), caller: User = Depends(owner)):
+    db.query(FridayPromo).filter(FridayPromo.user_id == caller.id, FridayPromo.day == day).delete()
+    db.commit()
+
+
 # ── what the bets add up to ──────────────────────────────────────────────────
 def _market(pick: str | None, event: str | None) -> str:
     p = (pick or "").lower()
@@ -174,6 +245,10 @@ def summary(frm: str = "", to: str = "", db: Session = Depends(get_db), caller: 
         frm = CURRENT_FROM                    # the current stretch
     bets = [b for b in _in_period(db.query(Bet).filter(Bet.user_id == caller.id), frm, to).order_by(Bet.placed_at).all()
             if b.status != "open"]
+    pq = db.query(FridayPromo).filter(FridayPromo.user_id == caller.id, FridayPromo.day >= (frm or "0000"))
+    if to:
+        pq = pq.filter(FridayPromo.day <= to)
+    promo_rows = pq.all()
     if not bets:
         return {"total": None, "period": {"from": frm, "to": to}}
     total = _agg()
@@ -204,6 +279,18 @@ def summary(frm: str = "", to: str = "", db: Session = Depends(get_db), caller: 
         for g, k in keys.items():
             _add(groups[g][k], b)
         daily[(b.settled_at or b.placed_at or "")[:10]] += (b.payout or 0) - (b.stake or 0)
+    # Friday no-risk bets: a win's profit counts in the totals, its 10-day
+    # block and that day on the chart; nothing is added to the money staked.
+    for pr in promo_rows:
+        total["returned"] += pr.profit
+        blk = _block_of(pr.day)
+        if blk:
+            groups["block"][blk]["returned"] += pr.profit
+        if pr.profit:
+            daily[pr.day] += pr.profit
+    promo = {"fridays": len(promo_rows), "won": sum(1 for r in promo_rows if r.result == "won"),
+             "lost": sum(1 for r in promo_rows if r.result == "lost"), "profit": round(sum(r.profit for r in promo_rows), 2),
+             "staked": round(sum(r.stake for r in promo_rows), 2)}
     # streaks, in the order bets were settled
     best = worst = run = 0
     last = None
@@ -230,7 +317,7 @@ def summary(frm: str = "", to: str = "", db: Session = Depends(get_db), caller: 
         "total": {**_done(total), "statuses": statuses, "avg_odds": round(sum(b.odds or 0 for b in bets) / len(bets), 2),
                   "avg_stake": round(total["staked"] / len(bets), 2), "first": bets[0].placed_at, "last": bets[-1].placed_at,
                   "best_win": max((profit(b) for b in bets), default=0), "worst_loss": min((profit(b) for b in bets), default=0),
-                  "longest_win_streak": best, "longest_loss_streak": worst,
+                  "longest_win_streak": best, "longest_loss_streak": worst, "promo": promo,
                   "currency": next((b.currency for b in bets if b.currency), "INR")},
         "by_month": order("month", lambda x: x["label"]),
         "by_block": order("block", lambda x: x["label"]),
