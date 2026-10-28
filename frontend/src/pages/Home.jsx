@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getGroups, getOverview, getUserSummary, getUserGroupBalances, getFriends, getLoans } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
-import { useUser, isAdmin } from '../UserContext'
+import { useUser, isAdmin, isAnalyticsUser } from '../UserContext'
 import { buildMasterGroups } from '../utils/masterGroups'
 import { owes, owed } from '../utils/money'
 import { combinedBalances } from '../utils/balances'
@@ -141,7 +141,19 @@ export default function Home() {
             <h1 className="text-2xl font-bold mt-0.5 tracking-tight">Your balances</h1>
             <p className="text-slate-300/40 text-xs mt-1 font-medium">{activeOverview.length} active groups</p>
           </div>
-          <NotificationBell user={user} />
+          <div className="flex items-center gap-1 flex-shrink-0">
+            {isAnalyticsUser(user) && (
+              <button onClick={() => nav('/betting')} title="Betting analytics" aria-label="Betting analytics"
+                className="p-2 text-white/70 hover:text-white active:scale-95 transition-all">
+                {/* tennis ball */}
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M5.6 5.6a9 9 0 0 1 0 12.8M18.4 5.6a9 9 0 0 0 0 12.8" />
+                </svg>
+              </button>
+            )}
+            <NotificationBell user={user} />
+          </div>
         </div>
       </div>
 
