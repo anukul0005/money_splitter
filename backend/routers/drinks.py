@@ -67,7 +67,31 @@ def my_bottles(db: Session = Depends(get_db), caller: User = Depends(current_use
                     "bottles": a["bottles"], "avg_price": round(a["spent"] / a["priced"]) if a["priced"] else None,
                     "priced": a["priced"], "last": a["last"]})
     out.sort(key=lambda x: (-x["times"], x["name"].lower(), SIZE_ORDER.get(x["size"] or "", 9)))
-    return {"bottles": out, "reading": bottles.status()["running"], "unread": unread}
+    return {"bottles": out, "brands": _brands(out), "reading": bottles.status()["running"], "unread": unread}
+
+
+def _brands(sizes: list[dict]) -> list[dict]:
+    """The same bottles, one entry per brand ("Old Monk"), its sizes inside -
+    quarter, half, full, or not said - so a brand is listed once."""
+    by: dict[str, dict] = {}
+    for s in sizes:
+        k = bottles.bottle_key(s["name"])
+        b = by.setdefault(k, {"name": s["name"], "times": 0, "bottles": 0, "last": None, "sizes": [], "_n": defaultdict(int)})
+        b["times"] += s["times"]
+        b["bottles"] += s["bottles"]
+        b["_n"][s["name"]] += s["times"]
+        if s["last"] and (b["last"] is None or s["last"] > b["last"]):
+            b["last"] = s["last"]
+        b["sizes"].append(s)
+    out = []
+    for b in by.values():
+        b["name"] = max(b.pop("_n").items(), key=lambda x: x[1])[0]       # the spelling used most
+        b["sizes"].sort(key=lambda s: (SIZE_ORDER.get(s["size"] or "", 9) if s["size"] else 10, s["size_ml"] or 0))
+        prices = [s["avg_price"] for s in b["sizes"] if s["avg_price"] is not None]
+        b["price_low"], b["price_high"] = (min(prices), max(prices)) if prices else (None, None)
+        out.append(b)
+    out.sort(key=lambda x: (-x["times"], x["name"].lower()))
+    return out
 
 
 @router.get("/my-bottles/purchases", response_model=list[dict])

@@ -16,36 +16,31 @@ const sizeText = (b) => [b.size, b.size_ml && !(b.size || '').includes('ml') ? `
 // What the purchases endpoint groups by - the same as the list's own key.
 const sizeKey = (b) => String(b.size_ml || b.size || '')
 
-function Bottle({ b, nav }) {
-  const [open, setOpen] = useState(false)
+/** One size of a brand ("half · 375 ml"): times, average price; tap for each purchase. */
+function SizeRow({ s, nav, single }) {
+  const [open, setOpen] = useState(single)
   const [buys, setBuys] = useState(null)
-  const toggle = () => {
-    setOpen((o) => !o)
-    if (!buys) getBottlePurchases(b.name, sizeKey(b)).then((r) => setBuys(r.data)).catch(() => setBuys([]))
-  }
+  useEffect(() => {
+    if (open && buys === null) getBottlePurchases(s.name, sizeKey(s)).then((r) => setBuys(r.data)).catch(() => setBuys([]))
+  }, [open])
   return (
-    <div className="card">
-      <button onClick={toggle} className="w-full text-left flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm font-bold text-gray-900 break-words">
-            {b.name}
-            {sizeText(b) && <span className="ml-1.5 text-[11px] font-semibold text-gray-400">{sizeText(b)}</span>}
-          </p>
-          <p className="text-[11px] text-gray-500 mt-0.5">
-            {b.times} time{b.times === 1 ? '' : 's'}
-            {b.bottles !== b.times && ` · ${b.bottles} bottles`}
-            {b.last ? ` · last ${fmtDate(b.last)}` : ''}
-          </p>
-        </div>
-        <div className="text-right shrink-0">
-          <p className="text-sm font-black text-brand-600">{b.avg_price != null ? INR(b.avg_price) : '—'}</p>
-          <p className="text-[10px] text-gray-400">
-            {b.avg_price == null ? 'price not noted' : b.priced > 1 ? `avg of ${b.priced}` : 'a bottle'}
-          </p>
-        </div>
-      </button>
+    <div className={single ? '' : 'py-1.5 border-t border-amber-100 first:border-t-0'}>
+      {!single && (
+        <button onClick={() => setOpen((o) => !o)} className="w-full text-left flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-bold text-gray-800">{sizeText(s) || 'Size not noted'}</p>
+            <p className="text-[10px] text-gray-500">
+              {s.times} time{s.times === 1 ? '' : 's'}{s.bottles !== s.times && ` · ${s.bottles} bottles`}{s.last ? ` · last ${fmtDate(s.last)}` : ''}
+            </p>
+          </div>
+          <div className="text-right shrink-0">
+            <p className="text-xs font-black text-brand-600">{s.avg_price != null ? INR(s.avg_price) : '—'}</p>
+            <p className="text-[9px] text-gray-400">{s.avg_price == null ? 'price not noted' : s.priced > 1 ? `avg of ${s.priced}` : 'a bottle'}</p>
+          </div>
+        </button>
+      )}
       {open && (
-        <div className="mt-3 pt-2 border-t border-amber-100 space-y-1.5">
+        <div className={`space-y-1.5 ${single ? '' : 'mt-1.5 ml-2 pl-2 border-l-2 border-amber-200'}`}>
           {buys === null && <p className="text-[11px] text-gray-400">Loading…</p>}
           {buys?.map((p) => (
             <button key={p.expense_id} onClick={() => nav(`/groups/${p.group_id}`)} className="w-full text-left flex items-start justify-between gap-3">
@@ -59,6 +54,42 @@ function Bottle({ b, nav }) {
               </p>
             </button>
           ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** A brand, once: every size of it inside. */
+function Brand({ b, nav }) {
+  const [open, setOpen] = useState(false)
+  const one = b.sizes.length === 1 ? b.sizes[0] : null
+  const price = b.price_low == null ? '—' : b.price_low === b.price_high ? INR(b.price_low) : `${INR(b.price_low)} – ${INR(b.price_high)}`
+  return (
+    <div className="card">
+      <button onClick={() => setOpen((o) => !o)} className="w-full text-left flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-bold text-gray-900 break-words">
+            {b.name}
+            {one && sizeText(one) && <span className="ml-1.5 text-[11px] font-semibold text-gray-400">{sizeText(one)}</span>}
+          </p>
+          <p className="text-[11px] text-gray-500 mt-0.5">
+            {b.times} time{b.times === 1 ? '' : 's'}
+            {b.bottles !== b.times && ` · ${b.bottles} bottles`}
+            {!one && ` · ${b.sizes.length} sizes`}
+            {b.last ? ` · last ${fmtDate(b.last)}` : ''}
+          </p>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-sm font-black text-brand-600">{price}</p>
+          <p className="text-[10px] text-gray-400">
+            {one ? (one.avg_price == null ? 'price not noted' : one.priced > 1 ? `avg of ${one.priced}` : 'a bottle') : 'by size ▾'}
+          </p>
+        </div>
+      </button>
+      {open && (
+        <div className="mt-3 pt-2 border-t border-amber-100">
+          {one ? <SizeRow s={one} nav={nav} single /> : b.sizes.map((s) => <SizeRow key={sizeKey(s)} s={s} nav={nav} />)}
         </div>
       )}
     </div>
@@ -91,12 +122,13 @@ export default function MyBottles() {
     return () => clearTimeout(timer)
   }, [])
 
-  const list = data?.bottles || []
+  // one entry per brand (older servers: one per size)
+  const list = data?.brands || (data?.bottles || []).map((x) => ({ ...x, sizes: [x], price_low: x.avg_price, price_high: x.avg_price }))
   const shown = list
     .filter((b) => !q.trim() || b.name.toLowerCase().includes(q.trim().toLowerCase()))
     .sort((a, b) => sort === 'recent' ? (b.last || '').localeCompare(a.last || '')
-      : sort === 'dear' ? (b.avg_price ?? -1) - (a.avg_price ?? -1)
-      : sort === 'cheap' ? (a.avg_price ?? 1e9) - (b.avg_price ?? 1e9)
+      : sort === 'dear' ? (b.price_high ?? -1) - (a.price_high ?? -1)
+      : sort === 'cheap' ? (a.price_low ?? 1e9) - (b.price_low ?? 1e9)
       : b.times - a.times)
   const reading = data && (data.reading || data.unread > 0)
 
@@ -131,7 +163,7 @@ export default function MyBottles() {
           </p>
         )}
         {list.length > 0 && shown.length === 0 && <p className="text-sm text-gray-400 text-center py-6">No bottle matches “{q}”.</p>}
-        {shown.map((b) => <Bottle key={`${b.name}|${sizeKey(b)}`} b={b} nav={nav} />)}
+        {shown.map((b) => <Brand key={b.name} b={b} nav={nav} />)}
         {list.length > 0 && (
           <p className="text-[10px] text-gray-400 text-center pt-2">
             Read from what you wrote on each drink expense. A price is the cost of one bottle, averaged over the
