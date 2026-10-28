@@ -672,7 +672,7 @@ function Patterns() {
   const [out, setOut] = useState(-8.5)
   const [surface, setSurface] = useState('all')
   const [bo, setBo] = useState('all')
-  const [since, setSince] = useState(2020)
+  const [since, setSince] = useState(2016)
   useEffect(() => {
     setRows(null)
     tennisPatterns(since).then((r) => setRows(r.data.rows)).catch(() => setRows([]))
@@ -682,7 +682,7 @@ function Patterns() {
       <span className="font-bold text-gray-500">Matches from</span>
       <select value={since} onChange={(e) => setSince(+e.target.value)}
         className="px-2 py-1.5 rounded-md border border-amber-300 bg-white font-bold">
-        {[[0, 'All years (2000 on)'], [2015, '2015 on'], [2019, '2019 on'], [2020, '2020 on (after 2019)'],
+        {[[2016, '2016 on (after 2015)'], [2019, '2019 on'], [2020, '2020 on (after 2019)'],
           [2023, '2023 on'], [2025, '2025 on']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
       </select>
     </div>
@@ -711,6 +711,13 @@ function Patterns() {
   return (
     <div className="space-y-3">
       <div className="card space-y-2">
+        <div className="flex gap-2 flex-wrap">
+          {[[10.5, -8.5, 'Close set 1 → set 2 under 8.5'], [-8.5, 8.5, 'Set 1 under 8.5 → set 2 over 8.5']].map(([c, o, l]) => (
+            <button key={l} onClick={() => { setFirst(1); setCond(c); setOut(o) }}
+              className={`px-2.5 py-1.5 rounded-md text-[11px] font-bold border ${first === 1 && cond === c && out === o
+                ? 'bg-brand-400 text-white border-brand-400' : 'bg-white text-gray-700 border-amber-300'}`}>{l}</button>
+          ))}
+        </div>
         <div className="flex items-center gap-2 flex-wrap">
           <Seg value={String(first)} onChange={(v) => setFirst(+v)} options={[['1', 'Set 1 → Set 2'], ['2', 'Set 2 → Set 3']]} />
         </div>
