@@ -110,9 +110,11 @@ def canonical(tour: str, name: str) -> str:
     return _canon_cache[key]
 
 
-def sets_of(score: str) -> tuple[list[int], bool]:
+def sets_of(score: str, took: list | None = None) -> tuple[list[int], bool]:
     """Total games of each completed set, and whether the match was played
-    out in full (no retirement / walkover / unfinished set)."""
+    out in full (no retirement / walkover / unfinished set). Pass a list as
+    took to get, per set, whether the match winner won it (scores are
+    written from the winner's side)."""
     s = score or ""
     full = not re.search(r"RET|W/O|DEF|ABD|unfinished", s, re.I)
     out = []
@@ -121,16 +123,18 @@ def sets_of(score: str) -> tuple[list[int], bool]:
         hi, lo = max(a, b), min(a, b)
         if hi >= 6 and (hi - lo >= 2 or tb or (hi == 7 and lo == 6) or (hi > 7 and hi - lo == 1)):
             out.append(min(a + b, MAX_GAMES))
+            if took is not None:
+                took.append(a > b)
         else:
             full = False
     return out, full and bool(out)
 
 
-def match_sets(tour, tname, surface, best_of, score):
+def match_sets(tour, tname, surface, best_of, score, took: list | None = None):
     """What a match adds to the statistics: (canonical tournament, best-of,
     [(set, games)...]) - or None when it doesn't count (no completed set,
-    carpet, best-of-five outside the Grand Slams)."""
-    games, full = sets_of(score)
+    carpet, best-of-five outside the Grand Slams). took: as in sets_of."""
+    games, full = sets_of(score, took)
     if not games or surface == "Carpet":       # carpet: gone from the tour since 2009 - nothing to bet on
         return None
     bo = 5 if (best_of == 5 or len(games) > 3) else 3
@@ -143,19 +147,23 @@ def match_sets(tour, tname, surface, best_of, score):
     return canon, bo, keys
 
 
-def player_sets(rows, recent_cut: str) -> list:
-    """A player's matches as [period, surface, set, {games: count}] rows,
-    period 'all' or '12m' (played after recent_cut)."""
+def player_sets(rows, recent_cut: str, player_id: int) -> list:
+    """A player's matches as [period, surface, set, outcome, {games: count}]
+    rows: period 'all' or '12m' (played after recent_cut); outcome 'W' / 'L'
+    = the player won / lost that set, 'M' for the every / any match rows."""
     h: dict = defaultdict(lambda: defaultdict(int))
     for r in rows:
-        got = match_sets(r["tour"], r["tourney_name"], r["surface"], r["best_of"], r["score"])
+        took: list = []
+        got = match_sets(r["tour"], r["tourney_name"], r["surface"], r["best_of"], r["score"], took)
         if not got:
             continue
+        won_match = r["winner_id"] == player_id
         periods = ["all", "12m"] if (r["play_date"] or "") > recent_cut else ["all"]
-        for sn, g in got[2]:
+        for i, (sn, g) in enumerate(got[2]):
+            outcome = "M" if i >= len(took) else ("W" if took[i] == won_match else "L")
             for p in periods:
-                h[(p, r["surface"] or "Unknown", sn)][g] += 1
-    return [[p, s, sn, dict(c)] for (p, s, sn), c in h.items()]
+                h[(p, r["surface"] or "Unknown", sn, outcome)][g] += 1
+    return [[p, s, sn, o, dict(c)] for (p, s, sn, o), c in h.items()]
 
 
 _lock = threading.Lock()

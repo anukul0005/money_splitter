@@ -177,7 +177,7 @@ function PlayerView({ sel, onPlayer, onH2H }) {
           {Object.entries(p.by_surface).map(([s, r]) => <Record key={s} label={s} r={r} />)}
         </div>
       </div>
-      {p.sets?.length > 0 && <PlayerSets rows={p.sets} />}
+      {p.sets?.length > 0 && <PlayerSets rows={p.sets} name={info.name} />}
       <div className="card">
         <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">By year</p>
         {p.by_year.map((y) => (
@@ -463,14 +463,21 @@ function SetStats({ tour }) {
 }
 
 /** A player's sets over a games line: set 1-5 / every / any, career, last 12 months, by surface. */
-function PlayerSets({ rows }) {
+function PlayerSets({ rows, name }) {
   const [line, setLine] = useState(8.5)
+  const [scope, setScope] = useState('Career')
+  // rows: [period, surface, set, outcome W/L/M, {games: count}]
   const cols = [['all', null, 'Career'], ['12m', null, '12 months'],
     ...SURFACES.filter((s) => rows.some((r) => r[0] === 'all' && r[1] === s)).map((s) => ['all', s, s])]
-  const cell = (period, surface, set) => tally(rows.filter((r) => r[0] === period && (!surface || r[1] === surface)
-    && r[2] === set).map((r) => r[3]), line)
+  const pick = (period, surface, set, outcome) => rows.filter((r) => r[0] === period && (!surface || r[1] === surface)
+    && (set === 'sets' ? /^\d$/.test(r[2]) : r[2] === set) && (!outcome || r[3] === outcome)).map((r) => r[4])
+  const cell = (period, surface, set) => tally(pick(period, surface, set), line)
   const setRows = SET_ROWS.filter(([k]) => cell('all', null, k).n)
+  const [sp, ss] = cols.find((c) => c[2] === scope) || cols[0]
+  const bySet = [...setRows.filter(([k]) => /^\d$/.test(k)), ['sets', 'All sets']]
+  const firstName = (name || '').split(' ').slice(-1)[0]
   return (
+    <>
     <div className="card">
       <div className="flex items-center gap-2 mb-1">
         <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest flex-1">Sets over {line} games</p>
@@ -499,6 +506,77 @@ function PlayerSets({ rows }) {
       </div>
       <p className="text-[10px] text-gray-400 mt-1">Completed sets only; best-of-five only at the Grand Slams; no carpet.</p>
     </div>
+
+    <div className="card">
+      <div className="flex flex-wrap gap-1 mb-2">
+        {cols.map(([, , cl]) => (
+          <button key={cl} onClick={() => setScope(cl)}
+            className={`px-2 py-1 rounded text-[10px] font-bold border ${scope === cl ? 'bg-field-950 text-white border-field-950' : 'bg-white text-gray-600 border-amber-300'}`}>{cl}</button>
+        ))}
+      </div>
+
+      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Over {line} sets · who took them</p>
+      <p className="text-[10px] text-gray-400 mb-1">Of the sets that went over {line} games, how many {firstName} won.</p>
+      <table className="w-full text-xs mb-4">
+        <thead>
+          <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
+            <th className="py-1 text-left">Set</th><th className="py-1">Over sets</th><th className="py-1">Won</th><th className="py-1">Lost</th><th className="py-1">Won %</th>
+          </tr>
+        </thead>
+        <tbody>
+          {bySet.map(([k, l]) => {
+            const w = tally(pick(sp, ss, k, 'W'), line), lo = tally(pick(sp, ss, k, 'L'), line)
+            const over = w.over + lo.over
+            const t = { n: over, over: w.over, pct: over ? (100 * w.over) / over : null }
+            return (
+              <tr key={k} className={`border-t ${k === 'sets' ? 'border-gray-300' : 'border-gray-100'}`}>
+                <td className="py-1.5 font-bold text-gray-800">{l}</td>
+                <td className="py-1.5 text-center tabular-nums">{fmtN(over)}</td>
+                <td className="py-1.5 text-center tabular-nums font-bold text-green-700">{fmtN(w.over)}</td>
+                <td className="py-1.5 text-center tabular-nums text-red-600">{fmtN(lo.over)}</td>
+                <PctCell t={t} showCount={false} />
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+
+      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Dominant set wins · under the line</p>
+      <p className="text-[10px] text-gray-400 mb-1">Sets {firstName} won with few games against: count and share of all sets played. Small: sets lost that way.</p>
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
+            <th className="py-1 text-left">Set</th>
+            <th className="py-1">Under 8.5<br /><span className="normal-case font-semibold">6-2 or better</span></th>
+            <th className="py-1">Under 7.5<br /><span className="normal-case font-semibold">6-1 or better</span></th>
+            <th className="py-1">Under 6.5<br /><span className="normal-case font-semibold">6-0</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {bySet.map(([k, l]) => {
+            const won = pick(sp, ss, k, 'W'), lost = pick(sp, ss, k, 'L')
+            const played = tally([...won, ...lost], 0).n
+            return (
+              <tr key={k} className={`border-t ${k === 'sets' ? 'border-gray-300' : 'border-gray-100'}`}>
+                <td className="py-1.5 font-bold text-gray-800">{l}</td>
+                {[8.5, 7.5, 6.5].map((u) => {
+                  const w = tally(won, u), lo = tally(lost, u)
+                  const under = w.n - w.over, lUnder = lo.n - lo.over
+                  return (
+                    <td key={u} className="py-1.5 text-center">
+                      <p className="text-[13px] font-black text-gray-900 tabular-nums">{fmtN(under)}
+                        <span className="text-[10px] font-semibold text-gray-500"> · {played ? ((100 * under) / played).toFixed(0) : 0}%</span></p>
+                      <p className="text-[9px] text-red-500 tabular-nums">lost {fmtN(lUnder)}</p>
+                    </td>
+                  )
+                })}
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+    </>
   )
 }
 
