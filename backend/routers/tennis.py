@@ -137,6 +137,7 @@ def player(tour: str, player_id: int, db: Session = Depends(get_db), _: User = D
             "by_year": [{"year": y, **_record(rs, player_id)} for y, rs in sorted(by_year.items(), reverse=True)][:8],
             "titles": sum(1 for r in rows if r["round"] == "F" and r["winner_id"] == player_id),
             "sets": tennis_stats.player_sets(rows, recent_cut, player_id),
+            "sets_vs": tennis_stats.player_sets_vs(rows, recent_cut, player_id),
             "matches": [_match(r) for r in rows[:40]]}
 
 

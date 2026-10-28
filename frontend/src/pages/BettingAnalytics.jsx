@@ -195,7 +195,7 @@ function PlayerView({ sel, onPlayer, onH2H }) {
         </div>
       </div>
       {p.sets?.length > 0 && p.sets[0].length === 5 && (
-        <Safe what="set statistics"><PlayerSets rows={p.sets} name={info.name} /></Safe>
+        <Safe what="set statistics"><PlayerSets rows={p.sets} vs={p.sets_vs} name={info.name} /></Safe>
       )}
       <div className="card">
         <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">By year</p>
@@ -485,7 +485,7 @@ function SetStats({ tour }) {
 }
 
 /** A player's sets over a games line: set 1-5 / every / any, career, last 12 months, by surface. */
-function PlayerSets({ rows, name }) {
+function PlayerSets({ rows, vs, name }) {
   const [line, setLine] = useState(8.5)
   const [scope, setScope] = useState('Career')
   // rows: [period, surface, set, outcome W/L/M, {games: count}]
@@ -564,7 +564,7 @@ function PlayerSets({ rows, name }) {
       </table>
 
       <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Dominant set wins · under the line</p>
-      <p className="text-[10px] text-gray-400 mb-1">Sets {firstName} won with few games against: count and share of all sets played. Small: sets lost that way.</p>
+      <p className="text-[10px] text-gray-400 mb-1">Sets that ended with that scoreline, either way: how many {firstName} won of them, and that share.</p>
       <table className="w-full text-xs">
         <thead>
           <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
@@ -577,18 +577,22 @@ function PlayerSets({ rows, name }) {
         <tbody>
           {bySet.map(([k, l]) => {
             const won = pick(sp, ss, k, 'W'), lost = pick(sp, ss, k, 'L')
-            const played = tally([...won, ...lost], 0).n
             return (
               <tr key={k} className={`border-t ${k === 'sets' ? 'border-gray-300' : 'border-gray-100'}`}>
                 <td className="py-1.5 font-bold text-gray-800">{l}</td>
                 {[8.5, 7.5, 6.5].map((u) => {
                   const w = tally(won, u), lo = tally(lost, u)
-                  const under = w.n - w.over, lUnder = lo.n - lo.over
+                  const under = w.n - w.over, lUnder = lo.n - lo.over, all = under + lUnder
+                  const t = { n: all, over: under, pct: all ? (100 * under) / all : null }
                   return (
-                    <td key={u} className="py-1.5 text-center">
-                      <p className="text-[13px] font-black text-gray-900 tabular-nums">{fmtN(under)}
-                        <span className="text-[10px] font-semibold text-gray-500"> · {played ? ((100 * under) / played).toFixed(0) : 0}%</span></p>
-                      <p className="text-[9px] text-red-500 tabular-nums">lost {fmtN(lUnder)}</p>
+                    <td key={u} className={`py-1.5 text-center ${heat(t.pct)}`}>
+                      {all ? (
+                        <>
+                          <p className="text-[13px] font-black text-gray-900 tabular-nums">{t.pct.toFixed(0)}%</p>
+                          <p className="text-[9px] text-gray-500 tabular-nums">won {fmtN(under)} of {fmtN(all)}</p>
+                          <p className="text-[9px] text-red-500 tabular-nums">lost {fmtN(lUnder)}</p>
+                        </>
+                      ) : <span className="text-gray-300">—</span>}
                     </td>
                   )
                 })}
@@ -597,6 +601,43 @@ function PlayerSets({ rows, name }) {
           })}
         </tbody>
       </table>
+
+      {vs?.length > 0 && vs[0].length === 5 && (
+        <>
+          <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mt-4">Sets lost to stronger players</p>
+          <p className="text-[10px] text-gray-400 mb-1">
+            Sets {firstName} lost by type, against players ranked higher / in the top 5, 10, 20 at the time
+            (ranking; the tournament seed for 2026, where ESPN gives only seeds). Small: sets {firstName} won of that type.
+          </p>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
+                <th className="py-1 text-left">Opponent</th>
+                <th className="py-1">Over {line}</th><th className="py-1">Under 8.5</th><th className="py-1">Under 7.5</th><th className="py-1">Under 6.5</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[['above', 'Ranked higher'], ['top5', 'Top 5'], ['top10', 'Top 10'], ['top20', 'Top 20']].map(([tag, l]) => {
+                const get = (o) => vs.filter((r) => r[0] === sp && (!ss || r[1] === ss) && r[2] === tag && r[3] === o).map((r) => r[4])
+                const L = get('L'), W = get('W')
+                const kinds = [['over', line], ['under', 8.5], ['under', 7.5], ['under', 6.5]]
+                const count = (hs, [kind, ln]) => { const t = tally(hs, ln); return kind === 'over' ? t.over : t.n - t.over }
+                return (
+                  <tr key={tag} className="border-t border-gray-100">
+                    <td className="py-1.5 font-bold text-gray-800">{l}<p className="text-[9px] font-normal text-gray-400">{fmtN(tally(L, 0).n)} lost · {fmtN(tally(W, 0).n)} won</p></td>
+                    {kinds.map((kd, i) => (
+                      <td key={i} className="py-1.5 text-center">
+                        <p className="text-[13px] font-black text-red-600 tabular-nums">{fmtN(count(L, kd))}</p>
+                        <p className="text-[9px] text-gray-500 tabular-nums">won {fmtN(count(W, kd))}</p>
+                      </td>
+                    ))}
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </>
+      )}
     </div>
     </>
   )

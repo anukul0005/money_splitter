@@ -171,6 +171,49 @@ def player_sets(rows, recent_cut: str, player_id: int) -> list:
     return [[p, s, sn, o, dict(c)] for (p, s, sn, o), c in h.items()]
 
 
+def _strength(rank, seed):
+    """Ranking at the time; the tournament seed where no ranking was
+    recorded (ESPN, 2026: its rank field is the seed too)."""
+    for v in (rank, seed):
+        try:
+            if v not in (None, ""):
+                return int(v)
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def player_sets_vs(rows, recent_cut: str, player_id: int) -> list:
+    """The player's sets 1-5 by opponent strength: [period, surface, tag,
+    outcome W/L, {games: count}], tag 'above' (opponent ranked higher than
+    the player), 'top5', 'top10', 'top20' - overlapping groups."""
+    h: dict = defaultdict(lambda: defaultdict(int))
+    for r in rows:
+        took: list = []
+        got = match_sets(r["tour"], r["tourney_name"], r["surface"], r["best_of"], r["score"], took)
+        if not got:
+            continue
+        me, opp = ("winner", "loser") if r["winner_id"] == player_id else ("loser", "winner")
+        mine, theirs = _strength(r[f"{me}_rank"], r[f"{me}_seed"]), _strength(r[f"{opp}_rank"], r[f"{opp}_seed"])
+        if theirs is None:
+            continue
+        tags = [t for t, n in (("top5", 5), ("top10", 10), ("top20", 20)) if theirs <= n]
+        if mine is None or theirs < mine:
+            tags.append("above")
+        if not tags:
+            continue
+        won_match = me == "winner"
+        periods = ["all", "12m"] if (r["play_date"] or "") > recent_cut else ["all"]
+        for i, (sn, g) in enumerate(got[2]):
+            if i >= len(took):                 # the every / any rows
+                break
+            outcome = "W" if took[i] == won_match else "L"
+            for p in periods:
+                for t in tags:
+                    h[(p, r["surface"] or "Unknown", t, outcome)][g] += 1
+    return [[p, s, t, o, dict(c)] for (p, s, t, o), c in h.items()]
+
+
 _lock = threading.Lock()
 _cache: dict = {"key": None, "data": None}
 
