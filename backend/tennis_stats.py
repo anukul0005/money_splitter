@@ -6,7 +6,8 @@ Every completed set is counted as a histogram of its total games, so any
 line (7.5, 8.5, 9.5...) is worked out from the same numbers. A set is
 complete when someone reached 6 with a two-game lead, or won it 7-6 /
 in a tie-break; the unfinished set of a retirement, walkovers and short
-formats (Next Gen 4-game sets) are left out.
+formats (Next Gen 4-game sets) are left out, and so are best-of-five
+matches outside the Grand Slams (Davis Cup, Masters finals before 2007...).
 
 Besides sets 1-5 two match-level rows are kept: EVERY = the match's
 smallest set (every set over the line iff it is), ANY = its largest (at
@@ -27,6 +28,7 @@ from collections import defaultdict
 from sqlalchemy import text
 
 EVERY, ANY = "every", "any"
+SLAMS = {"Australian Open", "Roland Garros", "Wimbledon", "US Open"}
 MAX_GAMES = 14                      # longer final sets (e.g. 70-68) are counted as 14+
 _SET = re.compile(r"(\d+)-(\d+)(\(\d+\))?")
 
@@ -139,8 +141,10 @@ def _build(db) -> dict:
             continue
         surface = surface or "Unknown"
         bo = 5 if (best_of == 5 or len(games) > 3) else 3
-        year = (play or "")[:4]
         canon = canonical(tour, tname)
+        if bo == 5 and canon not in SLAMS:     # Davis Cup, old Masters finals... - not like today's tour
+            continue
+        year = (play or "")[:4]
         keys = [(str(i + 1), g) for i, g in enumerate(games)]
         if full:
             keys += [(EVERY, min(games)), (ANY, max(games))]

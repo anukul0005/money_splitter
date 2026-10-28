@@ -365,7 +365,7 @@ function SetStats({ tour }) {
         <p className="text-sm font-black text-gray-900">{label} · over {line} games, set by set</p>
         <p className="text-[10px] text-gray-400 mb-2">
           A set over {line} has {Math.ceil(line)}+ games{line === 8.5 ? ' (6-3, 6-4, 7-5, 7-6 - not 6-0, 6-1, 6-2)' : ''}.
-          Completed sets only. Every set / Any set: matches played out in full.
+          Completed sets only; best-of-five only at the Grand Slams. Every set / Any set: matches played out in full.
         </p>
         <table className="w-full text-xs">
           <thead>
