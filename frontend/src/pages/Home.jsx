@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getGroups, getOverview, getUserSummary, getUserGroupBalances, getFriends, getLoans, betsPromos } from '../api'
+import { getGroups, getOverview, getUserSummary, getUserGroupBalances, getFriends, getLoans } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser, isAdmin, isAnalyticsUser } from '../UserContext'
 import { buildMasterGroups } from '../utils/masterGroups'
@@ -58,13 +58,6 @@ export default function Home() {
   }
 
   useEffect(() => { load() }, [])
-
-  // 1xbet's Friday no-risk bet: nudge until that Friday's result is in (My bets asks for it)
-  const [fridayAsk, setFridayAsk] = useState(false)
-  useEffect(() => {
-    if (!isAnalyticsUser(user)) return
-    betsPromos().then((r) => setFridayAsk(r.data.pending.length > 0)).catch(() => {})
-  }, [user?.name])
 
   useEffect(() => {
     const onChanged = () => load()
@@ -165,17 +158,6 @@ export default function Home() {
       </div>
 
       <div className="px-5 mt-5 space-y-5">
-        {fridayAsk && (
-          <button onClick={() => nav('/my-bets')}
-            className="w-full card text-left bg-amber-50 border-brand-400 flex items-center gap-3 active:scale-[0.99] transition-transform">
-            <span className="text-xl">🎾</span>
-            <span className="flex-1 min-w-0">
-              <span className="block text-sm font-black text-gray-900">Friday no-risk bet</span>
-              <span className="block text-[11px] text-gray-600">How much did you stake, and did it win? Tap to add it.</span>
-            </span>
-            <span className="text-brand-600 font-black">›</span>
-          </button>
-        )}
 
         {/* Personal KPI cards */}
         {userStats && userStats.groups_count > 0 && (
