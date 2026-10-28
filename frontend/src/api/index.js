@@ -238,7 +238,7 @@ export const tennisPlayers  = (q, tour)          => api.get('/tennis/players', {
 export const tennisPlayer   = (tour, id)         => api.get(`/tennis/player/${tour}/${id}`)
 export const tennisH2H      = (tour, a, b)       => api.get('/tennis/h2h', { params: { tour, a, b } })
 export const tennisSets     = ()                 => api.get('/tennis/sets')
-export const tennisPatterns = ()                 => api.get('/tennis/patterns')
+export const tennisPatterns = (since = 0)        => api.get('/tennis/patterns', { params: { since } })
 export const tennisSetsTourney = (tour, name)    => api.get('/tennis/sets/tournament', { params: { tour, name } })
 // Bottles I've had - read from drink expenses' descriptions and notes (backend bottles.py)
 export const getMyBottles      = ()     => api.get('/drinks/my-bottles')

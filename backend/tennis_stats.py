@@ -228,7 +228,7 @@ def _build(db) -> dict:
     per: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
     info: dict = defaultdict(lambda: {"matches": 0, "first": "9999", "last": "0000", "surfaces": defaultdict(int)})
     rows = db.execute(text("SELECT tour, tourney_name, surface, best_of, play_date, score FROM tennis_matches")).fetchall()
-    # pairs[(tour, surface, best_of, first set n, games in set n, games in set n+1, same player won both)] = matches
+    # pairs[(tour, surface, best_of, first set n, games in set n, games in set n+1, same player won both, year)] = matches
     pairs: dict = defaultdict(int)
     for tour, tname, surface, best_of, play, score in rows:
         took: list = []
@@ -244,13 +244,13 @@ def _build(db) -> dict:
             t[(year, sn)][g] += 1
         games = [g for sn, g in keys if sn.isdigit()]
         for i in range(min(2, len(games) - 1)):          # set 1 -> set 2, set 2 -> set 3
-            pairs[(tour, surface, bo, i + 1, games[i], games[i + 1], int(took[i] == took[i + 1]))] += 1
+            pairs[(tour, surface, bo, i + 1, games[i], games[i + 1], int(took[i] == took[i + 1]), year)] += 1
         inf = info[(tour, canon)]
         inf["matches"] += 1
         inf["first"], inf["last"] = min(inf["first"], year), max(inf["last"], year)
         inf["surfaces"][surface] += 1
     return {"main": [[k[0], k[1], k[2], k[3], dict(h)] for k, h in main.items()],
-            "pairs": [[*k, n] for k, n in pairs.items()],
+            "pairs": pairs,
             "per": per,
             "tournaments": sorted(({"tour": k[0], "name": k[1], "matches": v["matches"], "first": v["first"],
                                     "last": v["last"], "surface": max(v["surfaces"], key=v["surfaces"].get)}
@@ -264,6 +264,19 @@ def data(db) -> dict:
             _cache["data"] = _build(db)
             _cache["key"] = key
         return _cache["data"]
+
+
+def pairs(db, since: int = 0) -> tuple[list, list]:
+    """Consecutive-set rows for matches played from `since` (a year; 0 =
+    all): [tour, surface, best_of, first set, games, next set's games,
+    same winner, matches] - years added together - and the years there are."""
+    out: dict = defaultdict(int)
+    years = set()
+    for (*k, year), n in data(db)["pairs"].items():
+        years.add(year)
+        if year and int(year) >= since:
+            out[tuple(k)] += n
+    return [[*k, n] for k, n in out.items()], sorted(y for y in years if y)
 
 
 def tournament(db, tour: str, name: str) -> list:

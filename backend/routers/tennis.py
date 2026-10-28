@@ -154,12 +154,13 @@ def sets(db: Session = Depends(get_db), _: User = Depends(owner)):
 
 
 @router.get("/patterns", response_model=dict)
-def patterns(db: Session = Depends(get_db), _: User = Depends(owner)):
+def patterns(since: int = 0, db: Session = Depends(get_db), _: User = Depends(owner)):
     """Consecutive sets, for "after a close set 1, set 2 goes under" and the
     like: rows of [tour, surface, best_of, first set (1 or 2), games in it,
-    games in the next set, same player won both (1/0), matches] - the page
-    works out any condition from them."""
-    return {"rows": tennis_stats.data(db)["pairs"]}
+    games in the next set, same player won both (1/0), matches] for matches
+    from the year `since` (0 = all) - the page works out any condition."""
+    rows, years = tennis_stats.pairs(db, since)
+    return {"rows": rows, "since": since, "years": years}
 
 
 @router.get("/sets/tournament", response_model=dict)

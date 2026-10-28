@@ -672,8 +672,22 @@ function Patterns() {
   const [out, setOut] = useState(-8.5)
   const [surface, setSurface] = useState('all')
   const [bo, setBo] = useState('all')
-  useEffect(() => { tennisPatterns().then((r) => setRows(r.data.rows)).catch(() => setRows([])) }, [])
-  if (!rows) return <p className="text-xs text-gray-400 text-center py-6">Working out every pair of sets since 2000…</p>
+  const [since, setSince] = useState(2020)
+  useEffect(() => {
+    setRows(null)
+    tennisPatterns(since).then((r) => setRows(r.data.rows)).catch(() => setRows([]))
+  }, [since])
+  const sinceSel = (
+    <div className="flex items-center gap-2 text-xs">
+      <span className="font-bold text-gray-500">Matches from</span>
+      <select value={since} onChange={(e) => setSince(+e.target.value)}
+        className="px-2 py-1.5 rounded-md border border-amber-300 bg-white font-bold">
+        {[[0, 'All years (2000 on)'], [2015, '2015 on'], [2019, '2019 on'], [2020, '2020 on (after 2019)'],
+          [2023, '2023 on'], [2025, '2025 on']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+      </select>
+    </div>
+  )
+  if (!rows) return <div className="space-y-3"><div className="card">{sinceSel}</div><p className="text-xs text-gray-400 text-center py-6">Working out every pair of sets…</p></div>
 
   // row: [tour, surface, best_of, first set, games in it, games in the next, same winner, matches]
   const base = rows.filter((r) => r[3] === first && (surface === 'all' || r[1] === surface) && (bo === 'all' || String(r[2]) === bo))
@@ -700,6 +714,7 @@ function Patterns() {
         <div className="flex items-center gap-2 flex-wrap">
           <Seg value={String(first)} onChange={(v) => setFirst(+v)} options={[['1', 'Set 1 → Set 2'], ['2', 'Set 2 → Set 3']]} />
         </div>
+        {sinceSel}
         <div className="grid grid-cols-[auto_1fr] items-center gap-2 text-xs">
           <span className="font-bold text-gray-500">If {A} is</span>
           <select value={cond} onChange={(e) => setCond(+e.target.value)} className="px-2 py-1.5 rounded-md border border-amber-300 bg-white font-bold">
@@ -718,6 +733,8 @@ function Patterns() {
 
       <div className="card">
         <p className="text-sm font-black text-gray-900">{A} {lineName(cond)} → {B} {lineName(out)}</p>
+        <p className="text-[10px] font-bold text-brand-600">{since ? `Matches from ${since} on` : 'All matches since 2000'}
+          {surface !== 'all' ? ` · ${surface}` : ''}{bo !== 'all' ? ` · best of ${bo}` : ''}</p>
         <p className="text-[10px] text-gray-400 mb-2">
           Compared with every match ("all matches") and with the opposite {A}. Positive points = the pattern
           is more likely than usual. {B} {lineName(out)} = {out < 0 ? `${Math.ceil(-out) - 1} games or fewer` : `${Math.ceil(out)} games or more`} in the set.
