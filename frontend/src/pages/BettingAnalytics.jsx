@@ -604,31 +604,44 @@ function PlayerSets({ rows, vs, name }) {
 
       {vs?.length > 0 && vs[0].length === 5 && (
         <>
-          <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mt-4">Sets lost to stronger players</p>
+          <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mt-4">Sets against stronger players</p>
           <p className="text-[10px] text-gray-400 mb-1">
-            Sets {firstName} lost by type, against players ranked higher / in the top 5, 10, 20 at the time
-            (ranking; the tournament seed for 2026, where ESPN gives only seeds). Small: sets {firstName} won of that type.
+            Every set against players ranked higher / in the top 5, 10, 20 at the time (ranking; the tournament
+            seed for 2026, where ESPN gives only seeds), split by how the set ended. <b className="text-red-600">Red</b> = sets {firstName} lost,
+            small = sets won. The columns don't overlap, so each row adds up to its total; under 8.5 = 6-2 + 6-1 + 6-0.
           </p>
+          <div className="overflow-x-auto -mx-4">
           <table className="w-full text-xs">
             <thead>
               <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
-                <th className="py-1 text-left">Opponent</th>
-                <th className="py-1">Over {line}</th><th className="py-1">Under 8.5</th><th className="py-1">Under 7.5</th><th className="py-1">Under 6.5</th>
+                <th className="px-2 py-1 text-left">Opponent</th>
+                <th className="px-1 py-1">Over 8.5<br /><span className="normal-case font-semibold">6-3 or closer</span></th>
+                <th className="px-1 py-1">6-2</th><th className="px-1 py-1">6-1</th><th className="px-1 py-1">6-0</th>
+                <th className="px-1 py-1">Total</th>
               </tr>
             </thead>
             <tbody>
               {[['above', 'Ranked higher'], ['top5', 'Top 5'], ['top10', 'Top 10'], ['top20', 'Top 20']].map(([tag, l]) => {
                 const get = (o) => vs.filter((r) => r[0] === sp && (!ss || r[1] === ss) && r[2] === tag && r[3] === o).map((r) => r[4])
                 const L = get('L'), W = get('W')
-                const kinds = [['over', line], ['under', 8.5], ['under', 7.5], ['under', 6.5]]
-                const count = (hs, [kind, ln]) => { const t = tally(hs, ln); return kind === 'over' ? t.over : t.n - t.over }
+                const mW = tally(get('MW'), -1).n, mL = tally(get('ML'), -1).n
+                // games in the set: 9+ = over 8.5; 8 = 6-2; 7 = 6-1; 6 = 6-0
+                const span = (hs, lo, hi) => hs.reduce((s, h) => s + Object.entries(h || {})
+                  .reduce((a, [g, c]) => a + (+g >= lo && +g <= hi ? +c : 0), 0), 0)
+                const buckets = [[9, 99], [8, 8], [7, 7], [6, 6], [0, 99]]
                 return (
                   <tr key={tag} className="border-t border-gray-100">
-                    <td className="py-1.5 font-bold text-gray-800">{l}<p className="text-[9px] font-normal text-gray-400">{fmtN(tally(L, 0).n)} lost · {fmtN(tally(W, 0).n)} won</p></td>
-                    {kinds.map((kd, i) => (
-                      <td key={i} className="py-1.5 text-center">
-                        <p className="text-[13px] font-black text-red-600 tabular-nums">{fmtN(count(L, kd))}</p>
-                        <p className="text-[9px] text-gray-500 tabular-nums">won {fmtN(count(W, kd))}</p>
+                    <td className="px-2 py-1.5 font-bold text-gray-800">{l}
+                      {(mW + mL) > 0 && (
+                        <p className="text-[9px] font-normal text-gray-400 whitespace-nowrap">
+                          {fmtN(mW + mL)} matches · <span className="text-green-700">{mW} W</span>–<span className="text-red-600">{mL} L</span>
+                        </p>
+                      )}
+                    </td>
+                    {buckets.map(([lo, hi], i) => (
+                      <td key={i} className={`px-1 py-1.5 text-center ${i === 4 ? 'bg-gray-50' : ''}`}>
+                        <p className="text-[13px] font-black text-red-600 tabular-nums">{fmtN(span(L, lo, hi))}</p>
+                        <p className="text-[9px] text-gray-500 tabular-nums">won {fmtN(span(W, lo, hi))}</p>
                       </td>
                     ))}
                   </tr>
@@ -636,6 +649,7 @@ function PlayerSets({ rows, vs, name }) {
               })}
             </tbody>
           </table>
+          </div>
         </>
       )}
     </div>

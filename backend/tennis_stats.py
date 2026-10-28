@@ -186,7 +186,8 @@ def _strength(rank, seed):
 def player_sets_vs(rows, recent_cut: str, player_id: int) -> list:
     """The player's sets 1-5 by opponent strength: [period, surface, tag,
     outcome W/L, {games: count}], tag 'above' (opponent ranked higher than
-    the player), 'top5', 'top10', 'top20' - overlapping groups."""
+    the player), 'top5', 'top10', 'top20' - overlapping groups. Outcome
+    MW / ML rows count the matches won / lost against them (as {0: n})."""
     h: dict = defaultdict(lambda: defaultdict(int))
     for r in rows:
         took: list = []
@@ -204,6 +205,9 @@ def player_sets_vs(rows, recent_cut: str, player_id: int) -> list:
             continue
         won_match = me == "winner"
         periods = ["all", "12m"] if (r["play_date"] or "") > recent_cut else ["all"]
+        for p in periods:                      # the matches themselves: outcome MW / ML, counted under 0 games
+            for t in tags:
+                h[(p, r["surface"] or "Unknown", t, "MW" if won_match else "ML")][0] += 1
         for i, (sn, g) in enumerate(got[2]):
             if i >= len(took):                 # the every / any rows
                 break
