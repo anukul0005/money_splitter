@@ -27,41 +27,74 @@ function Stat({ label, value, sub, cls = 'text-gray-900' }) {
   )
 }
 
-/** Profit day by day: a bar per day (green up / red down), the running
- * total as a line, ₹ scale on the left, dates along the bottom. */
-function ProfitChart({ points }) {
+/** Profit in 10-day blocks from `start` (bars green / red, the running
+ * total as a line); tap a block to see its 10 days one by one. */
+const addDays = (iso, n) => { const d = new Date(`${iso}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10) }
+
+function ProfitChart({ points, start }) {
+  const [block, setBlock] = useState(null)      // index of the 10-day block opened day by day
   const [hover, setHover] = useState(null)
+  useEffect(() => { setBlock(null); setHover(null) }, [start, points])
   if (!points?.length) return null
-  const W = 640, H = 220, L = 58, R = 10, T = 14, B = 26
-  const day = points.map((p) => p.profit), cum = points.map((p) => p.cumulative)
-  const lo = Math.min(0, ...day, ...cum), hi = Math.max(0, ...day, ...cum)
-  const span = hi - lo || 1
+  const first = start || points[0].date
+  const byDay = Object.fromEntries(points.map((p) => [p.date, p.profit]))
+  const lastDay = points[points.length - 1].date
+  // 10-day blocks from `first` up to the last day with a bet
+  const blocks = []
+  let cum = 0
+  for (let i = 0; addDays(first, i * 10) <= lastDay; i += 1) {
+    const from = addDays(first, i * 10), to = addDays(from, 9)
+    const days = Array.from({ length: 10 }, (_, k) => addDays(from, k))
+    let p = 0
+    const dayRows = days.map((d) => { const v = byDay[d] || 0; p += v; return { date: d, profit: v, cumulative: cum + p, bet: d in byDay } })
+    cum += p
+    blocks.push({ from, to, profit: p, cumulative: cum, days: dayRows, betDays: dayRows.filter((r) => r.bet).length })
+  }
+  const lead = points.filter((p) => p.date < first).reduce((a, p) => a + p.profit, 0)   // anything before `first`
+  const inBlock = block != null && blocks[block]
+  const bars = inBlock ? blocks[block].days.map((d) => ({ ...d, cumulative: d.cumulative + lead }))
+    : blocks.map((b) => ({ date: b.from, to: b.to, profit: b.profit, cumulative: b.cumulative + lead }))
+  const end = cum + lead
+
+  const W = 640, H = 220, L = 58, R = 10, T = 14, B = 30
+  const vals = [0, ...bars.map((b) => b.profit), ...bars.map((b) => b.cumulative)]
+  const lo = Math.min(...vals), hi = Math.max(...vals), span = hi - lo || 1
   const y = (v) => T + ((hi - v) * (H - T - B)) / span
-  const step = (W - L - R) / points.length
+  const step = (W - L - R) / bars.length
   const x = (i) => L + step * i + step / 2
-  const bw = Math.max(1.5, step * 0.7)
+  const bw = Math.max(3, step * (inBlock ? 0.6 : 0.72))
   const ticks = [hi, (hi + lo) / 2, lo, 0].filter((v, i, a) => a.findIndex((w) => Math.abs(w - v) < span * 0.08) === i)
   const short = (v) => `${v < 0 ? '−' : ''}₹${Math.abs(v) >= 1000 ? `${(Math.abs(v) / 1000).toFixed(1)}k` : Math.round(Math.abs(v))}`
   const dlab = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
-  const xl = [0, Math.floor(points.length / 2), points.length - 1].filter((v, i, a) => a.indexOf(v) === i)
-  const line = points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.cumulative).toFixed(1)}`).join(' ')
-  const end = cum[cum.length - 1]
-  const best = points.reduce((a, p) => (p.profit > a.profit ? p : a), points[0])
-  const worst = points.reduce((a, p) => (p.profit < a.profit ? p : a), points[0])
-  const up = points.filter((p) => p.profit > 0).length, down = points.filter((p) => p.profit < 0).length
-  const h = hover != null ? points[hover] : null
+  const every = Math.max(1, Math.ceil(bars.length / 7))          // keep the date labels readable
+  const line = bars.map((b, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(b.cumulative).toFixed(1)}`).join(' ')
+  const best = bars.reduce((a, b) => (b.profit > a.profit ? b : a), bars[0])
+  const worst = bars.reduce((a, b) => (b.profit < a.profit ? b : a), bars[0])
+  const up = bars.filter((b) => b.profit > 0).length, down = bars.filter((b) => b.profit < 0).length
+  const h = hover != null ? bars[hover] : null
+  const label = (b) => (inBlock ? dlab(b.date) : `${dlab(b.date)} – ${dlab(b.to)}`)
+  const tap = (i) => { if (inBlock) setHover(i); else { setBlock(i); setHover(null) } }
+
   return (
     <div>
-      <div className="flex items-baseline justify-between">
-        <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Profit day by day</p>
+      <div className="flex items-baseline justify-between gap-2">
+        <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">
+          {inBlock ? `${dlab(blocks[block].from)} – ${dlab(blocks[block].to)} · day by day` : 'Profit every 10 days'}
+        </p>
         <p className={`text-sm font-black ${pl(end)}`}>{end >= 0 ? '+' : ''}{inr(end)} total</p>
       </div>
-      <p className="text-[10px] text-gray-400 min-h-4">
-        {h ? (
-          <>{dlab(h.date)}: <b className={pl(h.profit)}>{h.profit >= 0 ? '+' : ''}{inr(h.profit)}</b> that day · running total{' '}
-            <b className={pl(h.cumulative)}>{inr(h.cumulative)}</b></>
-        ) : 'Bars: each day’s profit or loss · line: running total. Tap a day.'}
-      </p>
+      <div className="flex items-center gap-2 min-h-[18px]">
+        {inBlock && (
+          <button onClick={() => { setBlock(null); setHover(null) }} className="text-[11px] font-bold text-brand-600">‹ 10-day view</button>
+        )}
+        <p className="text-[10px] text-gray-400 flex-1">
+          {h ? (
+            <>{label(h)}: <b className={pl(h.profit)}>{h.profit >= 0 ? '+' : ''}{inr(h.profit)}</b> · running total <b className={pl(h.cumulative)}>{inr(h.cumulative)}</b></>
+          ) : inBlock ? (
+            <>This block <b className={pl(blocks[block].profit)}>{blocks[block].profit >= 0 ? '+' : ''}{inr(blocks[block].profit)}</b> · bets on {blocks[block].betDays} of 10 days · tap a day</>
+          ) : 'Bars: each 10 days’ profit or loss · line: running total. Tap a block for its days.'}
+        </p>
+      </div>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto select-none" onMouseLeave={() => setHover(null)}>
         {ticks.map((v) => (
           <g key={v}>
@@ -69,37 +102,41 @@ function ProfitChart({ points }) {
             <text x={L - 6} y={y(v) + 3.5} textAnchor="end" fontSize="11" fill="#6b7280">{v === 0 ? '₹0' : short(v)}</text>
           </g>
         ))}
-        {points.map((p, i) => (
-          <rect key={p.date} x={x(i) - bw / 2} width={bw} y={Math.min(y(p.profit), y(0))}
-            height={Math.max(1, Math.abs(y(p.profit) - y(0)))}
-            fill={p.profit >= 0 ? '#86efac' : '#fca5a5'} opacity={hover == null || hover === i ? 1 : 0.45} />
+        {bars.map((b, i) => (
+          <g key={b.date}>
+            <rect x={x(i) - bw / 2} width={bw} y={Math.min(y(b.profit), y(0))} height={Math.max(1, Math.abs(y(b.profit) - y(0)))}
+              rx="2" fill={b.profit >= 0 ? '#86efac' : '#fca5a5'} opacity={hover == null || hover === i ? 1 : 0.45} />
+            {!inBlock && bars.length <= 14 && b.profit !== 0 && (
+              <text x={x(i)} y={b.profit >= 0 ? y(b.profit) - 3 : y(b.profit) + 10} textAnchor="middle" fontSize="9"
+                fill={b.profit >= 0 ? '#15803d' : '#b91c1c'}>{short(b.profit)}</text>
+            )}
+          </g>
         ))}
         <path d={line} fill="none" stroke={end >= 0 ? '#15803d' : '#b91c1c'} strokeWidth="2.2" strokeLinejoin="round" />
-        <circle cx={x(points.length - 1)} cy={y(end)} r="3.5" fill={end >= 0 ? '#15803d' : '#b91c1c'} />
-        {xl.map((i) => (
-          <text key={i} x={x(i)} y={H - 8} textAnchor={i === 0 ? 'start' : i === points.length - 1 ? 'end' : 'middle'}
-            fontSize="11" fill="#6b7280">{dlab(points[i].date)}</text>
+        {bars.map((b, i) => <circle key={`c${b.date}`} cx={x(i)} cy={y(b.cumulative)} r="2.4" fill={end >= 0 ? '#15803d' : '#b91c1c'} />)}
+        {bars.map((b, i) => (i % every === 0 || i === bars.length - 1) && (
+          <text key={`t${b.date}`} x={x(i)} y={H - 12} textAnchor="middle" fontSize="10" fill="#6b7280">{dlab(b.date)}</text>
         ))}
-        {points.map((p, i) => (
-          <rect key={`h${p.date}`} x={L + step * i} width={step} y={T} height={H - T - B} fill="transparent"
-            onMouseEnter={() => setHover(i)} onClick={() => setHover(i)} />
+        {bars.map((b, i) => (
+          <rect key={`h${b.date}`} x={L + step * i} width={step} y={T} height={H - T - B} fill="transparent" style={{ cursor: 'pointer' }}
+            onMouseEnter={() => setHover(i)} onClick={() => tap(i)} />
         ))}
       </svg>
       <div className="grid grid-cols-3 gap-2 mt-1 text-center">
         <div>
-          <p className="text-[9px] font-bold text-gray-400 uppercase">Best day</p>
+          <p className="text-[9px] font-bold text-gray-400 uppercase">Best {inBlock ? 'day' : '10 days'}</p>
           <p className="text-xs font-black text-green-700">{inr(best.profit)}</p>
-          <p className="text-[10px] text-gray-400">{dlab(best.date)}</p>
+          <p className="text-[10px] text-gray-400">{label(best)}</p>
         </div>
         <div>
-          <p className="text-[9px] font-bold text-gray-400 uppercase">Worst day</p>
+          <p className="text-[9px] font-bold text-gray-400 uppercase">Worst {inBlock ? 'day' : '10 days'}</p>
           <p className="text-xs font-black text-red-600">{inr(worst.profit)}</p>
-          <p className="text-[10px] text-gray-400">{dlab(worst.date)}</p>
+          <p className="text-[10px] text-gray-400">{label(worst)}</p>
         </div>
         <div>
-          <p className="text-[9px] font-bold text-gray-400 uppercase">Days up / down</p>
+          <p className="text-[9px] font-bold text-gray-400 uppercase">{inBlock ? 'Days' : 'Blocks'} up / down</p>
           <p className="text-xs font-black text-gray-800"><span className="text-green-700">{up}</span> / <span className="text-red-600">{down}</span></p>
-          <p className="text-[10px] text-gray-400">of {points.length} betting days</p>
+          <p className="text-[10px] text-gray-400">of {bars.length} {inBlock ? 'days' : 'blocks of 10 days'}</p>
         </div>
       </div>
     </div>
@@ -482,7 +519,7 @@ export default function MyBets() {
                 </p>
               )}
             </div>
-            <div className="card"><ProfitChart points={s.curve} /></div>
+            <div className="card"><ProfitChart points={s.curve} start={shown?.from} /></div>
             {!isPast && s.by_block?.length > 1 && (
               <Breakdown title="Every 10 days" rows={[...s.by_block].reverse()} fmt={blockLabel} onRow={pickBlock}
                 note="Newest first · tap a block to see just those 10 days." />

@@ -279,7 +279,8 @@ def summary(frm: str = "", to: str = "", db: Session = Depends(get_db), caller: 
             keys["tennis_event"] = league
         for g, k in keys.items():
             _add(groups[g][k], b)
-        daily[(b.settled_at or b.placed_at or "")[:10]] += (b.payout or 0) - (b.stake or 0)
+        # by the day placed, like the 10-day blocks, so the chart and the table agree
+        daily[(b.placed_at or b.settled_at or "")[:10]] += (b.payout or 0) - (b.stake or 0)
     # Friday no-risk bets: a win's profit counts in the totals, its 10-day
     # block and that day on the chart; nothing is added to the money staked.
     for pr in promo_rows:
