@@ -182,17 +182,14 @@ function MailCard({ st, onSynced }) {
         </>
       ) : (
         <>
-          <div className="flex items-center gap-2">
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-black text-gray-900 truncate">{st.gmail_address}</p>
-              <p className="text-[10px] text-gray-400">
-                {st.last_synced_at ? `checked ${fmtD(st.last_synced_at.slice(0, 16))}` : 'not checked yet'} · also checked daily
-              </p>
-            </div>
-            <button onClick={sync} disabled={busy} className="btn-primary text-xs px-3 py-1.5 disabled:opacity-50">
-              {busy ? 'Checking…' : 'Check mail'}
-            </button>
-          </div>
+          <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Reading from Gmail</p>
+          <p className="text-sm font-black text-gray-900 break-all">{st.gmail_address}</p>
+          <p className="text-[11px] text-gray-500">
+            {st.last_synced_at ? `Last checked ${fmtD(st.last_synced_at.slice(0, 16))}` : 'Not checked yet'} · also checked every day
+          </p>
+          <button onClick={sync} disabled={busy} className="btn-primary text-sm mt-2 disabled:opacity-50">
+            {busy ? 'Checking…' : 'Check mail now'}
+          </button>
           {prog && (
             <p className="text-[11px] text-gray-600 mt-1">
               {prog.status === 'running' ? `Reading ${prog.done || 0} of ${prog.total || '…'} emails` :
@@ -205,13 +202,21 @@ function MailCard({ st, onSynced }) {
       {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
       {st.imports?.length > 0 && (
         <div className="mt-2 pt-2 border-t border-gray-100">
-          <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">History read</p>
-          {st.imports.map((i, k) => (
-            <p key={k} className="text-[11px] text-gray-600">
-              {(i.periods || []).filter(Boolean).map((p) => `${p[0]} → ${p[1]}`).join(', ') || i.subject} ·{' '}
-              {i.error ? <span className="text-red-600">{i.error}</span> : `${i.bets_found} bets, ${i.bets_new} new`}
-            </p>
-          ))}
+          <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">History read · newest period first</p>
+          {[...st.imports].sort((a, b) => ((b.periods || [])[0]?.[0] || '').localeCompare((a.periods || [])[0]?.[0] || '')).map((i, k) => {
+            const p = (i.periods || []).filter(Boolean)[0]
+            const day = (s) => (s ? new Date(`${s}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '')
+            return (
+              <div key={k} className="flex items-baseline gap-2 py-0.5 text-[11px]">
+                <span className="flex-1 min-w-0 font-bold text-gray-700">{p ? `${day(p[0])} – ${day(p[1])}` : i.subject}</span>
+                {i.error ? <span className="text-red-600">{i.error}</span> : (
+                  <span className="text-gray-500 tabular-nums whitespace-nowrap">
+                    {i.bets_found} bets · {i.bets_new ? <b className="text-green-700">{i.bets_new} new</b> : 'already had'}
+                  </span>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
