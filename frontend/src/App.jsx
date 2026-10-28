@@ -10,6 +10,7 @@ import AddExpense  from './pages/AddExpense'
 import LedgerImport      from './pages/LedgerImport'
 import MyBottles         from './pages/MyBottles'
 import BettingAnalytics  from './pages/BettingAnalytics'
+import MyBets            from './pages/MyBets'
 import NewGroup    from './pages/NewGroup'
 import MonthlyGroup from './pages/MonthlyGroup'
 import EditGroup   from './pages/EditGroup'
@@ -147,7 +148,10 @@ export default function App() {
                   <Route path="/admin/codes" element={<AdminCodes />} />
                 )}
                 {isAnalyticsUser(user) && (
-                  <Route path="/betting" element={<BettingAnalytics />} />
+                  <>
+                    <Route path="/betting" element={<BettingAnalytics />} />
+                    <Route path="/my-bets" element={<MyBets />} />
+                  </>
                 )}
               </Routes>
             </div>

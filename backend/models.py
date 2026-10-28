@@ -784,6 +784,75 @@ class GmailConnection(Base):
     last_synced_at = Column(DateTime(timezone=True), nullable=True)
 
 
+class BettingGmailConnection(Base):
+    """A second Gmail inbox, read-only, for My bets (bet_history.py): the
+    one a bookmaker (1xbet) sends betting-history exports to, which needn't
+    be the inbox connected for Credit Cards (GmailConnection). Same OAuth
+    flow (routers/gmail_auth.py, state marked "bet"), its own token."""
+
+    __tablename__ = "betting_gmail_connections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"),
+                     nullable=False, unique=True, index=True)
+    gmail_address = Column(String(200), nullable=False)
+    refresh_token_encrypted = Column(Text, nullable=False)
+    connected_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_synced_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class BetImport(Base):
+    """One betting-history email read: which file, how many bets came out of
+    it. `sample` keeps the start of the HTML when nothing could be read from
+    it, so the parser can be taught that layout."""
+
+    __tablename__ = "bet_imports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    gmail_message_id = Column(String(64), nullable=False)
+    subject = Column(String(300), nullable=True)
+    received_at = Column(DateTime(timezone=True), nullable=True)
+    files = Column(Text, nullable=True)            # names inside the zip
+    bets_found = Column(Integer, default=0)
+    bets_new = Column(Integer, default=0)
+    columns = Column(Text, nullable=True)          # the table headers seen (JSON)
+    error = Column(String(300), nullable=True)
+    sample = Column(Text, nullable=True)
+    imported_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("user_id", "gmail_message_id", name="uq_bet_import_msg"),)
+
+
+class Bet(Base):
+    """One bet from a bookmaker's history export (bet_history.py). bet_key
+    is the bookmaker's bet / coupon number, or a hash of the row when there
+    is none, so re-reading an overlapping export adds nothing twice."""
+
+    __tablename__ = "bets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    bookmaker = Column(String(40), nullable=False, default="1xbet")
+    bet_key = Column(String(120), nullable=False)
+    placed_at = Column(String(32), nullable=True)   # ISO date-time as far as the export gives it
+    settled_at = Column(String(32), nullable=True)
+    sport = Column(String(80), nullable=True)
+    event = Column(Text, nullable=True)
+    market = Column(Text, nullable=True)            # outcome / selection
+    bet_type = Column(String(60), nullable=True)    # single, accumulator, system...
+    legs = Column(Integer, default=1)
+    odds = Column(Float, nullable=True)
+    stake = Column(Float, nullable=True)
+    payout = Column(Float, nullable=True)
+    status = Column(String(16), nullable=True)      # won / lost / returned / open / cashout
+    currency = Column(String(8), nullable=True)
+    raw = Column(Text, nullable=True)               # the row as read (JSON)
+    gmail_message_id = Column(String(64), nullable=True)
+
+    __table_args__ = (UniqueConstraint("user_id", "bookmaker", "bet_key", name="uq_bet_key"),)
+
+
 class BankPassword(Base):
     """The PDF-opening password for one bank's statements, for one user.
 

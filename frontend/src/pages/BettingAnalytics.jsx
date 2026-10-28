@@ -960,7 +960,12 @@ export default function BettingAnalytics() {
     <div className="pb-28 md:pb-10">
       <div className="px-5 pt-10 md:pt-6 pb-3 bg-cream sticky top-0 z-10 border-b border-amber-100/60">
         <button onClick={() => nav(-1)} className="text-xs font-bold text-gray-400 mb-2">← Back</button>
-        <h1 className="text-xl font-black tracking-tight">Betting analytics</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl font-black tracking-tight flex-1">Betting analytics</h1>
+          <button onClick={() => nav('/my-bets')} className="px-2.5 py-1 rounded-md border border-amber-300 bg-white text-[11px] font-bold text-brand-600">
+            My bets ›
+          </button>
+        </div>
         <p className="text-[11px] text-gray-400 mt-0.5">
           {sum ? `ATP & WTA tour · ${Number(sum.n).toLocaleString('en-IN')} matches · ${fmtShort(sum.first)} – ${fmtShort(sum.last)}` : 'ATP & WTA tour results'}
           {sum?.refreshing && !fresh ? ' · fetching the latest results…'

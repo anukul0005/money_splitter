@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 import secret_box
 from auth import current_user
 from database import get_db, get_settings
-from models import GmailConnection, User
+from models import BettingGmailConnection, GmailConnection, User
 
 router = APIRouter(prefix="/gmail", tags=["gmail"])
 
@@ -51,12 +51,13 @@ def _flow() -> Flow:
 
 
 @router.get("/connect", response_model=dict)
-def connect(caller: User = Depends(current_user)):
+def connect(purpose: str = "cards", caller: User = Depends(current_user)):
     """The URL to send the browser to. The frontend just does
     `window.location = data.url` - there is nothing to POST here, Google's
-    own consent screen is the next step."""
+    own consent screen is the next step. purpose=betting connects the inbox
+    for My bets (BettingGmailConnection) instead of Credit Cards'."""
     flow = _flow()
-    state = secret_box.encrypt(str(caller.id))
+    state = secret_box.encrypt(f"bet:{caller.id}" if purpose == "betting" else str(caller.id))
     auth_url, _ = flow.authorization_url(
         access_type="offline",     # required to get a refresh token back
         prompt="consent",          # forces one even on a re-connect
@@ -73,27 +74,40 @@ def callback(code: str | None = None, state: str | None = None, error: str | Non
     settings = get_settings()
     frontend = settings.frontend_url.rstrip("/")
 
+    user_id_str = secret_box.decrypt(state, ttl=STATE_TTL_SECONDS) if state else None
+    betting = bool(user_id_str and user_id_str.startswith("bet:"))
+    page = f"{frontend}/my-bets?" if betting else f"{frontend}/loans?tab=cards&"
     if error:
-        return RedirectResponse(f"{frontend}/loans?tab=cards&gmail=error&reason={error}")
+        return RedirectResponse(f"{page}gmail=error&reason={error}")
     if not code or not state:
-        return RedirectResponse(f"{frontend}/loans?tab=cards&gmail=error&reason=missing_code")
-
-    user_id_str = secret_box.decrypt(state, ttl=STATE_TTL_SECONDS)
+        return RedirectResponse(f"{page}gmail=error&reason=missing_code")
     if not user_id_str:
-        return RedirectResponse(f"{frontend}/loans?tab=cards&gmail=error&reason=expired")
+        return RedirectResponse(f"{page}gmail=error&reason=expired")
+    user_id_str = user_id_str.removeprefix("bet:")
 
     user = db.query(User).filter(User.id == int(user_id_str)).first()
     if not user:
-        return RedirectResponse(f"{frontend}/loans?tab=cards&gmail=error&reason=unknown_user")
+        return RedirectResponse(f"{page}gmail=error&reason=unknown_user")
 
     flow = _flow()
     try:
         flow.fetch_token(code=code)
     except Exception as e:
         print(f"[gmail] token exchange failed: {e}")
-        return RedirectResponse(f"{frontend}/loans?tab=cards&gmail=error&reason=token_exchange")
+        return RedirectResponse(f"{page}gmail=error&reason=token_exchange")
 
     creds = flow.credentials
+    if betting:
+        if not creds.refresh_token:
+            return RedirectResponse(f"{page}gmail=error&reason=no_refresh_token")
+        row = db.query(BettingGmailConnection).filter(BettingGmailConnection.user_id == user.id).first()
+        if row is None:
+            row = BettingGmailConnection(user_id=user.id, gmail_address="", refresh_token_encrypted="")
+            db.add(row)
+        row.gmail_address = _fetch_gmail_address(creds)
+        row.refresh_token_encrypted = secret_box.encrypt(creds.refresh_token)
+        db.commit()
+        return RedirectResponse(f"{page}gmail=connected")
     if not creds.refresh_token:
         # Happens if the person has connected before and Google decided not
         # to re-issue one - prompt=consent above is meant to prevent this,

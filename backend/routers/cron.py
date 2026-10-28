@@ -241,6 +241,16 @@ def daily_jobs(db: Session) -> dict:
     import tennis_sync
     tennis_sync.start(today)
 
+    # New 1xbet history emails for My bets - see bet_history.py. One Gmail
+    # search per connected inbox; an email already read is skipped.
+    import bet_history
+    from models import BettingGmailConnection
+    for (uid,) in db.query(BettingGmailConnection.user_id).all():
+        try:
+            bet_history.start_sync(uid)
+        except RuntimeError:
+            pass                                  # one already running
+
     # Yesterday's spending, for whoever turned it on (User.daily_summary).
     from daily_summary import summarise
     summaries_sent, summaries_failed = [], []
