@@ -1,6 +1,6 @@
 import { Component, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { tennisDay, tennisH2H, tennisPlayer, tennisPlayers, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
+import { tennisDay, tennisH2H, tennisPatterns, tennisPlayer, tennisPlayers, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
 import DatePicker from '../components/DatePicker'
 
 /**
@@ -657,6 +657,149 @@ function PlayerSets({ rows, vs, name }) {
   )
 }
 
+/* ---- Patterns: what one set says about the next (backend tennis_stats pairs) ---- */
+const SET_SCORES = [[6, '6-0'], [7, '6-1'], [8, '6-2'], [9, '6-3'], [10, '6-4'], [12, '7-5'], [13, '7-6'], [14, 'Long (8-6+)']]
+const COND_LINES = [[8.5, 'Over 8.5 (6-3 or closer)'], [9.5, 'Over 9.5 (6-4 or closer)'], [10.5, 'Over 10.5 (7-5 / 7-6)'],
+  [12.5, 'Over 12.5 (7-6 only)'], [-8.5, 'Under 8.5 (6-2 or wider)'], [-7.5, 'Under 7.5 (6-1 / 6-0)']]
+const OUT_LINES = [[-6.5, 'Under 6.5'], [-7.5, 'Under 7.5'], [-8.5, 'Under 8.5'], [-9.5, 'Under 9.5'], [8.5, 'Over 8.5'], [10.5, 'Over 10.5']]
+const lineFits = (ln, g) => (ln < 0 ? g < -ln : g > ln)
+const lineName = (ln) => `${ln < 0 ? 'under' : 'over'} ${Math.abs(ln)}`
+
+function Patterns() {
+  const [rows, setRows] = useState(null)
+  const [first, setFirst] = useState(1)
+  const [cond, setCond] = useState(10.5)
+  const [out, setOut] = useState(-8.5)
+  const [surface, setSurface] = useState('all')
+  const [bo, setBo] = useState('all')
+  useEffect(() => { tennisPatterns().then((r) => setRows(r.data.rows)).catch(() => setRows([])) }, [])
+  if (!rows) return <p className="text-xs text-gray-400 text-center py-6">Working out every pair of sets since 2000…</p>
+
+  // row: [tour, surface, best_of, first set, games in it, games in the next, same winner, matches]
+  const base = rows.filter((r) => r[3] === first && (surface === 'all' || r[1] === surface) && (bo === 'all' || String(r[2]) === bo))
+  const stat = (tour, keep) => {
+    let n = 0, hit = 0, hitSame = 0
+    for (const r of base) {
+      if (r[0] !== tour || !keep(r[4])) continue
+      n += r[7]
+      if (lineFits(out, r[5])) { hit += r[7]; if (r[6]) hitSame += r[7] }
+    }
+    return { n, hit, hitSame, pct: n ? (100 * hit) / n : null }
+  }
+  const A = first === 1 ? 'Set 1' : 'Set 2', B = first === 1 ? 'Set 2' : 'Set 3'
+  const pc = (t) => (t.pct == null ? '—' : `${t.pct.toFixed(1)}%`)
+  const Diff = ({ a, b }) => {
+    if (a.pct == null || b.pct == null) return <span className="text-gray-300">—</span>
+    const d = a.pct - b.pct
+    return <span className={`font-black ${d >= 0 ? 'text-green-700' : 'text-red-600'}`}>{d >= 0 ? '+' : ''}{d.toFixed(1)} pts</span>
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="card space-y-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Seg value={String(first)} onChange={(v) => setFirst(+v)} options={[['1', 'Set 1 → Set 2'], ['2', 'Set 2 → Set 3']]} />
+        </div>
+        <div className="grid grid-cols-[auto_1fr] items-center gap-2 text-xs">
+          <span className="font-bold text-gray-500">If {A} is</span>
+          <select value={cond} onChange={(e) => setCond(+e.target.value)} className="px-2 py-1.5 rounded-md border border-amber-300 bg-white font-bold">
+            {COND_LINES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+          <span className="font-bold text-gray-500">how often is {B}</span>
+          <select value={out} onChange={(e) => setOut(+e.target.value)} className="px-2 py-1.5 rounded-md border border-amber-300 bg-white font-bold">
+            {OUT_LINES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Seg value={surface} onChange={setSurface} options={[['all', 'All'], ['Hard', 'Hard'], ['Clay', 'Clay'], ['Grass', 'Grass']]} />
+          <Seg value={bo} onChange={setBo} options={[['all', 'All'], ['3', 'Bo3'], ['5', 'Bo5']]} />
+        </div>
+      </div>
+
+      <div className="card">
+        <p className="text-sm font-black text-gray-900">{A} {lineName(cond)} → {B} {lineName(out)}</p>
+        <p className="text-[10px] text-gray-400 mb-2">
+          Compared with every match ("all matches") and with the opposite {A}. Positive points = the pattern
+          is more likely than usual. {B} {lineName(out)} = {out < 0 ? `${Math.ceil(-out) - 1} games or fewer` : `${Math.ceil(out)} games or more`} in the set.
+        </p>
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
+              <th className="py-1 text-left"></th><th className="py-1">ATP</th><th className="py-1">WTA</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[
+              [`${A} ${lineName(cond)}`, (g) => lineFits(cond, g), true],
+              ['All matches', () => true],
+              [`${A} not ${lineName(cond)}`, (g) => !lineFits(cond, g)],
+            ].map(([l, keep, main]) => {
+              const a = stat('ATP', keep), w = stat('WTA', keep)
+              return (
+                <tr key={l} className={`border-t border-gray-100 ${main ? 'bg-amber-50' : ''}`}>
+                  <td className="py-1.5 font-bold text-gray-800">{l}</td>
+                  {[a, w].map((t, i) => (
+                    <td key={i} className="py-1.5 text-center">
+                      <p className="text-[14px] font-black text-gray-900 tabular-nums">{pc(t)}</p>
+                      <p className="text-[9px] text-gray-500 tabular-nums">{fmtN(t.hit)} of {fmtN(t.n)}</p>
+                    </td>
+                  ))}
+                </tr>
+              )
+            })}
+            <tr className="border-t-2 border-gray-200">
+              <td className="py-1.5 font-bold text-gray-800">vs all matches</td>
+              {['ATP', 'WTA'].map((t) => (
+                <td key={t} className="py-1.5 text-center text-[12px]"><Diff a={stat(t, (g) => lineFits(cond, g))} b={stat(t, () => true)} /></td>
+              ))}
+            </tr>
+          </tbody>
+        </table>
+        {['ATP', 'WTA'].map((t) => {
+          const s = stat(t, (g) => lineFits(cond, g))
+          return s.hit ? (
+            <p key={t} className="text-[10px] text-gray-500 mt-1">
+              <b>{t}</b>: of those {fmtN(s.hit)} {B}s, the {A} winner took {((100 * s.hitSame) / s.hit).toFixed(0)}%, the {A} loser {((100 * (s.hit - s.hitSame)) / s.hit).toFixed(0)}%.
+            </p>
+          ) : null
+        })}
+      </div>
+
+      <div className="card">
+        <p className="text-sm font-black text-gray-900">{B} {lineName(out)}, by {A} score</p>
+        <p className="text-[10px] text-gray-400 mb-2">Every {A} scoreline, either player winning it.</p>
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
+              <th className="py-1 text-left">{A}</th><th className="py-1">ATP</th><th className="py-1">WTA</th>
+            </tr>
+          </thead>
+          <tbody>
+            {SET_SCORES.map(([g, l]) => {
+              const keep = (x) => (g === 14 ? x >= 14 : x === g)
+              const a = stat('ATP', keep), w = stat('WTA', keep)
+              if (!a.n && !w.n) return null
+              const all = { ATP: stat('ATP', () => true), WTA: stat('WTA', () => true) }
+              return (
+                <tr key={g} className="border-t border-gray-100">
+                  <td className="py-1.5 font-bold text-gray-800">{l}</td>
+                  {[['ATP', a], ['WTA', w]].map(([t, s]) => (
+                    <td key={t} className={`py-1.5 text-center ${s.pct != null && all[t].pct != null ? (s.pct - all[t].pct >= 2 ? 'bg-green-50' : s.pct - all[t].pct <= -2 ? 'bg-red-50' : '') : ''}`}>
+                      <p className="text-[13px] font-black text-gray-900 tabular-nums">{pc(s)}</p>
+                      <p className="text-[9px] text-gray-500 tabular-nums">{fmtN(s.hit)} of {fmtN(s.n)}</p>
+                    </td>
+                  ))}
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+        <p className="text-[10px] text-gray-400 mt-1">Green / red: 2+ points above / below all matches.</p>
+      </div>
+    </div>
+  )
+}
+
 function H2HSheet({ m, onClose, onPlayer }) {
   const [d, setD] = useState(null)
   useEffect(() => { tennisH2H(m.tour, m.winner.id, m.loser.id).then((r) => setD(r.data)).catch(() => setD({ matches: [] })) }, [m])
@@ -716,9 +859,9 @@ export default function BettingAnalytics() {
           {sum?.refreshing && !fresh ? ' · fetching the latest results…'
             : sum?.last_update ? ` · updated ${fmtShort(sum.last_update.slice(0, 10))} ${sum.last_update.slice(11, 16)} UTC` : ''}
         </p>
-        <div className="flex items-center gap-2 mt-3">
+        <div className="flex items-center gap-2 mt-3 flex-wrap">
           <div className="flex rounded-md border border-amber-300 overflow-hidden">
-            {[['results', 'Results'], ['players', 'Players'], ['sets', 'Sets']].map(([k, l]) => (
+            {[['results', 'Results'], ['players', 'Players'], ['sets', 'Sets'], ['patterns', 'Patterns']].map(([k, l]) => (
               <button key={k} onClick={() => setTab(k)}
                 className={`px-3 py-1.5 text-xs font-bold ${tab === k ? 'bg-brand-400 text-white' : 'bg-white text-gray-600'}`}>{l}</button>
             ))}
@@ -736,6 +879,7 @@ export default function BettingAnalytics() {
           {tab === 'results' && <Results tour={tour} fresh={fresh} onPlayer={openPlayer} onH2H={setH2H} />}
           {tab === 'players' && <Players tour={tour} sel={sel} setSel={setSel} onH2H={setH2H} />}
           {tab === 'sets' && <SetStats tour={tour} />}
+          {tab === 'patterns' && <Patterns />}
         </Safe>
       </div>
       {h2h && <H2HSheet m={h2h} onClose={() => setH2H(null)} onPlayer={openPlayer} />}

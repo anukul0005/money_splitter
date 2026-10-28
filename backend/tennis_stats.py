@@ -228,8 +228,11 @@ def _build(db) -> dict:
     per: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
     info: dict = defaultdict(lambda: {"matches": 0, "first": "9999", "last": "0000", "surfaces": defaultdict(int)})
     rows = db.execute(text("SELECT tour, tourney_name, surface, best_of, play_date, score FROM tennis_matches")).fetchall()
+    # pairs[(tour, surface, best_of, first set n, games in set n, games in set n+1, same player won both)] = matches
+    pairs: dict = defaultdict(int)
     for tour, tname, surface, best_of, play, score in rows:
-        got = match_sets(tour, tname, surface, best_of, score)
+        took: list = []
+        got = match_sets(tour, tname, surface, best_of, score, took)
         if not got:
             continue
         canon, bo, keys = got
@@ -239,11 +242,15 @@ def _build(db) -> dict:
         for sn, g in keys:
             main[(tour, surface, bo, sn)][g] += 1
             t[(year, sn)][g] += 1
+        games = [g for sn, g in keys if sn.isdigit()]
+        for i in range(min(2, len(games) - 1)):          # set 1 -> set 2, set 2 -> set 3
+            pairs[(tour, surface, bo, i + 1, games[i], games[i + 1], int(took[i] == took[i + 1]))] += 1
         inf = info[(tour, canon)]
         inf["matches"] += 1
         inf["first"], inf["last"] = min(inf["first"], year), max(inf["last"], year)
         inf["surfaces"][surface] += 1
     return {"main": [[k[0], k[1], k[2], k[3], dict(h)] for k, h in main.items()],
+            "pairs": [[*k, n] for k, n in pairs.items()],
             "per": per,
             "tournaments": sorted(({"tour": k[0], "name": k[1], "matches": v["matches"], "first": v["first"],
                                     "last": v["last"], "surface": max(v["surfaces"], key=v["surfaces"].get)}
