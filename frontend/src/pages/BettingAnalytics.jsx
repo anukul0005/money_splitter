@@ -177,6 +177,7 @@ function PlayerView({ sel, onPlayer, onH2H }) {
           {Object.entries(p.by_surface).map(([s, r]) => <Record key={s} label={s} r={r} />)}
         </div>
       </div>
+      {p.sets?.length > 0 && <PlayerSets rows={p.sets} />}
       <div className="card">
         <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">By year</p>
         {p.by_year.map((y) => (
@@ -457,6 +458,46 @@ function SetStats({ tour }) {
           </>
         )}
       </div>
+    </div>
+  )
+}
+
+/** A player's sets over a games line: set 1-5 / every / any, career, last 12 months, by surface. */
+function PlayerSets({ rows }) {
+  const [line, setLine] = useState(8.5)
+  const cols = [['all', null, 'Career'], ['12m', null, '12 months'],
+    ...SURFACES.filter((s) => rows.some((r) => r[0] === 'all' && r[1] === s)).map((s) => ['all', s, s])]
+  const cell = (period, surface, set) => tally(rows.filter((r) => r[0] === period && (!surface || r[1] === surface)
+    && r[2] === set).map((r) => r[3]), line)
+  const setRows = SET_ROWS.filter(([k]) => cell('all', null, k).n)
+  return (
+    <div className="card">
+      <div className="flex items-center gap-2 mb-1">
+        <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest flex-1">Sets over {line} games</p>
+        <select value={line} onChange={(e) => setLine(+e.target.value)}
+          className="px-2 py-1 rounded-md border border-amber-300 bg-white text-[11px] font-bold">
+          {LINES.map((l) => <option key={l} value={l}>Over {l}</option>)}
+        </select>
+      </div>
+      <div className="overflow-x-auto -mx-4">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
+              <th className="px-2 py-1 text-left">Set</th>
+              {cols.map(([, , l]) => <th key={l} className="px-2 py-1">{l}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {setRows.map(([k, l]) => (
+              <tr key={k} className={`border-t ${k === 'every' ? 'border-gray-300' : 'border-gray-100'}`}>
+                <td className="px-2 py-1.5 font-bold text-gray-800 whitespace-nowrap">{l}</td>
+                {cols.map(([pd, s, cl]) => <PctCell key={cl} t={cell(pd, s, k)} />)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[10px] text-gray-400 mt-1">Completed sets only; best-of-five only at the Grand Slams; no carpet.</p>
     </div>
   )
 }

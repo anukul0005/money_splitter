@@ -36,6 +36,22 @@ def run(today: date) -> dict:
         if conn is not None:
             conn.close()
         _running.release()
+        warm_stats()
+
+
+def warm_stats() -> None:
+    """Works out the Sets statistics now, so the page doesn't wait on the
+    one pass over every match (tennis_stats caches it until the data changes)."""
+    try:
+        import tennis_stats
+        from database import get_db
+        gen = get_db()
+        try:
+            tennis_stats.data(next(gen))
+        finally:
+            gen.close()
+    except Exception as err:
+        print(f"[tennis] set stats warm-up failed: {err}")
 
 
 def start(today: date) -> None:

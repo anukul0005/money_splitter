@@ -126,6 +126,38 @@ def sets_of(score: str) -> tuple[list[int], bool]:
     return out, full and bool(out)
 
 
+def match_sets(tour, tname, surface, best_of, score):
+    """What a match adds to the statistics: (canonical tournament, best-of,
+    [(set, games)...]) - or None when it doesn't count (no completed set,
+    carpet, best-of-five outside the Grand Slams)."""
+    games, full = sets_of(score)
+    if not games or surface == "Carpet":       # carpet: gone from the tour since 2009 - nothing to bet on
+        return None
+    bo = 5 if (best_of == 5 or len(games) > 3) else 3
+    canon = canonical(tour, tname)
+    if bo == 5 and canon not in SLAMS:         # Davis Cup, old Masters finals... - not like today's tour
+        return None
+    keys = [(str(i + 1), g) for i, g in enumerate(games)]
+    if full:
+        keys += [(EVERY, min(games)), (ANY, max(games))]
+    return canon, bo, keys
+
+
+def player_sets(rows, recent_cut: str) -> list:
+    """A player's matches as [period, surface, set, {games: count}] rows,
+    period 'all' or '12m' (played after recent_cut)."""
+    h: dict = defaultdict(lambda: defaultdict(int))
+    for r in rows:
+        got = match_sets(r["tour"], r["tourney_name"], r["surface"], r["best_of"], r["score"])
+        if not got:
+            continue
+        periods = ["all", "12m"] if (r["play_date"] or "") > recent_cut else ["all"]
+        for sn, g in got[2]:
+            for p in periods:
+                h[(p, r["surface"] or "Unknown", sn)][g] += 1
+    return [[p, s, sn, dict(c)] for (p, s, sn), c in h.items()]
+
+
 _lock = threading.Lock()
 _cache: dict = {"key": None, "data": None}
 
@@ -137,20 +169,12 @@ def _build(db) -> dict:
     info: dict = defaultdict(lambda: {"matches": 0, "first": "9999", "last": "0000", "surfaces": defaultdict(int)})
     rows = db.execute(text("SELECT tour, tourney_name, surface, best_of, play_date, score FROM tennis_matches")).fetchall()
     for tour, tname, surface, best_of, play, score in rows:
-        games, full = sets_of(score)
-        if not games:
+        got = match_sets(tour, tname, surface, best_of, score)
+        if not got:
             continue
-        if surface == "Carpet":                # gone from the tour since 2009 - nothing to bet on
-            continue
+        canon, bo, keys = got
         surface = surface or "Unknown"
-        bo = 5 if (best_of == 5 or len(games) > 3) else 3
-        canon = canonical(tour, tname)
-        if bo == 5 and canon not in SLAMS:     # Davis Cup, old Masters finals... - not like today's tour
-            continue
         year = (play or "")[:4]
-        keys = [(str(i + 1), g) for i, g in enumerate(games)]
-        if full:
-            keys += [(EVERY, min(games)), (ANY, max(games))]
         t = per[(tour, canon)]
         for sn, g in keys:
             main[(tour, surface, bo, sn)][g] += 1

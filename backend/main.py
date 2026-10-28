@@ -49,6 +49,9 @@ async def lifespan(app: FastAPI):
             print(f"[warn] merchant memory backfill failed (non-fatal): {e}")
     import threading
     threading.Thread(target=_merchant_backfill, daemon=True, name="merchant-backfill").start()
+    # Betting analytics' Sets numbers - one pass over every tennis match.
+    import tennis_sync
+    threading.Thread(target=tennis_sync.warm_stats, daemon=True, name="tennis-stats").start()
     # Woken after 12:30 IST with today's daily jobs not yet run (the cron
     # ping was refused, say)? Run them now - see routers/cron.py.
     cron.maybe_catch_up()
