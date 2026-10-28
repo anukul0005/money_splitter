@@ -60,7 +60,14 @@ function SizeRow({ s, nav, single }) {
   )
 }
 
-/** A brand, once: every size of it inside. */
+// A brand's sizes under each variety ("Minty Jamun"), the plain brand first.
+const groupByVariety = (b) => {
+  const m = new Map()
+  for (const s of b.sizes) { const k = s.variety || ''; if (!m.has(k)) m.set(k, []); m.get(k).push(s) }
+  return [...m.entries()]
+}
+
+/** A brand, once: its varieties and sizes inside. */
 function Brand({ b, nav }) {
   const [open, setOpen] = useState(false)
   const one = b.sizes.length === 1 ? b.sizes[0] : null
@@ -71,12 +78,13 @@ function Brand({ b, nav }) {
         <div className="min-w-0">
           <p className="text-sm font-bold text-gray-900 break-words">
             {b.name}
+            {one && one.variety && <span className="ml-1.5 text-[11px] font-bold text-brand-600">{one.variety}</span>}
             {one && sizeText(one) && <span className="ml-1.5 text-[11px] font-semibold text-gray-400">{sizeText(one)}</span>}
           </p>
           <p className="text-[11px] text-gray-500 mt-0.5">
             {b.times} time{b.times === 1 ? '' : 's'}
             {b.bottles !== b.times && ` · ${b.bottles} bottles`}
-            {!one && ` · ${b.sizes.length} sizes`}
+            {!one && (b.varieties?.length ? ` · ${b.varieties.length + (b.sizes.some((x) => !x.variety) ? 1 : 0)} kinds` : ` · ${b.sizes.length} sizes`)}
             {b.last ? ` · last ${fmtDate(b.last)}` : ''}
           </p>
         </div>
@@ -89,7 +97,14 @@ function Brand({ b, nav }) {
       </button>
       {open && (
         <div className="mt-3 pt-2 border-t border-amber-100">
-          {one ? <SizeRow s={one} nav={nav} single /> : b.sizes.map((s) => <SizeRow key={sizeKey(s)} s={s} nav={nav} />)}
+          {one ? <SizeRow s={one} nav={nav} single /> : groupByVariety(b).map(([variety, rows]) => (
+            <div key={variety || '-'} className="mb-1 last:mb-0">
+              {b.varieties?.length > 0 && (
+                <p className="text-[10px] font-black uppercase tracking-widest text-brand-600 mt-1">{variety || b.name}</p>
+              )}
+              {rows.map((s) => <SizeRow key={`${variety}|${sizeKey(s)}`} s={s} nav={nav} />)}
+            </div>
+          ))}
         </div>
       )}
     </div>
