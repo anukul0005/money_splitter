@@ -34,7 +34,7 @@ class SyncIn(BaseModel):
 def status(db: Session = Depends(get_db), caller: User = Depends(owner)):
     conn = db.query(BettingGmailConnection).filter(BettingGmailConnection.user_id == caller.id).first()
     imports = db.query(BetImport).filter(BetImport.user_id == caller.id).order_by(BetImport.imported_at.desc()).limit(20).all()
-    return {"connected": bool(conn), "gmail_address": conn.gmail_address if conn else None,
+    return {"connected": bool(conn), "periods": _periods(db, caller.id), "gmail_address": conn.gmail_address if conn else None,
             "last_synced_at": conn.last_synced_at if conn else None, "progress": bet_history.get_progress(caller.id),
             "imports": [{"subject": i.subject, "received_at": i.received_at, "imported_at": i.imported_at,
                          "bets_found": i.bets_found, "bets_new": i.bets_new, "error": i.error,
@@ -59,6 +59,25 @@ def sync_progress(caller: User = Depends(owner)):
 def disconnect(db: Session = Depends(get_db), caller: User = Depends(owner)):
     db.query(BettingGmailConnection).filter(BettingGmailConnection.user_id == caller.id).delete()
     db.commit()
+
+
+def _periods(db: Session, user_id: int) -> list[dict]:
+    """Each history export's period, newest first - the page shows one at a
+    time, the latest by default (a newer export becomes the default)."""
+    seen: dict[tuple, dict] = {}
+    for i in db.query(BetImport).filter(BetImport.user_id == user_id, BetImport.error.is_(None)).all():
+        for p in (json.loads(i.columns or "{}") or {}).get("periods") or []:
+            if p and p[0] and p[1]:
+                seen.setdefault((p[0], p[1]), {"from": p[0], "to": p[1], "bets": i.bets_found})
+    return sorted(seen.values(), key=lambda p: (p["to"], p["from"]), reverse=True)
+
+
+def _in_period(qry, frm: str, to: str):
+    if frm:
+        qry = qry.filter(Bet.placed_at >= frm)
+    if to:
+        qry = qry.filter(Bet.placed_at <= f"{to} 23:59")
+    return qry
 
 
 # ── what the bets add up to ──────────────────────────────────────────────────
@@ -115,10 +134,16 @@ def _bucket(v, buckets):
 
 
 @router.get("/summary", response_model=dict)
-def summary(db: Session = Depends(get_db), caller: User = Depends(owner)):
-    bets = [b for b in db.query(Bet).filter(Bet.user_id == caller.id).order_by(Bet.placed_at).all() if b.status != "open"]
+def summary(frm: str = "", to: str = "", db: Session = Depends(get_db), caller: User = Depends(owner)):
+    """frm / to: one history period (YYYY-MM-DD); blank = the latest one."""
+    if not frm and not to:
+        latest = _periods(db, caller.id)
+        if latest:
+            frm, to = latest[0]["from"], latest[0]["to"]
+    bets = [b for b in _in_period(db.query(Bet).filter(Bet.user_id == caller.id), frm, to).order_by(Bet.placed_at).all()
+            if b.status != "open"]
     if not bets:
-        return {"total": None}
+        return {"total": None, "period": {"from": frm, "to": to}}
     total = _agg()
     groups: dict[str, dict] = defaultdict(lambda: defaultdict(_agg))
     daily: dict[str, float] = defaultdict(float)
@@ -166,6 +191,7 @@ def summary(db: Session = Depends(get_db), caller: User = Depends(owner)):
     for b in bets:
         statuses[b.status] += 1
     return {
+        "period": {"from": frm, "to": to},
         "total": {**_done(total), "statuses": statuses, "avg_odds": round(sum(b.odds or 0 for b in bets) / len(bets), 2),
                   "avg_stake": round(total["staked"] / len(bets), 2), "first": bets[0].placed_at, "last": bets[-1].placed_at,
                   "best_win": max((profit(b) for b in bets), default=0), "worst_loss": min((profit(b) for b in bets), default=0),
@@ -182,9 +208,13 @@ def summary(db: Session = Depends(get_db), caller: User = Depends(owner)):
 
 
 @router.get("/list", response_model=dict)
-def list_bets(status: str = "", sport: str = "", q: str = "", page: int = 0,
+def list_bets(status: str = "", sport: str = "", q: str = "", page: int = 0, frm: str = "", to: str = "",
               db: Session = Depends(get_db), caller: User = Depends(owner)):
-    qry = db.query(Bet).filter(Bet.user_id == caller.id)
+    if not frm and not to:
+        latest = _periods(db, caller.id)
+        if latest:
+            frm, to = latest[0]["from"], latest[0]["to"]
+    qry = _in_period(db.query(Bet).filter(Bet.user_id == caller.id), frm, to)
     if status:
         qry = qry.filter(Bet.status == status)
     if sport:

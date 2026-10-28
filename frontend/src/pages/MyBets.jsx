@@ -27,21 +27,82 @@ function Stat({ label, value, sub, cls = 'text-gray-900' }) {
   )
 }
 
-/** Cumulative profit, day by day. */
-function Curve({ points }) {
+/** Profit day by day: a bar per day (green up / red down), the running
+ * total as a line, ₹ scale on the left, dates along the bottom. */
+function ProfitChart({ points }) {
+  const [hover, setHover] = useState(null)
   if (!points?.length) return null
-  const W = 600, H = 160, P = 6
-  const ys = points.map((p) => p.cumulative)
-  const lo = Math.min(0, ...ys), hi = Math.max(0, ...ys)
-  const x = (i) => P + (i * (W - 2 * P)) / Math.max(points.length - 1, 1)
-  const y = (v) => H - P - ((v - lo) * (H - 2 * P)) / (hi - lo || 1)
-  const d = points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.cumulative).toFixed(1)}`).join(' ')
-  const last = points[points.length - 1].cumulative
+  const W = 640, H = 220, L = 58, R = 10, T = 14, B = 26
+  const day = points.map((p) => p.profit), cum = points.map((p) => p.cumulative)
+  const lo = Math.min(0, ...day, ...cum), hi = Math.max(0, ...day, ...cum)
+  const span = hi - lo || 1
+  const y = (v) => T + ((hi - v) * (H - T - B)) / span
+  const step = (W - L - R) / points.length
+  const x = (i) => L + step * i + step / 2
+  const bw = Math.max(1.5, step * 0.7)
+  const ticks = [hi, (hi + lo) / 2, lo, 0].filter((v, i, a) => a.findIndex((w) => Math.abs(w - v) < span * 0.08) === i)
+  const short = (v) => `${v < 0 ? '−' : ''}₹${Math.abs(v) >= 1000 ? `${(Math.abs(v) / 1000).toFixed(1)}k` : Math.round(Math.abs(v))}`
+  const dlab = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+  const xl = [0, Math.floor(points.length / 2), points.length - 1].filter((v, i, a) => a.indexOf(v) === i)
+  const line = points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.cumulative).toFixed(1)}`).join(' ')
+  const end = cum[cum.length - 1]
+  const best = points.reduce((a, p) => (p.profit > a.profit ? p : a), points[0])
+  const worst = points.reduce((a, p) => (p.profit < a.profit ? p : a), points[0])
+  const up = points.filter((p) => p.profit > 0).length, down = points.filter((p) => p.profit < 0).length
+  const h = hover != null ? points[hover] : null
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-40">
-      <line x1={P} x2={W - P} y1={y(0)} y2={y(0)} stroke="#d1d5db" strokeDasharray="4 4" />
-      <path d={d} fill="none" stroke={last >= 0 ? '#15803d' : '#dc2626'} strokeWidth="2.5" strokeLinejoin="round" />
-    </svg>
+    <div>
+      <div className="flex items-baseline justify-between">
+        <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Profit day by day</p>
+        <p className={`text-sm font-black ${pl(end)}`}>{end >= 0 ? '+' : ''}{inr(end)} total</p>
+      </div>
+      <p className="text-[10px] text-gray-400 min-h-4">
+        {h ? (
+          <>{dlab(h.date)}: <b className={pl(h.profit)}>{h.profit >= 0 ? '+' : ''}{inr(h.profit)}</b> that day · running total{' '}
+            <b className={pl(h.cumulative)}>{inr(h.cumulative)}</b></>
+        ) : 'Bars: each day’s profit or loss · line: running total. Tap a day.'}
+      </p>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto select-none" onMouseLeave={() => setHover(null)}>
+        {ticks.map((v) => (
+          <g key={v}>
+            <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke={v === 0 ? '#9ca3af' : '#eef0f3'} strokeDasharray={v === 0 ? '' : '3 3'} />
+            <text x={L - 6} y={y(v) + 3.5} textAnchor="end" fontSize="11" fill="#6b7280">{v === 0 ? '₹0' : short(v)}</text>
+          </g>
+        ))}
+        {points.map((p, i) => (
+          <rect key={p.date} x={x(i) - bw / 2} width={bw} y={Math.min(y(p.profit), y(0))}
+            height={Math.max(1, Math.abs(y(p.profit) - y(0)))}
+            fill={p.profit >= 0 ? '#86efac' : '#fca5a5'} opacity={hover == null || hover === i ? 1 : 0.45} />
+        ))}
+        <path d={line} fill="none" stroke={end >= 0 ? '#15803d' : '#b91c1c'} strokeWidth="2.2" strokeLinejoin="round" />
+        <circle cx={x(points.length - 1)} cy={y(end)} r="3.5" fill={end >= 0 ? '#15803d' : '#b91c1c'} />
+        {xl.map((i) => (
+          <text key={i} x={x(i)} y={H - 8} textAnchor={i === 0 ? 'start' : i === points.length - 1 ? 'end' : 'middle'}
+            fontSize="11" fill="#6b7280">{dlab(points[i].date)}</text>
+        ))}
+        {points.map((p, i) => (
+          <rect key={`h${p.date}`} x={L + step * i} width={step} y={T} height={H - T - B} fill="transparent"
+            onMouseEnter={() => setHover(i)} onClick={() => setHover(i)} />
+        ))}
+      </svg>
+      <div className="grid grid-cols-3 gap-2 mt-1 text-center">
+        <div>
+          <p className="text-[9px] font-bold text-gray-400 uppercase">Best day</p>
+          <p className="text-xs font-black text-green-700">{inr(best.profit)}</p>
+          <p className="text-[10px] text-gray-400">{dlab(best.date)}</p>
+        </div>
+        <div>
+          <p className="text-[9px] font-bold text-gray-400 uppercase">Worst day</p>
+          <p className="text-xs font-black text-red-600">{inr(worst.profit)}</p>
+          <p className="text-[10px] text-gray-400">{dlab(worst.date)}</p>
+        </div>
+        <div>
+          <p className="text-[9px] font-bold text-gray-400 uppercase">Days up / down</p>
+          <p className="text-xs font-black text-gray-800"><span className="text-green-700">{up}</span> / <span className="text-red-600">{down}</span></p>
+          <p className="text-[10px] text-gray-400">of {points.length} betting days</p>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -112,7 +173,7 @@ function BetRow({ b }) {
   )
 }
 
-function BetList() {
+function BetList({ period }) {
   const [status, setStatus] = useState('')
   const [q, setQ] = useState('')
   const [page, setPage] = useState(0)
@@ -120,9 +181,11 @@ function BetList() {
   const timer = useRef(null)
   useEffect(() => {
     clearTimeout(timer.current)
-    timer.current = setTimeout(() => betsList({ status, q, page }).then((r) => setD(r.data)).catch(() => setD({ bets: [], count: 0 })), 250)
+    timer.current = setTimeout(() => betsList({ status, q, page, frm: period?.from || '', to: period?.to || '' })
+      .then((r) => setD(r.data)).catch(() => setD({ bets: [], count: 0 })), 250)
     return () => clearTimeout(timer.current)
-  }, [status, q, page])
+  }, [status, q, page, period?.from, period?.to])
+  useEffect(() => setPage(0), [period?.from, period?.to])
   return (
     <div className="card">
       <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2">Every bet</p>
@@ -228,11 +291,17 @@ export default function MyBets() {
   const loc = useLocation()
   const [st, setSt] = useState(null)
   const [s, setS] = useState(null)
-  const load = () => {
-    betsStatus().then((r) => setSt(r.data)).catch(() => setSt({ connected: false }))
-    betsSummary().then((r) => setS(r.data)).catch(() => setS({ total: null }))
-  }
-  useEffect(load, [])
+  const [pick, setPick] = useState(0)           // index into st.periods: 0 = the latest history export
+  const periods = st?.periods || []
+  const period = periods[pick] || periods[0] || null
+  const load = () => betsStatus().then((r) => setSt(r.data)).catch(() => setSt({ connected: false, periods: [] }))
+  useEffect(() => { load() }, [])
+  useEffect(() => {
+    if (!st) return
+    setS(null)
+    betsSummary(period ? { frm: period.from, to: period.to } : {}).then((r) => setS(r.data)).catch(() => setS({ total: null }))
+  }, [st, period?.from, period?.to])
+  const pday = (d) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '')
   const gmail = new URLSearchParams(loc.search).get('gmail')
   const t = s?.total
   return (
@@ -241,13 +310,24 @@ export default function MyBets() {
         <button onClick={() => nav(-1)} className="text-xs font-bold text-gray-400 mb-2">← Back</button>
         <h1 className="text-xl font-black tracking-tight">My bets</h1>
         <p className="text-[11px] text-gray-400 mt-0.5">
-          1xbet{t ? ` · ${t.bets} bets · ${fmtD(t.first)} – ${fmtD(t.last)}` : ''}
+          1xbet{period ? ` · ${pday(period.from)} – ${pday(period.to)}` : ''}{t ? ` · ${t.bets} bets` : ''}
         </p>
+        {periods.length > 0 && (
+          <div className="flex items-center gap-2 mt-2">
+            <span className="text-[11px] font-bold text-gray-500">History</span>
+            <select value={pick} onChange={(e) => setPick(+e.target.value)}
+              className="flex-1 min-w-0 px-2 py-1.5 rounded-md border border-amber-300 bg-white text-xs font-bold">
+              {periods.map((p, i) => (
+                <option key={`${p.from}|${p.to}`} value={i}>{pday(p.from)} – {pday(p.to)}{i === 0 ? '  (latest)' : ''}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
       <div className="px-5 mt-4 max-w-2xl space-y-3">
         {gmail === 'connected' && <p className="text-xs font-bold text-green-700">Gmail connected - tap "Check mail" to read your history.</p>}
         {gmail === 'error' && <p className="text-xs font-bold text-red-600">Gmail didn't connect - try again.</p>}
-        {st && <MailCard st={st} onSynced={load} />}
+        {st && <MailCard st={st} onSynced={() => { setPick(0); load() }} />}
         {!s && <p className="text-xs text-gray-400 text-center py-6">Loading…</p>}
         {s && !t && <p className="text-sm text-gray-400 text-center py-8">No bets yet.</p>}
         {t && (
@@ -268,10 +348,7 @@ export default function MyBets() {
                 {Object.entries(t.statuses || {}).map(([k, v]) => `${(STATUS[k] || [k])[0]} ${v}`).join(' · ')}
               </p>
             </div>
-            <div className="card">
-              <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Profit over time</p>
-              <Curve points={s.curve} />
-            </div>
+            <div className="card"><ProfitChart points={s.curve} /></div>
             <Breakdown title="By month" rows={s.by_month} />
             <Breakdown title="By sport" rows={s.by_sport} />
             <Breakdown title="Single vs accumulator" rows={s.by_type} />
@@ -283,7 +360,7 @@ export default function MyBets() {
             <Breakdown title="Tennis · tournaments" rows={s.tennis_events} note="Most bet on." />
           </>
         )}
-        <BetList />
+        <BetList period={period} />
       </div>
     </div>
   )
