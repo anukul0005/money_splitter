@@ -106,7 +106,7 @@ function ProfitChart({ points }) {
   )
 }
 
-function Breakdown({ title, rows, note }) {
+function Breakdown({ title, rows, note, fmt, onRow }) {
   if (!rows?.length) return null
   return (
     <div className="card">
@@ -122,8 +122,9 @@ function Breakdown({ title, rows, note }) {
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.label} className="border-t border-gray-100">
-                <td className="px-2 py-1.5 font-bold text-gray-800">{r.label}</td>
+              <tr key={r.label} onClick={onRow ? () => onRow(r.label) : undefined}
+                className={`border-t border-gray-100 ${onRow ? 'cursor-pointer hover:bg-amber-50' : ''}`}>
+                <td className="px-2 py-1.5 font-bold text-gray-800 whitespace-nowrap">{fmt ? fmt(r.label) : r.label}{onRow ? ' ›' : ''}</td>
                 <td className="px-1 py-1.5 text-center tabular-nums">{r.bets}</td>
                 <td className="px-1 py-1.5 text-center tabular-nums text-gray-600">{r.won}–{r.lost}</td>
                 <td className="px-1 py-1.5 text-center tabular-nums">{r.win_rate == null ? '—' : `${r.win_rate}%`}</td>
@@ -286,22 +287,59 @@ function MailCard({ st, onSynced }) {
   )
 }
 
+const shortDay = (d) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '')
+const longDay = (d) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '')
+const blockLabel = (lbl) => { const [a, b] = (lbl || '').split('|'); return `${shortDay(a)} – ${shortDay(b)}` }
+
+/** Current stretch (default) · its 10-day blocks · the past, in the page. */
+function ViewPicker({ views, view, setView }) {
+  if (!views?.current) return null
+  const same = (v) => v.from === view?.from && v.to === view?.to
+  const chip = (v, label, sub, tone) => (
+    <button key={`${v.from}|${v.to}`} onClick={() => setView(v)}
+      className={`flex-shrink-0 px-3 py-1.5 rounded-md border text-left ${same(v)
+        ? (tone === 'past' ? 'bg-gray-700 text-white border-gray-700' : 'bg-brand-400 text-white border-brand-400')
+        : 'bg-white text-gray-700 border-amber-300'}`}>
+      <p className="text-[11px] font-black whitespace-nowrap">{label}</p>
+      {sub && <p className={`text-[9px] whitespace-nowrap ${same(v) ? 'text-white/80' : 'text-gray-400'}`}>{sub}</p>}
+    </button>
+  )
+  return (
+    <div className="card space-y-2">
+      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Showing</p>
+      <div className="flex gap-2 flex-wrap">
+        {chip(views.current, `Since ${shortDay(views.current.from)}`, `${views.current.bets} bets · current`)}
+        {views.past && chip(views.past, 'Past', `before ${shortDay(views.current.from)} · ${views.past.bets} bets`, 'past')}
+      </div>
+      {views.blocks?.length > 0 && (
+        <>
+          <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">10-day blocks since {shortDay(views.current.from)}</p>
+          <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
+            {views.blocks.map((b) => chip(b, `${shortDay(b.from)} – ${shortDay(b.to)}`))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 export default function MyBets() {
   const nav = useNavigate()
   const loc = useLocation()
   const [st, setSt] = useState(null)
   const [s, setS] = useState(null)
-  const [pick, setPick] = useState(0)           // index into st.periods: 0 = the latest history export
-  const periods = st?.periods || []
-  const period = periods[pick] || periods[0] || null
-  const load = () => betsStatus().then((r) => setSt(r.data)).catch(() => setSt({ connected: false, periods: [] }))
+  const [view, setView] = useState(null)        // {from, to}; null = the current stretch
+  const views = st?.views
+  const shown = view || views?.current || null
+  const isPast = !!(views?.past && shown && shown.from === views.past.from && shown.to === views.past.to)
+  const load = () => betsStatus().then((r) => setSt(r.data)).catch(() => setSt({ connected: false, views: null }))
   useEffect(() => { load() }, [])
   useEffect(() => {
     if (!st) return
     setS(null)
-    betsSummary(period ? { frm: period.from, to: period.to } : {}).then((r) => setS(r.data)).catch(() => setS({ total: null }))
-  }, [st, period?.from, period?.to])
-  const pday = (d) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '')
+    betsSummary(shown ? { frm: shown.from, to: shown.to } : {}).then((r) => setS(r.data)).catch(() => setS({ total: null }))
+  }, [st, shown?.from, shown?.to])
+  const pickBlock = (lbl) => { const [from, to] = lbl.split('|'); setView({ from, to }); window.scrollTo({ top: 0, behavior: 'smooth' }) }
   const gmail = new URLSearchParams(loc.search).get('gmail')
   const t = s?.total
   return (
@@ -310,26 +348,20 @@ export default function MyBets() {
         <button onClick={() => nav(-1)} className="text-xs font-bold text-gray-400 mb-2">← Back</button>
         <h1 className="text-xl font-black tracking-tight">My bets</h1>
         <p className="text-[11px] text-gray-400 mt-0.5">
-          1xbet{period ? ` · ${pday(period.from)} – ${pday(period.to)}` : ''}{t ? ` · ${t.bets} bets` : ''}
+          1xbet · {isPast ? 'Past · ' : ''}{shown ? `${longDay(shown.from)} – ${longDay(shown.to)}` : ''}{t ? ` · ${t.bets} bets` : ''}
         </p>
-        {periods.length > 0 && (
-          <div className="flex items-center gap-2 mt-2">
-            <span className="text-[11px] font-bold text-gray-500">History</span>
-            <select value={pick} onChange={(e) => setPick(+e.target.value)}
-              className="flex-1 min-w-0 px-2 py-1.5 rounded-md border border-amber-300 bg-white text-xs font-bold">
-              {periods.map((p, i) => (
-                <option key={`${p.from}|${p.to}`} value={i}>{pday(p.from)} – {pday(p.to)}{i === 0 ? '  (latest)' : ''}</option>
-              ))}
-            </select>
-          </div>
-        )}
       </div>
       <div className="px-5 mt-4 max-w-2xl space-y-3">
         {gmail === 'connected' && <p className="text-xs font-bold text-green-700">Gmail connected - tap "Check mail" to read your history.</p>}
         {gmail === 'error' && <p className="text-xs font-bold text-red-600">Gmail didn't connect - try again.</p>}
-        {st && <MailCard st={st} onSynced={() => { setPick(0); load() }} />}
+        <ViewPicker views={views} view={shown} setView={setView} />
+        {isPast && (
+          <p className="text-[11px] text-gray-600 bg-gray-100 rounded-md px-3 py-2">
+            Past: every bet before {shortDay(views.current.from)} in one view, kept apart from the current numbers.
+          </p>
+        )}
         {!s && <p className="text-xs text-gray-400 text-center py-6">Loading…</p>}
-        {s && !t && <p className="text-sm text-gray-400 text-center py-8">No bets yet.</p>}
+        {s && !t && <p className="text-sm text-gray-400 text-center py-8">No bets in this stretch.</p>}
         {t && (
           <>
             <div className="card">
@@ -349,7 +381,11 @@ export default function MyBets() {
               </p>
             </div>
             <div className="card"><ProfitChart points={s.curve} /></div>
-            <Breakdown title="By month" rows={s.by_month} />
+            {!isPast && s.by_block?.length > 1 && (
+              <Breakdown title="Every 10 days" rows={[...s.by_block].reverse()} fmt={blockLabel} onRow={pickBlock}
+                note="Newest first · tap a block to see just those 10 days." />
+            )}
+            {isPast && <Breakdown title="By month" rows={s.by_month} />}
             <Breakdown title="By sport" rows={s.by_sport} />
             <Breakdown title="Single vs accumulator" rows={s.by_type} />
             <Breakdown title="By market" rows={s.by_market} note="Singles; accumulators on their own line." />
@@ -360,7 +396,8 @@ export default function MyBets() {
             <Breakdown title="Tennis · tournaments" rows={s.tennis_events} note="Most bet on." />
           </>
         )}
-        <BetList period={period} />
+        <BetList period={shown} />
+        {st && <MailCard st={st} onSynced={() => { setView(null); load() }} />}
       </div>
     </div>
   )

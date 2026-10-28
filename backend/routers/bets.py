@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 from collections import defaultdict
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -16,6 +17,8 @@ from sqlalchemy.orm import Session
 
 import bet_history
 from database import get_db
+from sqlalchemy import func
+
 from models import Bet, BetImport, BettingGmailConnection, User
 from routers.tennis import owner
 
@@ -26,6 +29,13 @@ STAKE_BUCKETS = [(0, 100, "under ₹100"), (100, 500, "₹100 – 499"), (500, 1
                  (2000, 1e12, "₹2,000 +")]
 
 
+# The current stretch starts here: the page shows bets from this day on by
+# default, in 10-day blocks; everything before it is one "past" view, kept
+# apart and shown only when asked for.
+CURRENT_FROM = "2026-07-29"
+BLOCK_DAYS = 10
+
+
 class SyncIn(BaseModel):
     password: str | None = None        # only if a zip ever comes password-protected
 
@@ -34,7 +44,7 @@ class SyncIn(BaseModel):
 def status(db: Session = Depends(get_db), caller: User = Depends(owner)):
     conn = db.query(BettingGmailConnection).filter(BettingGmailConnection.user_id == caller.id).first()
     imports = db.query(BetImport).filter(BetImport.user_id == caller.id).order_by(BetImport.imported_at.desc()).limit(20).all()
-    return {"connected": bool(conn), "periods": _periods(db, caller.id), "gmail_address": conn.gmail_address if conn else None,
+    return {"connected": bool(conn), "views": _views(db, caller.id), "gmail_address": conn.gmail_address if conn else None,
             "last_synced_at": conn.last_synced_at if conn else None, "progress": bet_history.get_progress(caller.id),
             "imports": [{"subject": i.subject, "received_at": i.received_at, "imported_at": i.imported_at,
                          "bets_found": i.bets_found, "bets_new": i.bets_new, "error": i.error,
@@ -61,15 +71,30 @@ def disconnect(db: Session = Depends(get_db), caller: User = Depends(owner)):
     db.commit()
 
 
-def _periods(db: Session, user_id: int) -> list[dict]:
-    """Each history export's period, newest first - the page shows one at a
-    time, the latest by default (a newer export becomes the default)."""
-    seen: dict[tuple, dict] = {}
-    for i in db.query(BetImport).filter(BetImport.user_id == user_id, BetImport.error.is_(None)).all():
-        for p in (json.loads(i.columns or "{}") or {}).get("periods") or []:
-            if p and p[0] and p[1]:
-                seen.setdefault((p[0], p[1]), {"from": p[0], "to": p[1], "bets": i.bets_found})
-    return sorted(seen.values(), key=lambda p: (p["to"], p["from"]), reverse=True)
+def _blocks(last: str) -> list[tuple[str, str]]:
+    """10-day blocks from CURRENT_FROM up to the day `last`, oldest first."""
+    out, d, end = [], date.fromisoformat(CURRENT_FROM), date.fromisoformat(last)
+    while d <= end:
+        e = d + timedelta(days=BLOCK_DAYS - 1)
+        out.append((d.isoformat(), e.isoformat()))
+        d = e + timedelta(days=1)
+    return out
+
+
+def _views(db: Session, user_id: int) -> dict:
+    """What the page can show: the current stretch (from CURRENT_FROM, the
+    default), its 10-day blocks (newest first), and the past - everything
+    before CURRENT_FROM as one view."""
+    first, last = db.query(func.min(Bet.placed_at), func.max(Bet.placed_at)).filter(Bet.user_id == user_id).first()
+    if not last:
+        return {"current": None, "blocks": [], "past": None}
+    last_day = max(last[:10], CURRENT_FROM)
+    n_cur = db.query(func.count(Bet.id)).filter(Bet.user_id == user_id, Bet.placed_at >= CURRENT_FROM).scalar()
+    n_past = db.query(func.count(Bet.id)).filter(Bet.user_id == user_id, Bet.placed_at < CURRENT_FROM).scalar()
+    before = (date.fromisoformat(CURRENT_FROM) - timedelta(days=1)).isoformat()
+    return {"current": {"from": CURRENT_FROM, "to": last_day, "bets": n_cur},
+            "blocks": [{"from": a, "to": b} for a, b in reversed(_blocks(last_day))],
+            "past": {"from": first[:10], "to": before, "bets": n_past} if n_past else None}
 
 
 def _in_period(qry, frm: str, to: str):
@@ -126,6 +151,14 @@ def _done(a: dict, label=None) -> dict:
     return out
 
 
+def _block_of(day: str) -> str | None:
+    if not day or day < CURRENT_FROM:
+        return None
+    n = (date.fromisoformat(day) - date.fromisoformat(CURRENT_FROM)).days // BLOCK_DAYS
+    a = date.fromisoformat(CURRENT_FROM) + timedelta(days=n * BLOCK_DAYS)
+    return f"{a.isoformat()}|{(a + timedelta(days=BLOCK_DAYS - 1)).isoformat()}"
+
+
 def _bucket(v, buckets):
     for lo, hi, label in buckets:
         if v is not None and lo <= v < hi:
@@ -135,11 +168,10 @@ def _bucket(v, buckets):
 
 @router.get("/summary", response_model=dict)
 def summary(frm: str = "", to: str = "", db: Session = Depends(get_db), caller: User = Depends(owner)):
-    """frm / to: one history period (YYYY-MM-DD); blank = the latest one."""
+    """frm / to: the stretch to add up (YYYY-MM-DD); blank = the current one,
+    from CURRENT_FROM on. by_block: its 10-day blocks, when it is current."""
     if not frm and not to:
-        latest = _periods(db, caller.id)
-        if latest:
-            frm, to = latest[0]["from"], latest[0]["to"]
+        frm = CURRENT_FROM                    # the current stretch
     bets = [b for b in _in_period(db.query(Bet).filter(Bet.user_id == caller.id), frm, to).order_by(Bet.placed_at).all()
             if b.status != "open"]
     if not bets:
@@ -153,12 +185,15 @@ def summary(frm: str = "", to: str = "", db: Session = Depends(get_db), caller: 
         league = (legs[0].get("league") or "") if legs else ""
         keys = {
             "month": (b.placed_at or "")[:7],
+            "block": _block_of((b.placed_at or "")[:10]),
             "sport": b.sport or "—",
             "type": "Accumulator" if (b.legs or 1) > 1 else "Single",
             "odds": _bucket(b.odds, ODDS_BUCKETS),
             "stake": _bucket(b.stake, STAKE_BUCKETS),
             "market": _market(b.market, b.event) if (b.legs or 1) == 1 else "Accumulator",
         }
+        if keys["block"] is None:              # before CURRENT_FROM: no 10-day block
+            del keys["block"]
         if b.sport == "Tennis" and (b.legs or 1) == 1:
             tour = league.split(".")[0].strip() or "—"
             if tour in ("US Open", "Australian Open", "Roland Garros", "French Open", "Wimbledon"):
@@ -198,6 +233,7 @@ def summary(frm: str = "", to: str = "", db: Session = Depends(get_db), caller: 
                   "longest_win_streak": best, "longest_loss_streak": worst,
                   "currency": next((b.currency for b in bets if b.currency), "INR")},
         "by_month": order("month", lambda x: x["label"]),
+        "by_block": order("block", lambda x: x["label"]),
         "by_sport": order("sport"), "by_type": order("type"), "by_market": order("market"),
         "by_odds": [x for lbl in [b[2] for b in ODDS_BUCKETS] for x in order("odds") if x["label"] == lbl],
         "by_stake": [x for lbl in [b[2] for b in STAKE_BUCKETS] for x in order("stake") if x["label"] == lbl],
@@ -211,9 +247,7 @@ def summary(frm: str = "", to: str = "", db: Session = Depends(get_db), caller: 
 def list_bets(status: str = "", sport: str = "", q: str = "", page: int = 0, frm: str = "", to: str = "",
               db: Session = Depends(get_db), caller: User = Depends(owner)):
     if not frm and not to:
-        latest = _periods(db, caller.id)
-        if latest:
-            frm, to = latest[0]["from"], latest[0]["to"]
+        frm = CURRENT_FROM                    # the current stretch
     qry = _in_period(db.query(Bet).filter(Bet.user_id == caller.id), frm, to)
     if status:
         qry = qry.filter(Bet.status == status)
