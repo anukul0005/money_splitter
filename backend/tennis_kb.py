@@ -519,7 +519,8 @@ def espn_rows(item, tour, players, tourneys) -> dict | None:
            "draw_size": item["draw"] or None, "tourney_level": tourneys.level(name, tour, ev.get("major")),
            "tourney_date": int(start.replace("-", "")), "match_date": mdate,
            "round": _round((c.get("round") or {}).get("displayName"), item["draw"]),
-           "best_of": ((c.get("format") or {}).get("regulation") or {}).get("periods") or (5 if ev.get("major") and tour == "ATP" else 3),
+           # ESPN's format says 5 periods for every ATP match - only the men's Slams are best of five.
+           "best_of": 5 if tour == "ATP" and (ev.get("major") or tourneys.level(name, tour, ev.get("major")) == "G") else 3,
            "score": _score(note, cs), "minutes": None}
     for side, x in (("winner", w), ("loser", l)):
         a = x["athlete"]

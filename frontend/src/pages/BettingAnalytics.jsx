@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Component, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { tennisDay, tennisH2H, tennisPlayer, tennisPlayers, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
 import DatePicker from '../components/DatePicker'
@@ -32,6 +32,23 @@ function parseScore(score) {
     sets.push({ w, l, tb, tbOn: tb == null ? null : w > l ? 'l' : 'w' })
   }
   return { sets, end }
+}
+
+/** A crash inside shows a line, not a blank white page. */
+class Safe extends Component {
+  constructor(props) { super(props); this.state = { err: null } }
+  static getDerivedStateFromError(err) { return { err } }
+  render() {
+    if (this.state.err) {
+      return (
+        <div className="card text-sm text-red-600">
+          Couldn't show {this.props.what}.{' '}
+          <button className="font-bold underline" onClick={() => this.setState({ err: null })}>Try again</button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
 }
 
 function Flag({ ioc }) {
@@ -177,7 +194,9 @@ function PlayerView({ sel, onPlayer, onH2H }) {
           {Object.entries(p.by_surface).map(([s, r]) => <Record key={s} label={s} r={r} />)}
         </div>
       </div>
-      {p.sets?.length > 0 && <PlayerSets rows={p.sets} name={info.name} />}
+      {p.sets?.length > 0 && p.sets[0].length === 5 && (
+        <Safe what="set statistics"><PlayerSets rows={p.sets} name={info.name} /></Safe>
+      )}
       <div className="card">
         <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">By year</p>
         {p.by_year.map((y) => (
@@ -250,7 +269,10 @@ const fmtN = (n) => Number(n).toLocaleString('en-IN')
 /** Adds histograms {games: count} into {n, over} for the line. */
 function tally(hists, line) {
   let n = 0, over = 0
-  for (const h of hists) for (const [g, c] of Object.entries(h)) { n += c; if (+g > line) over += c }
+  for (const h of hists) {
+    if (!h || typeof h !== 'object') continue          // a reply in another shape (mid-deploy) - skip, don't crash
+    for (const [g, c] of Object.entries(h)) { n += +c || 0; if (+g > line) over += +c || 0 }
+  }
   return { n, over, pct: n ? (100 * over) / n : null }
 }
 
@@ -647,9 +669,11 @@ export default function BettingAnalytics() {
         </div>
       </div>
       <div className="px-5 mt-4 max-w-2xl">
-        {tab === 'results' && <Results tour={tour} onPlayer={openPlayer} onH2H={setH2H} />}
-        {tab === 'players' && <Players tour={tour} sel={sel} setSel={setSel} onH2H={setH2H} />}
-        {tab === 'sets' && <SetStats tour={tour} />}
+        <Safe key={tab} what="this tab">
+          {tab === 'results' && <Results tour={tour} onPlayer={openPlayer} onH2H={setH2H} />}
+          {tab === 'players' && <Players tour={tour} sel={sel} setSel={setSel} onH2H={setH2H} />}
+          {tab === 'sets' && <SetStats tour={tour} />}
+        </Safe>
       </div>
       {h2h && <H2HSheet m={h2h} onClose={() => setH2H(null)} onPlayer={openPlayer} />}
     </div>

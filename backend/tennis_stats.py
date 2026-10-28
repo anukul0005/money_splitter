@@ -134,10 +134,15 @@ def match_sets(tour, tname, surface, best_of, score, took: list | None = None):
     """What a match adds to the statistics: (canonical tournament, best-of,
     [(set, games)...]) - or None when it doesn't count (no completed set,
     carpet, best-of-five outside the Grand Slams). took: as in sets_of."""
-    games, full = sets_of(score, took)
+    mine: list = []
+    games, full = sets_of(score, mine)
+    if took is not None:
+        took.extend(mine)
     if not games or surface == "Carpet":       # carpet: gone from the tour since 2009 - nothing to bet on
         return None
-    bo = 5 if (best_of == 5 or len(games) > 3) else 3
+    # The score settles it when the match was played out: three sets won = best of five.
+    # Otherwise (a retirement) the stored format.
+    bo = 5 if (len(games) > 3 or sum(mine) >= 3) else 3 if full else (5 if best_of == 5 else 3)
     canon = canonical(tour, tname)
     if bo == 5 and canon not in SLAMS:         # Davis Cup, old Masters finals... - not like today's tour
         return None
