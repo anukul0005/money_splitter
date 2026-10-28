@@ -1,18 +1,19 @@
-"""Script 2 - the daily update: yesterday's and today's ATP and WTA
-tour-level singles matches into tennis_kb.sqlite. Run once a day by cron.
+"""Script 2 - the update: the latest ATP and WTA tour-level singles
+results into tennis_kb.sqlite. Run every hour by cron.
 
     python update_kb.py
 
 It starts two days before the last day it covered - results that finished
 after the previous run, or were corrected, are picked up - and runs to
-today, so a missed day (laptop off) is caught up on the next run. Running
-it twice adds nothing twice: each match has one key (tennis_kb.upsert).
-Appends a line to update.log.
+today, so a missed run (laptop off) is caught up on the next one. Matches
+already stored with the same score are skipped, so an hour with nothing
+new costs four small ESPN requests. Running it twice adds nothing twice:
+each match has one key (tennis_kb.upsert). Appends a line to update.log.
 
-cron (Linux / macOS - 06:00 every day):
-    0 6 * * * cd /path/to/Tennis_scraper && /usr/bin/python3 update_kb.py >> update.log 2>&1
-Windows (Task Scheduler - the same, daily at 06:00):
-    schtasks /Create /SC DAILY /ST 06:00 /TN "Tennis KB update" /TR "\"<python.exe>\" \"<folder>\\update_kb.py\""
+cron (Linux / macOS - every hour, on the hour):
+    0 * * * * cd /path/to/Tennis_scraper && /usr/bin/python3 update_kb.py >> update.log 2>&1
+Windows (Task Scheduler - the same):
+    schtasks /Create /SC HOURLY /MO 1 /ST 00:00 /TN "Tennis KB update" /TR "\"<python.exe>\" \"<folder>\\update_kb.py\"" /F
 """
 from __future__ import annotations
 
@@ -46,7 +47,7 @@ def main() -> int:
     start = (date.fromisoformat(last) - timedelta(days=OVERLAP_DAYS)) if last else date.today() - timedelta(days=OVERLAP_DAYS)
     end = date.today()
     try:
-        result = kb.fetch_range(conn, start, end, log=say)
+        result = kb.fetch_range(conn, start, end, log=say, light=True)   # unchanged matches skipped, players looked up by name
     except Exception as err:          # one bad day mustn't leave the log silent
         say(f"update failed: {err}")
         return 1

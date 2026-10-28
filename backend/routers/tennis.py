@@ -13,6 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 import tennis_stats
+import tennis_sync
 from auth import current_user
 from database import get_db
 from models import User
@@ -60,7 +61,9 @@ def summary(db: Session = Depends(get_db), _: User = Depends(owner)):
                         "SUM(CASE WHEN tour='WTA' THEN 1 ELSE 0 END) wta, MIN(play_date) first, MAX(play_date) last "
                         "FROM tennis_matches")).mappings().first()
     meta = dict(db.execute(text("SELECT key, value FROM tennis_meta")).fetchall())
-    return {**dict(r), "last_fetched": meta.get("last_fetched"), "last_update": meta.get("last_update")}
+    refreshing = tennis_sync.refresh_if_stale(meta.get("last_update"))   # over an hour old: fetch in the background
+    return {**dict(r), "last_fetched": meta.get("last_fetched"), "last_update": meta.get("last_update"),
+            "refreshing": refreshing}
 
 
 @router.get("/day", response_model=dict)

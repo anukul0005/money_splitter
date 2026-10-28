@@ -24,14 +24,16 @@ stay next to `backend/`. Standard library Python only.
    *is* the source (the original CSVs are gone), so run without arguments:
    it fetches from the day after `last_fetched` to today.
    `--source` rebuilt it from the original files and no longer applies.
-2. **`update_kb.py`** - the daily update: from two days before the last day
-   covered to today (late results are picked up, a missed day is caught up),
-   safe to run twice. Logs to `update.log`.
+2. **`update_kb.py`** - the hourly update: from two days before the last day
+   covered to today (late results are picked up, a missed run is caught up),
+   safe to run twice. Matches already stored with the same score are
+   skipped and players are looked up name by name, so a quiet hour costs
+   four small ESPN requests. Logs to `update.log`.
 
-## Daily schedule
-Registered on this laptop as Windows Task **"Tennis KB update"**, daily
-09:00 (Task Scheduler is Windows' cron). If the laptop is off, the next run
-catches up.
+## Hourly schedule
+Registered on this laptop as Windows Task **"Tennis KB update"**, every
+hour on the hour (Task Scheduler is Windows' cron). If the laptop is off,
+the next run catches up.
 
     schtasks /Query /TN "Tennis KB update"          # check it
     schtasks /Run   /TN "Tennis KB update"          # run it now
@@ -39,7 +41,9 @@ catches up.
 
 On Linux/macOS the equivalent cron line:
 
-    0 9 * * * cd /path/to/Tennis_scraper && python3 update_kb.py
+    0 * * * * cd /path/to/Tennis_scraper && python3 update_kb.py
 
-The app keeps its own copy current separately: Render's daily cron runs the
-same update against the app's database (`backend/tennis_sync.py`).
+The app keeps its own copy current separately (`backend/tennis_sync.py`):
+the daily cron runs the full update, and a light one (yesterday and today)
+runs hourly - from a pinger calling `/cron/tennis?key=<CRON_SECRET>`, and
+whenever Betting analytics is opened with results over an hour old.

@@ -211,24 +211,72 @@ class Players:
     initial among the players active in the last few years - and adds a new
     player when none fits."""
 
-    def __init__(self, conn):
+    _COLS = "tour, player_id, first_name, last_name, ioc, dob, espn_id"
+
+    def __init__(self, conn, partial: bool = False):
+        """partial: don't read all 136k players up front - load, per name
+        asked, the players it could be (same ESPN id, a first or last name
+        made of its words), and everyone only when that finds nobody. For
+        the hourly refresh, which sees a few dozen names."""
         self.conn = conn
         self.by_name: dict[tuple, int] = {}
         self.by_espn: dict[tuple, int] = {}
         self.by_last: dict[tuple, list] = {}
         self.by_tok: dict[tuple, set] = {}
         self.info: dict[tuple, dict] = {}
+        self.recent: dict[tuple, int] = {}
+        self.partial = partial
+        self._asked: set = set()
+        if not partial:
+            self._load_all()
+
+    def _load_all(self) -> None:
         # Who played most recently decides a shared name: "Zhang" means today's Zhang.
         recent: dict[tuple, int] = {}
-        for tour, pid, d in conn.execute(
+        for tour, pid, d in self.conn.execute(
                 "SELECT tour, winner_id, MAX(tourney_date) FROM tennis_matches WHERE winner_id IS NOT NULL GROUP BY 1, 2 "
                 "UNION ALL SELECT tour, loser_id, MAX(tourney_date) FROM tennis_matches WHERE loser_id IS NOT NULL GROUP BY 1, 2"):
             recent[(tour, pid)] = max(recent.get((tour, pid), 0), d or 0)
         self.recent = recent
-        rows = conn.execute("SELECT tour, player_id, first_name, last_name, ioc, dob, espn_id FROM tennis_players").fetchall()
+        rows = self.conn.execute(f"SELECT {self._COLS} FROM tennis_players").fetchall()
         rows.sort(key=lambda r: recent.get((r[0], r[1]), 0))     # most recent last: wins below
         for tour, pid, first, last, ioc, dob, espn in rows:
             self._index(tour, pid, first, last, ioc, dob, espn)
+        self.partial = False
+
+    def _ensure(self, tour, name, espn_id) -> None:
+        """partial mode: index the players this name / ESPN id could be."""
+        words = norm(name or "").split()
+        key = (tour, " ".join(words), str(espn_id or ""))
+        if key in self._asked:
+            return
+        self._asked.add(key)
+        # every run of consecutive words: "Roberto Bautista Agut" -> "bautista agut", "agut", ...
+        runs = sorted({" ".join(words[i:j]) for i in range(len(words)) for j in range(i + 1, len(words) + 1)})
+        conds, params = [], [tour]
+        if espn_id:
+            conds.append("espn_id = ?")
+            params.append(str(espn_id))
+        if runs:
+            marks = ", ".join("?" * len(runs))
+            conds.append(f"LOWER(last_name) IN ({marks}) OR LOWER(first_name) IN ({marks})")
+            params += runs + runs
+        if not conds:
+            return
+        rows = [r for r in self.conn.execute(f"SELECT {self._COLS} FROM tennis_players WHERE tour = ? AND ({' OR '.join(conds)})",
+                                             params).fetchall() if (r[0], r[1]) not in self.info]
+        if not rows:
+            return
+        ids = sorted({r[1] for r in rows})
+        marks = ", ".join("?" * len(ids))
+        for pid, d in self.conn.execute(
+                f"SELECT winner_id, MAX(tourney_date) FROM tennis_matches WHERE tour = ? AND winner_id IN ({marks}) GROUP BY 1 "
+                f"UNION ALL SELECT loser_id, MAX(tourney_date) FROM tennis_matches WHERE tour = ? AND loser_id IN ({marks}) GROUP BY 1",
+                [tour] + ids + [tour] + ids):
+            self.recent[(tour, pid)] = max(self.recent.get((tour, pid), 0), d or 0)
+        rows.sort(key=lambda r: self.recent.get((r[0], r[1]), 0))
+        for r in rows:
+            self._index(*r)
 
     def _index(self, tour, pid, first, last, ioc, dob, espn):
         f, l = norm(first), norm(last)
@@ -249,6 +297,15 @@ class Players:
             self.by_espn[(tour, str(espn))] = pid
 
     def find(self, tour: str, full_name: str | None = None, espn_id=None, surname: str | None = None):
+        if self.partial:
+            self._ensure(tour, full_name or surname, espn_id)
+            pid = self._find(tour, full_name, espn_id, surname)
+            if pid is not None:
+                return pid
+            self._load_all()                  # nobody among the likely ones: look at everyone before adding a player
+        return self._find(tour, full_name, espn_id, surname)
+
+    def _find(self, tour: str, full_name: str | None = None, espn_id=None, surname: str | None = None):
         if espn_id and (tour, str(espn_id)) in self.by_espn:
             return self.by_espn[(tour, str(espn_id))]
         if full_name:
@@ -571,12 +628,30 @@ def tsdb_rows(e, players, tourneys) -> dict | None:
     return row
 
 
-def fetch_range(conn, start: date, end: date, log=print) -> dict:
+class _Lazy:
+    """Players / Tourneys made on first use - an hour with nothing new needs neither."""
+
+    def __init__(self, make):
+        self._make, self._obj = make, None
+
+    def __getattr__(self, name):
+        if self._obj is None:
+            self._obj = self._make()
+        return getattr(self._obj, name)
+
+
+def fetch_range(conn, start: date, end: date, log=print, light: bool = False) -> dict:
     """Every ATP and WTA tour-level singles match from `start` to `end`
     (inclusive) into the knowledge base: ESPN per tour per day, the app's
     TheSportsDB method for a day ESPN can't be reached. Only matches played
-    on or after `start` are taken. Commits as it goes."""
-    players, tourneys = Players(conn), Tourneys(conn)
+    on or after `start` are taken. Commits as it goes.
+
+    light (the hourly refresh): a match already stored with the same score
+    is left alone, and players are looked up name by name (Players partial)
+    rather than all read in - an hour costs a few small queries, not a pass
+    over every player and match."""
+    players = _Lazy(lambda: Players(conn, partial=light))
+    tourneys = _Lazy(lambda: Tourneys(conn))
     added = refreshed = skipped = 0
     day = start
     while day <= end:
@@ -588,9 +663,17 @@ def fetch_range(conn, start: date, end: date, log=print) -> dict:
                 log(f"  {day} {tour}: ESPN unavailable ({err}) - using TheSportsDB")
                 espn_ok = False
                 continue
+            items = [it for it in items if (it["comp"].get("date") or "")[:10] >= start.isoformat()]
+            if light and items:
+                ids = [f"espn:{it['comp']['id']}" for it in items]
+                stored = dict(conn.execute(f"SELECT match_id, score FROM tennis_matches WHERE match_id IN ({', '.join('?' * len(ids))})",
+                                           ids).fetchall())
+                fresh = [it for i, it in zip(ids, items)
+                         if i not in stored or stored[i] != _score(" ".join(n.get("text", "") for n in it["comp"].get("notes", [])),
+                                                                   it["comp"]["competitors"])]
+                skipped += len(items) - len(fresh)
+                items = fresh
             for it in items:
-                if (it["comp"].get("date") or "")[:10] < start.isoformat():
-                    continue
                 row = espn_rows(it, tour, players, tourneys)
                 if not row:
                     continue

@@ -48,6 +48,18 @@ def run_daily(key: str = "", db: Session = Depends(get_db)):
     return _run_and_record(db, "cron")
 
 
+@router.get("/tennis", response_model=dict)
+def run_tennis(key: str = "", db: Session = Depends(get_db)):
+    """Hourly: fresh ATP/WTA results for Betting analytics (tennis_sync's
+    light refresh - yesterday and today only). Does nothing if the last
+    refresh was under an hour ago."""
+    _check_key(key)
+    from sqlalchemy import text
+    import tennis_sync
+    last = db.execute(text("SELECT value FROM tennis_meta WHERE key = 'last_update'")).scalar()
+    return {"last_update": last, "started": tennis_sync.refresh_if_stale(last)}
+
+
 # ── catch-up ──────────────────────────────────────────────────────────────
 # Render's free plan sleeps the server when idle, and its edge sometimes
 # refuses the pinger's wake-up call outright (429 "hibernate-rate-limited")

@@ -123,15 +123,15 @@ function TournamentCard({ t, onPlayer, onH2H }) {
   )
 }
 
-function Results({ tour, onPlayer, onH2H }) {
+function Results({ tour, fresh, onPlayer, onH2H }) {
   const [day, setDay] = useState(null)
   const [date, setDate] = useState('')
   const [busy, setBusy] = useState(false)
   useEffect(() => {
-    setBusy(true)
+    setBusy(!fresh)                            // a refresh reloads quietly, without the loading line
     tennisDay(date, tour).then((r) => { setDay(r.data); if (!date && r.data.date) setDate(r.data.date) })
       .catch(() => setDay({ tournaments: [] })).finally(() => setBusy(false))
-  }, [date, tour])
+  }, [date, tour, fresh])
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
@@ -682,7 +682,14 @@ export default function BettingAnalytics() {
   const [sum, setSum] = useState(null)
   const [sel, setSel] = useState(null)       // the player open on the Players tab
   const [h2h, setH2H] = useState(null)
-  useEffect(() => { tennisSummary().then((r) => setSum(r.data)).catch(() => {}) }, [])
+  const [fresh, setFresh] = useState(0)      // bumped when a background refresh has had time to land
+  useEffect(() => {
+    tennisSummary().then((r) => {
+      setSum(r.data)
+      // Results over an hour old: the server is fetching new ones - look again shortly.
+      if (r.data.refreshing && fresh < 1) setTimeout(() => setFresh((f) => f + 1), 30000)
+    }).catch(() => {})
+  }, [fresh])
   const openPlayer = (t, id) => { setSel({ tour: t, id }); setTab('players') }
 
   return (
@@ -692,7 +699,8 @@ export default function BettingAnalytics() {
         <h1 className="text-xl font-black tracking-tight">Betting analytics</h1>
         <p className="text-[11px] text-gray-400 mt-0.5">
           {sum ? `ATP & WTA tour · ${Number(sum.n).toLocaleString('en-IN')} matches · ${fmtShort(sum.first)} – ${fmtShort(sum.last)}` : 'ATP & WTA tour results'}
-          {sum?.last_update ? ` · updated ${fmtShort(sum.last_update.slice(0, 10))}` : ''}
+          {sum?.refreshing && !fresh ? ' · fetching the latest results…'
+            : sum?.last_update ? ` · updated ${fmtShort(sum.last_update.slice(0, 10))} ${sum.last_update.slice(11, 16)} UTC` : ''}
         </p>
         <div className="flex items-center gap-2 mt-3">
           <div className="flex rounded-md border border-amber-300 overflow-hidden">
@@ -711,7 +719,7 @@ export default function BettingAnalytics() {
       </div>
       <div className="px-5 mt-4 max-w-2xl">
         <Safe key={tab} what="this tab">
-          {tab === 'results' && <Results tour={tour} onPlayer={openPlayer} onH2H={setH2H} />}
+          {tab === 'results' && <Results tour={tour} fresh={fresh} onPlayer={openPlayer} onH2H={setH2H} />}
           {tab === 'players' && <Players tour={tour} sel={sel} setSel={setSel} onH2H={setH2H} />}
           {tab === 'sets' && <SetStats tour={tour} />}
         </Safe>
