@@ -462,31 +462,22 @@ const blockLabel = (lbl) => { const [a, b] = (lbl || '').split('|'); return `${s
 /** Current stretch (default) · its weeks · the past, in the page. */
 function ViewPicker({ views, view, setView }) {
   if (!views?.current) return null
-  const same = (v) => v.from === view?.from && v.to === view?.to
-  const chip = (v, label, sub, tone) => (
-    <button key={`${v.from}|${v.to}`} onClick={() => setView(v)}
-      className={`flex-shrink-0 px-3 py-1.5 rounded-md border text-left ${same(v)
-        ? (tone === 'past' ? 'bg-gray-700 text-white border-gray-700' : 'bg-brand-400 text-white border-brand-400')
-        : 'bg-white text-gray-700 border-amber-300'}`}>
-      <p className="text-[11px] font-black whitespace-nowrap">{label}</p>
-      {sub && <p className={`text-[9px] whitespace-nowrap ${same(v) ? 'text-white/80' : 'text-gray-400'}`}>{sub}</p>}
-    </button>
-  )
+  const key = (v) => `${v.from}|${v.to}`
+  const all = [views.current, ...(views.past ? [views.past] : []), ...(views.blocks || [])]
+  const picked = view ? key(view) : key(views.current)
   return (
-    <div className="card space-y-2">
+    <div className="card flex items-center gap-3">
       <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Showing</p>
-      <div className="flex gap-2 flex-wrap">
-        {chip(views.current, `Since ${shortDay(views.current.from)}`, `${views.current.bets} bets · current`)}
-        {views.past && chip(views.past, 'Past', `before ${shortDay(views.current.from)} · ${views.past.bets} bets`, 'past')}
-      </div>
-      {views.blocks?.length > 0 && (
-        <>
-          <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Weeks since {shortDay(views.current.from)} · Fri – Thu</p>
-          <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
-            {views.blocks.map((b) => chip(b, `${shortDay(b.from)} – ${shortDay(b.to)}`))}
-          </div>
-        </>
-      )}
+      <select value={picked} onChange={(e) => { const v = all.find((x) => key(x) === e.target.value); if (v) setView(v) }}
+        className="flex-1 min-w-0 px-2 py-2 rounded-md border border-amber-300 bg-white text-sm font-bold text-gray-900">
+        <option value={key(views.current)}>Since {shortDay(views.current.from)} · current · {views.current.bets} bets</option>
+        {views.past && <option value={key(views.past)}>Past · before {shortDay(views.current.from)} · {views.past.bets} bets</option>}
+        {views.blocks?.length > 0 && (
+          <optgroup label={`Weeks since ${shortDay(views.current.from)} · Fri – Thu`}>
+            {views.blocks.map((b) => <option key={key(b)} value={key(b)}>{shortDay(b.from)} – {shortDay(b.to)}</option>)}
+          </optgroup>
+        )}
+      </select>
     </div>
   )
 }
