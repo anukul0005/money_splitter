@@ -316,7 +316,10 @@ class Players:
             pid = self._by_parts(tour, frozenset(parts))
             if pid:
                 return pid
-            if len(parts) >= 2:                                   # "J. Sinner" / initial + surname
+            # "J. Sinner": initial + surname - only when the first name IS an initial. A full first
+            # name that merely shares the initial is someone else: "Xinran Sun" isn't "Xu Liu Sun",
+            # "Alex Hernandez" (b. 1998) isn't "Alejandro Hernandez" (b. 1977) - a new player instead.
+            if len(parts) >= 2 and len(parts[0]) == 1:
                 cands = self.by_last.get((tour, " ".join(parts[1:])), [])
                 cands = [c for c in cands if norm(self.info[(tour, c)]["name"]).startswith(parts[0][0])]
                 if cands:

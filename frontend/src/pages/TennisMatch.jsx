@@ -11,6 +11,7 @@ import { LiveRow, MatchRow, ROUND_NAME, SURFACE, Safe, fmtShort, matchLink, star
  * players' ids (a, b) and names (an, bn) for a live or upcoming one.
  */
 const pct = (n, d) => (d ? Math.round((100 * n) / d) : null)
+const THIN = 20                                     // fewer tour-level matches than this: the numbers are thin
 
 function Side({ label, a, b, fmt = (v) => v, better = 'high' }) {
   const na = typeof a === 'number' ? a : null, nb = typeof b === 'number' ? b : null
@@ -163,6 +164,15 @@ export default function TennisMatch() {
                 <p className="text-[10px] text-gray-400 mt-2">Bold = the better of the two. Sets over 8.5 = 6-3 or closer.</p>
               </div>
             )}
+            {/* a player new to the tour: most of their tennis is below it (WTA 125, Challengers, ITF,
+                qualifying), which the results don't hold - say how thin the numbers are */}
+            {[[A, nameA], [B, nameB]].filter(([p]) => p && p.career.won + p.career.lost < THIN).map(([p, n]) => (
+              <p key={n} className="text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                <b>{n}</b> has played only <b>{p.career.won + p.career.lost}</b> tour-level match{p.career.won + p.career.lost === 1 ? '' : 'es'}.
+                Most of their tennis is probably below tour level (WTA 125, Challengers, ITF, qualifying), which isn't in this data,
+                so their numbers here rest on very few matches.
+              </p>
+            ))}
             {!A && !B && !m && (
               <p className="text-[11px] text-gray-500 bg-gray-100 rounded-md px-3 py-2">
                 Neither player is in the results yet (a qualifier or a newcomer), so there's no form or head-to-head to show.
