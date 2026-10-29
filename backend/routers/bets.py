@@ -30,10 +30,14 @@ STAKE_BUCKETS = [(0, 100, "under ₹100"), (100, 500, "₹100 – 499"), (500, 1
 
 
 # The current stretch starts here: the page shows bets from this day on by
-# default, in 10-day blocks; everything before it is one "past" view, kept
+# default, week by week (Friday to Thursday); everything before it is one "past" view, kept
 # apart and shown only when asked for.
 CURRENT_FROM = "2026-07-29"
-BLOCK_DAYS = 10
+BLOCK_DAYS = 7
+# weeks run Friday to Thursday - 1xbet's no-risk bet is on Fridays. The first
+# week is cut to start on CURRENT_FROM (a Wednesday).
+_FIRST = date.fromisoformat(CURRENT_FROM)
+WEEK_ANCHOR = _FIRST - timedelta(days=(_FIRST.weekday() - 4) % 7)    # the Friday on or before
 
 
 # 1xbet's Friday no-risk bet: stake up to this; a win pays the stake as
@@ -84,18 +88,18 @@ def disconnect(db: Session = Depends(get_db), caller: User = Depends(owner)):
 
 
 def _blocks(last: str) -> list[tuple[str, str]]:
-    """10-day blocks from CURRENT_FROM up to the day `last`, oldest first."""
-    out, d, end = [], date.fromisoformat(CURRENT_FROM), date.fromisoformat(last)
+    """Friday-to-Thursday weeks from CURRENT_FROM up to the day `last`, oldest first."""
+    out, d, end = [], WEEK_ANCHOR, date.fromisoformat(last)
     while d <= end:
         e = d + timedelta(days=BLOCK_DAYS - 1)
-        out.append((d.isoformat(), e.isoformat()))
+        out.append((max(d, _FIRST).isoformat(), e.isoformat()))
         d = e + timedelta(days=1)
     return out
 
 
 def _views(db: Session, user_id: int) -> dict:
     """What the page can show: the current stretch (from CURRENT_FROM, the
-    default), its 10-day blocks (newest first), and the past - everything
+    default), its weeks (newest first), and the past - everything
     before CURRENT_FROM as one view."""
     first, last = db.query(func.min(Bet.placed_at), func.max(Bet.placed_at)).filter(Bet.user_id == user_id).first()
     if not last:
@@ -226,9 +230,9 @@ def _done(a: dict, label=None) -> dict:
 def _block_of(day: str) -> str | None:
     if not day or day < CURRENT_FROM:
         return None
-    n = (date.fromisoformat(day) - date.fromisoformat(CURRENT_FROM)).days // BLOCK_DAYS
-    a = date.fromisoformat(CURRENT_FROM) + timedelta(days=n * BLOCK_DAYS)
-    return f"{a.isoformat()}|{(a + timedelta(days=BLOCK_DAYS - 1)).isoformat()}"
+    n = (date.fromisoformat(day) - WEEK_ANCHOR).days // BLOCK_DAYS
+    a = WEEK_ANCHOR + timedelta(days=n * BLOCK_DAYS)
+    return f"{max(a, _FIRST).isoformat()}|{(a + timedelta(days=BLOCK_DAYS - 1)).isoformat()}"
 
 
 def _time_of_day(placed: str | None) -> str:
@@ -254,7 +258,7 @@ def _bucket(v, buckets):
 @router.get("/summary", response_model=dict)
 def summary(frm: str = "", to: str = "", db: Session = Depends(get_db), caller: User = Depends(owner)):
     """frm / to: the stretch to add up (YYYY-MM-DD); blank = the current one,
-    from CURRENT_FROM on. by_block: its 10-day blocks, when it is current."""
+    from CURRENT_FROM on. by_block: its weeks (Friday to Thursday), when it is current."""
     if not frm and not to:
         frm = CURRENT_FROM                    # the current stretch
     bets = [b for b in _in_period(db.query(Bet).filter(Bet.user_id == caller.id), frm, to).order_by(Bet.placed_at).all()
@@ -285,7 +289,7 @@ def summary(frm: str = "", to: str = "", db: Session = Depends(get_db), caller: 
             "stake": _bucket(b.stake, STAKE_BUCKETS),
             "market": _market(b.market, b.event) if (b.legs or 1) == 1 else "Accumulator",
         }
-        if keys["block"] is None:              # before CURRENT_FROM: no 10-day block
+        if keys["block"] is None:              # before CURRENT_FROM: no week
             del keys["block"]
         if b.sport == "Tennis" and (b.legs or 1) == 1:
             tour = league.split(".")[0].strip() or "—"
@@ -296,9 +300,9 @@ def summary(frm: str = "", to: str = "", db: Session = Depends(get_db), caller: 
             keys["tennis_event"] = league
         for g, k in keys.items():
             _add(groups[g][k], b)
-        # by the day placed, like the 10-day blocks, so the chart and the table agree
+        # by the day placed, like the weeks, so the chart and the table agree
         daily[(b.placed_at or b.settled_at or "")[:10]] += (b.payout or 0) - (b.stake or 0)
-    # Friday no-risk bets: a win's profit counts in the totals, its 10-day
+    # Friday no-risk bets: a win's profit counts in the totals, its week
     # block and that day on the chart; nothing is added to the money staked.
     for pr in promo_rows:
         total["returned"] += pr.profit

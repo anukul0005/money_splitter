@@ -27,24 +27,28 @@ function Stat({ label, value, sub, cls = 'text-gray-900' }) {
   )
 }
 
-/** Profit in 10-day blocks from `start` (bars green / red, the running
- * total as a line); tap a block to see its 10 days one by one. */
+/** Profit week by week - Friday to Thursday - from `start` (bars green /
+ * red, the running total as a line); tap a week to see its days one by one. */
 const addDays = (iso, n) => { const d = new Date(`${iso}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10) }
+// the Friday on or before a day: weeks run Friday to Thursday (the no-risk bet is on Fridays)
+const fridayOf = (iso) => addDays(iso, -((new Date(`${iso}T00:00:00Z`).getUTCDay() + 2) % 7))
 
 function ProfitChart({ points, start }) {
-  const [block, setBlock] = useState(null)      // index of the 10-day block opened day by day
+  const [block, setBlock] = useState(null)      // index of the week opened day by day
   const [hover, setHover] = useState(null)
   useEffect(() => { setBlock(null); setHover(null) }, [start, points])
   if (!points?.length) return null
   const first = start || points[0].date
   const byDay = Object.fromEntries(points.map((p) => [p.date, p.profit]))
   const lastDay = points[points.length - 1].date
-  // 10-day blocks from `first` up to the last day with a bet
+  // Friday-to-Thursday weeks up to the last day with a bet; the first cut to start on `first`
   const blocks = []
   let cum = 0
-  for (let i = 0; addDays(first, i * 10) <= lastDay; i += 1) {
-    const from = addDays(first, i * 10), to = addDays(from, 9)
-    const days = Array.from({ length: 10 }, (_, k) => addDays(from, k))
+  const anchor = fridayOf(first)
+  for (let i = 0; addDays(anchor, i * 7) <= lastDay; i += 1) {
+    const wk = addDays(anchor, i * 7), from = wk < first ? first : wk, to = addDays(wk, 6)
+    const days = []
+    for (let d = from; d <= to; d = addDays(d, 1)) days.push(d)
     let p = 0
     const dayRows = days.map((d) => { const v = byDay[d] || 0; p += v; return { date: d, profit: v, cumulative: cum + p, bet: d in byDay } })
     cum += p
@@ -80,20 +84,20 @@ function ProfitChart({ points, start }) {
     <div>
       <div className="flex items-baseline justify-between gap-2">
         <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">
-          {inBlock ? `${dlab(blocks[block].from)} – ${dlab(blocks[block].to)} · day by day` : 'Profit every 10 days'}
+          {inBlock ? `${dlab(blocks[block].from)} – ${dlab(blocks[block].to)} · day by day` : 'Profit week by week · Fri – Thu'}
         </p>
         <p className={`text-sm font-black ${pl(end)}`}>{end >= 0 ? '+' : ''}{inr(end)} total</p>
       </div>
       <div className="flex items-center gap-2 min-h-[18px]">
         {inBlock && (
-          <button onClick={() => { setBlock(null); setHover(null) }} className="text-[11px] font-bold text-brand-600">‹ 10-day view</button>
+          <button onClick={() => { setBlock(null); setHover(null) }} className="text-[11px] font-bold text-brand-600">‹ Weekly view</button>
         )}
         <p className="text-[10px] text-gray-400 flex-1">
           {h ? (
             <>{label(h)}: <b className={pl(h.profit)}>{h.profit >= 0 ? '+' : ''}{inr(h.profit)}</b> · running total <b className={pl(h.cumulative)}>{inr(h.cumulative)}</b></>
           ) : inBlock ? (
-            <>This block <b className={pl(blocks[block].profit)}>{blocks[block].profit >= 0 ? '+' : ''}{inr(blocks[block].profit)}</b> · bets on {blocks[block].betDays} of 10 days · tap a day</>
-          ) : 'Bars: each 10 days’ profit or loss · line: running total. Tap a block for its days.'}
+            <>This block <b className={pl(blocks[block].profit)}>{blocks[block].profit >= 0 ? '+' : ''}{inr(blocks[block].profit)}</b> · bets on {blocks[block].betDays} of {blocks[block].days.length} days · tap a day</>
+          ) : 'Bars: each week’s profit or loss (Friday to Thursday) · line: running total. Tap a week for its days.'}
         </p>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto select-none" onMouseLeave={() => setHover(null)}>
@@ -125,19 +129,19 @@ function ProfitChart({ points, start }) {
       </svg>
       <div className="grid grid-cols-3 gap-2 mt-1 text-center">
         <div>
-          <p className="text-[9px] font-bold text-gray-400 uppercase">Best {inBlock ? 'day' : '10 days'}</p>
+          <p className="text-[9px] font-bold text-gray-400 uppercase">Best {inBlock ? 'day' : 'week'}</p>
           <p className="text-xs font-black text-green-700">{inr(best.profit)}</p>
           <p className="text-[10px] text-gray-400">{label(best)}</p>
         </div>
         <div>
-          <p className="text-[9px] font-bold text-gray-400 uppercase">Worst {inBlock ? 'day' : '10 days'}</p>
+          <p className="text-[9px] font-bold text-gray-400 uppercase">Worst {inBlock ? 'day' : 'week'}</p>
           <p className="text-xs font-black text-red-600">{inr(worst.profit)}</p>
           <p className="text-[10px] text-gray-400">{label(worst)}</p>
         </div>
         <div>
-          <p className="text-[9px] font-bold text-gray-400 uppercase">{inBlock ? 'Days' : 'Blocks'} up / down</p>
+          <p className="text-[9px] font-bold text-gray-400 uppercase">{inBlock ? 'Days' : 'Weeks'} up / down</p>
           <p className="text-xs font-black text-gray-800"><span className="text-green-700">{up}</span> / <span className="text-red-600">{down}</span></p>
-          <p className="text-[10px] text-gray-400">of {bars.length} {inBlock ? 'days' : 'blocks of 10 days'}</p>
+          <p className="text-[10px] text-gray-400">of {bars.length} {inBlock ? 'days' : 'weeks'}</p>
         </div>
       </div>
     </div>
@@ -456,7 +460,7 @@ const shortDay = (d) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString('en-IN
 const longDay = (d) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '')
 const blockLabel = (lbl) => { const [a, b] = (lbl || '').split('|'); return `${shortDay(a)} – ${shortDay(b)}` }
 
-/** Current stretch (default) · its 10-day blocks · the past, in the page. */
+/** Current stretch (default) · its weeks · the past, in the page. */
 function ViewPicker({ views, view, setView }) {
   if (!views?.current) return null
   const same = (v) => v.from === view?.from && v.to === view?.to
@@ -478,7 +482,7 @@ function ViewPicker({ views, view, setView }) {
       </div>
       {views.blocks?.length > 0 && (
         <>
-          <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">10-day blocks since {shortDay(views.current.from)}</p>
+          <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Weeks since {shortDay(views.current.from)} · Fri – Thu</p>
           <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
             {views.blocks.map((b) => chip(b, `${shortDay(b.from)} – ${shortDay(b.to)}`))}
           </div>
@@ -719,8 +723,8 @@ export default function MyBets() {
             <DayDash min={(t.first || shown.from).slice(0, 10)} max={(t.last || shown.to).slice(0, 10)} />
             <div className="card -mx-3 px-3 py-4"><ProfitChart points={s.curve} start={shown?.from} /></div>
             {!isPast && s.by_block?.length > 1 && (
-              <Breakdown title="Every 10 days" rows={[...s.by_block].reverse()} fmt={blockLabel} onRow={pickBlock}
-                note="Newest first · tap a block to see just those 10 days." />
+              <Breakdown title="Week by week" rows={[...s.by_block].reverse()} fmt={blockLabel} onRow={pickBlock}
+                note="Friday to Thursday · newest first · tap a week to see just those days." />
             )}
             {isPast && <Breakdown title="By month" rows={s.by_month} />}
             <Breakdown title="By sport" rows={s.by_sport} />
