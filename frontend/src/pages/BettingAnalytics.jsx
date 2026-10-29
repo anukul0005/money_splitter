@@ -948,7 +948,8 @@ export function LiveRow({ m, onOpen, plain }) {
     <button onClick={() => onOpen(m)} className="w-full text-left py-2 border-t border-gray-100 first:border-t-0 hover:bg-amber-50/50 active:bg-amber-50 -mx-2 px-2 rounded block">
       <div className="flex items-center gap-2 mb-0.5 text-[10px]">
         {live
-          ? <span className="font-black text-red-600 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-red-600 animate-pulse" />LIVE · {m.detail}</span>
+          ? <span className="font-black text-red-600 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-red-600 animate-pulse" />LIVE · {m.detail}
+            {m.players.some((p) => p.serving) && <span className="font-semibold text-gray-400">· <span className="inline-block w-1.5 h-1.5 rounded-full bg-lime-400 ring-1 ring-lime-600 align-middle" /> serving</span>}</span>
           : <span className="font-bold text-gray-500">{startTime(m.start)}</span>}
         {!plain && <span className="text-gray-400">{ROUND_NAME[m.round] || m.round}</span>}
         {!plain && <span className="ml-auto font-bold text-brand-600">Match ›</span>}
@@ -960,6 +961,10 @@ export function LiveRow({ m, onOpen, plain }) {
             <Flag ioc={p.ioc} />
             <span className="flex-1 min-w-0 truncate text-[13px] font-bold">
               {p.name}{p.seed && <span className="ml-1 text-[10px] font-semibold text-gray-400">({p.seed})</span>}
+              {live && p.serving && (
+                <span title="Serving" aria-label="serving"
+                  className="ml-1.5 inline-block w-2 h-2 rounded-full bg-lime-400 ring-1 ring-lime-600 align-middle" />
+              )}
             </span>
             {p.games.map((g, k) => {
               const done = k < p.games.length - 1 || !live          // the set being played is red

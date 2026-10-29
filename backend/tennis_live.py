@@ -49,7 +49,9 @@ def _side(x) -> dict:
             "ioc": code, "seed": rank if rank and rank < 5000 else None,
             "games": [int(l.get("value", 0)) for l in x.get("linescores", [])],
             "tiebreaks": [l.get("tiebreak") for l in x.get("linescores", [])],
-            "winner": bool(x.get("winner"))}
+            "winner": bool(x.get("winner")),
+            # ESPN's "possession": the player serving now (true / false; missing when it doesn't say)
+            "serving": x.get("possession") is True}
 
 
 def _fetch(tour: str) -> list:
