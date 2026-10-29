@@ -28,7 +28,9 @@ function Stat({ label, value, sub, cls = 'text-gray-900' }) {
 }
 
 /** Profit week by week - Friday to Thursday - from `start` (bars green /
- * red, the running total as a line); tap a week to see its days one by one. */
+ * red, the running total as a line). The latest four weeks show; Earlier /
+ * Later page through the rest. Tap a week to see its days one by one. */
+const SHOW_WEEKS = 4
 const addDays = (iso, n) => { const d = new Date(`${iso}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10) }
 // the Friday on or before a day: weeks run Friday to Thursday (the no-risk bet is on Fridays)
 const fridayOf = (iso) => addDays(iso, -((new Date(`${iso}T00:00:00Z`).getUTCDay() + 2) % 7))
@@ -36,7 +38,8 @@ const fridayOf = (iso) => addDays(iso, -((new Date(`${iso}T00:00:00Z`).getUTCDay
 function ProfitChart({ points, start }) {
   const [block, setBlock] = useState(null)      // index of the week opened day by day
   const [hover, setHover] = useState(null)
-  useEffect(() => { setBlock(null); setHover(null) }, [start, points])
+  const [back, setBack] = useState(0)           // weeks paged back from the latest
+  useEffect(() => { setBlock(null); setHover(null); setBack(0) }, [start, points])
   if (!points?.length) return null
   const first = start || points[0].date
   const byDay = Object.fromEntries(points.map((p) => [p.date, p.profit]))
@@ -56,8 +59,11 @@ function ProfitChart({ points, start }) {
   }
   const lead = points.filter((p) => p.date < first).reduce((a, p) => a + p.profit, 0)   // anything before `first`
   const inBlock = block != null && blocks[block]
+  const last = blocks.length - 1 - back                     // the newest week shown
+  const off = Math.max(0, last - SHOW_WEEKS + 1)            // the oldest week shown
+  const page = (n) => { setBack((b) => Math.min(Math.max(0, b + n), Math.max(0, blocks.length - SHOW_WEEKS))); setHover(null) }
   const bars = inBlock ? blocks[block].days.map((d) => ({ ...d, cumulative: d.cumulative + lead }))
-    : blocks.map((b) => ({ date: b.from, to: b.to, profit: b.profit, cumulative: b.cumulative + lead }))
+    : blocks.slice(off, last + 1).map((b) => ({ date: b.from, to: b.to, profit: b.profit, cumulative: b.cumulative + lead }))
   const end = cum + lead
 
   // drawn at about phone width so the labels show at real size; taller than wide-screen charts
@@ -78,7 +84,7 @@ function ProfitChart({ points, start }) {
   const up = bars.filter((b) => b.profit > 0).length, down = bars.filter((b) => b.profit < 0).length
   const h = hover != null ? bars[hover] : null
   const label = (b) => (inBlock ? dlab(b.date) : `${dlab(b.date)} – ${dlab(b.to)}`)
-  const tap = (i) => { if (inBlock) setHover(i); else { setBlock(i); setHover(null) } }
+  const tap = (i) => { if (inBlock) setHover(i); else { setBlock(off + i); setHover(null) } }
 
   return (
     <div>
@@ -96,10 +102,19 @@ function ProfitChart({ points, start }) {
           {h ? (
             <>{label(h)}: <b className={pl(h.profit)}>{h.profit >= 0 ? '+' : ''}{inr(h.profit)}</b> · running total <b className={pl(h.cumulative)}>{inr(h.cumulative)}</b></>
           ) : inBlock ? (
-            <>This block <b className={pl(blocks[block].profit)}>{blocks[block].profit >= 0 ? '+' : ''}{inr(blocks[block].profit)}</b> · bets on {blocks[block].betDays} of {blocks[block].days.length} days · tap a day</>
-          ) : 'Bars: each week’s profit or loss (Friday to Thursday) · line: running total. Tap a week for its days.'}
+            <>This week <b className={pl(blocks[block].profit)}>{blocks[block].profit >= 0 ? '+' : ''}{inr(blocks[block].profit)}</b> · bets on {blocks[block].betDays} of {blocks[block].days.length} days · tap a day</>
+          ) : 'Bars: each week’s profit or loss · line: running total. Tap a week for its days.'}
         </p>
       </div>
+      {!inBlock && blocks.length > SHOW_WEEKS && (
+        <div className="flex items-center justify-between mt-1">
+          <button onClick={() => page(SHOW_WEEKS)} disabled={off === 0}
+            className="text-[11px] font-bold text-brand-600 disabled:opacity-30">‹ Earlier weeks</button>
+          <span className="text-[10px] text-gray-400">weeks {off + 1}–{last + 1} of {blocks.length}</span>
+          <button onClick={() => page(-SHOW_WEEKS)} disabled={back === 0}
+            className="text-[11px] font-bold text-brand-600 disabled:opacity-30">Later weeks ›</button>
+        </div>
+      )}
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto select-none" onMouseLeave={() => setHover(null)}>
         {ticks.map((v) => (
           <g key={v}>
@@ -141,7 +156,7 @@ function ProfitChart({ points, start }) {
         <div>
           <p className="text-[9px] font-bold text-gray-400 uppercase">{inBlock ? 'Days' : 'Weeks'} up / down</p>
           <p className="text-xs font-black text-gray-800"><span className="text-green-700">{up}</span> / <span className="text-red-600">{down}</span></p>
-          <p className="text-[10px] text-gray-400">of {bars.length} {inBlock ? 'days' : 'weeks'}</p>
+          <p className="text-[10px] text-gray-400">of {bars.length} {inBlock ? 'days' : 'weeks shown'}</p>
         </div>
       </div>
     </div>
