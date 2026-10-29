@@ -461,23 +461,58 @@ const blockLabel = (lbl) => { const [a, b] = (lbl || '').split('|'); return `${s
 
 /** Current stretch (default) · its weeks · the past, in the page. */
 function ViewPicker({ views, view, setView }) {
+  const [open, setOpen] = useState(false)
+  const box = useRef(null)
+  useEffect(() => {
+    if (!open) return undefined
+    const away = (e) => { if (box.current && !box.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('pointerdown', away)
+    return () => document.removeEventListener('pointerdown', away)
+  }, [open])
   if (!views?.current) return null
   const key = (v) => `${v.from}|${v.to}`
-  const all = [views.current, ...(views.past ? [views.past] : []), ...(views.blocks || [])]
   const picked = view ? key(view) : key(views.current)
+  const since = shortDay(views.current.from)
+  const items = [
+    { v: views.current, label: `Since ${since}`, sub: `current · ${views.current.bets} bets` },
+    ...(views.past ? [{ v: views.past, label: 'Past', sub: `before ${since} · ${views.past.bets} bets` }] : []),
+    ...(views.blocks || []).map((b) => ({ v: b, label: `${shortDay(b.from)} – ${shortDay(b.to)}`, week: true })),
+  ]
+  const cur = items.find((x) => key(x.v) === picked) || items[0]
+  const pick = (v) => { setView(v); setOpen(false) }
+  const row = (x) => {
+    const on = key(x.v) === picked
+    return (
+      <button key={key(x.v)} onClick={() => pick(x.v)}
+        className={`w-full flex items-center gap-2 px-3 py-2 text-left ${on ? 'bg-amber-50' : 'hover:bg-gray-50'}`}>
+        <span className={`w-3 text-[11px] font-black ${on ? 'text-brand-600' : 'text-transparent'}`}>✓</span>
+        <span className={`text-[11px] ${on ? 'font-black text-gray-900' : 'font-bold text-gray-700'}`}>{x.label}</span>
+        {x.sub && <span className="text-[9px] text-gray-400 truncate">{x.sub}</span>}
+      </button>
+    )
+  }
   return (
-    <div className="card flex items-center gap-3">
+    <div className="card flex items-center gap-3 relative z-20" ref={box}>
       <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Showing</p>
-      <select value={picked} onChange={(e) => { const v = all.find((x) => key(x) === e.target.value); if (v) setView(v) }}
-        className="flex-1 min-w-0 px-2 py-2 rounded-md border border-amber-300 bg-white text-sm font-bold text-gray-900">
-        <option value={key(views.current)}>Since {shortDay(views.current.from)} · current · {views.current.bets} bets</option>
-        {views.past && <option value={key(views.past)}>Past · before {shortDay(views.current.from)} · {views.past.bets} bets</option>}
-        {views.blocks?.length > 0 && (
-          <optgroup label={`Weeks since ${shortDay(views.current.from)} · Fri – Thu`}>
-            {views.blocks.map((b) => <option key={key(b)} value={key(b)}>{shortDay(b.from)} – {shortDay(b.to)}</option>)}
-          </optgroup>
+      <div className="flex-1 min-w-0 relative">
+        <button onClick={() => setOpen(!open)}
+          className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md border bg-white text-left ${open ? 'border-brand-400' : 'border-amber-300'}`}>
+          <span className="text-[11px] font-black text-gray-900 whitespace-nowrap">{cur.label}</span>
+          <span className="text-[9px] text-gray-400 truncate flex-1">{cur.sub || 'week · Fri – Thu'}</span>
+          <span className="text-[10px] text-gray-500">{open ? '▴' : '▾'}</span>
+        </button>
+        {open && (
+          <div className="absolute left-0 right-0 top-full mt-1 rounded-md border border-amber-200 bg-white shadow-lg max-h-72 overflow-y-auto py-1">
+            {items.filter((x) => !x.week).map(row)}
+            {items.some((x) => x.week) && (
+              <p className="px-3 pt-2 pb-1 mt-1 border-t border-gray-100 text-[9px] font-black text-gray-400 uppercase tracking-widest">
+                Weeks since {since} · Fri – Thu
+              </p>
+            )}
+            {items.filter((x) => x.week).map(row)}
+          </div>
         )}
-      </select>
+      </div>
     </div>
   )
 }
