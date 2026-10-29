@@ -147,36 +147,43 @@ function ProfitChart({ points, start }) {
   )
 }
 
+// ₹28,257 -> ₹28.3k, so a table row fits a phone's width
+const kInr = (n) => (n == null ? '—' : Math.abs(n) >= 1000
+  ? `${n < 0 ? '−' : ''}₹${(Math.abs(n) / 1000).toFixed(Math.abs(n) >= 100000 ? 0 : 1)}k` : inr(n))
+
 function Breakdown({ title, rows, note, fmt, onRow, bare }) {
   if (!rows?.length) return null
   return (
     <div className={bare ? 'mt-3' : 'card'}>
       <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">{title}</p>
       {note && <p className="text-[10px] text-gray-400">{note}</p>}
-      <div className={`overflow-x-auto mt-1 ${bare ? '-mx-1' : '-mx-4'}`}>
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
-              <th className="px-2 py-1 text-left"></th><th className="px-1 py-1">Bets</th><th className="px-1 py-1">W–L</th>
-              <th className="px-1 py-1">Win %</th><th className="px-1 py-1">Staked</th><th className="px-1 py-1">P/L</th><th className="px-1 py-1">ROI</th>
+      {/* fits the card's width - no sideways scrolling: fixed columns, short amounts */}
+      <table className="w-full table-fixed mt-1 text-[10.5px]">
+        <colgroup>
+          <col className="w-[27%]" /><col className="w-[10%]" /><col className="w-[13%]" /><col className="w-[11%]" />
+          <col className="w-[14%]" /><col className="w-[14%]" /><col className="w-[11%]" />
+        </colgroup>
+        <thead>
+          <tr className="text-[8px] font-black text-gray-500 uppercase tracking-wide">
+            <th className="py-1 text-left"></th><th className="py-1">Bets</th><th className="py-1">W–L</th>
+            <th className="py-1">Win</th><th className="py-1">Staked</th><th className="py-1">P/L</th><th className="py-1">ROI</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.label} onClick={onRow ? () => onRow(r.label) : undefined}
+              className={`border-t border-gray-100 ${onRow ? 'cursor-pointer hover:bg-amber-50' : ''}`}>
+              <td className="py-1.5 pr-1 font-bold text-gray-800 leading-tight break-words">{fmt ? fmt(r.label) : r.label}{onRow ? ' ›' : ''}</td>
+              <td className="py-1.5 text-center tabular-nums">{r.bets}</td>
+              <td className="py-1.5 text-center tabular-nums text-gray-600 whitespace-nowrap">{r.won}–{r.lost}</td>
+              <td className="py-1.5 text-center tabular-nums">{r.win_rate == null ? '—' : `${Math.round(r.win_rate)}%`}</td>
+              <td className="py-1.5 text-center tabular-nums text-gray-600 whitespace-nowrap">{kInr(r.staked)}</td>
+              <td className={`py-1.5 text-center tabular-nums font-black whitespace-nowrap ${pl(r.profit)}`}>{kInr(r.profit)}</td>
+              <td className={`py-1.5 text-center tabular-nums font-bold whitespace-nowrap ${pl(r.roi)}`}>{r.roi == null ? '—' : `${r.roi > 0 ? '+' : ''}${Math.round(r.roi)}%`}</td>
             </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.label} onClick={onRow ? () => onRow(r.label) : undefined}
-                className={`border-t border-gray-100 ${onRow ? 'cursor-pointer hover:bg-amber-50' : ''}`}>
-                <td className="px-2 py-1.5 font-bold text-gray-800 whitespace-nowrap">{fmt ? fmt(r.label) : r.label}{onRow ? ' ›' : ''}</td>
-                <td className="px-1 py-1.5 text-center tabular-nums">{r.bets}</td>
-                <td className="px-1 py-1.5 text-center tabular-nums text-gray-600">{r.won}–{r.lost}</td>
-                <td className="px-1 py-1.5 text-center tabular-nums">{r.win_rate == null ? '—' : `${r.win_rate}%`}</td>
-                <td className="px-1 py-1.5 text-center tabular-nums text-gray-600">{inr(r.staked)}</td>
-                <td className={`px-1 py-1.5 text-center tabular-nums font-black ${pl(r.profit)}`}>{inr(r.profit)}</td>
-                <td className={`px-1 py-1.5 text-center tabular-nums font-bold ${pl(r.roi)}`}>{r.roi == null ? '—' : `${r.roi > 0 ? '+' : ''}${r.roi}%`}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
