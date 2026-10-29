@@ -488,36 +488,24 @@ function ViewPicker({ views, view, setView }) {
   )
 }
 
-/** What the numbers say: the odds that won, break-even, stakes on wins vs
- * losses, the odds range that made money, and when betting went best. */
+/** What the numbers say: the odds that won, the odds range that made money,
+ * and when betting went best. */
 function Insights({ s }) {
-  const t = s.total, i = s.insights || {}
+  const i = s.insights || {}
   const enough = (r) => r.bets >= 3 && r.roi != null
   const odds = (s.by_odds || []).filter(enough)
   const sweet = odds.length ? odds.reduce((a, b) => (b.roi > a.roi ? b : a)) : null
   const sour = odds.length > 1 ? odds.reduce((a, b) => (b.roi < a.roi ? b : a)) : null
   const times = (s.by_time || []).filter(enough)
   const bestTime = times.length > 1 ? times.reduce((a, b) => (b.profit > a.profit ? b : a)) : null
-  const edge = t.win_rate != null && i.breakeven_rate != null ? +(t.win_rate - i.breakeven_rate).toFixed(1) : null
-  const stakeTilt = i.avg_stake_won && i.avg_stake_lost ? i.avg_stake_lost / i.avg_stake_won : null
   const tiles = [
     i.avg_odds_won != null && {
       label: 'Odds you won at', value: `${i.avg_odds_won}`, cls: 'text-green-700',
       sub: <>lost at {i.avg_odds_lost ?? '—'} on average · longest won {i.max_odds_won ?? '—'}</>,
     },
-    edge != null && {
-      label: 'Edge vs break-even', value: `${edge > 0 ? '+' : ''}${edge} pts`, cls: pl(edge),
-      sub: <>at {t.avg_odds} avg odds you need {i.breakeven_rate}% wins · you hit {t.win_rate}%</>,
-    },
     sweet && {
       label: 'Sweet spot (odds)', value: sweet.label, cls: pl(sweet.roi),
       sub: <>ROI {sweet.roi > 0 ? '+' : ''}{sweet.roi}% over {sweet.bets} bets{sour && sour.label !== sweet.label ? <> · worst {sour.label} ({sour.roi > 0 ? '+' : ''}{sour.roi}%)</> : ''}</>,
-    },
-    stakeTilt != null && {
-      label: 'Stake on wins vs losses', value: `${inr(i.avg_stake_won)} · ${inr(i.avg_stake_lost)}`,
-      cls: stakeTilt > 1.15 ? 'text-red-600' : 'text-gray-900',
-      sub: stakeTilt > 1.15 ? `you stake ${Math.round((stakeTilt - 1) * 100)}% more on bets that lose`
-        : stakeTilt < 0.87 ? `you stake ${Math.round((1 / stakeTilt - 1) * 100)}% more on bets that win` : 'about the same either way',
     },
     bestTime && {
       label: 'Best time to bet', value: bestTime.label.split(' · ')[0], cls: pl(bestTime.profit),
@@ -622,13 +610,13 @@ function DayDash({ min, max }) {
                   return (
                     <button key={x} onClick={() => { setSpan(1); setEnd(x) }}
                       className="flex-1 min-w-0 rounded-md border border-amber-100 bg-white px-1 py-1.5 flex flex-col items-center hover:bg-amber-50">
-                      <div className="h-14 w-full flex flex-col justify-center items-center">
-                        <div className="w-4 flex flex-col justify-end h-1/2">
-                          {p > 0 && <div className="bg-green-300 rounded-t" style={{ height: `${(100 * p) / peak}%` }} />}
+                      <div className="h-36 w-full flex flex-col justify-center items-center">
+                        <div className="w-3/5 max-w-[44px] flex flex-col justify-end h-1/2">
+                          {p > 0 && <div className="bg-green-600" style={{ height: `${(100 * p) / peak}%` }} />}
                         </div>
-                        <div className="w-full border-t border-gray-300" />
-                        <div className="w-4 h-1/2">
-                          {p < 0 && <div className="bg-red-300 rounded-b" style={{ height: `${(-100 * p) / peak}%` }} />}
+                        <div className="w-full border-t border-gray-400" />
+                        <div className="w-3/5 max-w-[44px] h-1/2">
+                          {p < 0 && <div className="bg-red-600" style={{ height: `${(-100 * p) / peak}%` }} />}
                         </div>
                       </div>
                       <p className={`text-[10px] font-black tabular-nums ${r ? pl(p) : 'text-gray-300'}`}>{r ? `${p >= 0 ? '+' : '−'}${Math.abs(p) >= 1000 ? `${(Math.abs(p) / 1000).toFixed(1)}k` : Math.round(Math.abs(p))}` : '—'}</p>
