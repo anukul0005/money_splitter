@@ -144,13 +144,13 @@ function ProfitChart({ points, start }) {
   )
 }
 
-function Breakdown({ title, rows, note, fmt, onRow }) {
+function Breakdown({ title, rows, note, fmt, onRow, bare }) {
   if (!rows?.length) return null
   return (
-    <div className="card">
+    <div className={bare ? 'mt-3' : 'card'}>
       <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">{title}</p>
       {note && <p className="text-[10px] text-gray-400">{note}</p>}
-      <div className="overflow-x-auto -mx-4 mt-1">
+      <div className={`overflow-x-auto mt-1 ${bare ? '-mx-1' : '-mx-4'}`}>
         <table className="w-full text-xs">
           <thead>
             <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
@@ -212,7 +212,7 @@ function BetRow({ b }) {
   )
 }
 
-function BetList({ period }) {
+function BetList({ period, bare }) {
   const [status, setStatus] = useState('')
   const [q, setQ] = useState('')
   const [page, setPage] = useState(0)
@@ -226,8 +226,8 @@ function BetList({ period }) {
   }, [status, q, page, period?.from, period?.to])
   useEffect(() => setPage(0), [period?.from, period?.to])
   return (
-    <div className="card">
-      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2">Every bet</p>
+    <div className={bare ? 'mt-2' : 'card'}>
+      {!bare && <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2">Every bet</p>}
       <div className="flex gap-2 flex-wrap mb-2">
         <input className="input flex-1 min-w-[160px]" placeholder="Search a match or player" value={q}
           onChange={(e) => { setQ(e.target.value); setPage(0) }} />
@@ -254,52 +254,69 @@ function BetList({ period }) {
   )
 }
 
-function MailCard({ st, onSynced }) {
+const connectGmail = (onErr) => betsConnectUrl().then((r) => { window.location = r.data.url })
+  .catch(() => onErr("Couldn't start the Gmail connection."))
+
+/** The small sync icon at the top right: checks Gmail for new 1xbet history
+ * (connects it first if it isn't); spins while reading, then says what came in. */
+function SyncButton({ st, onSynced }) {
   const [busy, setBusy] = useState(false)
-  const [prog, setProg] = useState(null)
-  const [err, setErr] = useState('')
+  const [msg, setMsg] = useState(null)          // [text, tone]
   const poll = useRef(null)
   useEffect(() => () => clearInterval(poll.current), [])
-  const connect = () => betsConnectUrl().then((r) => { window.location = r.data.url }).catch(() => setErr("Couldn't start the Gmail connection."))
+  if (!st) return null
   const sync = () => {
-    setErr(''); setBusy(true)
+    if (busy) return
+    if (!st.connected) { connectGmail((e) => setMsg([e, 'err'])); return }
+    setMsg(['Checking mail…', '']); setBusy(true)
     betsSync().then(() => {
       poll.current = setInterval(() => betsProgress().then((r) => {
-        setProg(r.data)
-        if (r.data.status !== 'running') { clearInterval(poll.current); setBusy(false); onSynced() }
-      }), 1500)
-    }).catch((e) => { setBusy(false); setErr(e.response?.data?.detail || "Couldn't start.") })
+        const p = r.data
+        if (p.status === 'running') { setMsg([`Reading ${p.done || 0} of ${p.total || '…'} emails`, '']); return }
+        clearInterval(poll.current); setBusy(false)
+        if (p.status === 'error') setMsg([p.error || "Couldn't read the mail", 'err'])
+        else { setMsg([p.bets_new ? `${p.bets_new} new bet${p.bets_new === 1 ? '' : 's'}` : 'Up to date', 'ok']); onSynced() }
+        setTimeout(() => setMsg(null), 6000)
+      }).catch(() => { clearInterval(poll.current); setBusy(false); setMsg(["Couldn't check progress", 'err']) }), 1500)
+    }).catch((e) => { setBusy(false); setMsg([e.response?.data?.detail || "Couldn't start", 'err']) })
   }
+  const title = !st.connected ? 'Connect Gmail to read new bets'
+    : `Check Gmail for new bets${st.last_synced_at ? ` · last ${fmtD(st.last_synced_at.slice(0, 16))}` : ''}`
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      <button onClick={sync} title={title} aria-label={title}
+        className={`relative w-9 h-9 rounded-full border flex items-center justify-center bg-white ${st.connected ? 'border-amber-300 text-brand-600' : 'border-brand-400 text-brand-600'}`}>
+        <svg viewBox="0 0 24 24" className={`w-[18px] h-[18px] ${busy ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M20 11a8 8 0 0 0-14.3-4.9L4 8" /><path d="M4 3v5h5" /><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16" /><path d="M20 21v-5h-5" />
+        </svg>
+        {!st.connected && <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-brand-400 border border-white" />}
+      </button>
+      <p className={`text-[9px] font-bold whitespace-nowrap ${msg?.[1] === 'err' ? 'text-red-600' : msg?.[1] === 'ok' ? 'text-green-700' : 'text-gray-400'}`}>
+        {msg ? msg[0] : st.connected ? (st.last_synced_at ? `synced ${fmtD(st.last_synced_at.slice(0, 16))}` : 'sync') : 'connect Gmail'}
+      </p>
+    </div>
+  )
+}
+
+function MailCard({ st }) {
+  const [err, setErr] = useState('')
   return (
     <div className="card">
       {!st.connected ? (
         <>
           <p className="text-sm font-black text-gray-900">Read new history from Gmail</p>
           <p className="text-[11px] text-gray-500 mt-0.5">
-            Connect the inbox 1xbet sends your betting history to (anukul2597@gmail.com), read-only. Each time you ask 1xbet for
-            your history, tap "Check mail" here - it's also checked every day. Bets already here are skipped, so overlapping
-            periods never count twice.
+            Connect the inbox 1xbet sends your betting history to (anukul2597@gmail.com), read-only. Then the sync icon at the
+            top checks it whenever you ask 1xbet for your history - it's also checked every day. Bets already here are skipped.
           </p>
-          <button onClick={connect} className="btn-primary mt-2 text-sm">Connect Gmail</button>
+          <button onClick={() => connectGmail(setErr)} className="btn-primary mt-2 text-sm">Connect Gmail</button>
         </>
       ) : (
-        <>
-          <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Reading from Gmail</p>
-          <p className="text-sm font-black text-gray-900 break-all">{st.gmail_address}</p>
-          <p className="text-[11px] text-gray-500">
-            {st.last_synced_at ? `Last checked ${fmtD(st.last_synced_at.slice(0, 16))}` : 'Not checked yet'} · also checked every day
-          </p>
-          <button onClick={sync} disabled={busy} className="btn-primary text-sm mt-2 disabled:opacity-50">
-            {busy ? 'Checking…' : 'Check mail now'}
-          </button>
-          {prog && (
-            <p className="text-[11px] text-gray-600 mt-1">
-              {prog.status === 'running' ? `Reading ${prog.done || 0} of ${prog.total || '…'} emails` :
-                prog.status === 'error' ? <span className="text-red-600">{prog.error}</span> :
-                  `${prog.new_emails || 0} new history email${prog.new_emails === 1 ? '' : 's'} · ${prog.bets_new || 0} new bets`}
-            </p>
-          )}
-        </>
+        <p className="text-[11px] text-gray-500">
+          Reading from <b className="text-gray-800 break-all">{st.gmail_address}</b> ·{' '}
+          {st.last_synced_at ? `last checked ${fmtD(st.last_synced_at.slice(0, 16))}` : 'not checked yet'} · also every day.
+          Tap ⟳ at the top to check now.
+        </p>
       )}
       {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
       {st.imports?.length > 0 && (
@@ -456,6 +473,176 @@ function ViewPicker({ views, view, setView }) {
   )
 }
 
+/** What the numbers say: the odds that won, break-even, stakes on wins vs
+ * losses, the odds range that made money, and when betting went best. */
+function Insights({ s }) {
+  const t = s.total, i = s.insights || {}
+  const enough = (r) => r.bets >= 3 && r.roi != null
+  const odds = (s.by_odds || []).filter(enough)
+  const sweet = odds.length ? odds.reduce((a, b) => (b.roi > a.roi ? b : a)) : null
+  const sour = odds.length > 1 ? odds.reduce((a, b) => (b.roi < a.roi ? b : a)) : null
+  const times = (s.by_time || []).filter(enough)
+  const bestTime = times.length > 1 ? times.reduce((a, b) => (b.profit > a.profit ? b : a)) : null
+  const edge = t.win_rate != null && i.breakeven_rate != null ? +(t.win_rate - i.breakeven_rate).toFixed(1) : null
+  const stakeTilt = i.avg_stake_won && i.avg_stake_lost ? i.avg_stake_lost / i.avg_stake_won : null
+  const tiles = [
+    i.avg_odds_won != null && {
+      label: 'Odds you won at', value: `${i.avg_odds_won}`, cls: 'text-green-700',
+      sub: <>lost at {i.avg_odds_lost ?? '—'} on average · longest won {i.max_odds_won ?? '—'}</>,
+    },
+    edge != null && {
+      label: 'Edge vs break-even', value: `${edge > 0 ? '+' : ''}${edge} pts`, cls: pl(edge),
+      sub: <>at {t.avg_odds} avg odds you need {i.breakeven_rate}% wins · you hit {t.win_rate}%</>,
+    },
+    sweet && {
+      label: 'Sweet spot (odds)', value: sweet.label, cls: pl(sweet.roi),
+      sub: <>ROI {sweet.roi > 0 ? '+' : ''}{sweet.roi}% over {sweet.bets} bets{sour && sour.label !== sweet.label ? <> · worst {sour.label} ({sour.roi > 0 ? '+' : ''}{sour.roi}%)</> : ''}</>,
+    },
+    stakeTilt != null && {
+      label: 'Stake on wins vs losses', value: `${inr(i.avg_stake_won)} · ${inr(i.avg_stake_lost)}`,
+      cls: stakeTilt > 1.15 ? 'text-red-600' : 'text-gray-900',
+      sub: stakeTilt > 1.15 ? `you stake ${Math.round((stakeTilt - 1) * 100)}% more on bets that lose`
+        : stakeTilt < 0.87 ? `you stake ${Math.round((1 / stakeTilt - 1) * 100)}% more on bets that win` : 'about the same either way',
+    },
+    bestTime && {
+      label: 'Best time to bet', value: bestTime.label.split(' · ')[0], cls: pl(bestTime.profit),
+      sub: <>{bestTime.label.split(' · ')[1]} · {inr(bestTime.profit)} over {bestTime.bets} bets</>,
+    },
+  ].filter(Boolean)
+  if (!tiles.length) return null
+  return (
+    <div className="grid grid-cols-2 gap-2 mt-3">
+      {tiles.map((x) => (
+        <div key={x.label} className="rounded-md bg-white border border-amber-100 px-2.5 py-2">
+          <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">{x.label}</p>
+          <p className={`text-sm font-black ${x.cls}`}>{x.value}</p>
+          <p className="text-[10px] text-gray-500 leading-snug">{x.sub}</p>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function TopBets({ title, rows }) {
+  if (!rows?.length) return null
+  return (
+    <div className="mt-3">
+      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">{title}</p>
+      {rows.map((b, k) => (
+        <div key={k} className="flex items-start gap-2 py-1 border-t border-gray-100 first:border-t-0 text-[11px]">
+          <div className="flex-1 min-w-0">
+            <p className="font-bold text-gray-800 truncate">{b.legs > 1 ? `Accumulator · ${b.legs} legs` : b.event}</p>
+            <p className="text-gray-400">{fmtD(b.placed_at)} · {b.market ? `${b.market} ` : ''}@ {b.odds} · {inr(b.stake)}</p>
+          </div>
+          <p className={`font-black tabular-nums ${pl(b.profit)}`}>{b.profit > 0 ? '+' : ''}{inr(b.profit)}</p>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** One day, or 3 or 5 days, ending on a chosen day: net profit, the days'
+ * bars (tap one to drill into that day), insights, where it was won and
+ * lost, the best and worst bets, and the bets themselves. */
+const SPANS = [[1, '1 day'], [3, '3 days'], [5, '5 days']]
+
+function DayDash({ min, max }) {
+  const [span, setSpan] = useState(1)
+  const [end, setEnd] = useState(max)
+  const [d, setD] = useState(null)
+  const [showBets, setShowBets] = useState(false)
+  useEffect(() => { setEnd(max) }, [min, max])
+  const from = addDays(end, 1 - span) < min ? min : addDays(end, 1 - span)
+  useEffect(() => {
+    setD(null)
+    betsSummary({ frm: from, to: end }).then((r) => setD(r.data)).catch(() => setD({ total: null }))
+  }, [from, end])
+  const go = (n) => setEnd((e) => { const x = addDays(e, n * span); return x > max ? max : x < min ? min : x })
+  const t = d?.total
+  const days = Array.from({ length: Math.round((new Date(end) - new Date(from)) / 864e5) + 1 }, (_, k) => addDays(from, k))
+  const byDay = Object.fromEntries((d?.by_day || []).map((r) => [r.label, r]))
+  const peak = Math.max(1, ...days.map((x) => Math.abs(byDay[x]?.profit || 0)))
+  const range = span === 1 ? friLabel(end) : `${shortDay(from)} – ${shortDay(end)}`
+  return (
+    <div className="card">
+      <div className="flex items-center gap-2">
+        <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest flex-1">Day by day</p>
+        <div className="flex rounded-md border border-amber-300 overflow-hidden">
+          {SPANS.map(([n, l]) => (
+            <button key={n} onClick={() => setSpan(n)}
+              className={`px-2 py-1 text-[10px] font-black ${span === n ? 'bg-field-950 text-white' : 'bg-white text-gray-600'}`}>{l}</button>
+          ))}
+        </div>
+      </div>
+      <div className="flex items-center justify-between mt-2">
+        <button onClick={() => go(-1)} disabled={end <= min} className="w-8 h-8 rounded-full border border-amber-300 text-brand-600 font-black disabled:opacity-30">‹</button>
+        <div className="text-center">
+          <p className="text-sm font-black text-gray-900">{range}</p>
+          <input type="date" value={end} min={min} max={max} onChange={(e) => e.target.value && setEnd(e.target.value)}
+            className="text-[10px] text-gray-400 bg-transparent text-center" />
+        </div>
+        <button onClick={() => go(1)} disabled={end >= max} className="w-8 h-8 rounded-full border border-amber-300 text-brand-600 font-black disabled:opacity-30">›</button>
+      </div>
+
+      {!d && <p className="text-xs text-gray-400 text-center py-6">Loading…</p>}
+      {d && !t && <p className="text-sm text-gray-400 text-center py-6">No bets {span === 1 ? 'this day' : 'these days'}.</p>}
+      {t && (
+        <>
+          <div className="text-center mt-2">
+            <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Net</p>
+            <p className={`text-3xl font-black ${pl(t.profit)}`}>{t.profit >= 0 ? '+' : ''}{inr(t.profit, 2)}</p>
+            <p className="text-[11px] text-gray-500">
+              {t.bets} bets · <span className="text-green-700 font-bold">{t.won} W</span>–<span className="text-red-600 font-bold">{t.lost} L</span>
+              {t.win_rate != null && ` · ${t.win_rate}%`} · staked {inr(t.staked)} · ROI <b className={pl(t.roi)}>{t.roi > 0 ? '+' : ''}{t.roi}%</b>
+            </p>
+            {t.promo?.profit > 0 && <p className="text-[10px] text-green-700">incl. Friday no-risk +{inr(t.promo.profit)}</p>}
+          </div>
+
+          {span > 1 && (
+            <div className="mt-3">
+              <p className="text-[9px] text-gray-400 mb-1">Tap a day to open it on its own.</p>
+              <div className="flex items-stretch gap-1.5">
+                {days.map((x) => {
+                  const r = byDay[x], p = r?.profit || 0
+                  return (
+                    <button key={x} onClick={() => { setSpan(1); setEnd(x) }}
+                      className="flex-1 min-w-0 rounded-md border border-amber-100 bg-white px-1 py-1.5 flex flex-col items-center hover:bg-amber-50">
+                      <div className="h-14 w-full flex flex-col justify-center items-center">
+                        <div className="w-4 flex flex-col justify-end h-1/2">
+                          {p > 0 && <div className="bg-green-300 rounded-t" style={{ height: `${(100 * p) / peak}%` }} />}
+                        </div>
+                        <div className="w-full border-t border-gray-300" />
+                        <div className="w-4 h-1/2">
+                          {p < 0 && <div className="bg-red-300 rounded-b" style={{ height: `${(-100 * p) / peak}%` }} />}
+                        </div>
+                      </div>
+                      <p className={`text-[10px] font-black tabular-nums ${r ? pl(p) : 'text-gray-300'}`}>{r ? `${p >= 0 ? '+' : '−'}${Math.abs(p) >= 1000 ? `${(Math.abs(p) / 1000).toFixed(1)}k` : Math.round(Math.abs(p))}` : '—'}</p>
+                      <p className="text-[9px] text-gray-500">{new Date(`${x}T00:00:00`).toLocaleDateString('en-IN', { weekday: 'short' })} {+x.slice(8)}</p>
+                      {r && <p className="text-[9px] text-gray-400">{r.won}–{r.lost}</p>}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          <Insights s={d} />
+          <TopBets title="Best wins" rows={d.insights?.top_wins} />
+          <TopBets title="Worst losses" rows={d.insights?.top_losses} />
+          <Breakdown bare title="By odds" rows={d.by_odds} />
+          <Breakdown bare title="By sport" rows={d.by_sport} />
+          <Breakdown bare title="By market" rows={d.by_market} />
+          <Breakdown bare title="Time of day" rows={d.by_time} note="When the bet was placed." />
+          <button onClick={() => setShowBets(!showBets)} className="mt-3 w-full text-center text-xs font-black text-brand-600 py-1.5 rounded-md border border-amber-200">
+            {showBets ? 'Hide the bets ▴' : `See the ${t.bets} bets ▾`}
+          </button>
+          {showBets && <BetList period={{ from, to: end }} bare />}
+        </>
+      )}
+    </div>
+  )
+}
+
 export default function MyBets() {
   const nav = useNavigate()
   const loc = useLocation()
@@ -480,10 +667,15 @@ export default function MyBets() {
     <div className="pb-28 md:pb-10">
       <div className="px-5 pt-10 md:pt-6 pb-3 bg-cream sticky top-0 z-10 border-b border-amber-100/60">
         <button onClick={() => nav(-1)} className="text-xs font-bold text-gray-400 mb-2">← Back</button>
-        <h1 className="text-xl font-black tracking-tight">My bets</h1>
-        <p className="text-[11px] text-gray-400 mt-0.5">
-          1xbet · {isPast ? 'Past · ' : ''}{shown ? `${longDay(shown.from)} – ${longDay(shown.to)}` : ''}{t ? ` · ${t.bets} bets` : ''}
-        </p>
+        <div className="flex items-start gap-3">
+          <div className="flex-1 min-w-0">
+            <h1 className="text-xl font-black tracking-tight">My bets</h1>
+            <p className="text-[11px] text-gray-400 mt-0.5">
+              1xbet · {isPast ? 'Past · ' : ''}{shown ? `${longDay(shown.from)} – ${longDay(shown.to)}` : ''}{t ? ` · ${t.bets} bets` : ''}
+            </p>
+          </div>
+          <SyncButton st={st} onSynced={() => { setView(null); load() }} />
+        </div>
       </div>
       <div className="px-5 mt-4 max-w-2xl space-y-3">
         {gmail === 'connected' && <p className="text-xs font-bold text-green-700">Gmail connected - tap "Check mail" to read your history.</p>}
@@ -519,7 +711,9 @@ export default function MyBets() {
                   Includes Friday no-risk bets: <b className="text-green-700">+{inr(t.promo.profit)}</b> ({t.promo.won} won, {t.promo.lost} lost)
                 </p>
               )}
+              <Insights s={s} />
             </div>
+            <DayDash min={(t.first || shown.from).slice(0, 10)} max={(t.last || shown.to).slice(0, 10)} />
             <div className="card -mx-3 px-3 py-4"><ProfitChart points={s.curve} start={shown?.from} /></div>
             {!isPast && s.by_block?.length > 1 && (
               <Breakdown title="Every 10 days" rows={[...s.by_block].reverse()} fmt={blockLabel} onRow={pickBlock}
@@ -531,13 +725,15 @@ export default function MyBets() {
             <Breakdown title="By market" rows={s.by_market} note="Singles; accumulators on their own line." />
             <Breakdown title="By odds" rows={s.by_odds} />
             <Breakdown title="By stake" rows={s.by_stake} />
+            <Breakdown title="Time of day" rows={s.by_time} note="When the bet was placed." />
+            <Breakdown title="Day of the week" rows={s.by_weekday} />
             <Breakdown title="Tennis · by tour" rows={s.tennis_tour} note="Tennis singles." />
             <Breakdown title="Tennis · whole match or set" rows={s.tennis_part} />
             <Breakdown title="Tennis · tournaments" rows={s.tennis_events} note="Most bet on." />
           </>
         )}
         <BetList period={shown} />
-        {st && <MailCard st={st} onSynced={() => { setView(null); load() }} />}
+        {st && <MailCard st={st} />}
       </div>
     </div>
   )

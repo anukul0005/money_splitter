@@ -231,6 +231,19 @@ def _block_of(day: str) -> str | None:
     return f"{a.isoformat()}|{(a + timedelta(days=BLOCK_DAYS - 1)).isoformat()}"
 
 
+def _time_of_day(placed: str | None) -> str:
+    """When the bet was placed (1xbet's times are India time)."""
+    h = int(placed[11:13]) if placed and len(placed) >= 13 and placed[11:13].isdigit() else None
+    if h is None:
+        return "—"
+    return ("Morning · 6–12" if 6 <= h < 12 else "Afternoon · 12–5" if 12 <= h < 17
+            else "Evening · 5–9" if 17 <= h < 21 else "Night · 9–6")
+
+
+TIMES = ["Morning · 6–12", "Afternoon · 12–5", "Evening · 5–9", "Night · 9–6"]
+WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
 def _bucket(v, buckets):
     for lo, hi, label in buckets:
         if v is not None and lo <= v < hi:
@@ -259,8 +272,12 @@ def summary(frm: str = "", to: str = "", db: Session = Depends(get_db), caller: 
         _add(total, b)
         legs = (json.loads(b.raw or "{}") or {}).get("legs") or []
         league = (legs[0].get("league") or "") if legs else ""
+        day = (b.placed_at or "")[:10]
         keys = {
             "month": (b.placed_at or "")[:7],
+            "day": day,
+            "time": _time_of_day(b.placed_at),
+            "weekday": WEEKDAYS[date.fromisoformat(day).weekday()] if len(day) == 10 else "—",
             "block": _block_of((b.placed_at or "")[:10]),
             "sport": b.sport or "—",
             "type": "Accumulator" if (b.legs or 1) > 1 else "Single",
@@ -289,6 +306,8 @@ def summary(frm: str = "", to: str = "", db: Session = Depends(get_db), caller: 
         if blk:
             groups["block"][blk]["returned"] += pr.profit
         if pr.profit:
+            groups["day"][pr.day]["returned"] += pr.profit
+        if pr.profit:
             daily[pr.day] += pr.profit
     promo = {"fridays": len(promo_rows), "won": sum(1 for r in promo_rows if r.result == "won"),
              "lost": sum(1 for r in promo_rows if r.result == "lost"), "profit": round(sum(r.profit for r in promo_rows), 2),
@@ -314,6 +333,18 @@ def summary(frm: str = "", to: str = "", db: Session = Depends(get_db), caller: 
     statuses = defaultdict(int)
     for b in bets:
         statuses[b.status] += 1
+    won = [b for b in bets if b.status == "won"]
+    lost = [b for b in bets if b.status == "lost"]
+    avg = lambda xs, f: round(sum(f(b) or 0 for b in xs) / len(xs), 2) if xs else None
+    brief = lambda b: {"placed_at": b.placed_at, "event": b.event, "market": b.market, "odds": b.odds,
+                       "stake": b.stake, "legs": b.legs, "profit": round(profit(b), 2)}
+    # the win rate the average odds need just to break even: 1 / odds
+    insights = {"avg_odds_won": avg(won, lambda b: b.odds), "avg_odds_lost": avg(lost, lambda b: b.odds),
+                "avg_stake_won": avg(won, lambda b: b.stake), "avg_stake_lost": avg(lost, lambda b: b.stake),
+                "max_odds_won": max((b.odds or 0 for b in won), default=None),
+                "breakeven_rate": round(100 / (sum(b.odds or 0 for b in bets) / len(bets)), 1) if any(b.odds for b in bets) else None,
+                "top_wins": [brief(b) for b in sorted(won, key=profit, reverse=True)[:3]],
+                "top_losses": [brief(b) for b in sorted(lost, key=profit)[:3]]}
     return {
         "period": {"from": frm, "to": to},
         "total": {**_done(total), "statuses": statuses, "avg_odds": round(sum(b.odds or 0 for b in bets) / len(bets), 2),
@@ -321,6 +352,10 @@ def summary(frm: str = "", to: str = "", db: Session = Depends(get_db), caller: 
                   "best_win": max((profit(b) for b in bets), default=0), "worst_loss": min((profit(b) for b in bets), default=0),
                   "longest_win_streak": best, "longest_loss_streak": worst, "promo": promo,
                   "currency": next((b.currency for b in bets if b.currency), "INR")},
+        "insights": insights,
+        "by_day": order("day", lambda x: x["label"]),
+        "by_time": [x for lbl in TIMES for x in order("time") if x["label"] == lbl],
+        "by_weekday": [x for lbl in WEEKDAYS for x in order("weekday") if x["label"] == lbl],
         "by_month": order("month", lambda x: x["label"]),
         "by_block": order("block", lambda x: x["label"]),
         "by_sport": order("sport"), "by_type": order("type"), "by_market": order("market"),
