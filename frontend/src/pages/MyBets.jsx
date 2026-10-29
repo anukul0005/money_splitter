@@ -74,7 +74,8 @@ function ProfitChart({ points, start }) {
   const step = (W - L - R) / bars.length
   const x = (i) => L + step * i + step / 2
   const bw = Math.max(3, step * (inBlock ? 0.6 : 0.72))
-  const ticks = [hi, (hi + lo) / 2, lo, 0].filter((v, i, a) => a.findIndex((w) => Math.abs(w - v) < span * 0.08) === i)
+  // ₹0 first, so it always keeps its label; a gridline too close to it is dropped
+  const ticks = [0, hi, lo, (hi + lo) / 2].filter((v, i, a) => a.findIndex((w) => Math.abs(w - v) < span * 0.1) === i)
   const short = (v) => `${v < 0 ? '−' : ''}₹${Math.abs(v) >= 1000 ? `${(Math.abs(v) / 1000).toFixed(1)}k` : Math.round(Math.abs(v))}`
   const dlab = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
   const every = Math.max(1, Math.ceil(bars.length / 5))          // keep the date labels readable
@@ -118,8 +119,10 @@ function ProfitChart({ points, start }) {
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto select-none" onMouseLeave={() => setHover(null)}>
         {ticks.map((v) => (
           <g key={v}>
-            <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke={v === 0 ? '#9ca3af' : '#eef0f3'} strokeDasharray={v === 0 ? '' : '3 3'} />
-            <text x={L - 5} y={y(v) + 4} textAnchor="end" fontSize="11" fill="#6b7280">{v === 0 ? '₹0' : short(v)}</text>
+            <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke={v === 0 ? '#374151' : '#eef0f3'} strokeWidth={v === 0 ? 1.5 : 1}
+              strokeDasharray={v === 0 ? '' : '3 3'} />
+            <text x={L - 5} y={y(v) + 4} textAnchor="end" fontSize="11" fontWeight={v === 0 ? 800 : 400}
+              fill={v === 0 ? '#111827' : '#6b7280'}>{v === 0 ? '₹0' : short(v)}</text>
           </g>
         ))}
         {bars.map((b, i) => (
