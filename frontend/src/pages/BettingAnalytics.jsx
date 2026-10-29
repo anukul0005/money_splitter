@@ -29,7 +29,10 @@ export function parseScore(score) {
   for (const m of s.matchAll(/(\d+)-(\d+)(?:\((\d+)\))?/g)) {
     const w = +m[1], l = +m[2], tb = m[3] != null ? +m[3] : null
     // The bracket is the loser's tie-break points, shown beside the side that lost the set.
-    sets.push({ w, l, tb, tbOn: tb == null ? null : w > l ? 'l' : 'w' })
+    // The bracket is the set loser's tie-break points; the winner's follow: 7, or two past them from 6 up.
+    const tbLost = tb, tbWon = tb == null ? null : Math.max(7, tb + 2)
+    sets.push({ w, l, tb, tbOn: tb == null ? null : w > l ? 'l' : 'w',
+      tbW: tb == null ? null : w > l ? tbWon : tbLost, tbL: tb == null ? null : w > l ? tbLost : tbWon })
   }
   return { sets, end }
 }
@@ -72,7 +75,7 @@ function PlayerLine({ p, won, sets, side, onPlayer, tour }) {
         const tookSet = side === 'w' ? st.w > st.l : st.l > st.w
         return (
           <span key={i} className={`w-6 text-center text-[13px] tabular-nums ${tookSet ? 'font-black' : 'font-medium'}`}>
-            {games}{st.tbOn === side && <sup className="text-[8px] font-semibold ml-px">{st.tb}</sup>}
+            {games}{st.tb != null && <sup className="text-[8px] font-semibold ml-px">{side === 'w' ? st.tbW : st.tbL}</sup>}
           </span>
         )
       })}
@@ -971,7 +974,10 @@ export function LiveRow({ m, onOpen, plain }) {
               const took = done && g > (o.games[k] ?? 0)
               return (
                 <span key={k} className={`w-6 text-center text-[13px] tabular-nums ${!done ? 'text-red-600 font-black' : took ? 'font-black' : 'font-medium text-gray-400'}`}>
-                  {g}{p.tiebreaks?.[k] != null && done && !took && <sup className="text-[8px] font-semibold ml-px">{p.tiebreaks[k]}</sup>}
+                  {/* both players' tie-break points, as ESPN gives them: 7⁷ over 6⁴ */}
+                  {g}{done && (p.tiebreaks?.[k] != null || o.tiebreaks?.[k] != null) && (
+                    <sup className="text-[8px] font-semibold ml-px">{p.tiebreaks?.[k] ?? (o.tiebreaks?.[k] != null ? (took ? Math.max(7, o.tiebreaks[k] + 2) : '') : '')}</sup>
+                  )}
                 </span>
               )
             })}
