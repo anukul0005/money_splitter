@@ -275,12 +275,21 @@ def sync_for_user(db: Session, user_id: int, password: str | None = None) -> dic
     return {"checked": len(ids), "new_emails": emails, "bets_new": bets_new}
 
 
+def _needs_reconnect(e: Exception) -> bool:
+    """Google refused the saved access (revoked, expired - an unverified
+    app's access lapses after a week - or the password changed), or it
+    can't be read: only connecting Gmail again fixes it."""
+    from google.auth.exceptions import RefreshError
+    text = str(e).lower()
+    return isinstance(e, RefreshError) or "invalid_grant" in text or "unreadable" in text or "unauthorized" in text
+
+
 def start_sync(user_id: int, password: str | None = None) -> None:
     if get_progress(user_id).get("status") == "running":
         raise RuntimeError("Already looking")
     from database import get_session_factory
     factory = get_session_factory()
-    _set(user_id, status="running", total=0, done=0, emails=0, bets_new=0, error=None)
+    _set(user_id, status="running", total=0, done=0, emails=0, bets_new=0, error=None, reconnect=False)
 
     def _run():
         db = factory()
@@ -288,7 +297,9 @@ def start_sync(user_id: int, password: str | None = None) -> None:
             _set(user_id, status="done", **sync_for_user(db, user_id, password))
         except Exception as e:
             print(f"[bet_history] sync failed for user {user_id}: {e}")
-            _set(user_id, status="error", error=str(e)[:300])
+            reconnect = _needs_reconnect(e)
+            _set(user_id, status="error", reconnect=reconnect,
+                 error="Gmail access has expired or was removed - reconnect Gmail" if reconnect else str(e)[:300])
         finally:
             db.close()
 

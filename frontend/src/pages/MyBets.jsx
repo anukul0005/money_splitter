@@ -270,43 +270,69 @@ const connectGmail = (onErr) => betsConnectUrl().then((r) => { window.location =
 
 /** The small sync icon at the top right: checks Gmail for new 1xbet history
  * (connects it first if it isn't); spins while reading, then says what came in. */
-function SyncButton({ st, onSynced }) {
+function SyncButton({ st, onSynced, autoStart }) {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)          // [text, tone]
+  const [reconnect, setReconnect] = useState(false)
   const poll = useRef(null)
+  const started = useRef(false)
   useEffect(() => () => clearInterval(poll.current), [])
-  if (!st) return null
+  // the last check found Google's access gone (kept by the server until the next check)
+  // (not when just back from reconnecting: that flag is from before, and the check below clears it)
+  useEffect(() => { if (st?.progress?.reconnect && !autoStart) { setReconnect(true); setMsg(['Reconnect Gmail', 'err']) } }, [st?.progress?.reconnect])
+  const connect = () => { setMsg(['Opening Google…', '']); connectGmail((e) => setMsg([e, 'err'])) }
   const sync = () => {
     if (busy) return
-    if (!st.connected) { connectGmail((e) => setMsg([e, 'err'])); return }
+    if (!st.connected || reconnect) { connect(); return }
     setMsg(['Checking mail…', '']); setBusy(true)
     betsSync().then(() => {
       poll.current = setInterval(() => betsProgress().then((r) => {
         const p = r.data
         if (p.status === 'running') { setMsg([`Reading ${p.done || 0} of ${p.total || '…'} emails`, '']); return }
         clearInterval(poll.current); setBusy(false)
-        if (p.status === 'error') setMsg([p.error || "Couldn't read the mail", 'err'])
-        else { setMsg([p.bets_new ? `${p.bets_new} new bet${p.bets_new === 1 ? '' : 's'}` : 'Up to date', 'ok']); onSynced() }
+        if (p.status === 'error') {
+          // an error stays until it is dealt with; "access gone" turns the icon into Reconnect
+          if (p.reconnect) { setReconnect(true); setMsg(['Gmail access expired · tap to reconnect', 'err']) } else setMsg([p.error || "Couldn't read the mail", 'err'])
+          return
+        }
+        setMsg([p.bets_new ? `${p.bets_new} new bet${p.bets_new === 1 ? '' : 's'}` : 'Up to date', 'ok']); onSynced()
         setTimeout(() => setMsg(null), 6000)
       }).catch(() => { clearInterval(poll.current); setBusy(false); setMsg(["Couldn't check progress", 'err']) }), 1500)
     }).catch((e) => { setBusy(false); setMsg([e.response?.data?.detail || "Couldn't start", 'err']) })
   }
-  const title = !st.connected ? 'Connect Gmail to read new bets'
-    : `Check Gmail for new bets${st.last_synced_at ? ` · last ${fmtD(st.last_synced_at.slice(0, 16))}` : ''}`
+  // straight back from Google's consent screen: read the mail at once
+  useEffect(() => { if (autoStart && st?.connected && !started.current) { started.current = true; sync() } }, [autoStart, st?.connected])
+  if (!st) return null
+  const needs = !st.connected || reconnect
+  const title = !st.connected ? 'Connect Gmail to read new bets' : reconnect ? 'Reconnect Gmail'
+    : `Check Gmail for new bets${st.last_synced_at ? ` · last ${syncedAt(st.last_synced_at)}` : ''}`
   return (
-    <div className="flex flex-col items-end gap-0.5">
+    <div className="flex flex-col items-end gap-0.5 max-w-[150px]">
       <button onClick={sync} title={title} aria-label={title}
-        className={`relative w-9 h-9 rounded-full border flex items-center justify-center bg-white ${st.connected ? 'border-amber-300 text-brand-600' : 'border-brand-400 text-brand-600'}`}>
+        className={`relative w-9 h-9 rounded-full border flex items-center justify-center bg-white ${reconnect ? 'border-red-400 text-red-600' : needs ? 'border-brand-400 text-brand-600' : 'border-amber-300 text-brand-600'}`}>
         <svg viewBox="0 0 24 24" className={`w-[18px] h-[18px] ${busy ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M20 11a8 8 0 0 0-14.3-4.9L4 8" /><path d="M4 3v5h5" /><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16" /><path d="M20 21v-5h-5" />
         </svg>
-        {!st.connected && <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-brand-400 border border-white" />}
+        {needs && <span className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-white ${reconnect ? 'bg-red-500' : 'bg-brand-400'}`} />}
       </button>
-      <p className={`text-[9px] font-bold whitespace-nowrap ${msg?.[1] === 'err' ? 'text-red-600' : msg?.[1] === 'ok' ? 'text-green-700' : 'text-gray-400'}`}>
-        {msg ? msg[0] : st.connected ? (st.last_synced_at ? `synced ${fmtD(st.last_synced_at.slice(0, 16))}` : 'sync') : 'connect Gmail'}
+      <p className={`text-[9px] font-bold text-right leading-tight ${msg?.[1] === 'err' ? 'text-red-600' : msg?.[1] === 'ok' ? 'text-green-700' : 'text-gray-400'}`}>
+        {msg ? msg[0] : st.connected ? (st.last_synced_at ? `synced ${syncedAt(st.last_synced_at)}` : 'sync') : 'connect Gmail'}
       </p>
     </div>
   )
+}
+
+// last_synced_at is a UTC timestamp ("2026-10-29T15:50:36.959241+00:00"): shown in the phone's time
+const syncedAt = (iso) => {
+  const d = new Date(String(iso).replace(' ', 'T').replace(/(\.\d{3})\d+/, '$1'))
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+}
+
+const GMAIL_ERRORS = {
+  access_denied: 'Google access was not allowed - tap Connect and choose Allow.',
+  expired: 'That took too long - try connecting again.',
+  no_refresh_token: "Google didn't give lasting access - remove this app at myaccount.google.com/permissions, then connect again.",
+  token_exchange: "Google's answer couldn't be used - try connecting again.",
 }
 
 /** Every bet of the stretch shown - behind a button, closed until asked for. */
@@ -338,11 +364,17 @@ function MailCard({ st }) {
           <button onClick={() => connectGmail(setErr)} className="btn-primary mt-2 text-sm">Connect Gmail</button>
         </>
       ) : (
-        <p className="text-[11px] text-gray-500">
-          Reading from <b className="text-gray-800 break-all">{st.gmail_address}</b> ·{' '}
-          {st.last_synced_at ? `last checked ${fmtD(st.last_synced_at.slice(0, 16))}` : 'not checked yet'} · also every day.
-          Tap ⟳ at the top to check now.
-        </p>
+        <>
+          <p className="text-[11px] text-gray-500">
+            Reading from <b className="text-gray-800 break-all">{st.gmail_address}</b> ·{' '}
+            {st.last_synced_at ? `last checked ${syncedAt(st.last_synced_at)}` : 'not checked yet'} · also every day.
+            Tap ⟳ at the top to check now.
+          </p>
+          <button onClick={() => connectGmail(setErr)}
+            className={`mt-2 text-[11px] font-bold px-2.5 py-1 rounded-md border ${st.progress?.reconnect && st.progress?.status === 'error' ? 'border-red-400 text-red-600' : 'border-amber-300 text-brand-600'}`}>
+            {st.progress?.reconnect && st.progress?.status === 'error' ? 'Gmail access expired · reconnect' : 'Reconnect or switch inbox'}
+          </button>
+        </>
       )}
       {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
       {st.imports?.length > 0 && (
@@ -791,12 +823,16 @@ export default function MyBets() {
               1xbet · {isPast ? 'Past · ' : ''}{shown ? `${longDay(shown.from)} – ${longDay(shown.to)}` : ''}{t ? ` · ${t.bets} bets` : ''}
             </p>
           </div>
-          <SyncButton st={st} onSynced={() => { setView(null); load() }} />
+          <SyncButton st={st} onSynced={() => { setView(null); load() }} autoStart={gmail === 'connected'} />
         </div>
       </div>
       <div className="px-5 mt-4 max-w-2xl space-y-3">
-        {gmail === 'connected' && <p className="text-xs font-bold text-green-700">Gmail connected - tap "Check mail" to read your history.</p>}
-        {gmail === 'error' && <p className="text-xs font-bold text-red-600">Gmail didn't connect - try again.</p>}
+        {gmail === 'connected' && <p className="text-xs font-bold text-green-700">Gmail connected - reading your 1xbet history now.</p>}
+        {gmail === 'error' && (
+          <p className="text-xs font-bold text-red-600">
+            Gmail didn't connect. {GMAIL_ERRORS[new URLSearchParams(loc.search).get('reason')] || 'Try again with the ⟳ icon.'}
+          </p>
+        )}
         <ViewPicker views={views} view={shown} setView={setView} />
         {isPast && (
           <p className="text-[11px] text-gray-600 bg-gray-100 rounded-md px-3 py-2">
