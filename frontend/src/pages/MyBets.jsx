@@ -683,6 +683,77 @@ function DayDash({ min, max }) {
   )
 }
 
+/* ---- the page as a story: each chapter answers one question, its findings
+   first (worked out from the numbers), the tables and charts behind them after ---- */
+const MIN_BETS = 5                                  // a row needs this many bets to be called best / worst
+
+// best = the row that made the most, if any made money; worst = the one
+// that lost the most, if any lost - a "best" that lost money isn't a finding
+const bestWorst = (rows, min = MIN_BETS, skip = []) => {
+  const ok = (rows || []).filter((r) => r.bets >= min && r.label !== '—' && !skip.includes(r.label))
+  if (ok.length < 2) return [null, null]
+  const best = ok.reduce((a, b) => (b.profit > a.profit ? b : a))
+  const worst = ok.reduce((a, b) => (b.profit < a.profit ? b : a))
+  return [best.profit > 0 ? best : null, worst !== best && worst.profit < 0 ? worst : null]
+}
+const signed = (n) => `${n >= 0 ? '+' : '−'}${kInr(Math.abs(n))}`
+const roiTxt = (r) => (r.roi == null ? '' : ` · ROI ${r.roi > 0 ? '+' : ''}${Math.round(r.roi)}%`)
+
+/** "Best sport: Tennis +₹7.6k · ROI +3% · 497 bets" - a finding about one row. */
+function rowLine(what, r, tone, fmt) {
+  if (!r) return null
+  return { tone, text: <><b>{what}:</b> {fmt ? fmt(r.label) : r.label} <b className={pl(r.profit)}>{signed(r.profit)}</b>{roiTxt(r)} · {r.bets} bets</> }
+}
+
+function Chapter({ title, lines, children }) {
+  const shown = (lines || []).filter(Boolean)
+  return (
+    <section className="space-y-3 pt-3">
+      <div className="px-1">
+        <h2 className="text-lg font-black text-gray-900 leading-tight">{title}</h2>
+        {shown.length > 0 && (
+          <ul className="mt-1.5 space-y-1">
+            {shown.map((l, i) => (
+              <li key={i} className="flex gap-2 text-[11px] text-gray-700 leading-snug">
+                <span className={`mt-[5px] w-1.5 h-1.5 rounded-full flex-shrink-0 ${l.tone === 'good' ? 'bg-green-600' : l.tone === 'bad' ? 'bg-red-500' : 'bg-gray-400'}`} />
+                <span>{l.text}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      {children}
+    </section>
+  )
+}
+
+/** Chapter 2's findings: the low point of the running total and how far it has come back, and the share of periods in profit. */
+function trendLines(s, isPast) {
+  const c = s.curve || []
+  if (!c.length) return []
+  const low = c.reduce((a, b) => (b.cumulative < a.cumulative ? b : a))
+  const high = c.reduce((a, b) => (b.cumulative > a.cumulative ? b : a))
+  const end = c[c.length - 1].cumulative
+  const out = []
+  if (low.cumulative < 0 && low.date !== c[c.length - 1].date && end - low.cumulative > Math.abs(low.cumulative) * 0.1) {
+    out.push({ tone: end > low.cumulative ? 'good' : 'bad', text: <>Lowest point <b className="text-red-600">{signed(low.cumulative)}</b> on {shortDay(low.date)}; <b className={pl(end - low.cumulative)}>{signed(end - low.cumulative)}</b> since then, to <b className={pl(end)}>{signed(end)}</b> now.</> })
+  }
+  if (high.cumulative > 0 && high.date !== c[c.length - 1].date && high.cumulative - end > Math.abs(high.cumulative) * 0.1) {
+    out.push({ tone: 'bad', text: <>Peak <b className="text-green-700">{signed(high.cumulative)}</b> on {shortDay(high.date)} - {kInr(high.cumulative - end)} given back since.</> })
+  }
+  const per = isPast ? s.by_month : s.by_block
+  if (per?.length > 1) {
+    const up = per.filter((r) => r.profit > 0).length
+    out.push({ tone: up * 2 >= per.length ? 'good' : 'bad', text: <><b>{up} of {per.length}</b> {isPast ? 'months' : 'weeks'} ended in profit.</> })
+    const last3 = per.slice(-3)
+    if (!isPast && last3.length === 3) {
+      const sum = last3.reduce((a, r) => a + r.profit, 0)
+      out.push({ tone: sum >= 0 ? 'good' : 'bad', text: <>Last 3 weeks: <b className={pl(sum)}>{signed(sum)}</b>.</> })
+    }
+  }
+  return out
+}
+
 export default function MyBets() {
   const nav = useNavigate()
   const loc = useLocation()
@@ -726,7 +797,6 @@ export default function MyBets() {
       <div className="px-5 mt-4 max-w-2xl space-y-3">
         {gmail === 'connected' && <p className="text-xs font-bold text-green-700">Gmail connected - tap "Check mail" to read your history.</p>}
         {gmail === 'error' && <p className="text-xs font-bold text-red-600">Gmail didn't connect - try again.</p>}
-        <FridayPromo onSaved={() => setBump((b) => b + 1)} />
         <ViewPicker views={views} view={shown} setView={setView} />
         {isPast && (
           <p className="text-[11px] text-gray-600 bg-gray-100 rounded-md px-3 py-2">
@@ -735,51 +805,97 @@ export default function MyBets() {
         )}
         {!s && <p className="text-xs text-gray-400 text-center py-6">Loading…</p>}
         {s && !t && <p className="text-sm text-gray-400 text-center py-8">No bets in this stretch.</p>}
-        {t && (
-          <>
-            <div className="card">
-              <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Overall</p>
-              <p className={`text-3xl font-black mt-1 ${pl(t.profit)}`}>{t.profit >= 0 ? '+' : ''}{inr(t.profit, 2)}</p>
-              <p className="text-[11px] text-gray-500">
-                ROI <b className={pl(t.roi)}>{t.roi > 0 ? '+' : ''}{t.roi}%</b> · staked {inr(t.staked)} · returned {inr(t.returned)}
-              </p>
-              <div className="flex gap-2 flex-wrap mt-3">
-                <Stat label="Won – lost" value={`${t.won} – ${t.lost}`} sub={`${t.win_rate}% of settled`} />
-                <Stat label="Average odds" value={t.avg_odds} sub={`avg stake ${inr(t.avg_stake)}`} />
-                <Stat label="Streaks" value={`${t.longest_win_streak} W · ${t.longest_loss_streak} L`} sub="longest in a row" />
-                <Stat label="Biggest" value={inr(t.best_win)} sub={`worst ${inr(t.worst_loss)}`} cls="text-green-700" />
-              </div>
-              <p className="text-[10px] text-gray-400 mt-2">
-                {Object.entries(t.statuses || {}).map(([k, v]) => `${(STATUS[k] || [k])[0]} ${v}`).join(' · ')}
-              </p>
-              {t.promo?.fridays > 0 && (
-                <p className="text-[11px] text-gray-600 mt-1">
-                  Includes Friday no-risk bets: <b className="text-green-700">+{inr(t.promo.profit)}</b> ({t.promo.won} won, {t.promo.lost} lost)
-                </p>
-              )}
-              <Insights s={s} />
-            </div>
-            <DayDash min={(t.first || shown.from).slice(0, 10)} max={(t.last || shown.to).slice(0, 10)} />
-            <div className="card -mx-3 px-3 py-4"><ProfitChart points={s.curve} start={shown?.from} /></div>
-            {!isPast && s.by_block?.length > 1 && (
-              <Breakdown title="Week by week" rows={[...s.by_block].reverse()} fmt={blockLabel} onRow={pickBlock}
-                note="Friday to Thursday · newest first · tap a week to see just those days." />
-            )}
-            {isPast && <Breakdown title="By month" rows={s.by_month} />}
-            <Breakdown title="By sport" rows={s.by_sport} />
-            <Breakdown title="Single vs accumulator" rows={s.by_type} />
-            <Breakdown title="By market" rows={s.by_market} note="Singles; accumulators on their own line." />
-            <Breakdown title="By odds" rows={s.by_odds} />
-            <Breakdown title="By stake" rows={s.by_stake} />
-            <Breakdown title="Time of day" rows={s.by_time} note="When the bet was placed." />
-            <Breakdown title="Day of the week" rows={s.by_weekday} />
-            <Breakdown title="Tennis · by tour" rows={s.tennis_tour} note="Tennis singles." />
-            <Breakdown title="Tennis · whole match or set" rows={s.tennis_part} />
-            <Breakdown title="Tennis · tournaments" rows={s.tennis_events} note="Most bet on." />
-          </>
-        )}
-        <AllBets period={shown} count={t?.bets} />
-        {st && <MailCard st={st} />}
+        {t && (() => {
+          const ins = s.insights || {}
+          const promo = t.promo?.profit || 0
+          const [sportB, sportW] = bestWorst(s.by_sport)
+          const [mktB, mktW] = bestWorst(s.by_market, MIN_BETS, ['Accumulator'])   // accumulators have their own finding
+          const [tourB, tourW] = bestWorst(s.tennis_tour)
+          const oddsOk = (s.by_odds || []).filter((r) => r.bets >= MIN_BETS && r.roi != null)
+          const top = oddsOk.length > 1 ? oddsOk.reduce((a, b) => (b.roi > a.roi ? b : a)) : null
+          const sweet = top && top.roi > 0 ? top : null                 // only a range that made money
+          // worst = the range that lost the most money (by ROI a handful of long shots would win it)
+          const sour = oddsOk.length > 1 ? oddsOk.reduce((a, b) => (b.profit < a.profit ? b : a)) : null
+          const single = (s.by_type || []).find((r) => r.label === 'Single'), acca = (s.by_type || []).find((r) => r.label === 'Accumulator')
+          const [stakeB, stakeW] = bestWorst(s.by_stake)
+          const [timeB, timeW] = bestWorst(s.by_time)
+          const [dayB, dayW] = bestWorst(s.by_weekday)
+          return (
+            <>
+              <Chapter title="Bottom line" lines={[
+                { tone: t.profit >= 0 ? 'good' : 'bad', text: <>{t.profit >= 0 ? 'Up' : 'Down'} <b className={pl(t.profit)}>{inr(Math.abs(t.profit))}</b> on {inr(t.staked)} staked - every ₹100 bet came back as <b>₹{(100 + (t.roi || 0)).toFixed(1)}</b>.</> },
+                { tone: 'info', text: <>Won <b>{t.won}</b> of {t.won + t.lost} settled bets ({t.win_rate}%) at average odds of <b>{t.avg_odds}</b>, staking {inr(t.avg_stake)} a bet.</> },
+                promo > 0 && { tone: t.profit - promo >= 0 ? 'good' : 'bad', text: <>The Friday no-risk bet added <b className="text-green-700">+{inr(promo)}</b>; without it the bets alone are <b className={pl(t.profit - promo)}>{signed(t.profit - promo)}</b>.</> },
+              ]}>
+                <div className="card">
+                  <p className={`text-3xl font-black ${pl(t.profit)}`}>{t.profit >= 0 ? '+' : ''}{inr(t.profit, 2)}</p>
+                  <p className="text-[11px] text-gray-500">
+                    ROI <b className={pl(t.roi)}>{t.roi > 0 ? '+' : ''}{t.roi}%</b> · staked {inr(t.staked)} · returned {inr(t.returned)}
+                  </p>
+                  <div className="flex gap-2 flex-wrap mt-3">
+                    <Stat label="Won – lost" value={`${t.won} – ${t.lost}`} sub={`${t.win_rate}% of settled`} />
+                    <Stat label="Average odds" value={t.avg_odds} sub={`avg stake ${inr(t.avg_stake)}`} />
+                  </div>
+                  <p className="text-[10px] text-gray-400 mt-2">
+                    {Object.entries(t.statuses || {}).map(([k, v]) => `${(STATUS[k] || [k])[0]} ${v}`).join(' · ')}
+                  </p>
+                </div>
+                <FridayPromo onSaved={() => setBump((b) => b + 1)} />
+              </Chapter>
+
+              <Chapter title="How it went" lines={trendLines(s, isPast)}>
+                <div className="card -mx-3 px-3 py-4"><ProfitChart points={s.curve} start={shown?.from} /></div>
+                {!isPast && s.by_block?.length > 1 && (
+                  <Breakdown title="Week by week" rows={[...s.by_block].reverse()} fmt={blockLabel} onRow={pickBlock}
+                    note="Friday to Thursday · newest first · tap a week to see just those days." />
+                )}
+                {isPast && <Breakdown title="By month" rows={s.by_month} />}
+              </Chapter>
+
+              <Chapter title="Recent days">
+                <DayDash min={(t.first || shown.from).slice(0, 10)} max={(t.last || shown.to).slice(0, 10)} />
+              </Chapter>
+
+              <Chapter title="Where the money is made and lost" lines={[
+                rowLine('Best sport', sportB, 'good'), rowLine('Worst sport', sportW, 'bad'),
+                single && acca && { tone: (acca.roi ?? 0) > (single.roi ?? 0) ? 'good' : 'bad', text: <><b>Singles</b> {signed(single.profit)}{roiTxt(single)} vs <b>accumulators</b> {signed(acca.profit)}{roiTxt(acca)}.</> },
+                rowLine('Best market', mktB, 'good'), rowLine('Worst market', mktW, 'bad'),
+                sweet && { tone: 'good', text: <><b>Odds sweet spot:</b> {sweet.label} <b className={pl(sweet.profit)}>{signed(sweet.profit)}</b>{roiTxt(sweet)} · {sweet.bets} bets{sour && sour !== sweet && sour.profit < 0 ? <> - worst <b>{sour.label}</b> {signed(sour.profit)}{roiTxt(sour)}</> : null}.</> },
+                !sweet && sour && sour.profit < 0 && { tone: 'bad', text: <><b>No odds range made money.</b> Worst: {sour.label} <b className="text-red-600">{signed(sour.profit)}</b>{roiTxt(sour)} · {sour.bets} bets.</> },
+                ins.avg_odds_won != null && { tone: 'info', text: <>Your wins come at average odds of <b>{ins.avg_odds_won}</b>, your losses at <b>{ins.avg_odds_lost}</b>; the longest odds you've won at are {ins.max_odds_won}.</> },
+                rowLine('Best tennis tour', tourB, 'good'), rowLine('Worst tennis tour', tourW, 'bad'),
+              ]}>
+                <Breakdown title="By sport" rows={s.by_sport} />
+                <Breakdown title="Single vs accumulator" rows={s.by_type} />
+                <Breakdown title="By market" rows={s.by_market} note="Singles; accumulators on their own line." />
+                <Breakdown title="By odds" rows={s.by_odds} />
+                <Breakdown title="Tennis · by tour" rows={s.tennis_tour} note="Tennis singles." />
+                <Breakdown title="Tennis · whole match or set" rows={s.tennis_part} />
+                <Breakdown title="Tennis · tournaments" rows={s.tennis_events} note="Most bet on." />
+              </Chapter>
+
+              <Chapter title="How you bet" lines={[
+                rowLine('Best stake size', stakeB, 'good'), rowLine('Worst stake size', stakeW, 'bad'),
+                rowLine('Best time of day', timeB, 'good', (l) => l.replace(' · ', ' ')), rowLine('Worst time of day', timeW, 'bad', (l) => l.replace(' · ', ' ')),
+                rowLine('Best day', dayB, 'good'), rowLine('Worst day', dayW, 'bad'),
+                { tone: 'info', text: <>Longest runs: <b className="text-green-700">{t.longest_win_streak} wins</b> and <b className="text-red-600">{t.longest_loss_streak} losses</b> in a row. Biggest win <b className="text-green-700">{inr(t.best_win)}</b>, biggest loss <b className="text-red-600">{inr(t.worst_loss)}</b>.</> },
+              ]}>
+                <Breakdown title="By stake" rows={s.by_stake} />
+                <Breakdown title="Time of day" rows={s.by_time} note="When the bet was placed." />
+                <Breakdown title="Day of the week" rows={s.by_weekday} />
+                <div className="card">
+                  <TopBets title="Best wins" rows={ins.top_wins} />
+                  <TopBets title="Worst losses" rows={ins.top_losses} />
+                </div>
+              </Chapter>
+            </>
+          )
+        })()}
+        {(!t) && <FridayPromo onSaved={() => setBump((b) => b + 1)} />}
+        <Chapter title="Every bet">
+          <AllBets period={shown} count={t?.bets} />
+          {st && <MailCard st={st} />}
+        </Chapter>
       </div>
     </div>
   )
