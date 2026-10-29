@@ -82,6 +82,17 @@ CREATE TABLE IF NOT EXISTS tennis_match_stats (
     l_ace INTEGER, l_df INTEGER, l_svpt INTEGER, l_1stIn INTEGER, l_1stWon INTEGER, l_2ndWon INTEGER,
     l_SvGms INTEGER, l_bpSaved INTEGER, l_bpFaced INTEGER);
 CREATE TABLE IF NOT EXISTS tennis_meta (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS tennis_matches_lower (
+    match_id TEXT PRIMARY KEY, source TEXT NOT NULL, tour TEXT NOT NULL, lower_kind TEXT NOT NULL,
+    tourney_id TEXT, tourney_name TEXT, surface TEXT, draw_size INTEGER, tourney_level TEXT,
+    tourney_date INTEGER, match_date TEXT, play_date TEXT, match_num INTEGER, round TEXT, best_of INTEGER,
+    winner_id INTEGER, winner_name TEXT, winner_ioc TEXT, winner_age REAL, winner_rank INTEGER,
+    winner_rank_points INTEGER, winner_seed TEXT, winner_entry TEXT,
+    loser_id INTEGER, loser_name TEXT, loser_ioc TEXT, loser_age REAL, loser_rank INTEGER,
+    loser_rank_points INTEGER, loser_seed TEXT, loser_entry TEXT,
+    score TEXT, minutes INTEGER);
+CREATE INDEX IF NOT EXISTS ix_tennis_lower_winner ON tennis_matches_lower(tour, winner_id);
+CREATE INDEX IF NOT EXISTS ix_tennis_lower_loser ON tennis_matches_lower(tour, loser_id);
 """
 MATCH_COLS = ["match_id", "source", "tour", "tourney_id", "tourney_name", "surface", "draw_size",
               "tourney_level", "tourney_date", "match_date", "play_date", "match_num", "round", "best_of",
@@ -484,10 +495,11 @@ def _score(note: str, comps: list) -> str:
     return " ".join(sets)
 
 
-def espn_day(tour: str, day: date) -> list:
+def espn_day(tour: str, day: date, lower: bool = False) -> list:
     """Every finished tour-level singles match ESPN lists for that day's
     tournaments - the whole event so far, which overlap between days makes
-    harmless. Qualifying, doubles and WTA 125s are left out."""
+    harmless. Doubles are left out; qualifying too, unless lower (then each
+    qualifying match comes flagged "qual" - see LOWER)."""
     data = get_json(ESPN.format(tour=tour.lower(), day=day.strftime("%Y%m%d")))
     want = "mens-singles" if tour == "ATP" else "womens-singles"
     out = []
@@ -500,21 +512,22 @@ def espn_day(tour: str, day: date) -> list:
             if (g.get("grouping") or {}).get("slug") != want:
                 continue
             comps = g.get("competitions", [])
-            main = [c for c in comps if "qualif" not in ((c.get("round") or {}).get("displayName") or "").lower()]
+            is_q = lambda c: "qualif" in ((c.get("round") or {}).get("displayName") or "").lower()
+            main = [c for c in comps if not is_q(c)]
             draw = 0
             firsts = [c for c in main if ((c.get("round") or {}).get("displayName") or "").lower() == "round 1"]
             if firsts:
                 draw = 1
                 while draw < len(firsts) * 2:
                     draw *= 2
-            for c in main:
+            for c in (comps if lower else main):
                 st = ((c.get("status") or {}).get("type") or {})
                 if not st.get("completed") or st.get("name") == "STATUS_WALKOVER":
                     continue
                 cs = c.get("competitors", [])
                 if len(cs) != 2 or not all(x.get("athlete") for x in cs):
                     continue
-                out.append({"event": ev, "espn_tid": espn_tid, "comp": c, "draw": draw})
+                out.append({"event": ev, "espn_tid": espn_tid, "comp": c, "draw": draw, "qual": is_q(c)})
     return out
 
 
@@ -549,6 +562,20 @@ def upsert(conn, row) -> bool:
     return True
 
 
+# Lower-level matches - qualifying for tour events, WTA 125s - kept apart in
+# tennis_matches_lower: the backend has them (for a player new to the tour,
+# whose tennis is mostly there), but nothing the app shows counts them.
+LOWER_COLS = MATCH_COLS[:3] + ["lower_kind"] + MATCH_COLS[3:]
+
+
+def upsert_lower(conn, row) -> None:
+    row.setdefault("play_date", play_date(row))
+    row["lower_kind"] = row["lower"]
+    conn.execute(f"INSERT INTO tennis_matches_lower({', '.join(LOWER_COLS)}) VALUES({', '.join('?' * len(LOWER_COLS))}) "
+                 f"ON CONFLICT(match_id) DO UPDATE SET " + ", ".join(f"{c} = excluded.{c}" for c in LOWER_COLS[1:]),
+                 [row.get(c) for c in LOWER_COLS])
+
+
 def _player(players, tour, name, espn_id, flag_code):
     pid = players.find(tour, full_name=name, espn_id=espn_id)
     if pid is None:
@@ -558,10 +585,17 @@ def _player(players, tour, name, espn_id, flag_code):
     return pid
 
 
-def espn_rows(item, tour, players, tourneys) -> dict | None:
+def espn_rows(item, tour, players, tourneys, lower: bool = False) -> dict | None:
+    """lower: a WTA 125 or qualifying match comes back with "lower" set
+    (its kind, for tennis_matches_lower) instead of being dropped."""
     ev, c = item["event"], item["comp"]
     name = ev.get("name") or ""
+    kind = None
     if tour == "WTA" and not tourneys.is_wta_tour(name, (ev.get("venue") or {}).get("displayName", ""), ev.get("major")):
+        kind = "wta125"
+    elif item.get("qual"):
+        kind = "qualifying"
+    if kind and not lower:
         return None
     cs = c["competitors"]
     w = next((x for x in cs if x.get("winner")), None)
@@ -593,6 +627,8 @@ def espn_rows(item, tour, players, tourneys) -> dict | None:
                     f"{side}_age": players.age(tour, pid, on), f"{side}_rank": rank if rank and rank < 5000 else None,
                     f"{side}_rank_points": None,
                     f"{side}_seed": next((s for s, n in seeds.items() if norm(n) == norm(nm)), None), f"{side}_entry": None})
+    if kind:
+        row["lower"] = kind
     return row
 
 
@@ -643,7 +679,7 @@ class _Lazy:
         return getattr(self._obj, name)
 
 
-def fetch_range(conn, start: date, end: date, log=print, light: bool = False) -> dict:
+def fetch_range(conn, start: date, end: date, log=print, light: bool = False, lower: bool = True) -> dict:
     """Every ATP and WTA tour-level singles match from `start` to `end`
     (inclusive) into the knowledge base: ESPN per tour per day, the app's
     TheSportsDB method for a day ESPN can't be reached. Only matches played
@@ -652,16 +688,18 @@ def fetch_range(conn, start: date, end: date, log=print, light: bool = False) ->
     light (the hourly refresh): a match already stored with the same score
     is left alone, and players are looked up name by name (Players partial)
     rather than all read in - an hour costs a few small queries, not a pass
-    over every player and match."""
+    over every player and match.
+
+    lower: qualifying and WTA 125 matches go to tennis_matches_lower."""
     players = _Lazy(lambda: Players(conn, partial=light))
     tourneys = _Lazy(lambda: Tourneys(conn))
-    added = refreshed = skipped = 0
+    added = refreshed = skipped = low = 0
     day = start
     while day <= end:
         espn_ok = True
         for tour in ("ATP", "WTA"):
             try:
-                items = espn_day(tour, day)
+                items = espn_day(tour, day, lower)
             except Exception as err:
                 log(f"  {day} {tour}: ESPN unavailable ({err}) - using TheSportsDB")
                 espn_ok = False
@@ -669,16 +707,22 @@ def fetch_range(conn, start: date, end: date, log=print, light: bool = False) ->
             items = [it for it in items if (it["comp"].get("date") or "")[:10] >= start.isoformat()]
             if light and items:
                 ids = [f"espn:{it['comp']['id']}" for it in items]
-                stored = dict(conn.execute(f"SELECT match_id, score FROM tennis_matches WHERE match_id IN ({', '.join('?' * len(ids))})",
-                                           ids).fetchall())
+                marks = ', '.join('?' * len(ids))
+                stored = dict(conn.execute(f"SELECT match_id, score FROM tennis_matches WHERE match_id IN ({marks}) "
+                                           f"UNION ALL SELECT match_id, score FROM tennis_matches_lower WHERE match_id IN ({marks})",
+                                           ids + ids).fetchall())
                 fresh = [it for i, it in zip(ids, items)
                          if i not in stored or stored[i] != _score(" ".join(n.get("text", "") for n in it["comp"].get("notes", [])),
                                                                    it["comp"]["competitors"])]
                 skipped += len(items) - len(fresh)
                 items = fresh
             for it in items:
-                row = espn_rows(it, tour, players, tourneys)
+                row = espn_rows(it, tour, players, tourneys, lower)
                 if not row:
+                    continue
+                if row.get("lower"):
+                    upsert_lower(conn, row)
+                    low += 1
                     continue
                 existed = conn.execute("SELECT 1 FROM tennis_matches WHERE match_id = ?", (row["match_id"],)).fetchone()
                 if upsert(conn, row):
@@ -697,10 +741,10 @@ def fetch_range(conn, start: date, end: date, log=print, light: bool = False) ->
         meta_set(conn, "last_fetched", day.isoformat())
         conn.commit()
         if day.day == 1 or day == end:
-            log(f"  up to {day}: {added} new matches, {refreshed} refreshed, {skipped} already there")
+            log(f"  up to {day}: {added} new matches, {refreshed} refreshed, {skipped} already there, {low} lower-level")
         day += timedelta(days=1)
         time.sleep(0.3)
-    return {"added": added, "refreshed": refreshed, "skipped": skipped}
+    return {"added": added, "refreshed": refreshed, "skipped": skipped, "lower": low}
 
 
 def summary(conn) -> str:
