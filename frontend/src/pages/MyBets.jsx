@@ -298,6 +298,21 @@ function SyncButton({ st, onSynced }) {
   )
 }
 
+/** Every bet of the stretch shown - behind a button, closed until asked for. */
+function AllBets({ period, count }) {
+  const [open, setOpen] = useState(false)
+  useEffect(() => setOpen(false), [period?.from, period?.to])
+  return (
+    <div className="card">
+      <button onClick={() => setOpen(!open)} className="w-full flex items-center gap-2 text-left">
+        <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest flex-1">Every bet</span>
+        <span className="text-xs font-black text-brand-600">{open ? 'Hide ▴' : `See all${count ? ` ${count}` : ''} bets ▾`}</span>
+      </button>
+      {open && <BetList period={period} bare />}
+    </div>
+  )
+}
+
 function MailCard({ st }) {
   const [err, setErr] = useState('')
   return (
@@ -732,7 +747,7 @@ export default function MyBets() {
             <Breakdown title="Tennis · tournaments" rows={s.tennis_events} note="Most bet on." />
           </>
         )}
-        <BetList period={shown} />
+        <AllBets period={shown} count={t?.bets} />
         {st && <MailCard st={st} />}
       </div>
     </div>
