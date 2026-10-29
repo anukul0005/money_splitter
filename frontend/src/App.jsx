@@ -11,6 +11,7 @@ import LedgerImport      from './pages/LedgerImport'
 import MyBottles         from './pages/MyBottles'
 import BettingAnalytics  from './pages/BettingAnalytics'
 import MyBets            from './pages/MyBets'
+import TennisMatch       from './pages/TennisMatch'
 import NewGroup    from './pages/NewGroup'
 import MonthlyGroup from './pages/MonthlyGroup'
 import EditGroup   from './pages/EditGroup'
@@ -150,6 +151,7 @@ export default function App() {
                 {isAnalyticsUser(user) && (
                   <>
                     <Route path="/betting" element={<BettingAnalytics />} />
+                    <Route path="/betting/match" element={<TennisMatch />} />
                     <Route path="/my-bets" element={<MyBets />} />
                   </>
                 )}

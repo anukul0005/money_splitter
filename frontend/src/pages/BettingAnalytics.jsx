@@ -1,6 +1,6 @@
 import { Component, useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { tennisDay, tennisH2H, tennisPatterns, tennisPlayer, tennisPlayers, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { tennisDay, tennisLive, tennisPatterns, tennisPlayer, tennisPlayers, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
 import DatePicker from '../components/DatePicker'
 
 /**
@@ -10,19 +10,19 @@ import DatePicker from '../components/DatePicker'
  * lines with set columns. Players: record, surfaces, years, recent matches,
  * head-to-head.
  */
-const ROUND_NAME = { F: 'Final', SF: 'Semifinals', QF: 'Quarterfinals', R16: 'Round of 16', R32: 'Round of 32',
+export const ROUND_NAME = { F: 'Final', SF: 'Semifinals', QF: 'Quarterfinals', R16: 'Round of 16', R32: 'Round of 32',
   R64: 'Round of 64', R128: 'Round of 128', RR: 'Round robin', BR: 'Bronze medal', ER: 'Early rounds' }
-const SURFACE = { Hard: 'bg-sky-100 text-sky-800', Clay: 'bg-orange-100 text-orange-800', Grass: 'bg-green-100 text-green-800',
+export const SURFACE = { Hard: 'bg-sky-100 text-sky-800', Clay: 'bg-orange-100 text-orange-800', Grass: 'bg-green-100 text-green-800',
   Carpet: 'bg-purple-100 text-purple-800' }
 const TOURS = [['all', 'All'], ['ATP', 'ATP'], ['WTA', 'WTA']]
 
 const fmtDay = (iso) => (iso ? new Date(`${iso}T00:00:00`).toLocaleDateString('en-IN',
   { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : '')
-const fmtShort = (iso) => (iso ? new Date(`${iso}T00:00:00`).toLocaleDateString('en-IN',
+export const fmtShort = (iso) => (iso ? new Date(`${iso}T00:00:00`).toLocaleDateString('en-IN',
   { day: 'numeric', month: 'short', year: '2-digit' }) : '')
 
 /** "6-4 6-7(4) 7-6(5) RET" -> sets from the winner's side: [{w, l, tb, tbOn}], and the ending. */
-function parseScore(score) {
+export function parseScore(score) {
   const s = (score || '').trim()
   const end = /\bRET\b/i.test(s) ? 'Ret.' : /W\/O/i.test(s) ? 'W/O' : /\bDEF\b/i.test(s) ? 'Def.' : null
   const sets = []
@@ -35,7 +35,7 @@ function parseScore(score) {
 }
 
 /** A crash inside shows a line, not a blank white page. */
-class Safe extends Component {
+export class Safe extends Component {
   constructor(props) { super(props); this.state = { err: null } }
   static getDerivedStateFromError(err) { return { err } }
   render() {
@@ -51,7 +51,7 @@ class Safe extends Component {
   }
 }
 
-function Flag({ ioc }) {
+export function Flag({ ioc }) {
   return <span className="inline-block w-8 text-[9px] font-bold text-gray-400 tracking-wider">{ioc || ''}</span>
 }
 
@@ -59,7 +59,8 @@ function PlayerLine({ p, won, sets, side, onPlayer, tour }) {
   return (
     <div className={`flex items-center gap-1.5 ${won ? 'text-gray-900' : 'text-gray-400'}`}>
       <Flag ioc={p.ioc} />
-      <button onClick={() => p.id && onPlayer(tour, p.id)}
+      {/* the name opens the player; the rest of the row opens the match */}
+      <button onClick={(e) => { e.stopPropagation(); if (p.id && onPlayer) onPlayer(tour, p.id) }}
         className={`flex-1 min-w-0 text-left truncate text-[13px] ${won ? 'font-bold' : 'font-medium'} hover:text-brand-600`}>
         {p.name}
         {p.seed && <span className="ml-1 text-[10px] font-semibold text-gray-400">({p.seed})</span>}
@@ -79,26 +80,26 @@ function PlayerLine({ p, won, sets, side, onPlayer, tour }) {
   )
 }
 
-function MatchRow({ m, onPlayer, onH2H }) {
+/** A match: tap it for its own page (form, head-to-head, set habits); tap a name for that player. */
+export function MatchRow({ m, onPlayer, onOpen }) {
   const { sets, end } = parseScore(m.score)
   return (
-    <div className="py-2 border-t border-gray-100 first:border-t-0">
+    <div onClick={onOpen ? () => onOpen(m) : undefined}
+      className={`py-2 border-t border-gray-100 first:border-t-0 ${onOpen ? 'cursor-pointer active:bg-amber-50 hover:bg-amber-50/50 -mx-2 px-2 rounded' : ''}`}>
       <PlayerLine p={m.winner} won sets={sets} side="w" onPlayer={onPlayer} tour={m.tour} />
       <PlayerLine p={m.loser} won={false} sets={sets} side="l" onPlayer={onPlayer} tour={m.tour} />
-      {(end || m.minutes || onH2H) && (
+      {(end || m.minutes || onOpen) && (
         <div className="flex items-center gap-2 mt-0.5 pl-9 text-[10px] text-gray-400">
           {end && <span className="font-bold text-amber-600">{end}</span>}
           {m.minutes ? <span>{Math.floor(m.minutes / 60)}h {String(m.minutes % 60).padStart(2, '0')}m</span> : null}
-          {onH2H && m.winner.id && m.loser.id && (
-            <button onClick={() => onH2H(m)} className="font-bold text-brand-600 hover:underline">H2H</button>
-          )}
+          {onOpen && <span className="ml-auto font-bold text-brand-600">Match ›</span>}
         </div>
       )}
     </div>
   )
 }
 
-function TournamentCard({ t, onPlayer, onH2H }) {
+function TournamentCard({ t, onPlayer, onOpen }) {
   return (
     <div className="card p-0 overflow-hidden">
       <div className="px-4 py-2.5 bg-field-950 text-white flex items-center gap-2">
@@ -115,7 +116,7 @@ function TournamentCard({ t, onPlayer, onH2H }) {
         {t.rounds.map((r) => (
           <div key={r.round} className="mt-2">
             <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">{ROUND_NAME[r.round] || r.round}</p>
-            {r.matches.map((m) => <MatchRow key={m.id} m={m} onPlayer={onPlayer} onH2H={onH2H} />)}
+            {r.matches.map((m) => <MatchRow key={m.id} m={m} onPlayer={onPlayer} onOpen={onOpen} />)}
           </div>
         ))}
       </div>
@@ -123,7 +124,7 @@ function TournamentCard({ t, onPlayer, onH2H }) {
   )
 }
 
-function Results({ tour, fresh, onPlayer, onH2H }) {
+function Results({ tour, fresh, onPlayer, onOpen }) {
   const [day, setDay] = useState(null)
   const [date, setDate] = useState('')
   const [busy, setBusy] = useState(false)
@@ -151,7 +152,7 @@ function Results({ tour, fresh, onPlayer, onH2H }) {
       {!busy && day && day.tournaments.length === 0 && (
         <p className="text-sm text-gray-400 text-center py-10">No matches on this day - use ‹ › to jump to the nearest day with results.</p>
       )}
-      {!busy && day?.tournaments.map((t) => <TournamentCard key={`${t.tour}|${t.name}`} t={t} onPlayer={onPlayer} onH2H={onH2H} />)}
+      {!busy && day?.tournaments.map((t) => <TournamentCard key={`${t.tour}|${t.name}`} t={t} onPlayer={onPlayer} onOpen={onOpen} />)}
     </div>
   )
 }
@@ -167,7 +168,7 @@ function Record({ label, r }) {
   )
 }
 
-function PlayerView({ sel, onPlayer, onH2H }) {
+function PlayerView({ sel, onPlayer, onOpen }) {
   const [p, setP] = useState(null)
   useEffect(() => {
     setP(null)
@@ -218,7 +219,7 @@ function PlayerView({ sel, onPlayer, onH2H }) {
         {p.matches.map((m) => (
           <div key={m.id}>
             <p className="text-[10px] text-gray-400 mt-2">{fmtShort(m.date)} · {m.tournament} · {ROUND_NAME[m.round] || m.round}</p>
-            <MatchRow m={m} onPlayer={onPlayer} onH2H={onH2H} />
+            <MatchRow m={m} onPlayer={onPlayer} onOpen={onOpen} />
           </div>
         ))}
       </div>
@@ -226,7 +227,7 @@ function PlayerView({ sel, onPlayer, onH2H }) {
   )
 }
 
-function Players({ tour, sel, setSel, onH2H }) {
+function Players({ tour, sel, setSel, onOpen }) {
   const [q, setQ] = useState('')
   const [found, setFound] = useState(null)
   const timer = useRef(null)
@@ -256,7 +257,7 @@ function Players({ tour, sel, setSel, onH2H }) {
       {sel && (
         <>
           <button onClick={() => setSel(null)} className="text-xs font-bold text-gray-400">← Search results</button>
-          <PlayerView sel={sel} onPlayer={(t, id) => setSel({ tour: t, id })} onH2H={onH2H} />
+          <PlayerView sel={sel} onPlayer={(t, id) => setSel({ tour: t, id })} onOpen={onOpen} />
         </>
       )}
     </div>
@@ -923,45 +924,129 @@ function Patterns() {
   )
 }
 
-function H2HSheet({ m, onClose, onPlayer }) {
-  const [d, setD] = useState(null)
-  useEffect(() => { tennisH2H(m.tour, m.winner.id, m.loser.id).then((r) => setD(r.data)).catch(() => setD({ matches: [] })) }, [m])
+/** The match page for a match in the results: /betting/match?id=... */
+export const matchLink = (m) => `/betting/match?id=${encodeURIComponent(m.id)}`
+/** ...and for a live or upcoming one: ESPN's id, both players (ids where known), the surface. */
+export const liveLink = (m) => {
+  const q = new URLSearchParams({ tour: m.tour, espn: m.espn, surface: m.surface || '' })
+  m.players.forEach((p, i) => { if (p.id) q.set(i ? 'b' : 'a', p.id); q.set(i ? 'bn' : 'an', p.name) })
+  return `/betting/match?${q}`
+}
+export const startTime = (iso) => {
+  const d = iso ? new Date(iso) : null
+  if (!d || Number.isNaN(d.getTime())) return ''
+  const today = new Date().toDateString() === d.toDateString()
+  const tmw = new Date(Date.now() + 864e5).toDateString() === d.toDateString()
+  const day = today ? 'Today' : tmw ? 'Tomorrow' : d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
+  return `${day}, ${d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}`
+}
+
+/** One live / upcoming match: the players with their games so far, the set or the start time. */
+export function LiveRow({ m, onOpen, plain }) {
+  const live = m.state === 'live'
   return (
-    <div className="fixed inset-0 bg-field-950/80 z-50 flex items-end md:items-center justify-center" onClick={onClose}>
-      <div className="bg-cream w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-t-xl md:rounded-xl p-4" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-sm font-black text-gray-900">Head to head</p>
-          <button onClick={onClose} className="text-gray-400 text-lg leading-none">×</button>
-        </div>
-        {!d ? <p className="text-xs text-gray-400 py-4 text-center">Loading…</p> : (
-          <>
-            <div className="flex items-center justify-between card mb-3">
-              <span className="text-sm font-bold flex-1 truncate">{m.winner.name}</span>
-              <span className="text-2xl font-black text-brand-600 px-3">{d.a_wins} – {d.b_wins}</span>
-              <span className="text-sm font-bold flex-1 truncate text-right">{m.loser.name}</span>
-            </div>
-            <div className="card">
-              {d.matches.map((x) => (
-                <div key={x.id}>
-                  <p className="text-[10px] text-gray-400 mt-2">{fmtShort(x.date)} · {x.tournament} · {ROUND_NAME[x.round] || x.round}{x.surface ? ` · ${x.surface}` : ''}</p>
-                  <MatchRow m={x} onPlayer={(t, id) => { onClose(); onPlayer(t, id) }} />
-                </div>
-              ))}
-            </div>
-          </>
-        )}
+    <button onClick={() => onOpen(m)} className="w-full text-left py-2 border-t border-gray-100 first:border-t-0 hover:bg-amber-50/50 active:bg-amber-50 -mx-2 px-2 rounded block">
+      <div className="flex items-center gap-2 mb-0.5 text-[10px]">
+        {live
+          ? <span className="font-black text-red-600 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-red-600 animate-pulse" />LIVE · {m.detail}</span>
+          : <span className="font-bold text-gray-500">{startTime(m.start)}</span>}
+        {!plain && <span className="text-gray-400">{ROUND_NAME[m.round] || m.round}</span>}
+        {!plain && <span className="ml-auto font-bold text-brand-600">Match ›</span>}
       </div>
+      {m.players.map((p, i) => {
+        const o = m.players[1 - i]
+        return (
+          <div key={i} className="flex items-center gap-1.5 text-gray-900">
+            <Flag ioc={p.ioc} />
+            <span className="flex-1 min-w-0 truncate text-[13px] font-bold">
+              {p.name}{p.seed && <span className="ml-1 text-[10px] font-semibold text-gray-400">({p.seed})</span>}
+            </span>
+            {p.games.map((g, k) => {
+              const done = k < p.games.length - 1 || !live          // the set being played is red
+              const took = done && g > (o.games[k] ?? 0)
+              return (
+                <span key={k} className={`w-6 text-center text-[13px] tabular-nums ${!done ? 'text-red-600 font-black' : took ? 'font-black' : 'font-medium text-gray-400'}`}>
+                  {g}{p.tiebreaks?.[k] != null && done && !took && <sup className="text-[8px] font-semibold ml-px">{p.tiebreaks[k]}</sup>}
+                </span>
+              )
+            })}
+          </div>
+        )
+      })}
+    </button>
+  )
+}
+
+/** Live now, then what starts in the next day and a half, by tournament; refreshed every 30 seconds while open. */
+function Live({ tour, onOpen }) {
+  const [d, setD] = useState(null)
+  const [err, setErr] = useState(false)
+  useEffect(() => {
+    let alive = true
+    const load = () => tennisLive(tour).then((r) => { if (alive) { setD(r.data); setErr(false) } }).catch(() => { if (alive) setErr(true) })
+    load()
+    const t = setInterval(load, 30000)
+    return () => { alive = false; clearInterval(t) }
+  }, [tour])
+  if (!d && !err) return <p className="text-xs text-gray-400 text-center py-6">Loading live matches…</p>
+  if (!d) return <p className="text-sm text-red-600 text-center py-6">Couldn't reach the live scores - try again in a minute.</p>
+  const groups = (state) => {
+    const by = {}
+    d.matches.filter((m) => m.state === state).forEach((m) => {
+      const k = `${m.tour}|${m.tournament}`
+      if (!by[k]) by[k] = { tour: m.tour, name: m.tournament, surface: m.surface, matches: [] }
+      by[k].matches.push(m)
+    })
+    return Object.values(by)
+  }
+  const section = (state, title) => {
+    const gs = groups(state)
+    return (
+      <div className="space-y-2">
+        <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">
+          {title} · {gs.reduce((a, g) => a + g.matches.length, 0)}
+        </p>
+        {gs.length === 0 && <p className="text-xs text-gray-400 px-1">{state === 'live' ? 'Nothing on court right now.' : 'Nothing scheduled in the next day and a half.'}</p>}
+        {gs.map((g) => (
+          <div key={`${g.tour}|${g.name}`} className="card p-0 overflow-hidden">
+            <div className="px-4 py-2 bg-field-950 text-white flex items-center gap-2">
+              <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-white/15 tracking-wider">{g.tour}</span>
+              <p className="text-sm font-bold flex-1 min-w-0 truncate">{g.name}</p>
+              {g.surface && <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${SURFACE[g.surface] || 'bg-gray-100 text-gray-700'}`}>{g.surface}</span>}
+            </div>
+            <div className="px-4 pb-1">{g.matches.map((m) => <LiveRow key={m.espn} m={m} onOpen={onOpen} />)}</div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+  return (
+    <div className="space-y-4">
+      {section('live', 'Live now')}
+      {section('upcoming', 'Upcoming')}
+      <p className="text-[10px] text-gray-400 text-center">
+        From ESPN · updates every 30 seconds · {new Date(d.updated).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}
+      </p>
     </div>
   )
 }
 
 export default function BettingAnalytics() {
   const nav = useNavigate()
-  const [tab, setTab] = useState('results')
+  // the tab and the open player live in the address, so Back from a match page returns to them
+  const [params, setParams] = useSearchParams()
+  const tab = params.get('tab') || 'results'
+  const pl = params.get('player')
+  const sel = pl && pl.includes(':') ? { tour: pl.split(':')[0], id: +pl.split(':')[1] } : null
+  const go = (next) => setParams((p) => {
+    const q = new URLSearchParams(p)
+    Object.entries(next).forEach(([k, v]) => (v ? q.set(k, v) : q.delete(k)))
+    return q
+  }, { replace: true })
+  const setTab = (t) => go({ tab: t })
+  const setSel = (x) => go({ player: x ? `${x.tour}:${x.id}` : null })
   const [tour, setTour] = useState('all')
   const [sum, setSum] = useState(null)
-  const [sel, setSel] = useState(null)       // the player open on the Players tab
-  const [h2h, setH2H] = useState(null)
   const [fresh, setFresh] = useState(0)      // bumped when a background refresh has had time to land
   useEffect(() => {
     tennisSummary().then((r) => {
@@ -970,7 +1055,9 @@ export default function BettingAnalytics() {
       if (r.data.refreshing && fresh < 1) setTimeout(() => setFresh((f) => f + 1), 30000)
     }).catch(() => {})
   }, [fresh])
-  const openPlayer = (t, id) => { setSel({ tour: t, id }); setTab('players') }
+  const openPlayer = (t, id) => go({ tab: 'players', player: `${t}:${id}` })
+  const openMatch = (m) => nav(matchLink(m))
+  const openLive = (m) => nav(liveLink(m))
 
   return (
     <div className="pb-28 md:pb-10">
@@ -997,22 +1084,24 @@ export default function BettingAnalytics() {
             ))}
           </div>
         </div>
-        <div className="grid grid-cols-4 mt-2.5 rounded-md border border-amber-300 overflow-hidden">
-          {[['results', 'Results'], ['players', 'Players'], ['sets', 'Sets'], ['patterns', 'Patterns']].map(([k, l]) => (
+        <div className="grid grid-cols-5 mt-2.5 rounded-md border border-amber-300 overflow-hidden">
+          {[['live', 'Live'], ['results', 'Results'], ['players', 'Players'], ['sets', 'Sets'], ['patterns', 'Patterns']].map(([k, l]) => (
             <button key={k} onClick={() => setTab(k)}
-              className={`py-1.5 text-xs font-bold ${tab === k ? 'bg-brand-400 text-white' : 'bg-white text-gray-600'}`}>{l}</button>
+              className={`py-1.5 text-[11px] font-bold ${tab === k ? 'bg-brand-400 text-white' : 'bg-white text-gray-600'}`}>
+              {k === 'live' && <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 mr-1 align-middle" />}{l}
+            </button>
           ))}
         </div>
       </div>
       <div className="px-5 mt-4 max-w-2xl">
         <Safe key={tab} what="this tab">
-          {tab === 'results' && <Results tour={tour} fresh={fresh} onPlayer={openPlayer} onH2H={setH2H} />}
-          {tab === 'players' && <Players tour={tour} sel={sel} setSel={setSel} onH2H={setH2H} />}
+          {tab === 'live' && <Live tour={tour} onOpen={openLive} />}
+          {tab === 'results' && <Results tour={tour} fresh={fresh} onPlayer={openPlayer} onOpen={openMatch} />}
+          {tab === 'players' && <Players tour={tour} sel={sel} setSel={setSel} onOpen={openMatch} />}
           {tab === 'sets' && <SetStats tour={tour} />}
           {tab === 'patterns' && <Patterns />}
         </Safe>
       </div>
-      {h2h && <H2HSheet m={h2h} onClose={() => setH2H(null)} onPlayer={openPlayer} />}
     </div>
   )
 }

@@ -178,6 +178,77 @@ def sets_tournament(tour: str, name: str, db: Session = Depends(get_db), _: User
     return {"tour": tour.upper(), "name": name, "rows": tennis_stats.tournament(db, tour.upper(), name)}
 
 
+@router.get("/live", response_model=dict)
+def live(tour: str = "all", db: Session = Depends(get_db), _: User = Depends(owner)):
+    """Matches in progress and starting within a day and a half (tennis_live)."""
+    import tennis_live
+    return tennis_live.matches(db, tour)
+
+
+def _form(rows, pid: int, surface: str | None) -> dict:
+    """One player for the match page: records (career / 12 months / this
+    surface), the last 10 results, and how their sets go - over 8.5 games,
+    tie-breaks - over the last 12 months, on this surface and on all."""
+    from datetime import date as _date, timedelta as _td
+    cut = (_date.today() - _td(days=365)).isoformat()
+    recent = [r for r in rows if (r["play_date"] or "") >= cut]
+    on = lambda rs: [r for r in rs if surface and r["surface"] == surface]
+
+    def sets(rs):
+        n = over = tb = first_over = 0
+        for r in rs:
+            games, _ = tennis_stats.sets_of(r["score"])
+            for i, g in enumerate(games):
+                n += 1
+                over += g >= 9
+                tb += g == 13
+                first_over += i == 0 and g >= 9
+        firsts = sum(1 for r in rs if tennis_stats.sets_of(r["score"])[0])
+        return {"sets": n, "over": over, "tb": tb, "matches": firsts, "first_over": first_over}
+
+    last = []
+    for r in rows[:10]:
+        won = r["winner_id"] == pid
+        last.append({"id": r["match_id"], "date": r["play_date"], "tournament": r["tourney_name"], "round": r["round"],
+                     "surface": r["surface"], "won": won, "score": r["score"],
+                     "opponent": r["loser_name"] if won else r["winner_name"],
+                     "opp_rank": r["loser_rank"] if won else r["winner_rank"]})
+    return {"career": _record(rows, pid), "last_12_months": _record(recent, pid),
+            "surface": _record(on(rows), pid), "surface_12_months": _record(on(recent), pid),
+            "sets_12_months": sets(recent), "sets_surface_12_months": sets(on(recent)),
+            "last": last}
+
+
+@router.get("/matchup", response_model=dict)
+def matchup(tour: str, a: int | None = None, b: int | None = None, surface: str = "", match_id: str = "",
+            db: Session = Depends(get_db), _: User = Depends(owner)):
+    """Everything the match page shows for two players: the match itself
+    (match_id, when it is in the results), each player's form and set
+    habits, and their head-to-head. For a live or upcoming match the page
+    passes the two player ids it has (either may be unknown)."""
+    tour = tour.upper()
+    match = None
+    if match_id:
+        r = db.execute(text(f"SELECT {COLS} FROM tennis_matches WHERE match_id = :m"), {"m": match_id}).mappings().first()
+        if not r:
+            raise HTTPException(404, "No such match")
+        match = _match(r)
+        tour, a, b, surface = r["tour"], r["winner_id"], r["loser_id"], r["surface"] or ""
+    surface = surface or None
+    out = {"tour": tour, "surface": surface, "match": match, "players": {}}
+    for key, pid in (("a", a), ("b", b)):
+        if not pid:
+            continue
+        p = db.execute(text("SELECT player_id, name, hand, dob, ioc, height FROM tennis_players WHERE tour = :t AND player_id = :p"),
+                       {"t": tour, "p": pid}).mappings().first()
+        rows = db.execute(text(f"SELECT {COLS} FROM tennis_matches WHERE tour = :t AND (winner_id = :p OR loser_id = :p) "
+                               f"ORDER BY play_date DESC, match_id DESC"), {"t": tour, "p": pid}).mappings().all()
+        out["players"][key] = {"info": dict(p) if p else {"player_id": pid}, **_form(rows, pid, surface)}
+    if a and b:
+        out["h2h"] = h2h(tour, a, b, db, _)
+    return out
+
+
 @router.get("/h2h", response_model=dict)
 def h2h(tour: str, a: int, b: int, db: Session = Depends(get_db), _: User = Depends(owner)):
     """Every meeting between two players, newest first."""
