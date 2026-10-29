@@ -50,6 +50,7 @@ function ProfitChart({ points, start }) {
     cum += p
     blocks.push({ from, to, profit: p, cumulative: cum, days: dayRows, betDays: dayRows.filter((r) => r.bet).length })
   }
+  if (!blocks.length) return null                 // nothing on or after `start`
   const lead = points.filter((p) => p.date < first).reduce((a, p) => a + p.profit, 0)   // anything before `first`
   const inBlock = block != null && blocks[block]
   const bars = inBlock ? blocks[block].days.map((d) => ({ ...d, cumulative: d.cumulative + lead }))
@@ -686,19 +687,25 @@ export default function MyBets() {
   const nav = useNavigate()
   const loc = useLocation()
   const [st, setSt] = useState(null)
-  const [s, setS] = useState(null)
+  const [loaded, setLoaded] = useState(null)    // {key, data}: the summary and the stretch it is for
   const [view, setView] = useState(null)        // {from, to}; null = the current stretch
   const [bump, setBump] = useState(0)           // a Friday answer changes the numbers: reload them
   const views = st?.views
   const shown = view || views?.current || null
   const isPast = !!(views?.past && shown && shown.from === views.past.from && shown.to === views.past.to)
+  const shownKey = `${shown?.from}|${shown?.to}|${bump}`
+  // only the summary for the stretch picked now - never the last one's numbers
+  // with the new dates (that crashed the chart switching Past -> current), and a
+  // slow answer for a stretch since left can't land on the page
+  const s = loaded?.key === shownKey ? loaded.data : null
   const load = () => betsStatus().then((r) => setSt(r.data)).catch(() => setSt({ connected: false, views: null }))
   useEffect(() => { load() }, [])
   useEffect(() => {
     if (!st) return
-    setS(null)
-    betsSummary(shown ? { frm: shown.from, to: shown.to } : {}).then((r) => setS(r.data)).catch(() => setS({ total: null }))
-  }, [st, shown?.from, shown?.to, bump])
+    const key = shownKey
+    betsSummary(shown ? { frm: shown.from, to: shown.to } : {})
+      .then((r) => setLoaded({ key, data: r.data })).catch(() => setLoaded({ key, data: { total: null } }))
+  }, [st, shownKey])
   const pickBlock = (lbl) => { const [from, to] = lbl.split('|'); setView({ from, to }); window.scrollTo({ top: 0, behavior: 'smooth' }) }
   const gmail = new URLSearchParams(loc.search).get('gmail')
   const t = s?.total
