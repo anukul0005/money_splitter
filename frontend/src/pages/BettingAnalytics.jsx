@@ -611,8 +611,9 @@ function PlayerSets({ rows, vs, name }) {
           <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mt-4">Sets against stronger players</p>
           <p className="text-[10px] text-gray-400 mb-1">
             Every set against players ranked higher / in the top 5, 10, 20 at the time (ranking; the tournament
-            seed for 2026, where ESPN gives only seeds), split by how the set ended. <b className="text-red-600">Red</b> = sets {firstName} lost,
-            small = sets won. The columns don't overlap, so each row adds up to its total; under 8.5 = 6-2 + 6-1 + 6-0.
+            seed for 2026, where ESPN gives only seeds), split by how the set ended. Each box: the share of those
+            sets {firstName} <b>won</b>, how many sets there were, then <span className="text-green-700 font-bold">won</span> · <span className="text-red-600 font-bold">lost</span>.
+            The columns don't overlap, so they add up to the total; under 8.5 = 6-2 + 6-1 + 6-0.
           </p>
           <div className="overflow-x-auto -mx-4">
           <table className="w-full text-xs">
@@ -642,12 +643,23 @@ function PlayerSets({ rows, vs, name }) {
                         </p>
                       )}
                     </td>
-                    {buckets.map(([lo, hi], i) => (
-                      <td key={i} className={`px-1 py-1.5 text-center ${i === 4 ? 'bg-gray-50' : ''}`}>
-                        <p className="text-[13px] font-black text-red-600 tabular-nums">{fmtN(span(L, lo, hi))}</p>
-                        <p className="text-[9px] text-gray-500 tabular-nums">won {fmtN(span(W, lo, hi))}</p>
-                      </td>
-                    ))}
+                    {buckets.map(([lo, hi], i) => {
+                      const w = span(W, lo, hi), l = span(L, lo, hi), n = w + l
+                      const pct = n ? (100 * w) / n : null
+                      return (
+                        <td key={i} className={`px-1 py-1.5 text-center ${heat(pct)} ${i === 4 ? 'border-l-2 border-gray-300' : ''}`}>
+                          {n ? (
+                            <>
+                              <p className="text-[13px] font-black text-gray-900 tabular-nums">{pct.toFixed(0)}%</p>
+                              <p className="text-[9px] font-bold text-gray-600 tabular-nums whitespace-nowrap">{fmtN(n)} set{n === 1 ? '' : 's'}</p>
+                              <p className="text-[9px] tabular-nums whitespace-nowrap">
+                                <span className="text-green-700">{fmtN(w)}</span><span className="text-gray-400"> · </span><span className="text-red-600">{fmtN(l)}</span>
+                              </p>
+                            </>
+                          ) : <span className="text-gray-300">—</span>}
+                        </td>
+                      )
+                    })}
                   </tr>
                 )
               })}
