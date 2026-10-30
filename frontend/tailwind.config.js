@@ -1,7 +1,7 @@
 /** @type {import('tailwindcss').Config} */
 /*
  * Design system mirrored from andhbhakt.org:
- *   font   — Helvetica (Helvetica Neue on Apple devices, Arial where there's neither)
+ *   font   — IBM Plex Sans (text) + IBM Plex Mono (every number), as in Claude's artifacts
  *   primary— hsl(25 95% 53%)  orange
  *   accent — hsl(215 85% 60%) blue
  *   chrome — slate (hue 215) darks for sidebar / nav / headers
@@ -61,11 +61,11 @@ export default {
         },
       },
       fontFamily: {
-        sans: ['"Helvetica Neue"', 'Helvetica', 'Arial', 'sans-serif'],
-        mono: ['ui-monospace', 'Menlo', '"Courier New"', 'monospace'],
+        sans: ['Num', '"IBM Plex Sans"', 'system-ui', 'sans-serif'],   // Num: digits in Plex Mono - see index.css
+        mono: ['"IBM Plex Mono"', '"Courier New"', 'monospace'],
       },
       fontWeight: {
-        // Helvetica's heaviest everyday weight is bold (700) — avoid synthetic-bold smearing
+        // IBM Plex Sans tops out at 700 — avoid synthetic-bold smearing
         black: '700',
         extrabold: '700',
       },
