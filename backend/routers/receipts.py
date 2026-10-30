@@ -36,6 +36,23 @@ def scan_receipt(file: UploadFile = File(...), caller: User = Depends(current_us
     if not image_bytes:
         raise HTTPException(400, "Empty file")
 
+    # A PDF bill (Swiggy, Zomato, Uber, a hotel's invoice) carries its text:
+    # read straight off the pages, no OCR. A scanned PDF has none - a photo
+    # of it is the way in then.
+    if image_bytes[:5] == b"%PDF-":
+        import io
+        import pdfplumber
+        try:
+            with pdfplumber.open(io.BytesIO(image_bytes)) as pdf:
+                text = "\n".join((p.extract_text() or "") for p in pdf.pages[:5]).strip()
+        except Exception as e:
+            raise HTTPException(400, f"Could not open that PDF ({type(e).__name__}) - if it has a password, take a photo of it instead.")
+        if not text:
+            raise HTTPException(400, "That PDF is a scan with no text in it - take a photo of it instead.")
+        parsed = parse_receipt(text)
+        parsed["provider"] = "the PDF's text"
+        return parsed
+
     attempts: list[str] = []
     best: dict | None = None
 
