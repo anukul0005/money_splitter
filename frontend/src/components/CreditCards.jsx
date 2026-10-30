@@ -59,28 +59,17 @@ const shortMonth = (period) => new Date(`${period}-01T00:00:00`).toLocaleDateStr
 // a plain card with the latest bill's amount on the right, one row per
 // month underneath, the payments made, and "Record payment". Only the
 // latest bill takes payments (bill.can_pay) - past months are closed.
-function CardBlock({ card: c, banks, results, busy, run, editing, setEditing, saveCard }) {
+function CardBlock({ card: c, banks, results, busy, run, editing, setEditing, saveCard, onPay, color }) {
   const nav = useNavigate()
-  const [paying, setPaying] = useState(false)
-  const [amount, setAmount] = useState('')
-  const [paidOn, setPaidOn] = useState(today())
   const periods = lastPeriods(c.last_bill, MONTHS_BACK)
   const latest = c.bills.find((b) => b.can_pay)
   const settled = latest && latest.total_due != null && latest.remaining <= 0.01
 
-  const save = async (e) => {
-    e.preventDefault()
-    const amt = parseFloat(amount)
-    if (!amt || amt <= 0) return
-    if (await run(() => recordCardPayment(latest.id, { amount: amt, paid_on: paidOn }))) {
-      setPaying(false); setAmount(''); setPaidOn(today())
-    }
-  }
-
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between px-1">
-        <p className="text-xs font-bold text-gray-500">
+        <p className="text-xs font-bold text-gray-500 flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-sm shrink-0" style={{ background: color }} />
           {c.bank}{c.label ? ` ${c.label}` : ''} · billed on the {ord(c.bill_day)}
         </p>
         <div className="flex gap-3 shrink-0 text-xs font-bold">
@@ -92,8 +81,8 @@ function CardBlock({ card: c, banks, results, busy, run, editing, setEditing, sa
         </div>
       </div>
 
-      <div className={`card ${settled ? 'opacity-60' : ''} ${editing || paying ? '' : 'cursor-pointer active:scale-[0.99] transition-transform'}`}
-        onClick={editing || paying ? undefined : () => nav(`/credit-cards/card/${c.id}`)}>
+      <div className={`card ${settled ? 'opacity-60' : ''} ${editing ? "" : "cursor-pointer active:scale-[0.99] transition-transform"}`}
+        onClick={editing ? undefined : () => nav(`/credit-cards/card/${c.id}`)}>
         {editing ? (
           <CardForm banks={banks} busy={busy} onCancel={() => setEditing(null)}
             initial={{ bank: c.bank, label: c.label || '', last4: c.last4 || '', bill_day: c.bill_day }}
@@ -161,35 +150,192 @@ function CardBlock({ card: c, banks, results, busy, run, editing, setEditing, sa
               </p>
             )}
 
-            {paying ? (
-              <form onSubmit={save} className="mt-3 space-y-2">
-                <div className="flex gap-2">
-                  <input className="input text-sm flex-1 min-w-0" placeholder="Amount paid" inputMode="decimal" autoFocus
-                    value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ''))} />
-                  <DatePicker value={paidOn} onChange={setPaidOn} className="flex-1" />
-                </div>
-                {latest.remaining > 0 && (
-                  <button type="button" onClick={() => setAmount(String(latest.remaining))}
-                    className="text-[11px] font-bold text-brand-500">Pay in full ({INR(latest.remaining)})</button>
-                )}
-                <div className="flex gap-2">
-                  <button type="submit" disabled={busy || !parseFloat(amount)} className="btn-primary py-2 text-xs flex-1 disabled:opacity-50">
-                    {busy ? 'Saving…' : 'Save payment'}
-                  </button>
-                  <button type="button" onClick={() => setPaying(false)} className="text-xs font-bold text-gray-500 px-3">Cancel</button>
-                </div>
-              </form>
-            ) : (
-              <div className="flex gap-2 mt-3" onClick={(e) => e.stopPropagation()}>
-                <button onClick={(e) => { e.stopPropagation(); setPaying(true) }} disabled={!latest || settled || latest.total_due == null}
-                  className="flex-1 py-2 text-xs font-bold bg-amber-100 border border-amber-300 text-amber-800 rounded-md disabled:opacity-40 disabled:cursor-not-allowed">
-                  {settled ? 'Paid in full' : 'Record payment'}
-                </button>
-              </div>
-            )}
+            <div className="flex gap-2 mt-3" onClick={(e) => e.stopPropagation()}>
+              <button onClick={(e) => { e.stopPropagation(); onPay(c.id) }} disabled={!latest || settled || latest.total_due == null}
+                className="flex-1 py-2 text-xs font-bold bg-amber-100 border border-amber-300 text-amber-800 rounded-md disabled:opacity-40 disabled:cursor-not-allowed">
+                {settled ? 'Paid in full' : 'Record payment'}
+              </button>
+            </div>
           </>
         )}
       </div>
+    </div>
+  )
+}
+
+// One colour per card, the same in the charts and beside its name below
+const CARD_COLORS = ['#f97316', '#2563eb', '#16a34a', '#9333ea', '#db2777', '#0891b2', '#ca8a04', '#64748b']
+const kInr = (n) => (n >= 100000 ? `₹${(n / 100000).toFixed(1)}L` : n >= 1000 ? `₹${Math.round(n / 1000)}k` : `₹${Math.round(n)}`)
+const cardName = (c) => `${c.bank}${c.label ? ` ${c.label}` : ''}${c.last4 ? ` ••${c.last4}` : ''}`
+const daysTo = (iso) => Math.round((new Date(`${iso}T00:00:00`) - new Date(`${today()}T00:00:00`)) / 864e5)
+
+/** All the cards together: what's owed now, when it's due, and the bills month by month. */
+function CardsDashboard({ cards, colorOf, onPay }) {
+  const open = cards.map((c) => ({ c, b: c.bills.find((x) => x.can_pay) }))
+    .filter(({ b }) => b && b.total_due != null)
+  const owed = open.reduce((s, { b }) => s + (b.remaining || 0), 0)
+  const billed = open.reduce((s, { b }) => s + (b.total_due || 0), 0)
+  const paid = open.reduce((s, { b }) => s + Math.min(b.paid || 0, b.total_due || 0), 0)
+  const minimum = open.filter(({ b }) => b.remaining > 0.01)
+    .reduce((s, { b }) => s + Math.min(b.minimum_due ?? 0, b.remaining), 0)
+  const dues = open.filter(({ b }) => b.remaining > 0.01 && b.due_date)
+    .sort((x, y) => x.b.due_date.localeCompare(y.b.due_date))
+
+  // Bills by month, stacked by card - the last 6 months any card has
+  const periods = [...new Set(cards.flatMap((c) => c.bills.map((b) => b.period)).filter(Boolean))].sort().slice(-6)
+  const months = periods.map((p) => ({
+    p, parts: cards.map((c) => ({ c, v: c.bills.find((b) => b.period === p)?.total_due || 0 })).filter((x) => x.v > 0),
+  }))
+  const top = Math.max(1, ...months.map((m) => m.parts.reduce((s, x) => s + x.v, 0)))
+
+  return (
+    <div className="card space-y-4">
+      {/* the headline */}
+      <div className="grid grid-cols-3 gap-2">
+        <div>
+          <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">To pay</p>
+          <p className={`text-lg font-black tabular-nums ${owed > 0.01 ? 'text-red-600' : 'text-green-600'}`}>{owed > 0.01 ? INR(Math.round(owed)) : 'All paid'}</p>
+        </div>
+        <div>
+          <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Minimum</p>
+          <p className="text-lg font-black tabular-nums text-gray-900">{INR(Math.round(minimum))}</p>
+        </div>
+        <div>
+          <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Next due</p>
+          {dues[0] ? (
+            <p className={`text-lg font-black ${daysTo(dues[0].b.due_date) <= 3 ? 'text-red-600' : 'text-gray-900'}`}>
+              {daysTo(dues[0].b.due_date) < 0 ? 'Overdue' : daysTo(dues[0].b.due_date) === 0 ? 'Today' : `${daysTo(dues[0].b.due_date)}d`}
+            </p>
+          ) : <p className="text-lg font-black text-gray-300">—</p>}
+        </div>
+      </div>
+
+      {/* this cycle: paid of billed */}
+      {billed > 0 && (
+        <div>
+          <div className="flex justify-between text-[10px] text-gray-500 mb-1">
+            <span>This cycle: <b className="text-gray-800">{INR(Math.round(paid))}</b> paid of {INR(Math.round(billed))}</span>
+            <span className="font-bold">{Math.round((paid / billed) * 100)}%</span>
+          </div>
+          <div className="h-2.5 bg-red-100 overflow-hidden flex">
+            <div className="bg-green-600 h-full" style={{ width: `${(paid / billed) * 100}%` }} />
+          </div>
+        </div>
+      )}
+
+      {/* due dates, soonest first */}
+      {dues.length > 0 && (
+        <div>
+          <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">Due</p>
+          {dues.map(({ c, b }) => {
+            const d = daysTo(b.due_date)
+            return (
+              <button key={c.id} onClick={() => onPay(c.id)} className="w-full flex items-center gap-2 py-1 text-[11px] text-left">
+                <span className="w-2 h-2 rounded-sm shrink-0" style={{ background: colorOf(c.id) }} />
+                <span className="flex-1 min-w-0 truncate font-semibold text-gray-700">{cardName(c)}</span>
+                <span className={`shrink-0 ${d < 0 ? 'text-red-600 font-bold' : d <= 3 ? 'text-amber-700 font-bold' : 'text-gray-400'}`}>
+                  {day(b.due_date)}{d < 0 ? ' · overdue' : d === 0 ? ' · today' : ` · ${d}d`}
+                </span>
+                <span className="w-20 text-right shrink-0 font-black text-red-600 tabular-nums">{INR(Math.round(b.remaining))}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {/* bills by month, stacked by card */}
+      {months.length > 0 && (
+        <div>
+          <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-2">Bills by month</p>
+          <div className="flex items-end gap-2 h-32">
+            {months.map(({ p, parts }) => {
+              const total = parts.reduce((s, x) => s + x.v, 0)
+              return (
+                <div key={p} className="flex-1 flex flex-col items-center justify-end h-full min-w-0">
+                  <span className="text-[9px] font-bold text-gray-600 tabular-nums mb-0.5">{kInr(total)}</span>
+                  <div className="w-full max-w-[44px] flex flex-col-reverse" style={{ height: `${(total / top) * 100}%` }}>
+                    {parts.map(({ c, v }) => (
+                      <div key={c.id} style={{ height: `${(v / total) * 100}%`, background: colorOf(c.id) }} title={`${cardName(c)}: ${INR(v)}`} />
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="flex gap-2 mt-1">
+            {months.map(({ p }) => (
+              <span key={p} className="flex-1 text-center text-[9px] text-gray-400">{new Date(`${p}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'short' })}</span>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2">
+            {cards.filter((c) => c.bills.some((b) => periods.includes(b.period) && b.total_due)).map((c) => (
+              <span key={c.id} className="flex items-center gap-1 text-[10px] text-gray-500">
+                <span className="w-2 h-2 rounded-sm" style={{ background: colorOf(c.id) }} />{cardName(c)}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** "Record payment": pick a card, the amount (full / minimum in a tap) and the day - set against its latest bill. */
+function PayForm({ cards, cardId, setCardId, busy, onSave, onClose }) {
+  const [amount, setAmount] = useState('')
+  const [paidOn, setPaidOn] = useState(today())
+  const payable = cards.filter((c) => { const b = c.bills.find((x) => x.can_pay); return b && b.total_due != null })
+  const card = payable.find((c) => c.id === cardId)
+  const bill = card?.bills.find((x) => x.can_pay)
+  useEffect(() => { setAmount('') }, [cardId])
+  const amt = parseFloat(amount) || 0
+  return (
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40" onClick={onClose}>
+      <form onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); if (bill && amt > 0) onSave(bill.id, amt, paidOn) }}
+        className="w-full md:max-w-md bg-cream rounded-t-xl md:rounded-xl p-5 space-y-3 pb-8">
+        <div className="flex items-center">
+          <p className="text-base font-black flex-1">Record payment</p>
+          <button type="button" onClick={onClose} className="text-xs font-bold text-gray-400">Close</button>
+        </div>
+        {payable.length === 0 ? (
+          <p className="text-xs text-gray-500">No card has a bill to pay yet - fetch the bills first.</p>
+        ) : (
+          <>
+            <Dropdown value={cardId ?? ''} onChange={(v) => setCardId(Number(v))} placeholder="Which card?"
+              options={payable.map((c) => {
+                const b = c.bills.find((x) => x.can_pay)
+                return { value: c.id, label: `${cardName(c)} · ${b.remaining > 0.01 ? `${INR(b.remaining)} due` : 'paid'}` }
+              })} />
+            {bill && (
+              <p className="text-[11px] text-gray-500">
+                {shortMonth(bill.period)} bill {INR(bill.total_due)}{bill.paid > 0 ? ` · ${INR(bill.paid)} paid` : ''}
+                {bill.due_date ? ` · due ${day(bill.due_date)}` : ''}
+              </p>
+            )}
+            <input className="input text-xl font-bold" placeholder="Amount paid" inputMode="decimal"
+              value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ''))} />
+            {bill && bill.remaining > 0.01 && (
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setAmount(String(bill.remaining))}
+                  className="px-3 py-1.5 text-xs font-bold border rounded-md bg-amber-50 border-amber-200 text-gray-700">Full {INR(bill.remaining)}</button>
+                {bill.minimum_due != null && bill.minimum_due < bill.remaining && (
+                  <button type="button" onClick={() => setAmount(String(bill.minimum_due))}
+                    className="px-3 py-1.5 text-xs font-bold border rounded-md bg-amber-50 border-amber-200 text-gray-700">Minimum {INR(bill.minimum_due)}</button>
+                )}
+              </div>
+            )}
+            <DatePicker value={paidOn} onChange={setPaidOn} />
+            {bill && amt > 0 && (
+              <p className="text-[11px] text-gray-600">
+                {amt >= bill.remaining - 0.01 ? 'Settles this bill in full.' : `Leaves ${INR(Math.round((bill.remaining - amt) * 100) / 100)} to pay.`}
+              </p>
+            )}
+            <button type="submit" disabled={busy || !bill || !(amt > 0)} className="btn-primary py-2.5 text-sm w-full disabled:opacity-50">
+              {busy ? 'Saving…' : amt > 0 ? `Save ${INR(amt)} payment` : 'Save payment'}
+            </button>
+          </>
+        )}
+      </form>
     </div>
   )
 }
@@ -211,6 +357,21 @@ export default function CreditCards({ initialMsg = '' }) {
   const [results, setResults] = useState({})         // `${card_id}:${period}` -> last fetch's result
   const [msg, setMsg] = useState(initialMsg)
   const [error, setError] = useState('')
+  const [payFor, setPayFor] = useState(undefined)    // the card the payment form is open for (null: none picked yet)
+  const colorOf = (id) => CARD_COLORS[Math.max(0, (cards || []).findIndex((c) => c.id === id)) % CARD_COLORS.length]
+  const openPay = (id = null) => {
+    if (id == null) {          // the card with the soonest unpaid bill, if any
+      const next = (cards || []).map((c) => ({ c, b: c.bills.find((x) => x.can_pay) }))
+        .filter(({ b }) => b && b.remaining > 0.01).sort((x, y) => (x.b.due_date || '9').localeCompare(y.b.due_date || '9'))[0]
+      id = next?.c.id ?? null
+    }
+    setPayFor(id)
+  }
+  const savePayment = async (billId, amount, paidOn) => {
+    if (await run(() => recordCardPayment(billId, { amount, paid_on: paidOn }))) {
+      setPayFor(undefined); setMsg('Payment saved.')
+    }
+  }
 
   const load = () => {
     getGmailStatus().then((r) => setGmail(r.data)).catch(() => {})
@@ -262,30 +423,26 @@ export default function CreditCards({ initialMsg = '' }) {
 
   return (
     <div className="space-y-4">
+      {/* Record payment - for any card, from the top */}
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-black text-gray-500 uppercase tracking-widest">Your cards</p>
+        {cards?.length > 0 && (
+          <button onClick={() => openPay()} className="btn-primary !w-auto px-4 py-2 text-xs">+ Record payment</button>
+        )}
+      </div>
+
       {msg && <p className="text-xs text-green-700 bg-green-50 border border-green-100 rounded-md px-3 py-2">{msg}</p>}
       {error && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{error}</p>}
 
-      {/* Gmail connection */}
-      <div className="card space-y-2">
-        <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Gmail</p>
-        {gmail?.connected ? (
-          <div className="flex items-center justify-between gap-2">
-            <div className="min-w-0">
-              <p className="text-sm font-bold text-gray-900 truncate">{gmail.gmail_address}</p>
-              <p className="text-[11px] text-gray-400 mt-0.5">
-                {gmail.last_synced_at ? `Last searched ${new Date(gmail.last_synced_at).toLocaleString('en-IN')}` : 'Not searched yet'}
-              </p>
-              <p className="text-[11px] text-green-700 font-semibold mt-0.5">
-                Auto-sync on · each bill is fetched, unlocked and read daily after its bill date
-              </p>
-            </div>
-            <button onClick={() => confirm('Disconnect Gmail? Bills already found stay saved.') && run(() => disconnectGmail())}
-              className="text-xs font-bold text-gray-400 hover:text-red-500 shrink-0">Disconnect</button>
-          </div>
-        ) : (
-          <button onClick={connectGmail} disabled={busy} className="btn-primary py-2.5 text-xs w-full">Connect Gmail</button>
-        )}
-      </div>
+      {cards?.length > 0 && <CardsDashboard cards={cards} colorOf={colorOf} onPay={openPay} />}
+
+      {cards === null && <p className="text-xs text-gray-400 text-center py-4">Loading…</p>}
+      {cards?.length === 0 && !adding && <p className="text-sm text-gray-400 text-center py-8">No cards yet</p>}
+
+      {cards?.map((c) => (
+        <CardBlock key={c.id} card={c} banks={bankOptions} results={results} busy={busy} run={run}
+          editing={editing === c.id} setEditing={setEditing} saveCard={saveCard} onPay={openPay} color={colorOf(c.id)} />
+      ))}
 
       {/* Fetch + add */}
       <div className="card space-y-3">
@@ -315,13 +472,34 @@ export default function CreditCards({ initialMsg = '' }) {
         )}
       </div>
 
-      {cards === null && <p className="text-xs text-gray-400 text-center py-4">Loading…</p>}
-      {cards?.length === 0 && !adding && <p className="text-sm text-gray-400 text-center py-8">No cards yet</p>}
 
-      {cards?.map((c) => (
-        <CardBlock key={c.id} card={c} banks={bankOptions} results={results} busy={busy} run={run}
-          editing={editing === c.id} setEditing={setEditing} saveCard={saveCard} />
-      ))}
+      {/* Gmail connection */}
+      <div className="card space-y-2">
+        <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Gmail</p>
+        {gmail?.connected ? (
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-gray-900 truncate">{gmail.gmail_address}</p>
+              <p className="text-[11px] text-gray-400 mt-0.5">
+                {gmail.last_synced_at ? `Last searched ${new Date(gmail.last_synced_at).toLocaleString('en-IN')}` : 'Not searched yet'}
+              </p>
+              <p className="text-[11px] text-green-700 font-semibold mt-0.5">
+                Auto-sync on · each bill is fetched, unlocked and read daily after its bill date
+              </p>
+            </div>
+            <button onClick={() => confirm('Disconnect Gmail? Bills already found stay saved.') && run(() => disconnectGmail())}
+              className="text-xs font-bold text-gray-400 hover:text-red-500 shrink-0">Disconnect</button>
+          </div>
+        ) : (
+          <button onClick={connectGmail} disabled={busy} className="btn-primary py-2.5 text-xs w-full">Connect Gmail</button>
+        )}
+      </div>
+
+
+      {payFor !== undefined && (
+        <PayForm cards={cards || []} cardId={payFor} setCardId={setPayFor} busy={busy}
+          onSave={savePayment} onClose={() => setPayFor(undefined)} />
+      )}
     </div>
   )
 }
