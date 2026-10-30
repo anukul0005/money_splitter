@@ -538,7 +538,7 @@ function BillBreakup({ billId: id }) {
                         → {covered.to} · EMI {covered.at} of {covered.of}, in the loan already
                       </button>
                     )}
-                    {!covered && (x.type === 'debit' || emiOf(x)) && sentTotal < passable(x) - 0.5 && (
+                    {!covered && x.category !== 'Card fees & interest' && (x.type === 'debit' || emiOf(x)) && sentTotal < passable(x) - 0.5 && (
                       <button onClick={() => setPassing({ x, line, already: sentTotal })}
                         className="text-[10px] font-bold text-brand-500 mt-0.5">{sent.length ? '+ pass on more' : 'Split / pass on'}</button>
                     )}
