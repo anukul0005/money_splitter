@@ -73,7 +73,7 @@ export default function TennisMatch() {
       if (alive) setLive(r.data.matches.find((m) => m.espn === espn) || { gone: true })
     }).catch(() => {})
     load()
-    const t = setInterval(load, 30000)
+    const t = setInterval(() => { if (!document.hidden) load() }, 10000)
     return () => { alive = false; clearInterval(t) }
   }, [espn])
 

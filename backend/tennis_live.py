@@ -114,7 +114,7 @@ def _fetch(tour: str) -> list:
 # live scoring does (api.wtatennis.com - free, no key). Nothing like it is open
 # for the ATP, so men's matches go without.
 WTA_API = "https://api.wtatennis.com/tennis"
-POINTS_SECONDS = 15
+POINTS_SECONDS = 5                    # the app asks every 10 seconds: each ask gets the latest point
 _points: tuple[float, list] | None = None
 _wta_events: tuple[float, list] | None = None
 

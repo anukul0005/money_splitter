@@ -1021,7 +1021,7 @@ function Live({ tour, onOpen }) {
     let alive = true
     const load = () => tennisLive(tour).then((r) => { if (alive) { setD(r.data); setErr(false) } }).catch(() => { if (alive) setErr(true) })
     load()
-    const t = setInterval(load, 30000)
+    const t = setInterval(() => { if (!document.hidden) load() }, 10000)
     return () => { alive = false; clearInterval(t) }
   }, [tour])
   if (!d && !err) return <p className="text-xs text-gray-400 text-center py-6">Loading live matches…</p>
