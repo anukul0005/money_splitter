@@ -185,6 +185,13 @@ def live(tour: str = "all", db: Session = Depends(get_db), _: User = Depends(own
     return tennis_live.matches(db, tour)
 
 
+@router.get("/live/points", response_model=dict)
+def live_points(_: User = Depends(owner)):
+    """The game score of live WTA matches, by ESPN id - polled every few seconds."""
+    import tennis_live
+    return tennis_live.points()
+
+
 def _form(rows, pid: int, surface: str | None) -> dict:
     """One player for the match page: records (career / 12 months / this
     surface), the last 10 results, and how their sets go - over 8.5 games,

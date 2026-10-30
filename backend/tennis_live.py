@@ -114,7 +114,7 @@ def _fetch(tour: str) -> list:
 # live scoring does (api.wtatennis.com - free, no key). Nothing like it is open
 # for the ATP, so men's matches go without.
 WTA_API = "https://api.wtatennis.com/tennis"
-POINTS_SECONDS = 5                    # the app asks every 10 seconds: each ask gets the latest point
+POINTS_SECONDS = 2                    # the app asks every few seconds while a WTA match is live (see points())
 _points: tuple[float, list] | None = None
 _wta_events: tuple[float, list] | None = None
 
@@ -133,6 +133,12 @@ def _wta_live_events() -> list:
     with _lock:
         _wta_events = (time.time(), got)
     return got
+
+
+def _pt(v):
+    """The WTA's "Av" (advantage) shows as "A"; an empty point as nothing."""
+    v = str(v or "").strip()
+    return "A" if v.lower().startswith("a") else (v or None)
 
 
 def _wta_points() -> list:
@@ -157,7 +163,7 @@ def _wta_points() -> list:
                     if m.get("DrawMatchType") != "S" or m.get("MatchState") != "P":
                         continue
                     out.append({"a": kb.norm(m.get("PlayerNameLastA")), "b": kb.norm(m.get("PlayerNameLastB")),
-                                "point_a": m.get("PointA") or None, "point_b": m.get("PointB") or None,
+                                "point_a": _pt(m.get("PointA")), "point_b": _pt(m.get("PointB")),
                                 "serve": m.get("Serve"),
                                 "games_a": [int(m[f"ScoreSet{i}A"]) for i in range(1, 6) if str(m.get(f"ScoreSet{i}A") or "").isdigit()],
                                 "games_b": [int(m[f"ScoreSet{i}B"]) for i in range(1, 6) if str(m.get(f"ScoreSet{i}B") or "").isdigit()]})
@@ -197,6 +203,22 @@ def _add_points(out: list) -> None:
             else:
                 continue
             break
+
+
+def points() -> dict:
+    """Just the live WTA matches' game score, by ESPN id - cheap enough for the
+    app to ask every few seconds (the WTA feed only answers when asked, so this
+    is as close to "as it happens" as it gets). Uses the ESPN list the last
+    matches() call cached; nothing when there isn't one."""
+    with _lock:
+        hit = _cache.get("WTA")
+    if not hit:
+        return {"matches": {}}
+    out = [{**m, "players": [dict(p) for p in m["players"]]} for m in hit[1] if m["state"] == "live"]
+    _add_points(out)
+    return {"matches": {m["espn"]: {"detail": m["detail"],
+                                    "players": [{k: p.get(k) for k in ("games", "point", "serving")} for p in m["players"]]}
+                        for m in out if any(p.get("point") is not None for p in m["players"])}}
 
 
 def matches(db, tour: str = "all") -> dict:

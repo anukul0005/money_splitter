@@ -1,6 +1,6 @@
 import { Component, useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { tennisDay, tennisLive, tennisPatterns, tennisPlayer, tennisPlayers, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
+import { tennisDay, tennisLive, tennisLivePoints, tennisPatterns, tennisPlayer, tennisPlayers, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
 import DatePicker from '../components/DatePicker'
 
 /**
@@ -963,6 +963,46 @@ export const startTime = (iso) => {
   return `${day}, ${d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}`
 }
 
+/** The game score of live WTA matches, asked for every 3 seconds while one is on screen
+ * (the WTA's feed only answers when asked - this is the nearest to "as it happens").
+ * Returns {espn id: {detail, players: [{games, point, serving}]}}. */
+export function useLivePoints(on) {
+  const [pts, setPts] = useState({})
+  useEffect(() => {
+    if (!on) return undefined
+    let alive = true, busy = false
+    const load = () => {
+      if (busy || document.hidden) return
+      busy = true
+      tennisLivePoints().then((r) => { if (alive) setPts(r.data.matches || {}) }).catch(() => {}).finally(() => { busy = false })
+    }
+    load()
+    const t = setInterval(load, 3000)
+    return () => { alive = false; clearInterval(t) }
+  }, [on])
+  return pts
+}
+
+/** A live match with the latest game score laid over it. */
+export const withPoints = (m, pts) => {
+  const x = m && pts?.[m.espn]
+  return x ? { ...m, detail: x.detail, players: m.players.map((p, i) => ({ ...p, ...x.players[i] })) } : m
+}
+
+/** A score that changed lights up for a moment (the point just played, a game just won). */
+function Flash({ v, className = '', children }) {
+  const prev = useRef(v)
+  const [on, setOn] = useState(false)
+  useEffect(() => {
+    if (prev.current === v) return undefined
+    prev.current = v
+    setOn(true)
+    const t = setTimeout(() => setOn(false), 1800)
+    return () => clearTimeout(t)
+  }, [v])
+  return <span className={`${className} rounded-sm transition-colors duration-700 ${on ? 'bg-amber-200' : ''}`}>{children}</span>
+}
+
 /** One live / upcoming match: the players with their games so far, the set or the start time. */
 export function LiveRow({ m, onOpen, plain }) {
   const live = m.state === 'live'
@@ -992,18 +1032,18 @@ export function LiveRow({ m, onOpen, plain }) {
               const done = k < p.games.length - 1 || !live          // the set being played is red
               const took = done && g > (o.games[k] ?? 0)
               return (
-                <span key={k} className={`w-6 text-center text-[13px] tabular-nums ${!done ? 'text-red-600 font-black' : took ? 'font-black' : 'font-medium text-gray-400'}`}>
+                <Flash key={k} v={g} className={`w-6 text-center text-[13px] tabular-nums ${!done ? 'text-red-600 font-black' : took ? 'font-black' : 'font-medium text-gray-400'}`}>
                   {/* both players' tie-break points, as ESPN gives them: 7⁷ over 6⁴ */}
                   {g}{done && (p.tiebreaks?.[k] != null || o.tiebreaks?.[k] != null) && (
                     <sup className="text-[8px] font-semibold ml-px">{p.tiebreaks?.[k] ?? (o.tiebreaks?.[k] != null ? (took ? Math.max(7, o.tiebreaks[k] + 2) : '') : '')}</sup>
                   )}
-                </span>
+                </Flash>
               )
             })}
             {/* the game being played (WTA only - the ATP's points aren't open) */}
             {live && m.players.some((x) => x.point != null) && (
-              <span className="ml-1 w-8 pl-1 text-center text-[13px] font-black tabular-nums text-brand-600 border-l border-gray-200">
-                {p.point ?? ''}
+              <span className="ml-1 pl-1 border-l border-gray-200">
+                <Flash v={p.point} className="inline-block w-7 text-center text-[13px] font-black tabular-nums text-brand-600">{p.point ?? ''}</Flash>
               </span>
             )}
           </div>
@@ -1013,7 +1053,7 @@ export function LiveRow({ m, onOpen, plain }) {
   )
 }
 
-/** Live now, then what starts in the next day and a half, by tournament; refreshed every 30 seconds while open. */
+/** Live now, then what starts in the next day and a half, by tournament: the list refreshed every 10 seconds, a WTA game's points every 3. */
 function Live({ tour, onOpen }) {
   const [d, setD] = useState(null)
   const [err, setErr] = useState(false)
@@ -1024,6 +1064,7 @@ function Live({ tour, onOpen }) {
     const t = setInterval(() => { if (!document.hidden) load() }, 10000)
     return () => { alive = false; clearInterval(t) }
   }, [tour])
+  const pts = useLivePoints(!!d?.matches?.some((m) => m.tour === 'WTA' && m.state === 'live'))
   if (!d && !err) return <p className="text-xs text-gray-400 text-center py-6">Loading live matches…</p>
   if (!d) return <p className="text-sm text-red-600 text-center py-6">Couldn't reach the live scores - try again in a minute.</p>
   const groups = (state) => {
@@ -1050,7 +1091,7 @@ function Live({ tour, onOpen }) {
               <p className="text-sm font-bold flex-1 min-w-0 truncate">{g.name}</p>
               {g.surface && <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${SURFACE[g.surface] || 'bg-gray-100 text-gray-700'}`}>{g.surface}</span>}
             </div>
-            <div className="px-4 pb-1">{g.matches.map((m) => <LiveRow key={m.espn} m={m} onOpen={onOpen} />)}</div>
+            <div className="px-4 pb-1">{g.matches.map((m) => <LiveRow key={m.espn} m={withPoints(m, pts)} onOpen={onOpen} />)}</div>
           </div>
         ))}
       </div>

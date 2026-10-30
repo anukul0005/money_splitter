@@ -238,6 +238,7 @@ export const tennisPlayers  = (q, tour)          => api.get('/tennis/players', {
 export const tennisPlayer   = (tour, id)         => api.get(`/tennis/player/${tour}/${id}`)
 export const tennisH2H      = (tour, a, b)       => api.get('/tennis/h2h', { params: { tour, a, b } })
 export const tennisLive     = (tour)             => api.get('/tennis/live', { params: { tour } })
+export const tennisLivePoints = ()               => api.get('/tennis/live/points')
 export const tennisMatchup  = (params)           => api.get('/tennis/matchup', { params })
 export const tennisSets     = ()                 => api.get('/tennis/sets')
 export const tennisPatterns = (since = 0)        => api.get('/tennis/patterns', { params: { since } })

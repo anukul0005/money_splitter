@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { tennisLive, tennisMatchup } from '../api'
-import { LiveRow, MatchRow, ROUND_NAME, SURFACE, Safe, ScoreText, fmtShort, matchLink, startTime } from './BettingAnalytics'
+import { LiveRow, MatchRow, ROUND_NAME, SURFACE, Safe, ScoreText, fmtShort, matchLink, startTime, useLivePoints, withPoints } from './BettingAnalytics'
 
 /**
  * /betting/match - one match: the result (or the live score, refreshed),
@@ -77,6 +77,7 @@ export default function TennisMatch() {
     return () => { alive = false; clearInterval(t) }
   }, [espn])
 
+  const pts = useLivePoints(live?.tour === 'WTA' && live?.state === 'live')
   const m = d?.match
   const A = d?.players?.a, B = d?.players?.b
   const nameA = m?.winner.name || A?.info?.name || q.get('an') || 'Player 1'
@@ -112,7 +113,7 @@ export default function TennisMatch() {
             {/* the match: final score, or live / upcoming from ESPN */}
             <div className="card">
               {m && <MatchRow m={m} onPlayer={openPlayer} />}
-              {!m && live && !live.gone && <LiveRow m={live} onOpen={() => {}} plain />}
+              {!m && live && !live.gone && <LiveRow m={withPoints(live, pts)} onOpen={() => {}} plain />}
               {!m && (!live || live.gone) && (
                 <div className="py-2 text-sm font-bold text-gray-900">
                   {nameA} <span className="text-gray-400 font-medium">vs</span> {nameB}
