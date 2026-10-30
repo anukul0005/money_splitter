@@ -32,7 +32,7 @@ const PAYMENT_KEY = 'splitter_last_payment_mode'
 const inr = (n) => `₹${r2(n).toLocaleString('en-IN')}`
 
 /**
- * "+ New Group" - a quick expense. First the expense: read from a photo, a
+ * "+ New Expense" (Home) - a quick expense. First the expense: read from a photo, a
  * gallery image or a PDF bill, or typed by hand (a bank statement imports a
  * month's worth into the monthly groups by itself). Then whose it is:
  *  - yours alone (the default): into that month's personal group,
@@ -305,7 +305,7 @@ export default function NewGroup() {
             </svg>
           </button>
           <div>
-            <h1 className="text-xl font-bold">Add expense</h1>
+            <h1 className="text-xl font-bold">New expense</h1>
             <p className="text-[11px] text-gray-400 mt-0.5">Yours goes to the month's personal expenses; split, it goes to the group with those people.</p>
           </div>
         </div>

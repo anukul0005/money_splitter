@@ -212,7 +212,7 @@ export default function Home() {
             start a group, and they're a member of whatever they create. */}
         <div className="grid grid-cols-3 gap-3">
             <button className="btn-primary py-2.5 px-3 text-xs" onClick={() => nav('/groups/new')}>
-              + New Group
+              + New Expense
             </button>
             <button
               className="bg-amber-100 border border-amber-300 rounded-md text-amber-800 hover:bg-amber-200 active:scale-95 font-bold px-3 py-2.5 transition-all duration-150 w-full text-center text-xs"
