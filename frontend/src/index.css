@@ -220,3 +220,7 @@
 }
 .rangepair input[type="range"]::-moz-range-track { background: transparent; }
 
+
+/* Sports pages in Arial (components/SportsFont.jsx). Arial's own digits are
+   equal width, so the score columns stay lined up. */
+.sports-arial, .sports-arial * { font-family: Arial, Helvetica, sans-serif !important; }
