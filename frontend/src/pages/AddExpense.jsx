@@ -424,7 +424,7 @@ export default function AddExpense() {
                 >
                   📄 Upload statement (.csv / .pdf)
                 </button>
-                <p className="text-[11px] text-gray-500 mt-1">PhonePe (.csv / .pdf), Google Pay (.pdf) or Paytm (.pdf) - password-protected PDFs work too</p>
+                <p className="text-[11px] text-gray-500 mt-1">PhonePe (.csv / .pdf), Google Pay, Paytm, or any bank's PDF statement - password-protected PDFs work too</p>
                 {statement.input}
                 {statement.panel}
               </>

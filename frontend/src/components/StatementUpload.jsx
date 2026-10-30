@@ -2,13 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import { startImportJob, getImportJob, cancelImportJob, listStatementPasswords, forgetStatementPassword } from '../api'
 import StatementImportResult from './StatementImportResult'
 
-// The payment apps a statement can come from, and the file types each
+// The payment apps (and banks) a statement can come from, and the file types each
 // app's statement downloads as. The backend works the format out from the
 // file itself - picking the app only narrows the file chooser.
 const APPS = [
   { key: 'gpay',    label: 'Google Pay', hint: 'PDF statement',       accept: '.pdf,application/pdf' },
   { key: 'phonepe', label: 'PhonePe',    hint: 'CSV or PDF statement', accept: '.csv,text/csv,.pdf,application/pdf' },
   { key: 'paytm',   label: 'Paytm',      hint: 'PDF statement',       accept: '.pdf,application/pdf' },
+  // Any bank's account statement (HDFC, SBI, ICICI, ...) - read by AI on the server
+  { key: 'bank',    label: 'Bank',       hint: "Any bank's PDF statement", accept: '.pdf,application/pdf' },
 ]
 // For a single "upload a statement" button with no app picker.
 export const ANY_STATEMENT = { key: 'any', label: 'statement', accept: '.csv,text/csv,.pdf,application/pdf' }

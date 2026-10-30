@@ -408,5 +408,11 @@ def parse_statement(raw: bytes, password: str | None = None,
             return name, run()
         except ValueError:
             continue
+    if raw.startswith(b"%PDF"):
+        # Not a payment app's: any bank's account statement, read by the LLM
+        # (bank_statement_llm) - the reading then shows as the bar's progress.
+        import bank_statement_llm
+        txns = bank_statement_llm.parse_bank_pdf(lines, progress)
+        return txns[0].source, txns
     names = ", ".join([f"{n} PDF" for n, _ in PDF_FORMATS] + [f"{n} CSV" for n, _ in CSV_FORMATS])
-    raise ValueError(f"This file isn't a statement type the app can read yet (supported: {names}).")
+    raise ValueError(f"This file isn't a statement type the app can read yet (supported: {names}, bank statement PDFs).")

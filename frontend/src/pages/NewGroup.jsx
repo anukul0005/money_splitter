@@ -327,7 +327,7 @@ export default function NewGroup() {
                   🏦 Bank statement
                 </button>
               </div>
-              <p className="text-[10px] text-gray-500 mt-1.5">A statement (PhonePe, Google Pay, Paytm - .csv / .pdf) files each payment into its month's personal expenses by itself.</p>
+              <p className="text-[10px] text-gray-500 mt-1.5">Any bank's PDF statement (HDFC, SBI, ICICI, …) or a PhonePe, Google Pay or Paytm one: each payment is read and filed into its month's personal expenses by itself.</p>
               {statement.input}
               {statement.panel}
               <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden"
