@@ -22,6 +22,27 @@ AHEAD_HOURS = 36                      # upcoming: what starts within this
 _cache: dict[str, tuple[float, list]] = {}
 _tourneys: tuple[float, object] | None = None
 _lock = threading.Lock()
+_running: set = set()                 # background refreshes under way
+_kb_ids: dict = {}                    # (tour, espn id) -> (knowledge-base id or None, when looked up)
+
+
+def _bg(key: str, fn) -> None:
+    """Run fn in the background unless it already is: a request never waits for
+    a refresh - it gets the last answer, and the next one gets the new."""
+    with _lock:
+        if key in _running:
+            return
+        _running.add(key)
+
+    def run():
+        try:
+            fn()
+        except Exception as err:
+            print(f"[tennis-live] {key}: {err}")
+        finally:
+            with _lock:
+                _running.discard(key)
+    threading.Thread(target=run, daemon=True, name=f"tennis-live-{key}").start()
 
 
 def _tourney_info():
@@ -142,14 +163,22 @@ def _pt(v):
 
 
 def _wta_points() -> list:
-    """Live WTA singles matches with the game score: [{a, b, point_a, point_b, serve}] (surnames)."""
-    global _points
+    """Live WTA singles matches with the game score: [{a, b, point_a, point_b, serve}] (surnames).
+    Older than POINTS_SECONDS: the last answer now, a fresh one fetched behind it."""
     with _lock:
-        if _points and time.time() - _points[0] < POINTS_SECONDS:
-            return _points[1]
+        hit = _points
+    if hit:
+        if time.time() - hit[0] >= POINTS_SECONDS:
+            _bg("wta-points", _load_wta_points)
+        return hit[1]
+    return _load_wta_points()
+
+
+def _load_wta_points() -> list:
+    global _points
     out = []
     try:
-        events = _wta_live_events()
+        events = [e for e in _wta_live_events() if "125" not in (e[2] or "")]   # the Live tab is tour level
         from concurrent.futures import ThreadPoolExecutor
         def get(ev):
             try:
@@ -222,37 +251,58 @@ def points() -> dict:
                         for m in out if any(p.get("point") is not None for p in m["players"])}}
 
 
+def _refresh(t: str) -> None:
+    _tourney_info()
+    got = _fetch(t)
+    with _lock:
+        _cache[t] = (time.time(), got)
+
+
+def warm() -> None:
+    """At server start: the tournament list, both tours' matches and the WTA points
+    ready before anyone opens the Live tab."""
+    for t in ("ATP", "WTA"):
+        _refresh(t)
+    _load_wta_points()
+
+
 def matches(db, tour: str = "all") -> dict:
     tours = [tour.upper()] if tour.upper() in ("ATP", "WTA") else ["ATP", "WTA"]
     out = []
-    stale = []
+    missing = []
     for t in tours:
         with _lock:
             hit = _cache.get(t)
-        if hit and time.time() - hit[0] < CACHE_SECONDS:
+        if hit:
             out += hit[1]
+            if time.time() - hit[0] >= CACHE_SECONDS:
+                _bg(f"espn-{t}", lambda t=t: _refresh(t))     # this answer now, a fresh one behind it
         else:
-            stale.append(t)
-    if stale:
-        _tourney_info()                            # once, before the tours fetch side by side
+            missing.append(t)
+    if missing:                                    # only the very first ask waits
+        _tourney_info()
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(2) as pool:
-            for t, got in zip(stale, pool.map(_fetch, stale)):
+            for t, got in zip(missing, pool.map(_fetch, missing)):
                 with _lock:
                     _cache[t] = (time.time(), got)
                 out += got
-    out = [{**m, "players": [dict(p) for p in m["players"]]} for m in out]   # points go on copies, not the cache
-    _add_points(out)
+    out = [{**m, "players": [dict(p) for p in m["players"]]} for m in out]   # ids go on copies, not the cache
     # ESPN athlete -> knowledge-base player, so the match page can show form and head-to-head
+    # (looked up once an hour per player, not on every refresh)
+    now = time.time()
     ids = {(m["tour"], p["espn_id"]) for m in out for p in m["players"] if p["espn_id"]}
-    known = {}
-    if ids:
-        espn_ids = sorted({e for _, e in ids})
+    ask = sorted({e for k in ids for e in [k[1]] if k not in _kb_ids or now - _kb_ids[k][1] > 3600})
+    if ask:
+        found = {}
         for r in db.execute(text("SELECT tour, espn_id, player_id FROM tennis_players WHERE espn_id = ANY(:ids)"),
-                            {"ids": espn_ids}).fetchall():
-            known[(r[0], r[1])] = r[2]
+                            {"ids": ask}).fetchall():
+            found[(r[0], r[1])] = r[2]
+        for k in ids:
+            if k[1] in ask:
+                _kb_ids[k] = (found.get(k), now)
     for m in out:
         for p in m["players"]:
-            p["id"] = known.get((m["tour"], p["espn_id"]))
+            p["id"] = (_kb_ids.get((m["tour"], p["espn_id"])) or (None,))[0]
     out.sort(key=lambda m: (m["state"] != "live", m["start"] or "", m["tournament"]))
     return {"updated": datetime.now(timezone.utc).isoformat(timespec="seconds"), "matches": out}

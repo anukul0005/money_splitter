@@ -52,6 +52,9 @@ async def lifespan(app: FastAPI):
     # Betting analytics' Sets numbers - one pass over every tennis match.
     import tennis_sync
     threading.Thread(target=tennis_sync.warm_stats, daemon=True, name="tennis-stats").start()
+    # The Live tab's ESPN matches and WTA points, ready before it's opened.
+    import tennis_live
+    threading.Thread(target=tennis_live.warm, daemon=True, name="tennis-live").start()
     # Woken after 12:30 IST with today's daily jobs not yet run (the cron
     # ping was refused, say)? Run them now - see routers/cron.py.
     cron.maybe_catch_up()

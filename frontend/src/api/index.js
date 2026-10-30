@@ -232,17 +232,34 @@ export const listPlaceNames    = (city) => api.get('/food/names', { params: { ci
 export const getMyPlaces       = ()     => api.get('/food/my-places')
 export const getMyPlaceVisits  = (name) => api.get('/food/my-places/visits', { params: { name } })
 // Betting analytics - ATP/WTA results 2000-today (backend routers/tennis.py; owner only)
-export const tennisSummary  = ()                 => api.get('/tennis/summary')
-export const tennisDay      = (date, tour)       => api.get('/tennis/day', { params: { date, tour } })
-export const tennisPlayers  = (q, tour)          => api.get('/tennis/players', { params: { q, tour } })
-export const tennisPlayer   = (tour, id)         => api.get(`/tennis/player/${tour}/${id}`)
+// Betting analytics answers are kept a short while in memory: going back to a
+// tab or a page just seen shows at once instead of asking the server again.
+const memo = new Map()
+const MIN = 60_000
+function remembered(url, params, ttl) {
+  const k = url + JSON.stringify(params || {})
+  const hit = memo.get(k)
+  if (hit && Date.now() - hit.t < ttl) return hit.p
+  const p = api.get(url, { params }).then((r) => {
+    if (r.data?.refreshing) memo.delete(k)       // still being worked out: ask again next time
+    return r
+  }).catch((e) => { memo.delete(k); throw e })
+  memo.set(k, { t: Date.now(), p })
+  if (memo.size > 200) memo.delete(memo.keys().next().value)
+  return p
+}
+
+export const tennisSummary  = ()                 => remembered('/tennis/summary', null, 5 * MIN)
+export const tennisDay      = (date, tour)       => remembered('/tennis/day', { date, tour }, 2 * MIN)
+export const tennisPlayers  = (q, tour)          => remembered('/tennis/players', { q, tour }, 5 * MIN)
+export const tennisPlayer   = (tour, id)         => remembered(`/tennis/player/${tour}/${id}`, null, 5 * MIN)
 export const tennisH2H      = (tour, a, b)       => api.get('/tennis/h2h', { params: { tour, a, b } })
-export const tennisLive     = (tour)             => api.get('/tennis/live', { params: { tour } })
+export const tennisLive     = (tour)             => remembered('/tennis/live', { tour }, 8_000)
 export const tennisLivePoints = ()               => api.get('/tennis/live/points')
 export const tennisLiveFeed = (espn)             => api.get('/tennis/live/feed', { params: { espn } })
-export const tennisMatchup  = (params)           => api.get('/tennis/matchup', { params })
-export const tennisSets     = ()                 => api.get('/tennis/sets')
-export const tennisPatterns = (since = 0)        => api.get('/tennis/patterns', { params: { since } })
+export const tennisMatchup  = (params)           => remembered('/tennis/matchup', params, 2 * MIN)
+export const tennisSets     = ()                 => remembered('/tennis/sets', null, 10 * MIN)
+export const tennisPatterns = (since = 0)        => remembered('/tennis/patterns', { since }, 10 * MIN)
 
 // My bets - 1xbet history read from Gmail (backend routers/bets.py; owner only)
 export const betsStatus     = ()                 => api.get('/bets/status')
@@ -254,7 +271,7 @@ export const betsList       = (params)           => api.get('/bets/list', { para
 export const betsPromos     = ()                 => api.get('/bets/promos')
 export const betsSavePromo  = (body)             => api.post('/bets/promos', body)
 export const betsDeletePromo = (day)             => api.delete(`/bets/promos/${day}`)
-export const tennisSetsTourney = (tour, name)    => api.get('/tennis/sets/tournament', { params: { tour, name } })
+export const tennisSetsTourney = (tour, name)    => remembered('/tennis/sets/tournament', { tour, name }, 10 * MIN)
 // Bottles I've had - read from drink expenses' descriptions and notes (backend bottles.py)
 export const getMyBottles      = ()     => api.get('/drinks/my-bottles')
 export const getBottlePurchases = (name, size) => api.get('/drinks/my-bottles/purchases', { params: { name, size } })
