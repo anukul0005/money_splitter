@@ -14,9 +14,11 @@ import PayViaUpi from '../components/PayViaUpi'
 import CreditCards from '../components/CreditCards'
 import { useUser } from '../UserContext'
 import { dn } from '../utils/displayName'
+import { combinedBalances } from '../utils/balances'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
 const same = (a, b) => (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase()
+const r2 = (n) => Math.round(n * 100) / 100
 
 
 /**
@@ -52,10 +54,15 @@ export default function Loans() {
   const [bill, setBill] = useState({ title: '', amount: '', members: [], day_of_month: 1 })
 
   const load = () => getLoans().then((r) => setData(r.data)).catch(() => setError('Could not load.'))
+  // Group balances per person (/stats/friends): a loan's card shows what's
+  // owed overall with that person, groups and settle-ups included - the same
+  // net Home shows
+  const [friends, setFriends] = useState(null)
+  const loadFriends = () => getFriends().then((r) => { setFriends(r.data); setPeople(r.data.map((f) => f.name)) }).catch(() => {})
 
   useEffect(() => {
     load()
-    getFriends().then((r) => setPeople(r.data.map((f) => f.name))).catch(() => {})
+    loadFriends()
     // The query string only matters for the one redirect back from Google -
     // clearing it keeps a later manual refresh from re-showing "Gmail
     // connected." as if it had just happened again.
@@ -63,7 +70,7 @@ export default function Loans() {
   }, [])
 
   useEffect(() => {
-    const onChanged = () => load()
+    const onChanged = () => { load(); loadFriends() }
     window.addEventListener(MONEY_CHANGED, onChanged)
     return () => window.removeEventListener(MONEY_CHANGED, onChanged)
   }, [])
@@ -184,6 +191,14 @@ export default function Loans() {
 
   const me = user?.name
   const t = data.totals
+  // name -> { net (> 0 they owe you), group (the groups' part of it) }
+  const overall = {}
+  if (friends) {
+    for (const r of combinedBalances(friends, data, me)) {
+      const f = friends.find((x) => same(x.name, r.name))
+      overall[r.name.trim().toLowerCase()] = { net: r.net, group: f?.net ?? 0 }
+    }
+  }
 
   return (
     <div className="pb-24 md:pb-8">
@@ -362,6 +377,11 @@ export default function Loans() {
           ) : data.loans.map((l) => {
             const iOwe = same(l.borrower, me)
             const other = iOwe ? l.lender : l.borrower
+            // Groups with them change what's really owed: Anjali owing you
+            // ₹6,969 in groups takes this ₹8,372 loan down to ₹1,403
+            const o = !l.paid && overall[(other || '').trim().toLowerCase()]
+            const netted = o && Math.abs(o.group) > 0.5 ? o : null
+            const owedOverall = netted ? (iOwe ? -netted.net : netted.net) : null   // > 0: still this loan's way round
             return (
               <div key={l.id} id={`loan-${l.id}`}
                 className={`card scroll-mt-4 transition-shadow ${l.paid ? 'opacity-60' : ''} ${flash === `loan-${l.id}` ? 'ring-2 ring-brand-400' : ''}`}>
@@ -376,10 +396,25 @@ export default function Loans() {
                     </p>
                     {l.note && <p className="text-xs text-gray-500 mt-0.5">{l.note}</p>}
                   </div>
-                  <p className={`text-base font-black shrink-0 ${l.paid ? 'text-gray-400' : iOwe ? 'text-red-600' : 'text-green-600'}`}>
-                    {l.paid ? 'Paid' : INR(l.total_due)}
-                  </p>
+                  <div className="text-right shrink-0">
+                    <p className={`text-base font-black ${l.paid ? 'text-gray-400' : netted && owedOverall <= 0.5 ? 'text-gray-400' : iOwe ? 'text-red-600' : 'text-green-600'}`}>
+                      {l.paid ? 'Paid' : netted ? (owedOverall > 0.5 ? INR(owedOverall) : 'Even') : INR(l.total_due)}
+                    </p>
+                    {netted && <p className="text-[10px] text-gray-400">overall</p>}
+                  </div>
                 </div>
+                {netted && (
+                  <p className="text-[11px] text-gray-600 mt-1.5 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">
+                    Loan {INR(l.total_due)} {(netted.group > 0) === iOwe ? '−' : '+'} {INR(Math.abs(netted.group))}{' '}
+                    {netted.group > 0 ? `${dn(other)} owes you` : `you owe ${dn(other)}`} in groups
+                    {' = '}
+                    <b>{owedOverall > 0.5
+                      ? (iOwe ? `you owe ${INR(owedOverall)}` : `${dn(other)} owes you ${INR(owedOverall)}`)
+                      : owedOverall < -0.5
+                        ? (iOwe ? `${dn(other)} owes you ${INR(-owedOverall)}` : `you owe ${INR(-owedOverall)}`)
+                        : "you're even"}</b> overall
+                  </p>
+                )}
                 {l.interest > 0 && (
                   <p className="text-xs text-amber-700 mt-1">
                     Includes {INR(l.interest)} interest · {l.months_overdue} month{l.months_overdue !== 1 ? 's' : ''} overdue
@@ -408,7 +443,7 @@ export default function Loans() {
                       Record repayment
                     </button>
                   )}
-                  {!l.paid && iOwe && (
+                  {!l.paid && iOwe && !(netted && owedOverall <= 0.5) && (
                     <button onClick={() => togglePay(`loan-${l.id}`, other)} className="flex-1 py-2 text-xs font-bold bg-brand-50 border border-brand-300 text-brand-700 rounded-md">
                       {openPayKey === `loan-${l.id}` ? 'Hide UPI' : 'Pay via UPI'}
                     </button>
@@ -420,7 +455,8 @@ export default function Loans() {
                   </button>
                 </div>
                 {openPayKey === `loan-${l.id}` && (
-                  <PayPanel personName={other} amount={l.total_due} note={`Loan repayment to ${dn(other)}`} kind="loan" refId={l.id} />
+                  <PayPanel personName={other} amount={netted ? Math.min(l.total_due, r2(owedOverall)) : l.total_due}
+                    note={`Loan repayment to ${dn(other)}`} kind="loan" refId={l.id} />
                 )}
               </div>
             )
