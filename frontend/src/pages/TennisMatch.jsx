@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { tennisLive, tennisMatchup } from '../api'
-import { LiveRow, MatchRow, ROUND_NAME, SURFACE, Safe, fmtShort, matchLink, startTime } from './BettingAnalytics'
+import { LiveRow, MatchRow, ROUND_NAME, SURFACE, Safe, ScoreText, fmtShort, matchLink, startTime } from './BettingAnalytics'
 
 /**
  * /betting/match - one match: the result (or the live score, refreshed),
@@ -48,7 +48,7 @@ function Form({ p, name, nav }) {
             {x.opp_rank && <span className="text-[9px] text-gray-400"> #{x.opp_rank}</span>}
             <span className="block text-[10px] text-gray-400 truncate">{fmtShort(x.date)} · {x.tournament} · {ROUND_NAME[x.round] || x.round}</span>
           </span>
-          <span className="tabular-nums text-gray-600 whitespace-nowrap">{x.score}</span>
+          <span className="tabular-nums text-gray-600 whitespace-nowrap"><ScoreText score={x.score} won={x.won} /></span>
         </button>
       ))}
     </div>

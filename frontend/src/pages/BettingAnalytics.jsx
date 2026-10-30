@@ -37,6 +37,25 @@ export function parseScore(score) {
   return { sets, end }
 }
 
+/** A stored score as text from one player's side ("7⁷-6⁴ 5-7"): won = that player won the match. */
+export function ScoreText({ score, won = true }) {
+  const { sets, end } = parseScore(score)
+  if (!sets.length) return <>{score}</>
+  return (
+    <>
+      {sets.map((st, i) => {
+        const [a, b, ta, tb] = won ? [st.w, st.l, st.tbW, st.tbL] : [st.l, st.w, st.tbL, st.tbW]
+        return (
+          <span key={i} className="ml-1 first:ml-0">
+            {a}{st.tb != null && <sup className="text-[8px]">{ta}</sup>}-{b}{st.tb != null && <sup className="text-[8px]">{tb}</sup>}
+          </span>
+        )
+      })}
+      {end && <span className="ml-1 text-amber-600 font-bold">{end}</span>}
+    </>
+  )
+}
+
 /** A crash inside shows a line, not a blank white page. */
 export class Safe extends Component {
   constructor(props) { super(props); this.state = { err: null } }
