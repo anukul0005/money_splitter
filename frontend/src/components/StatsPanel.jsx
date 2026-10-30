@@ -8,7 +8,7 @@ import { Bar, Doughnut } from 'react-chartjs-2'
 import { dn } from '../utils/displayName'
 
 Chart.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend, ArcElement, DoughnutController, BarController, LineElement, PointElement, LineController, Filler)
-Chart.defaults.font.family = "Num, 'IBM Plex Sans', system-ui, sans-serif"
+Chart.defaults.font.family = "'Helvetica Neue', Helvetica, Arial, sans-serif"
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 const PALETTE = ['#ef4444','#f97316','#eab308','#22c55e','#06b6d4','#3b82f6','#8b5cf6','#ec4899']
@@ -30,7 +30,7 @@ const donutPctPlugin = {
         const pos = el.tooltipPosition()
         ctx.save()
         ctx.fillStyle = '#fff'
-        ctx.font = "bold 11px Num, 'IBM Plex Sans', system-ui, sans-serif"
+        ctx.font = "bold 11px 'Helvetica Neue', Helvetica, Arial, sans-serif"
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
         ctx.fillText(`${pct}%`, pos.x, pos.y)
@@ -126,8 +126,8 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
       tooltip: { callbacks: { label: (c) => ` ${INR(c.parsed.x)}` } },
     },
     scales: {
-      x: { ticks: { callback: (v) => `₹${(v/1000).toFixed(0)}k`, font: { size: 11, family: "Num, 'IBM Plex Sans'" } }, grid: { color: '#f1f5f9' } },
-      y: { ticks: { font: { size: 12, family: "Num, 'IBM Plex Sans'" } }, grid: { display: false } },
+      x: { ticks: { callback: (v) => `₹${(v/1000).toFixed(0)}k`, font: { size: 11, family: "'Helvetica Neue', Helvetica, Arial, sans-serif" } }, grid: { color: '#f1f5f9' } },
+      y: { ticks: { font: { size: 12, family: "'Helvetica Neue', Helvetica, Arial, sans-serif" } }, grid: { display: false } },
     },
   }
 
@@ -227,12 +227,12 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
     },
     scales: {
       x: {
-        ticks: { font: { size: 11, family: "Num, 'IBM Plex Sans'" }, maxRotation: 0, autoSkip: true, maxTicksLimit: 6 },
+        ticks: { font: { size: 11, family: "'Helvetica Neue', Helvetica, Arial, sans-serif" }, maxRotation: 0, autoSkip: true, maxTicksLimit: 6 },
         grid: { display: false },
       },
       y: {
         beginAtZero: true,
-        ticks: { maxTicksLimit: 5, callback: compactINR, font: { size: 10, family: "Num, 'IBM Plex Sans'" } },
+        ticks: { maxTicksLimit: 5, callback: compactINR, font: { size: 10, family: "'Helvetica Neue', Helvetica, Arial, sans-serif" } },
         grid: { color: '#f1f5f9' },
       },
     },
@@ -341,10 +341,10 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
       if (monthView === 'years' && elements.length) setMonthView(periods[elements[0].index][3])
     },
     scales: {
-      x: { ticks: { font: { size: 11, family: "Num, 'IBM Plex Sans'" }, maxRotation: 0, autoSkip: true }, grid: { display: false } },
+      x: { ticks: { font: { size: 11, family: "'Helvetica Neue', Helvetica, Arial, sans-serif" }, maxRotation: 0, autoSkip: true }, grid: { display: false } },
       y: {
         beginAtZero: true,
-        ticks: { maxTicksLimit: 5, callback: compactINR, font: { size: 11, family: "Num, 'IBM Plex Sans'" } },
+        ticks: { maxTicksLimit: 5, callback: compactINR, font: { size: 11, family: "'Helvetica Neue', Helvetica, Arial, sans-serif" } },
         grid: { color: '#f1f5f9' },
       },
     },
