@@ -220,7 +220,3 @@
 }
 .rangepair input[type="range"]::-moz-range-track { background: transparent; }
 
-
-/* Sports pages in the font picked (components/SportsFont.jsx); the picker
-   itself shows each font in its own face. */
-.sports-font *:not(.sports-font-picker *) { font-family: var(--sports-font) !important; }
