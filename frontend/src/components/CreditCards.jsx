@@ -169,6 +169,10 @@ function CardBlock({ card: c, banks, results, busy, run, editing, setEditing, sa
 const CARD_COLORS = ['#f97316', '#2563eb', '#16a34a', '#9333ea', '#db2777', '#0891b2', '#ca8a04', '#64748b']
 const kInr = (n) => (n >= 100000 ? `₹${(n / 100000).toFixed(1)}L` : n >= 1000 ? `₹${Math.round(n / 1000)}k` : `₹${Math.round(n)}`)
 const cardName = (c) => `${c.bank}${c.label ? ` ${c.label}` : ''}${c.last4 ? ` ••${c.last4}` : ''}`
+// A legend's few letters: the bank alone ("ICICI", "Jupiter", "SBI"), with
+// the last 4 digits only when two cards share a bank
+const bankWord = (c) => (/american express|amex/i.test(c.bank || '') ? 'Amex' : null) || (c.bank || '').replace(/\(.*?\)/g, '').replace(/(bank|card|cards)/gi, '').trim().split(/\s+/)[0] || c.bank
+const shortName = (c, all) => (all.filter((x) => bankWord(x) === bankWord(c)).length > 1 && c.last4 ? `${bankWord(c)} ${c.last4}` : bankWord(c))
 const daysTo = (iso) => Math.round((new Date(`${iso}T00:00:00`) - new Date(`${today()}T00:00:00`)) / 864e5)
 
 /** All the cards together: what's owed now, when it's due, and the bills month by month. */
@@ -245,34 +249,35 @@ function CardsDashboard({ cards, colorOf, onPay }) {
         </div>
       )}
 
-      {/* bills by month, stacked by card */}
+      {/* bills by month: one bar a month, across, split by card */}
       {months.length > 0 && (
         <div>
           <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-2">Bills by month</p>
-          <div className="flex items-end gap-2 h-32">
+          <div className="space-y-2">
             {months.map(({ p, parts }) => {
               const total = parts.reduce((s, x) => s + x.v, 0)
               return (
-                <div key={p} className="flex-1 flex flex-col items-center justify-end h-full min-w-0">
-                  <span className="text-[9px] font-bold text-gray-600 tabular-nums mb-0.5">{kInr(total)}</span>
-                  <div className="w-full max-w-[44px] flex flex-col-reverse" style={{ height: `${(total / top) * 100}%` }}>
-                    {parts.map(({ c, v }) => (
-                      <div key={c.id} style={{ height: `${(v / total) * 100}%`, background: colorOf(c.id) }} title={`${cardName(c)}: ${INR(v)}`} />
-                    ))}
+                <div key={p} className="flex items-center gap-2">
+                  <span className="w-9 shrink-0 text-[11px] font-bold text-gray-500">{new Date(`${p}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'short' })}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex h-7" style={{ width: `${(total / top) * 100}%` }}>
+                      {parts.map(({ c, v }) => (
+                        <div key={c.id} className="h-full flex items-center justify-center overflow-hidden text-[9px] font-bold text-white"
+                          style={{ width: `${(v / total) * 100}%`, background: colorOf(c.id) }} title={`${cardName(c)}: ${INR(v)}`}>
+                          {v / top > 0.14 ? kInr(v) : ''}
+                        </div>
+                      ))}
+                    </div>
                   </div>
+                  <span className="w-12 shrink-0 text-right text-[11px] font-black text-gray-800 tabular-nums">{kInr(total)}</span>
                 </div>
               )
             })}
           </div>
-          <div className="flex gap-2 mt-1">
-            {months.map(({ p }) => (
-              <span key={p} className="flex-1 text-center text-[9px] text-gray-400">{new Date(`${p}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'short' })}</span>
-            ))}
-          </div>
-          <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2">
+          <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2.5">
             {cards.filter((c) => c.bills.some((b) => periods.includes(b.period) && b.total_due)).map((c) => (
-              <span key={c.id} className="flex items-center gap-1 text-[10px] text-gray-500">
-                <span className="w-2 h-2 rounded-sm" style={{ background: colorOf(c.id) }} />{cardName(c)}
+              <span key={c.id} className="flex items-center gap-1 text-[10px] font-semibold text-gray-500">
+                <span className="w-2 h-2 rounded-sm" style={{ background: colorOf(c.id) }} />{shortName(c, cards)}
               </span>
             ))}
           </div>
