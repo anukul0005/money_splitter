@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { getGroup, getSettlement, getGroupStats, deleteExpense, deleteGroup, getMonthlySkipped } from '../api'
+import { getGroup, getSettlement, getGroupStats, deleteExpense, deleteGroup, getMonthlySkipped, getLoans } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ExpenseEditModal from '../components/ExpenseEditModal'
 import ReceiptInfo from '../components/ReceiptInfo'
@@ -8,6 +8,7 @@ import RecordPaymentModal from '../components/RecordPaymentModal'
 import StatsPanel from '../components/StatsPanel'
 import { useUser } from '../UserContext'
 import { dn } from '../utils/displayName'
+import { PassOnSheet, passable } from '../components/PassOn'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 
@@ -24,6 +25,18 @@ export default function GroupDetail() {
   const [editingExpense, setEditingExp] = useState(null)   // expense being edited
   const [editingPayment, setEditingPayment] = useState(null)
   const [skipped, setSkipped]           = useState(null)   // monthly groups: investments / to people
+  // Monthly groups: an expense passed on to people (as loans) - expense id -> [{ loan_id, to, amount }]
+  const [passedOn, setPassedOn]         = useState({})
+  const [passing, setPassing]           = useState(null)   // the expense being passed on
+  const loadPassedOn = () => getLoans().then((r) => {
+    const me = (currentUser?.name || '').toLowerCase()
+    const by = {}
+    for (const l of r.data.loans || []) {
+      const m = /^exp:(\d+)$/.exec(l.card_ref || '')
+      if (m && (l.lender || '').toLowerCase() === me) (by[m[1]] = by[m[1]] || []).push({ loan_id: l.id, to: l.borrower, amount: l.principal })
+    }
+    setPassedOn(by)
+  }).catch(() => {})
 
   // Fetched the first time either tab is opened, not on every visit.
   useEffect(() => {
@@ -50,6 +63,10 @@ export default function GroupDetail() {
     setLoading(true)
     fetchData().finally(() => setLoading(false))
   }, [id])
+  // A monthly group's expenses passed on to people
+  useEffect(() => {
+    if (group && group.members.length === 1 && /^MONTHLY EXPENSES [A-Z]{3} \d{4}$/.test(group.name.toUpperCase())) loadPassedOn()
+  }, [group?.id])
 
   const handleDeleteExpense = async (expId) => {
     if (!confirm('Delete this expense?')) return
@@ -311,6 +328,31 @@ export default function GroupDetail() {
                       </div>
                     )}
 
+                    {/* Monthly: pass a spend on to people (each share a loan to them) */}
+                    {isMonthly && (() => {
+                      const sent = passedOn[String(e.id)] || []
+                      const sentTotal = sent.reduce((t, x) => t + x.amount, 0)
+                      const x = { description: e.title || e.category || 'Expense', amount: e.amount, date: e.date, type: 'debit' }
+                      return (
+                        <div className="mt-1">
+                          {sent.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                              {sent.map((t) => (
+                                <button key={t.loan_id} onClick={() => nav(`/loans?tab=loans&loan=${t.loan_id}`)}
+                                  className="text-[10px] font-bold text-green-700 bg-green-50 border border-green-200 rounded px-1.5 py-px">
+                                  → {t.to} {INR(t.amount)}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          {sentTotal < passable(x) - 0.5 && (
+                            <button onClick={() => setPassing({ x, id: e.id, already: sentTotal })}
+                              className="text-[11px] font-bold text-brand-500 mt-0.5">{sent.length ? '+ pass on more' : 'Split / pass on'}</button>
+                          )}
+                        </div>
+                      )
+                    })()}
+
                     {/* Partial equal split badge */}
                     {isPartialSplit && (
                       <span className="inline-block mt-1 text-[10px] font-bold text-orange-600 bg-orange-50 border border-orange-200 px-1.5 py-0.5 tracking-wide">
@@ -487,6 +529,11 @@ export default function GroupDetail() {
           onClose={() => setEditingPayment(null)}
           onSaved={() => { setEditingPayment(null); reload() }}
         />
+      )}
+
+      {passing && (
+        <PassOnSheet x={passing.x} refKey={`exp:${passing.id}`} already={passing.already} source={group.name}
+          onClose={() => setPassing(null)} onDone={() => { setPassing(null); loadPassedOn() }} />
       )}
 
       {/* Expense Edit Modal */}

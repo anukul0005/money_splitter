@@ -245,12 +245,20 @@ def create_loan(payload: LoanCreate, db: Session = Depends(get_db),
     lender, borrower = (caller.name, other) if payload.role == "lent" else (other, caller.name)
     card_ref = None
     if payload.card_ref:
+        # What's being passed on: a card bill's line ("bill:<id>:<line>") or an
+        # expense ("exp:<id>", e.g. in a monthly group) - only ever the caller's own
         import re
-        from models import CreditCardStatement
-        m = re.fullmatch(r"bill:(\d+):(\d+)", payload.card_ref)
-        if not m or payload.role != "lent" or not db.query(CreditCardStatement).filter(
-                CreditCardStatement.id == int(m.group(1)), CreditCardStatement.user_id == caller.id).first():
-            raise HTTPException(400, "That card transaction isn't yours to pass on")
+        from models import CreditCardStatement, Expense
+        ok = False
+        if payload.role == "lent":
+            if m := re.fullmatch(r"bill:(\d+):(\d+)", payload.card_ref):
+                ok = bool(db.query(CreditCardStatement).filter(
+                    CreditCardStatement.id == int(m.group(1)), CreditCardStatement.user_id == caller.id).first())
+            elif m := re.fullmatch(r"exp:(\d+)", payload.card_ref):
+                e = db.get(Expense, int(m.group(1)))
+                ok = bool(e and _same(e.paid_by or "", caller.name) and is_member(db.get(Group, e.group_id), caller))
+        if not ok:
+            raise HTTPException(400, "That isn't yours to pass on")
         card_ref = payload.card_ref
     loan = Loan(lender=lender, borrower=borrower, principal=payload.amount, card_ref=card_ref,
                 has_interest=payload.interest, rate_pct=3.6, start_date=start,
