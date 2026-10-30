@@ -183,6 +183,7 @@ const daysTo = (iso) => Math.round((new Date(`${iso}T00:00:00`) - new Date(`${to
 
 /** All the cards together: what's owed now, when it's due, and the bills month by month. */
 function CardsDashboard({ cards, colorOf, onPay }) {
+  const [tip, setTip] = useState(null)      // `${period}:${card id}` - the bar piece tapped, its amount shown under it
   const open = cards.map((c) => ({ c, b: c.bills.find((x) => x.can_pay) }))
     .filter(({ b }) => b && b.total_due != null)
   const owed = open.filter(({ b }) => b.remaining >= PAID).reduce((s, { b }) => s + b.remaining, 0)
@@ -273,13 +274,23 @@ function CardsDashboard({ cards, colorOf, onPay }) {
                   <span className="w-12 shrink-0 text-[11px] font-bold text-gray-500">{monthTag(p)}</span>
                   <div className="flex-1 min-w-0">
                     <div className="flex h-7" style={{ width: `${(total / top) * 100}%` }}>
-                      {parts.map(({ c, v }) => (
-                        <div key={c.id} className="h-full flex items-center justify-center overflow-hidden text-[9px] font-bold text-white"
-                          style={{ width: `${(v / total) * 100}%`, background: colorOf(c.id) }} title={`${cardName(c)}: ${INR(v)}`}>
-                          {v / top > 0.14 ? kInr(v) : ''}
-                        </div>
-                      ))}
+                      {parts.map(({ c, v }) => {
+                        const k = `${p}:${c.id}`
+                        return (
+                          <button key={c.id} type="button" aria-label={`${shortName(c, cards)} ${INR(v)}`}
+                            onClick={() => setTip(tip === k ? null : k)}
+                            className={`h-full ${tip && tip !== k && tip.startsWith(`${p}:`) ? 'opacity-50' : ''}`}
+                            style={{ width: `${(v / total) * 100}%`, background: colorOf(c.id) }} />
+                        )
+                      })}
                     </div>
+                    {/* the piece tapped: its card and amount, small */}
+                    {parts.filter(({ c }) => tip === `${p}:${c.id}`).map(({ c, v }) => (
+                      <p key={c.id} className="text-[10px] text-gray-600 mt-0.5">
+                        <span className="inline-block w-2 h-2 rounded-sm mr-1 align-middle" style={{ background: colorOf(c.id) }} />
+                        {shortName(c, cards)} <b className="tabular-nums">{INR(v)}</b>
+                      </p>
+                    ))}
                   </div>
                   <span className="w-12 shrink-0 text-right text-[11px] font-black text-gray-800 tabular-nums">{kInr(total)}</span>
                 </div>
