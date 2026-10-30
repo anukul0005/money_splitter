@@ -1000,6 +1000,12 @@ export function LiveRow({ m, onOpen, plain }) {
                 </span>
               )
             })}
+            {/* the game being played (WTA only - the ATP's points aren't open) */}
+            {live && m.players.some((x) => x.point != null) && (
+              <span className="ml-1 w-7 text-center text-[12px] font-black tabular-nums rounded-sm bg-gray-900 text-lime-300 py-px">
+                {p.point ?? ''}
+              </span>
+            )}
           </div>
         )
       })}

@@ -110,6 +110,95 @@ def _fetch(tour: str) -> list:
     return out
 
 
+# The points in the game being played: ESPN doesn't give them, the WTA's own
+# live scoring does (api.wtatennis.com - free, no key). Nothing like it is open
+# for the ATP, so men's matches go without.
+WTA_API = "https://api.wtatennis.com/tennis"
+POINTS_SECONDS = 15
+_points: tuple[float, list] | None = None
+_wta_events: tuple[float, list] | None = None
+
+
+def _wta_live_events() -> list:
+    """The WTA tournaments being played now, as (id, year) - looked up every 10 minutes."""
+    global _wta_events
+    with _lock:
+        if _wta_events and time.time() - _wta_events[0] < 600:
+            return _wta_events[1]
+    today = datetime.now(timezone.utc).date()
+    data = kb.get_json(f"{WTA_API}/tournaments/?page=0&pageSize=50&excludeLevels=ITF"
+                       f"&from={today - timedelta(days=8)}&to={today + timedelta(days=1)}")
+    got = [(t["liveScoringId"], t["year"]) for t in data.get("content", [])
+           if t.get("status") == "live" and t.get("liveScoringId")]
+    with _lock:
+        _wta_events = (time.time(), got)
+    return got
+
+
+def _wta_points() -> list:
+    """Live WTA singles matches with the game score: [{a, b, point_a, point_b, serve}] (surnames)."""
+    global _points
+    with _lock:
+        if _points and time.time() - _points[0] < POINTS_SECONDS:
+            return _points[1]
+    out = []
+    try:
+        events = _wta_live_events()
+        from concurrent.futures import ThreadPoolExecutor
+        def get(ev):
+            try:
+                return kb.get_json(f"{WTA_API}/tournaments/{ev[0]}/{ev[1]}/matches?states=L").get("matches", [])
+            except Exception as err:
+                print(f"[tennis-live] WTA points {ev}: {err}")
+                return []
+        with ThreadPoolExecutor(4) as pool:
+            for ms in pool.map(get, events):
+                for m in ms:
+                    if m.get("DrawMatchType") != "S" or m.get("MatchState") != "P":
+                        continue
+                    out.append({"a": kb.norm(m.get("PlayerNameLastA")), "b": kb.norm(m.get("PlayerNameLastB")),
+                                "point_a": m.get("PointA") or None, "point_b": m.get("PointB") or None,
+                                "serve": m.get("Serve"),
+                                "games_a": [int(m[f"ScoreSet{i}A"]) for i in range(1, 6) if str(m.get(f"ScoreSet{i}A") or "").isdigit()],
+                                "games_b": [int(m[f"ScoreSet{i}B"]) for i in range(1, 6) if str(m.get(f"ScoreSet{i}B") or "").isdigit()]})
+    except Exception as err:                       # no points is fine: the games still show
+        print(f"[tennis-live] WTA points: {err}")
+    with _lock:
+        _points = (time.time(), out)
+    return out
+
+
+def _add_points(out: list) -> None:
+    """Each live WTA match gets each player's "point" (0 / 15 / 30 / 40 / AD, or the tie-break count)."""
+    live = [m for m in out if m["tour"] == "WTA" and m["state"] == "live"]
+    if not live:
+        return
+    pts = _wta_points()
+    for m in live:
+        names = [kb.norm(p["name"]) for p in m["players"]]
+        for w in pts:
+            if not (w["a"] and w["b"]):
+                continue
+            for flip in (False, True):
+                a, b = (w["b"], w["a"]) if flip else (w["a"], w["b"])
+                if names[0].endswith(a) and names[1].endswith(b):
+                    pa, pb = (w["point_b"], w["point_a"]) if flip else (w["point_a"], w["point_b"])
+                    m["players"][0]["point"], m["players"][1]["point"] = pa, pb
+                    ga, gb = (w["games_b"], w["games_a"]) if flip else (w["games_a"], w["games_b"])
+                    # the games from the same feed as the points (ESPN's are up to a minute behind);
+                    # sets already finished keep ESPN's tie-break points
+                    if ga and len(ga) == len(gb) and len(ga) >= len(m["players"][0]["games"]):
+                        m["players"][0]["games"], m["players"][1]["games"] = ga, gb
+                        m["detail"] = f"Set {len(ga)}"
+                    if w["serve"] in ("A", "B"):
+                        first = (w["serve"] == "A") != flip
+                        m["players"][0]["serving"], m["players"][1]["serving"] = first, not first
+                    break
+            else:
+                continue
+            break
+
+
 def matches(db, tour: str = "all") -> dict:
     tours = [tour.upper()] if tour.upper() in ("ATP", "WTA") else ["ATP", "WTA"]
     out = []
@@ -129,6 +218,8 @@ def matches(db, tour: str = "all") -> dict:
                 with _lock:
                     _cache[t] = (time.time(), got)
                 out += got
+    out = [{**m, "players": [dict(p) for p in m["players"]]} for m in out]   # points go on copies, not the cache
+    _add_points(out)
     # ESPN athlete -> knowledge-base player, so the match page can show form and head-to-head
     ids = {(m["tour"], p["espn_id"]) for m in out for p in m["players"] if p["espn_id"]}
     known = {}
