@@ -158,11 +158,12 @@ def _wta_points() -> list:
                 print(f"[tennis-live] WTA points {ev}: {err}")
                 return []
         with ThreadPoolExecutor(4) as pool:
-            for ms in pool.map(get, events):
+            for ev, ms in zip(events, pool.map(get, events)):
                 for m in ms:
-                    if m.get("DrawMatchType") != "S" or m.get("MatchState") != "P":
+                    if m.get("DrawMatchType") != "S" or m.get("MatchState") not in ("P", "S"):   # S: suspended
                         continue
                     out.append({"a": kb.norm(m.get("PlayerNameLastA")), "b": kb.norm(m.get("PlayerNameLastB")),
+                                "wta": (ev[0], ev[1], m.get("MatchID")), "level": ev[2],
                                 "point_a": _pt(m.get("PointA")), "point_b": _pt(m.get("PointB")),
                                 "serve": m.get("Serve"),
                                 "games_a": [int(m[f"ScoreSet{i}A"]) for i in range(1, 6) if str(m.get(f"ScoreSet{i}A") or "").isdigit()],

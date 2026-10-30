@@ -181,9 +181,7 @@ def sets_tournament(tour: str, name: str, db: Session = Depends(get_db), _: User
 @router.get("/live", response_model=dict)
 def live(tour: str = "all", db: Session = Depends(get_db), _: User = Depends(owner)):
     """Matches in progress and starting within a day and a half (tennis_live)."""
-    import tennis_feed
     import tennis_live
-    tennis_feed.start()                            # the WTA commentary reader, from the first look at Live
     return tennis_live.matches(db, tour)
 
 
