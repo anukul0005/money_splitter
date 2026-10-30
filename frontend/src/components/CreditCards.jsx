@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import {
   getGmailStatus, getGmailConnectUrl, disconnectGmail,
@@ -13,6 +14,7 @@ const ord = (n) => `${n}${[11, 12, 13].includes(n % 100) ? 'th' : ({ 1: 'st', 2:
 const day = (iso) => (iso ? new Date(`${iso}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '')
 const DAYS = Array.from({ length: 31 }, (_, i) => ({ value: i + 1, label: ord(i + 1) }))
 const MONTHS_BACK = 2
+const PAID = 1        // less than ₹1 left on a bill: paid (rounding, not a debt)
 const BLANK = { bank: '', label: '', last4: '', bill_day: '' }
 
 // The last n bill periods ("YYYY-MM") for a card whose latest bill was on `lastBill`.
@@ -63,7 +65,7 @@ function CardBlock({ card: c, banks, results, busy, run, editing, setEditing, sa
   const nav = useNavigate()
   const periods = lastPeriods(c.last_bill, MONTHS_BACK)
   const latest = c.bills.find((b) => b.can_pay)
-  const settled = latest && latest.total_due != null && latest.remaining <= 0.01
+  const settled = latest && latest.total_due != null && latest.remaining < PAID
 
   return (
     <div className="space-y-2">
@@ -116,7 +118,7 @@ function CardBlock({ card: c, banks, results, busy, run, editing, setEditing, sa
                         <span className="text-gray-400">{r?.status === 'not_found' ? 'Not found' : 'Not fetched yet'}</span>
                       ) : b.total_due == null ? (
                         <span className="text-gray-400">Amount not found</span>
-                      ) : b.remaining <= 0.01 ? (
+                      ) : b.remaining < PAID ? (
                         <span className="text-green-600 font-bold">{INR(b.total_due)} · Paid ✓</span>
                       ) : (
                         <span className={b.can_pay ? 'text-red-600 font-bold' : 'text-gray-600 font-bold'}>
@@ -173,12 +175,12 @@ const daysTo = (iso) => Math.round((new Date(`${iso}T00:00:00`) - new Date(`${to
 function CardsDashboard({ cards, colorOf, onPay }) {
   const open = cards.map((c) => ({ c, b: c.bills.find((x) => x.can_pay) }))
     .filter(({ b }) => b && b.total_due != null)
-  const owed = open.reduce((s, { b }) => s + (b.remaining || 0), 0)
+  const owed = open.filter(({ b }) => b.remaining >= PAID).reduce((s, { b }) => s + b.remaining, 0)
   const billed = open.reduce((s, { b }) => s + (b.total_due || 0), 0)
   const paid = open.reduce((s, { b }) => s + Math.min(b.paid || 0, b.total_due || 0), 0)
-  const minimum = open.filter(({ b }) => b.remaining > 0.01)
+  const minimum = open.filter(({ b }) => b.remaining >= PAID)
     .reduce((s, { b }) => s + Math.min(b.minimum_due ?? 0, b.remaining), 0)
-  const dues = open.filter(({ b }) => b.remaining > 0.01 && b.due_date)
+  const dues = open.filter(({ b }) => b.remaining >= PAID && b.due_date)
     .sort((x, y) => x.b.due_date.localeCompare(y.b.due_date))
 
   // Bills by month, stacked by card - the last 6 months any card has
@@ -194,7 +196,7 @@ function CardsDashboard({ cards, colorOf, onPay }) {
       <div className="grid grid-cols-3 gap-2">
         <div>
           <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">To pay</p>
-          <p className={`text-lg font-black tabular-nums ${owed > 0.01 ? 'text-red-600' : 'text-green-600'}`}>{owed > 0.01 ? INR(Math.round(owed)) : 'All paid'}</p>
+          <p className={`text-lg font-black tabular-nums ${owed >= PAID ? 'text-red-600' : 'text-green-600'}`}>{owed >= PAID ? INR(Math.round(owed)) : 'All paid'}</p>
         </div>
         <div>
           <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Minimum</p>
@@ -289,10 +291,11 @@ function PayForm({ cards, cardId, setCardId, busy, onSave, onClose }) {
   const bill = card?.bills.find((x) => x.can_pay)
   useEffect(() => { setAmount('') }, [cardId])
   const amt = parseFloat(amount) || 0
-  return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40" onClick={onClose}>
+  // A portal to <body>: inside the page it sat under the bottom bar, its Save button hidden
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
       <form onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); if (bill && amt > 0) onSave(bill.id, amt, paidOn) }}
-        className="w-full md:max-w-md bg-cream rounded-t-xl md:rounded-xl p-5 space-y-3 pb-8">
+        className="w-full max-w-md bg-cream rounded-xl p-5 space-y-3 shadow-xl max-h-[85dvh] overflow-y-auto">
         <div className="flex items-center">
           <p className="text-base font-black flex-1">Record payment</p>
           <button type="button" onClick={onClose} className="text-xs font-bold text-gray-400">Close</button>
@@ -304,7 +307,7 @@ function PayForm({ cards, cardId, setCardId, busy, onSave, onClose }) {
             <Dropdown value={cardId ?? ''} onChange={(v) => setCardId(Number(v))} placeholder="Which card?"
               options={payable.map((c) => {
                 const b = c.bills.find((x) => x.can_pay)
-                return { value: c.id, label: `${cardName(c)} · ${b.remaining > 0.01 ? `${INR(b.remaining)} due` : 'paid'}` }
+                return { value: c.id, label: `${cardName(c)} · ${b.remaining >= PAID ? `${INR(b.remaining)} due` : 'paid'}` }
               })} />
             {bill && (
               <p className="text-[11px] text-gray-500">
@@ -314,7 +317,7 @@ function PayForm({ cards, cardId, setCardId, busy, onSave, onClose }) {
             )}
             <input className="input text-xl font-bold" placeholder="Amount paid" inputMode="decimal"
               value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ''))} />
-            {bill && bill.remaining > 0.01 && (
+            {bill && bill.remaining >= PAID && (
               <div className="flex gap-2">
                 <button type="button" onClick={() => setAmount(String(bill.remaining))}
                   className="px-3 py-1.5 text-xs font-bold border rounded-md bg-amber-50 border-amber-200 text-gray-700">Full {INR(bill.remaining)}</button>
@@ -327,7 +330,7 @@ function PayForm({ cards, cardId, setCardId, busy, onSave, onClose }) {
             <DatePicker value={paidOn} onChange={setPaidOn} />
             {bill && amt > 0 && (
               <p className="text-[11px] text-gray-600">
-                {amt >= bill.remaining - 0.01 ? 'Settles this bill in full.' : `Leaves ${INR(Math.round((bill.remaining - amt) * 100) / 100)} to pay.`}
+                {amt > bill.remaining - PAID ? 'Settles this bill in full.' : `Leaves ${INR(Math.round((bill.remaining - amt) * 100) / 100)} to pay.`}
               </p>
             )}
             <button type="submit" disabled={busy || !bill || !(amt > 0)} className="btn-primary py-2.5 text-sm w-full disabled:opacity-50">
@@ -336,7 +339,8 @@ function PayForm({ cards, cardId, setCardId, busy, onSave, onClose }) {
           </>
         )}
       </form>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -362,7 +366,7 @@ export default function CreditCards({ initialMsg = '' }) {
   const openPay = (id = null) => {
     if (id == null) {          // the card with the soonest unpaid bill, if any
       const next = (cards || []).map((c) => ({ c, b: c.bills.find((x) => x.can_pay) }))
-        .filter(({ b }) => b && b.remaining > 0.01).sort((x, y) => (x.b.due_date || '9').localeCompare(y.b.due_date || '9'))[0]
+        .filter(({ b }) => b && b.remaining >= PAID).sort((x, y) => (x.b.due_date || '9').localeCompare(y.b.due_date || '9'))[0]
       id = next?.c.id ?? null
     }
     setPayFor(id)
