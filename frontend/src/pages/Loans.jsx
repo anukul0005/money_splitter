@@ -404,15 +404,9 @@ export default function Loans() {
                   </div>
                 </div>
                 {netted && (
-                  <p className="text-[11px] text-gray-600 mt-1.5 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">
-                    Loan {INR(l.total_due)} {(netted.group > 0) === iOwe ? '−' : '+'} {INR(Math.abs(netted.group))}{' '}
-                    {netted.group > 0 ? `${dn(other)} owes you` : `you owe ${dn(other)}`} in groups
-                    {' = '}
-                    <b>{owedOverall > 0.5
-                      ? (iOwe ? `you owe ${INR(owedOverall)}` : `${dn(other)} owes you ${INR(owedOverall)}`)
-                      : owedOverall < -0.5
-                        ? (iOwe ? `${dn(other)} owes you ${INR(-owedOverall)}` : `you owe ${INR(-owedOverall)}`)
-                        : "you're even"}</b> overall
+                  <p className="text-[11px] text-gray-500 mt-1 tabular-nums">
+                    Loan {INR(l.total_due)} · Groups {(netted.group > 0) === iOwe ? '−' : '+'}{INR(Math.abs(netted.group))} · Net <b className="text-gray-800">{INR(Math.abs(r2(owedOverall)))}</b>
+                    {owedOverall < -0.5 ? (iOwe ? ` (${dn(other)} owes you)` : ' (you owe)') : ''}
                   </p>
                 )}
                 {l.interest > 0 && (
