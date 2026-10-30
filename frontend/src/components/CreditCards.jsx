@@ -173,6 +173,12 @@ const cardName = (c) => `${c.bank}${c.label ? ` ${c.label}` : ''}${c.last4 ? ` â
 // the last 4 digits only when two cards share a bank
 const bankWord = (c) => (/american express|amex/i.test(c.bank || '') ? 'Amex' : null) || (c.bank || '').replace(/\(.*?\)/g, ' ').split(/\s+/).filter((w) => w && !/^(bank|card|cards|of|the|ltd)$/i.test(w))[0] || c.bank
 const shortName = (c, all) => (all.filter((x) => bankWord(x) === bankWord(c)).length > 1 && c.last4 ? `${bankWord(c)} ${c.last4}` : bankWord(c))
+// "Oct", or "Oct 25" when it isn't this year
+const monthTag = (p) => {
+  const d = new Date(`${p}-01T00:00:00`)
+  const m = d.toLocaleDateString('en-IN', { month: 'short' })
+  return d.getFullYear() === new Date().getFullYear() ? m : `${m} ${String(d.getFullYear()).slice(2)}`
+}
 const daysTo = (iso) => Math.round((new Date(`${iso}T00:00:00`) - new Date(`${today()}T00:00:00`)) / 864e5)
 
 /** All the cards together: what's owed now, when it's due, and the bills month by month. */
@@ -188,7 +194,13 @@ function CardsDashboard({ cards, colorOf, onPay }) {
     .sort((x, y) => x.b.due_date.localeCompare(y.b.due_date))
 
   // Bills by month, stacked by card - the last 6 months any card has
-  const periods = [...new Set(cards.flatMap((c) => c.bills.map((b) => b.period)).filter(Boolean))].sort().slice(-6)
+  // The last 2 calendar months up to the latest bill, in order - a month with no
+  // bill is an empty row, and older bills (a year-old one a fetch turned up)
+  // stay out instead of jumping the chart back a year. Leading empties go.
+  const latestP = cards.flatMap((c) => c.bills.map((b) => b.period)).filter(Boolean).sort().pop()
+  const window6 = latestP ? lastPeriods(`${latestP}-01`, MONTHS_BACK).reverse() : []
+  const firstWith = window6.findIndex((p) => cards.some((c) => c.bills.some((b) => b.period === p && b.total_due)))
+  const periods = firstWith < 0 ? [] : window6.slice(firstWith)
   const months = periods.map((p) => ({
     p, parts: cards.map((c) => ({ c, v: c.bills.find((b) => b.period === p)?.total_due || 0 })).filter((x) => x.v > 0),
   }))
@@ -258,7 +270,7 @@ function CardsDashboard({ cards, colorOf, onPay }) {
               const total = parts.reduce((s, x) => s + x.v, 0)
               return (
                 <div key={p} className="flex items-center gap-2">
-                  <span className="w-9 shrink-0 text-[11px] font-bold text-gray-500">{new Date(`${p}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'short' })}</span>
+                  <span className="w-12 shrink-0 text-[11px] font-bold text-gray-500">{monthTag(p)}</span>
                   <div className="flex-1 min-w-0">
                     <div className="flex h-7" style={{ width: `${(total / top) * 100}%` }}>
                       {parts.map(({ c, v }) => (
