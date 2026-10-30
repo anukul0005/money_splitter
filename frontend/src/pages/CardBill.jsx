@@ -512,6 +512,7 @@ function BillBreakup({ billId: id }) {
                 const line = d.transactions.indexOf(x)
                 const sent = d.transfers?.[String(line)] || []
                 const sentTotal = sent.reduce((s, t) => s + t.amount, 0)
+                const covered = d.emi_covered?.[String(line)]   // a later instalment of an EMI already passed on
                 return (
                 <div key={i} className="flex items-start justify-between gap-3 py-1.5 border-b border-amber-100 last:border-0">
                   <div className="min-w-0">
@@ -531,7 +532,13 @@ function BillBreakup({ billId: id }) {
                         ))}
                       </div>
                     )}
-                    {(x.type === 'debit' || emiOf(x)) && sentTotal < passable(x) - 0.5 && (
+                    {covered && (
+                      <button onClick={() => nav(`/loans?tab=loans&loan=${covered.loan_id}`)}
+                        className="text-[10px] font-bold text-green-700 bg-green-50 border border-green-200 rounded px-1.5 py-px mt-0.5">
+                        → {covered.to} · EMI {covered.at} of {covered.of}, in the loan already
+                      </button>
+                    )}
+                    {!covered && (x.type === 'debit' || emiOf(x)) && sentTotal < passable(x) - 0.5 && (
                       <button onClick={() => setPassing({ x, line, already: sentTotal })}
                         className="text-[10px] font-bold text-brand-500 mt-0.5">{sent.length ? '+ pass on more' : 'Split / pass on'}</button>
                     )}

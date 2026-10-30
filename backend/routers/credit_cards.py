@@ -282,6 +282,52 @@ def _transfers(db: Session, bill_id: int, caller: User) -> dict:
     return out
 
 
+_EMI = __import__("re").compile(r"\bEMI\b\D{0,3}0*(\d{1,2})\s*/\s*0*(\d{1,2})", __import__("re").I)
+
+
+def _emi_covered(db: Session, bill: CreditCardStatement, caller: User) -> dict:
+    """line -> {loan_id, to, at, of}: this bill's "EMI 02/03" when "EMI 01/03" of
+    the same plan (same card, same instalment amount, same length) was passed
+    on from an earlier bill - its loan already holds every instalment, so the
+    line isn't to be passed on again."""
+    import json
+    from models import Loan
+    if not bill.details_json or not bill.card_id:
+        return {}
+    try:
+        txns = json.loads(bill.details_json).get("transactions") or []
+    except ValueError:
+        return {}
+    here = [(i, _EMI.search(t.get("description") or ""), t) for i, t in enumerate(txns)]
+    here = [(i, m, t) for i, m, t in here if m and int(m.group(1)) > 1]
+    if not here:
+        return {}
+    out: dict[str, dict] = {}
+    src_cache: dict[int, list] = {}
+    for l in db.query(Loan).filter(Loan.card_ref.like("bill:%"), Loan.emi_plan.isnot(None)).order_by(Loan.id):
+        if l.lender.lower() != caller.name.lower():
+            continue
+        try:
+            sid, idx = (int(v) for v in l.card_ref.split(":")[1:3])
+        except ValueError:
+            continue
+        if sid not in src_cache:
+            src = db.get(CreditCardStatement, sid)
+            ok = src and src.card_id == bill.card_id and src.details_json and (src.period or "") < (bill.period or "")
+            src_cache[sid] = (json.loads(src.details_json).get("transactions") or []) if ok else []
+        if idx >= len(src_cache[sid]):
+            continue
+        st = src_cache[sid][idx]
+        sm = _EMI.search(st.get("description") or "")
+        if not sm:
+            continue
+        for i, m, t in here:
+            if (m.group(2) == sm.group(2) and int(m.group(1)) > int(sm.group(1))
+                    and abs((t.get("amount") or 0) - (st.get("amount") or 0)) < 1 and str(i) not in out):
+                out[str(i)] = {"loan_id": l.id, "to": l.borrower, "at": int(m.group(1)), "of": int(m.group(2))}
+    return out
+
+
 @router.get("/bills/{bill_id}/details", response_model=dict)
 def bill_details(bill_id: int, db: Session = Depends(get_db), caller: User = Depends(current_user)):
     """The bill's breakup from its PDF: "ready" with the details, "reading"
@@ -295,7 +341,9 @@ def bill_details(bill_id: int, db: Session = Depends(get_db), caller: User = Dep
                      "total_due": bill.total_due, "minimum_due": bill.minimum_due, "due_date": bill.due_date,
                      "statement_date": bill.statement_date},
             # Lines passed on to someone as a loan: line -> [{loan_id, to, amount}]
-            "transfers": _transfers(db, bill.id, caller)}
+            "transfers": _transfers(db, bill.id, caller),
+            # Later instalments of an EMI already passed on from an earlier bill
+            "emi_covered": _emi_covered(db, bill, caller)}
     live = card_details.status(bill.id)
     if live and live["status"] == "reading":
         return {**head, **live}
