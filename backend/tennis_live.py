@@ -120,7 +120,7 @@ _wta_events: tuple[float, list] | None = None
 
 
 def _wta_live_events() -> list:
-    """The WTA tournaments being played now, as (id, year) - looked up every 10 minutes."""
+    """The WTA tournaments being played now, as (id, year, level) - looked up every 10 minutes."""
     global _wta_events
     with _lock:
         if _wta_events and time.time() - _wta_events[0] < 600:
@@ -128,8 +128,8 @@ def _wta_live_events() -> list:
     today = datetime.now(timezone.utc).date()
     data = kb.get_json(f"{WTA_API}/tournaments/?page=0&pageSize=50&excludeLevels=ITF"
                        f"&from={today - timedelta(days=8)}&to={today + timedelta(days=1)}")
-    got = [(t["liveScoringId"], t["year"]) for t in data.get("content", [])
-           if t.get("status") == "live" and t.get("liveScoringId")]
+    got = [(t["liveScoringId"], t["year"], t.get("level") or "") for t in data.get("content", [])
+           if t.get("status") in ("live", "inProgress") and t.get("liveScoringId")]
     with _lock:
         _wta_events = (time.time(), got)
     return got

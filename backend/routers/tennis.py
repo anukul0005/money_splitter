@@ -181,7 +181,9 @@ def sets_tournament(tour: str, name: str, db: Session = Depends(get_db), _: User
 @router.get("/live", response_model=dict)
 def live(tour: str = "all", db: Session = Depends(get_db), _: User = Depends(owner)):
     """Matches in progress and starting within a day and a half (tennis_live)."""
+    import tennis_feed
     import tennis_live
+    tennis_feed.start()                            # the WTA commentary reader, from the first look at Live
     return tennis_live.matches(db, tour)
 
 
@@ -190,6 +192,13 @@ def live_points(_: User = Depends(owner)):
     """The game score of live WTA matches, by ESPN id - polled every few seconds."""
     import tennis_live
     return tennis_live.points()
+
+
+@router.get("/live/feed", response_model=dict)
+def live_feed(espn: str, _: User = Depends(owner)):
+    """Text commentary of a live WTA match (tennis_feed), newest line first."""
+    import tennis_feed
+    return tennis_feed.feed(espn)
 
 
 def _form(rows, pid: int, surface: str | None) -> dict:

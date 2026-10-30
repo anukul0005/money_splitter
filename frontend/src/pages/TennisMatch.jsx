@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { tennisLive, tennisMatchup } from '../api'
+import { tennisLive, tennisLiveFeed, tennisMatchup } from '../api'
 import { LiveRow, MatchRow, ROUND_NAME, SURFACE, Safe, ScoreText, fmtShort, matchLink, startTime, useLivePoints, withPoints } from './BettingAnalytics'
 
 /**
@@ -51,6 +51,67 @@ function Form({ p, name, nav }) {
           <span className="tabular-nums text-gray-600 whitespace-nowrap"><ScoreText score={x.score} won={x.won} /></span>
         </button>
       ))}
+    </div>
+  )
+}
+
+const LINE = {
+  break: 'text-red-600 font-black', set: 'text-gray-900 font-black bg-amber-50 -mx-2 px-2 rounded',
+  end: 'text-gray-900 font-black bg-amber-50 -mx-2 px-2 rounded', game: 'text-gray-900 font-bold',
+  bp: 'text-amber-700 font-bold', ace: 'text-green-700 font-bold', df: 'text-red-500 font-semibold',
+  point: 'text-gray-600', info: 'text-gray-400 italic',
+}
+
+/** Live text commentary, point by point (WTA only: built from the WTA's live scoring), every 5 seconds. */
+function Commentary({ espn, tour, names }) {
+  const [f, setF] = useState(null)
+  const [all, setAll] = useState(false)
+  useEffect(() => {
+    if (tour !== 'WTA') return undefined
+    let alive = true
+    const load = () => tennisLiveFeed(espn).then((r) => { if (alive) setF(r.data) }).catch(() => {})
+    load()
+    const t = setInterval(() => { if (!document.hidden) load() }, 5000)
+    return () => { alive = false; clearInterval(t) }
+  }, [espn, tour])
+  const head = <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Commentary</p>
+  if (tour !== 'WTA') {
+    return <div className="card">{head}<p className="text-[11px] text-gray-400 mt-1">Point-by-point commentary is for WTA matches only - no open source carries the ATP's points.</p></div>
+  }
+  if (!f) return <div className="card">{head}<p className="text-[11px] text-gray-400 mt-1">Loading…</p></div>
+  const st = f.stats || {}
+  const lines = all ? f.lines : f.lines.slice(0, 25)
+  const stat = (label, k, fmt = (v) => v) => st[k] && (
+    <div className="grid grid-cols-[1fr_auto_1fr] text-[11px] tabular-nums">
+      <span className="font-bold text-gray-900">{st[k][0] != null ? fmt(st[k][0]) : '–'}</span>
+      <span className="text-gray-400 text-center px-2">{label}</span>
+      <span className="font-bold text-gray-900 text-right">{st[k][1] != null ? fmt(st[k][1]) : '–'}</span>
+    </div>
+  )
+  return (
+    <div className="card">
+      <div className="flex items-center">{head}{f.live !== false && f.found && <span className="ml-auto flex items-center gap-1 text-[9px] font-black text-red-600"><span className="w-1.5 h-1.5 rounded-full bg-red-600 animate-pulse" />LIVE</span>}</div>
+      {f.found && Object.keys(st).length > 0 && (
+        <div className="mt-2 mb-2 pb-2 border-b border-gray-100 space-y-0.5">
+          <div className="grid grid-cols-[1fr_auto_1fr] text-[10px] font-black text-gray-500"><span className="truncate">{names[0]}</span><span /><span className="truncate text-right">{names[1]}</span></div>
+          {stat('Aces', 'aces')}
+          {stat('Double faults', 'dfs')}
+          {stat('1st-serve points won', 'first_won', (v) => `${v}%`)}
+          {stat('Break points won', 'bp', (v) => `${v[0]}/${v[1]}`)}
+        </div>
+      )}
+      {!f.found && <p className="text-[11px] text-gray-400 mt-1">Commentary starts with the first point the WTA's live scoring shows for this match.</p>}
+      {lines.map((l, i) => (
+        <div key={f.lines.length - i} className={`flex gap-2 py-1 border-t border-gray-50 first:border-t-0 text-[12px] ${LINE[l.kind] || 'text-gray-600'}`}>
+          <span className="w-12 shrink-0 text-[10px] font-normal text-gray-400 tabular-nums pt-px">
+            {new Date(l.at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', second: '2-digit' }).replace(/\s?[ap]m$/i, '')}
+          </span>
+          <span className="flex-1">{l.text}</span>
+        </div>
+      ))}
+      {f.lines.length > 25 && !all && (
+        <button onClick={() => setAll(true)} className="mt-2 text-[11px] font-bold text-brand-600">Show all {f.lines.length} lines</button>
+      )}
     </div>
   )
 }
@@ -121,6 +182,10 @@ export default function TennisMatch() {
                 </div>
               )}
             </div>
+
+            {!m && live && !live.gone && live.state === 'live' && (
+              <Commentary espn={espn} tour={live.tour} names={live.players.map((p) => p.name)} />
+            )}
 
             {/* head to head */}
             {d.h2h && (
