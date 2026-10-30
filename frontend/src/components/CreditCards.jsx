@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { Chart, BarElement, BarController, CategoryScale, LinearScale, Tooltip } from 'chart.js'
+import { Bar } from 'react-chartjs-2'
 import { useNavigate } from 'react-router-dom'
 import {
   getGmailStatus, getGmailConnectUrl, disconnectGmail,
@@ -14,6 +16,9 @@ const ord = (n) => `${n}${[11, 12, 13].includes(n % 100) ? 'th' : ({ 1: 'st', 2:
 const day = (iso) => (iso ? new Date(`${iso}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '')
 const DAYS = Array.from({ length: 31 }, (_, i) => ({ value: i + 1, label: ord(i + 1) }))
 const MONTHS_BACK = 2
+
+Chart.register(BarElement, BarController, CategoryScale, LinearScale, Tooltip)
+const TICK_FONT = { size: 10, family: "Num, 'IBM Plex Sans', system-ui, sans-serif" }
 const PAID = 1        // less than ₹1 left on a bill: paid (rounding, not a debt)
 const BLANK = { bank: '', label: '', last4: '', bill_day: '' }
 
@@ -183,7 +188,6 @@ const daysTo = (iso) => Math.round((new Date(`${iso}T00:00:00`) - new Date(`${to
 
 /** All the cards together: what's owed now, when it's due, and the bills month by month. */
 function CardsDashboard({ cards, colorOf, onPay }) {
-  const [tip, setTip] = useState(null)      // `${period}:${card id}` - the bar piece tapped, its amount shown under it
   const open = cards.map((c) => ({ c, b: c.bills.find((x) => x.can_pay) }))
     .filter(({ b }) => b && b.total_due != null)
   const owed = open.filter(({ b }) => b.remaining >= PAID).reduce((s, { b }) => s + b.remaining, 0)
@@ -262,40 +266,47 @@ function CardsDashboard({ cards, colorOf, onPay }) {
         </div>
       )}
 
-      {/* bills by month: one bar a month, across, split by card */}
+      {/* bills by month: one bar a month, across, split by card - drawn like History's charts
+          (square edges, the amounts in the tooltip a tap brings up) */}
       {months.length > 0 && (
         <div>
           <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-2">Bills by month</p>
-          <div className="space-y-2">
-            {months.map(({ p, parts }) => {
-              const total = parts.reduce((s, x) => s + x.v, 0)
-              return (
-                <div key={p} className="flex items-center gap-2">
-                  <span className="w-12 shrink-0 text-[11px] font-bold text-gray-500">{monthTag(p)}</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex h-7" style={{ width: `${(total / top) * 100}%` }}>
-                      {parts.map(({ c, v }) => {
-                        const k = `${p}:${c.id}`
-                        return (
-                          <button key={c.id} type="button" aria-label={`${shortName(c, cards)} ${INR(v)}`}
-                            onClick={() => setTip(tip === k ? null : k)}
-                            className={`h-full ${tip && tip !== k && tip.startsWith(`${p}:`) ? 'opacity-50' : ''}`}
-                            style={{ width: `${(v / total) * 100}%`, background: colorOf(c.id) }} />
-                        )
-                      })}
-                    </div>
-                    {/* the piece tapped: its card and amount, small */}
-                    {parts.filter(({ c }) => tip === `${p}:${c.id}`).map(({ c, v }) => (
-                      <p key={c.id} className="text-[10px] text-gray-600 mt-0.5">
-                        <span className="inline-block w-2 h-2 rounded-sm mr-1 align-middle" style={{ background: colorOf(c.id) }} />
-                        {shortName(c, cards)} <b className="tabular-nums">{INR(v)}</b>
-                      </p>
-                    ))}
-                  </div>
-                  <span className="w-12 shrink-0 text-right text-[11px] font-black text-gray-800 tabular-nums">{kInr(total)}</span>
-                </div>
-              )
-            })}
+          <div className="relative" style={{ height: `${months.length * 52 + 36}px` }}>
+            <Bar
+              data={{
+                labels: months.map(({ p }) => monthTag(p)),
+                datasets: cards.filter((c) => months.some(({ parts }) => parts.some((x) => x.c.id === c.id))).map((c) => ({
+                  label: shortName(c, cards),
+                  data: months.map(({ parts }) => parts.find((x) => x.c.id === c.id)?.v || 0),
+                  backgroundColor: colorOf(c.id),
+                  borderRadius: 0, borderSkipped: false, barPercentage: 0.8, categoryPercentage: 0.85,
+                })),
+              }}
+              options={{
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false, axis: 'y' },
+                plugins: {
+                  legend: { display: false },
+                  tooltip: {
+                    filter: (item) => item.raw > 0,
+                    callbacks: {
+                      label: (c) => ` ${c.dataset.label}: ${INR(c.raw)}`,
+                      footer: (items) => `Total: ${INR(items.reduce((s, x) => s + x.raw, 0))}`,
+                    },
+                  },
+                },
+                scales: {
+                  x: {
+                    stacked: true, beginAtZero: true,
+                    ticks: { font: TICK_FONT, maxTicksLimit: 5, callback: (v) => kInr(v) },
+                    grid: { color: '#f1f5f9' }, border: { display: false },
+                  },
+                  y: { stacked: true, grid: { display: false }, ticks: { font: { ...TICK_FONT, size: 11, weight: 'bold' } } },
+                },
+              }}
+            />
           </div>
           <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2.5">
             {cards.filter((c) => c.bills.some((b) => periods.includes(b.period) && b.total_due)).map((c) => (
