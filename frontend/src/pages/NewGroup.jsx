@@ -7,6 +7,7 @@ import { compressImage } from '../utils/compressImage'
 import { dn } from '../utils/displayName'
 import ReceiptCropper from '../components/ReceiptCropper'
 import DatePicker from '../components/DatePicker'
+import { useStatementUpload, ANY_STATEMENT } from '../components/StatementUpload'
 
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
 // Today as every dated group is named ("18 oct 26") - the same pattern a
@@ -19,18 +20,30 @@ const lc = (s) => (s || '').trim().toLowerCase()
 // The same day however it was typed ("9 Oct 26", "09 oct 26")
 const dayKey = (name) => lc(name).replace(/^0(\d)/, '$1')
 const r2 = (n) => Math.round(n * 100) / 100
+// Your own spending sits in one group a month: "MONTHLY EXPENSES OCT 2026"
+const monthlyName = (iso) => {
+  const d = iso ? new Date(`${iso}T00:00:00`) : new Date()
+  return `MONTHLY EXPENSES ${MONTHS[d.getMonth()].toUpperCase()} ${d.getFullYear()}`
+}
+const monthLabel = (iso) => (iso ? new Date(`${iso}T00:00:00`) : new Date())
+  .toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
+const PAYMENT_MODES = [['upi', 'UPI'], ['cash', 'Cash'], ['credit_card', 'Credit card'], ['debit_card', 'Debit card']]
+const PAYMENT_KEY = 'splitter_last_payment_mode'
 const inr = (n) => `₹${r2(n).toLocaleString('en-IN')}`
 
 /**
- * "+ New Group" - a quick expense: who it's with, then (optionally) the
- * expense itself - read from a receipt photo, a gallery image or a PDF bill,
- * or typed - who paid, and the split (equal among whoever shares it, or
- * custom %). Where it goes follows from the people: today's group with
- * exactly them ("30 oct 26") - opened if it exists, made if not, inside
- * their existing set of groups when there is one. With no amount, only the
- * group is made. Someone on the app is matched to their exact username (two
- * "Ajay"s are told apart by their full names); anyone else is added by the
- * name typed.
+ * "+ New Group" - a quick expense. First the expense: read from a photo, a
+ * gallery image or a PDF bill, or typed by hand (a bank statement imports a
+ * month's worth into the monthly groups by itself). Then whose it is:
+ *  - yours alone (the default): into that month's personal group,
+ *    "MONTHLY EXPENSES OCT 2026", made if it isn't there yet;
+ *  - split with people, picked or added new: into today's group with exactly
+ *    them ("30 oct 26") - opened if it exists, made if not, inside their
+ *    existing set of groups when there is one - with who paid, and the split
+ *    equal among whoever shares it or custom %. With no amount, only the
+ *    group is made.
+ * Someone on the app is matched to their exact username (two "Ajay"s are
+ * told apart by their full names); anyone else is added by the name typed.
  */
 export default function NewGroup() {
   const nav = useNavigate()
@@ -46,7 +59,11 @@ export default function NewGroup() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError]         = useState('')
 
-  // The expense - all optional
+  const [whose, setWhose]         = useState('me')      // me (monthly) | split
+  const [payMode, setPayMode]     = useState(() => { try { return localStorage.getItem(PAYMENT_KEY) || 'upi' } catch { return 'upi' } })
+  const statement = useStatementUpload(null, { panelClassName: 'mt-2' })
+
+  // The expense
   const [amount, setAmount]       = useState('')
   const [title, setTitle]         = useState('')
   const [notes, setNotes]         = useState('')
@@ -138,6 +155,8 @@ export default function NewGroup() {
     existing?.groups.forEach((g) => { if (g.category) counts[g.category] = (counts[g.category] || 0) + 1 })
     return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'other'
   })()
+  const monthly = allGroups.find((g) => g.name === monthlyName(date)
+    && (g.member_names ?? []).some((n) => lc(n) === lc(me)))
   // Names as the group keeps them (an existing group's spelling wins)
   const groupNames = existing?.names?.length ? existing.names : everyone
   const label = (n) => (lc(n) === lc(me) ? 'You' : dn(n, everyone))
@@ -196,9 +215,41 @@ export default function NewGroup() {
     }
   }
 
+  const pickPayMode = (v) => {
+    setPayMode(v)
+    try { localStorage.setItem(PAYMENT_KEY, v) } catch { /* private mode */ }
+  }
+
+  const saveMonthly = async () => {
+    if (!(amt > 0)) return setError('Enter the amount.')
+    if (!title.trim()) return setError('Add a description - the category is worked out from it.')
+    setSubmitting(true)
+    try {
+      let gid = monthly?.id
+      if (!gid) {
+        const r = await createGroup({
+          name: monthlyName(date), description: '', category: 'personal', emoji: '💰',
+          members: [me], created_by: me,
+        })
+        gid = r.data.id
+      }
+      await createExpense({
+        group_id: Number(gid), date: date || null, title: title.trim(), amount: amt,
+        paid_by: me, divider: 1, notes: notes || null, split_json: null,
+        payment_mode: payMode, receipt_json: receipt ? JSON.stringify(receipt) : null,
+        recorded_by: me || null,
+      })
+      nav(`/groups/${gid}`)
+    } catch (err) {
+      setError(err?.response?.data?.detail || 'Something went wrong')
+      setSubmitting(false)
+    }
+  }
+
   const save = async () => {
     setError('')
-    if (!members.length) return setError('Add at least one person.')
+    if (whose === 'me') return saveMonthly()
+    if (!members.length) return setError('Add at least one person to split it with.')
     const withExpense = amount !== ''
     if (withExpense) {
       if (!(amt > 0)) return setError('Enter a valid amount.')
@@ -230,7 +281,7 @@ export default function NewGroup() {
           divider: plainEqual ? everyone.length : Math.max(1, Object.keys(split).length),
           notes: notes || null,
           split_json: plainEqual ? null : JSON.stringify(split),
-          payment_mode: localStorage.getItem('splitter_last_payment_mode') || 'upi',
+          payment_mode: payMode,
           receipt_json: receipt ? JSON.stringify(receipt) : null,
           recorded_by: me || null,
         })
@@ -254,13 +305,95 @@ export default function NewGroup() {
             </svg>
           </button>
           <div>
-            <h1 className="text-xl font-bold">New expense</h1>
-            <p className="text-[11px] text-gray-400 mt-0.5">Who it's with, what it was, how it's split - filed under <b>{todayName()}</b>.</p>
+            <h1 className="text-xl font-bold">Add expense</h1>
+            <p className="text-[11px] text-gray-400 mt-0.5">Yours goes to the month's personal expenses; split, it goes to the group with those people.</p>
           </div>
         </div>
       </div>
 
       <div className="px-5 mt-5 space-y-5 max-w-2xl">
+            {/* Read it from a bill */}
+            <div className="bg-amber-50 border border-amber-200 rounded-md px-4 py-3">
+              <p className="text-xs font-bold text-gray-700 mb-2">Upload it <span className="font-normal text-gray-400">- or type it in below</span></p>
+              <div className="grid grid-cols-2 gap-2">
+                {[['📷', 'Take photo', cameraRef], ['🖼️', 'Gallery', galleryRef], ['📄', 'PDF bill', pdfRef]].map(([icon, text, ref]) => (
+                  <button key={text} type="button" disabled={scan.busy} onClick={() => ref.current?.click()}
+                    className="py-2.5 text-xs font-bold text-gray-700 bg-white border border-amber-300 rounded-md hover:bg-amber-100 active:scale-[0.98] transition-all disabled:opacity-50">
+                    {icon} {text}
+                  </button>
+                ))}
+                <button type="button" disabled={statement.busy} onClick={() => statement.pick(ANY_STATEMENT)}
+                  className="py-2.5 text-xs font-bold text-gray-700 bg-white border border-amber-300 rounded-md hover:bg-amber-100 active:scale-[0.98] transition-all disabled:opacity-50">
+                  🏦 Bank statement
+                </button>
+              </div>
+              <p className="text-[10px] text-gray-500 mt-1.5">A statement (PhonePe, Google Pay, Paytm - .csv / .pdf) files each payment into its month's personal expenses by itself.</p>
+              {statement.input}
+              {statement.panel}
+              <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden"
+                onChange={(e) => e.target.files?.[0] && setCropFile(e.target.files[0])} />
+              <input ref={galleryRef} type="file" accept="image/*" className="hidden"
+                onChange={(e) => e.target.files?.[0] && setCropFile(e.target.files[0])} />
+              <input ref={pdfRef} type="file" accept="application/pdf,.pdf" className="hidden"
+                onChange={(e) => e.target.files?.[0] && readBill(e.target.files[0], true)} />
+              {scan.busy && <p className="text-xs text-gray-500 mt-2">Reading it…</p>}
+              {scan.error && <p className="text-xs text-red-600 mt-2">{scan.error}</p>}
+              {scan.note && <p className="text-xs text-brand-700 mt-2">{scan.note}</p>}
+            </div>
+
+            {/* The expense */}
+            <div>
+              <label className="label">Amount (₹)</label>
+              <input className="input text-2xl font-bold" type="number" inputMode="decimal" placeholder="0" min="1" step="0.01"
+                value={amount} onChange={(e) => setAmount(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Description</label>
+              <input className="input" placeholder="e.g. dinner at Punjab Grill" value={title}
+                onChange={(e) => setTitle(e.target.value)} autoComplete="off" />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label">Date</label>
+                <DatePicker value={date} onChange={setDate} />
+              </div>
+              <div>
+                <label className="label">Notes</label>
+                <input className="input" placeholder="optional" value={notes} onChange={(e) => setNotes(e.target.value)} />
+              </div>
+            </div>
+            <div>
+              <label className="label">Payment mode</label>
+              <div className="flex flex-wrap gap-2">
+                {PAYMENT_MODES.map(([v, t]) => (
+                  <button key={v} type="button" onClick={() => pickPayMode(v)} className={chip(payMode === v)}>{t}</button>
+                ))}
+              </div>
+            </div>
+            {/* Whose is it */}
+            <div>
+              <span className="label">Whose is it?</span>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" onClick={() => setWhose('me')}
+                  className={`text-left px-3 py-2.5 border rounded-md ${whose === 'me' ? 'bg-brand-400 text-white border-brand-400' : 'bg-amber-50 text-gray-700 border-amber-200'}`}>
+                  <span className="block text-sm font-bold">Just me</span>
+                  <span className={`block text-[10px] ${whose === 'me' ? 'text-white/80' : 'text-gray-400'}`}>Monthly · {monthLabel(date)}</span>
+                </button>
+                <button type="button" onClick={() => setWhose('split')}
+                  className={`text-left px-3 py-2.5 border rounded-md ${whose === 'split' ? 'bg-brand-400 text-white border-brand-400' : 'bg-amber-50 text-gray-700 border-amber-200'}`}>
+                  <span className="block text-sm font-bold">Split with people</span>
+                  <span className={`block text-[10px] ${whose === 'split' ? 'text-white/80' : 'text-gray-400'}`}>Friends, or someone new</span>
+                </button>
+              </div>
+              {whose === 'me' && (
+                <p className="text-[11px] text-gray-500 mt-1.5">
+                  Goes to <b>{monthlyName(date)}</b>{monthly ? '' : ' (made now - first one this month)'}
+                </p>
+              )}
+            </div>
+        {whose === 'split' && (
+          <>
         {/* Who's in */}
         <div>
           <p className="label">Members</p>
@@ -386,40 +519,6 @@ export default function NewGroup() {
 
         {members.length > 0 && (
           <>
-            {/* Read it from a bill */}
-            <div className="bg-amber-50 border border-amber-200 rounded-md px-4 py-3">
-              <p className="text-xs font-bold text-gray-700 mb-2">Fill it in from a bill <span className="font-normal text-gray-400">(optional)</span></p>
-              <div className="grid grid-cols-3 gap-2">
-                {[['📷', 'Take photo', cameraRef], ['🖼️', 'Gallery', galleryRef], ['📄', 'PDF', pdfRef]].map(([icon, text, ref]) => (
-                  <button key={text} type="button" disabled={scan.busy} onClick={() => ref.current?.click()}
-                    className="py-2.5 text-xs font-bold text-gray-700 bg-white border border-amber-300 rounded-md hover:bg-amber-100 active:scale-[0.98] transition-all disabled:opacity-50">
-                    {icon} {text}
-                  </button>
-                ))}
-              </div>
-              <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden"
-                onChange={(e) => e.target.files?.[0] && setCropFile(e.target.files[0])} />
-              <input ref={galleryRef} type="file" accept="image/*" className="hidden"
-                onChange={(e) => e.target.files?.[0] && setCropFile(e.target.files[0])} />
-              <input ref={pdfRef} type="file" accept="application/pdf,.pdf" className="hidden"
-                onChange={(e) => e.target.files?.[0] && readBill(e.target.files[0], true)} />
-              {scan.busy && <p className="text-xs text-gray-500 mt-2">Reading it…</p>}
-              {scan.error && <p className="text-xs text-red-600 mt-2">{scan.error}</p>}
-              {scan.note && <p className="text-xs text-brand-700 mt-2">{scan.note}</p>}
-            </div>
-
-            {/* The expense */}
-            <div>
-              <label className="label">Amount (₹)</label>
-              <input className="input text-2xl font-bold" type="number" inputMode="decimal" placeholder="0" min="1" step="0.01"
-                value={amount} onChange={(e) => setAmount(e.target.value)} />
-            </div>
-            <div>
-              <label className="label">Description</label>
-              <input className="input" placeholder="e.g. dinner at Punjab Grill" value={title}
-                onChange={(e) => setTitle(e.target.value)} autoComplete="off" />
-            </div>
-
             <div>
               <label className="label">Paid by</label>
               <div className="flex flex-wrap gap-2">
@@ -478,30 +577,24 @@ export default function NewGroup() {
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="label">Date</label>
-                <DatePicker value={date} onChange={setDate} />
-              </div>
-              <div>
-                <label className="label">Notes</label>
-                <input className="input" placeholder="optional" value={notes} onChange={(e) => setNotes(e.target.value)} />
-              </div>
-            </div>
+          </>
+        )}
           </>
         )}
 
         {error && <p className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-md px-4 py-3">{error}</p>}
 
         <button type="button" onClick={save} className="btn-primary disabled:opacity-50"
-          disabled={submitting || members.length === 0}>
+          disabled={submitting || (whose === 'split' && members.length === 0)}>
           {submitting
             ? 'Saving…'
-            : members.length === 0
-              ? 'Add someone to start'
-              : amount !== ''
-                ? `Save ${inr(amt)} expense`
-                : todays ? `Open ${todays.name}` : 'Just create the group'}
+            : whose === 'me'
+              ? `Save ${amt > 0 ? inr(amt) : 'expense'} to ${monthLabel(date)}`
+              : members.length === 0
+                ? 'Add someone to split with'
+                : amount !== ''
+                  ? `Save ${inr(amt)} expense`
+                  : todays ? `Open ${todays.name}` : 'Just create the group'}
         </button>
       </div>
 
