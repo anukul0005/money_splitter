@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import BottomNav  from './components/BottomNav'
 import Sidebar    from './components/Sidebar'
 import PaymentClaimsInbox from './components/PaymentClaimsInbox'
+import RememberPage from './components/RememberPage'
 import Home        from './pages/Home'
 import Groups      from './pages/Groups'
 import GroupDetail from './pages/GroupDetail'
@@ -122,6 +123,7 @@ export default function App() {
               {/* Above every page, so "did this payment arrive?" can't be
                   missed whichever screen the payee happens to be on. */}
               <PaymentClaimsInbox />
+              <RememberPage />
               <Routes>
                 <Route path="/"           element={<Home />} />
                 <Route path="/groups"     element={<Groups />} />
