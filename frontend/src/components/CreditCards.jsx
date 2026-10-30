@@ -137,7 +137,7 @@ function CardBlock({ card: c, banks, results, busy, run, editing, setEditing, sa
                         <span className="text-gray-400">paid {day(p.paid_on)}</span>
                         <span className="flex items-center gap-2">
                           <span className="text-green-600 font-bold">{INR(p.amount)}</span>
-                          {b.can_pay && (
+                          {(
                             <button onClick={(e) => { e.stopPropagation(); confirm(`Remove the ${INR(p.amount)} payment?`) && run(() => deleteCardPayment(p.id)) }}
                               className="text-gray-300 hover:text-red-500 font-bold" aria-label="Remove payment">×</button>
                           )}
@@ -325,10 +325,17 @@ function CardsDashboard({ cards, colorOf, onPay }) {
 function PayForm({ cards, cardId, setCardId, busy, onSave, onClose }) {
   const [amount, setAmount] = useState('')
   const [paidOn, setPaidOn] = useState(today())
-  const payable = cards.filter((c) => { const b = c.bills.find((x) => x.can_pay); return b && b.total_due != null })
+  const [billId, setBillId] = useState(null)
+  const billsOf = (c) => c.bills.filter((b) => b.total_due != null)        // newest first
+  const payable = cards.filter((c) => billsOf(c).length > 0)
   const card = payable.find((c) => c.id === cardId)
-  const bill = card?.bills.find((x) => x.can_pay)
-  useEffect(() => { setAmount('') }, [cardId])
+  const bill = card?.bills.find((b) => b.id === billId)
+  // A card picked: its oldest bill still unpaid (else its latest) - the cycle a payment usually clears
+  useEffect(() => {
+    setAmount('')
+    const bs = card ? billsOf(card) : []
+    setBillId((bs.filter((b) => b.remaining >= PAID).pop() || bs[0])?.id ?? null)
+  }, [cardId])
   const amt = parseFloat(amount) || 0
   // A portal to <body>: inside the page it sat under the bottom bar, its Save button hidden
   return createPortal(
@@ -345,9 +352,19 @@ function PayForm({ cards, cardId, setCardId, busy, onSave, onClose }) {
           <>
             <Dropdown value={cardId ?? ''} onChange={(v) => setCardId(Number(v))} placeholder="Which card?"
               options={payable.map((c) => {
-                const b = c.bills.find((x) => x.can_pay)
-                return { value: c.id, label: `${cardName(c)} · ${b.remaining >= PAID ? `${INR(b.remaining)} due` : 'paid'}` }
+                const left = billsOf(c).reduce((s, b) => s + (b.remaining >= PAID ? b.remaining : 0), 0)
+                return { value: c.id, label: `${cardName(c)} · ${left >= PAID ? `${INR(Math.round(left * 100) / 100)} due` : 'paid'}` }
               })} />
+            {card && (
+              <div>
+                <p className="text-[10px] font-bold text-gray-500 mb-1">Billing cycle</p>
+                <Dropdown value={billId ?? ''} onChange={(v) => { setBillId(Number(v)); setAmount('') }} placeholder="Which bill?"
+                  options={billsOf(card).map((b) => ({
+                    value: b.id,
+                    label: `${b.cycle_from ? `${day(b.cycle_from)} – ${day(b.cycle_to)}` : shortMonth(b.period)} · ${INR(b.total_due)}${b.remaining >= PAID ? ` · ${INR(b.remaining)} left` : ' · paid'}`,
+                  }))} />
+              </div>
+            )}
             {bill && (
               <p className="text-[11px] text-gray-500">
                 {shortMonth(bill.period)} bill {INR(bill.total_due)}{bill.paid > 0 ? ` · ${INR(bill.paid)} paid` : ''}

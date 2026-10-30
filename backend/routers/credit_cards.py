@@ -5,7 +5,7 @@ card_bills.py. Lives alongside /loans as its own section of the same page.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -97,9 +97,34 @@ def _clean_card(payload: CardIn) -> dict:
             "last4": last4, "bill_day": payload.bill_day}
 
 
+def _cycle(r: CreditCardStatement) -> tuple[str | None, str | None]:
+    """The billing period a bill covers: the statement's own (read with its
+    details), else the previous bill date to the day before this one's -
+    how the banks here run it (SBI's 21 Oct bill: 21 Sep to 20 Oct)."""
+    import json
+    if r.details_json:
+        try:
+            sm = json.loads(r.details_json).get("summary") or {}
+            if sm.get("period_from") and sm.get("period_to"):
+                return sm["period_from"], sm["period_to"]
+        except ValueError:
+            pass
+    if not r.statement_date:
+        return None, None
+    try:
+        d = date.fromisoformat(r.statement_date)
+    except ValueError:
+        return None, None
+    y, m = (d.year, d.month - 1) if d.month > 1 else (d.year - 1, 12)
+    import calendar
+    start = date(y, m, min(d.day, calendar.monthrange(y, m)[1]))
+    return start.isoformat(), (d - timedelta(days=1)).isoformat()
+
+
 def _bill_out(r: CreditCardStatement, payments: list[CardPayment], latest: bool) -> dict:
     paid = round(sum(p.amount for p in payments), 2)
-    return {"payments": [{"id": p.id, "amount": p.amount, "paid_on": p.paid_on} for p in payments],
+    cycle_from, cycle_to = _cycle(r)
+    return {"cycle_from": cycle_from, "cycle_to": cycle_to,"payments": [{"id": p.id, "amount": p.amount, "paid_on": p.paid_on} for p in payments],
             "paid": paid, "remaining": round(max((r.total_due or 0) - paid, 0), 2) if r.total_due is not None else None,
             "can_pay": latest, "has_details": bool(r.details_json), "id": r.id, "card_id": r.card_id, "period": r.period, "bank": r.bank, "card_last4": r.card_last4,
             "statement_date": r.statement_date, "due_date": r.due_date, "total_due": r.total_due,
@@ -211,16 +236,12 @@ class PaymentIn(BaseModel):
 @router.post("/bills/{bill_id}/payments", response_model=dict, status_code=201)
 def record_payment(bill_id: int, payload: PaymentIn, db: Session = Depends(get_db),
                    caller: User = Depends(current_user)):
-    """A full or part payment against a card's latest bill. Older months are
-    closed - their payments, if any, stay as they were."""
+    """A full or part payment against one bill - whichever billing cycle it
+    paid off (the form asks), so each bill's paid-vs-billed stays true."""
     bill = db.query(CreditCardStatement).filter(CreditCardStatement.id == bill_id,
                                                 CreditCardStatement.user_id == caller.id).first()
     if not bill:
         raise HTTPException(404, "Bill not found")
-    latest = (db.query(CreditCardStatement).filter(CreditCardStatement.card_id == bill.card_id)
-              .order_by(CreditCardStatement.period.desc()).first())
-    if not latest or latest.id != bill.id:
-        raise HTTPException(400, "Payments can only be recorded against the card's latest bill")
     amount = round(payload.amount, 2)
     if amount <= 0:
         raise HTTPException(400, "Amount must be more than zero")
