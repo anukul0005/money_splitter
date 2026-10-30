@@ -171,7 +171,7 @@ const kInr = (n) => (n >= 100000 ? `₹${(n / 100000).toFixed(1)}L` : n >= 1000 
 const cardName = (c) => `${c.bank}${c.label ? ` ${c.label}` : ''}${c.last4 ? ` ••${c.last4}` : ''}`
 // A legend's few letters: the bank alone ("ICICI", "Jupiter", "SBI"), with
 // the last 4 digits only when two cards share a bank
-const bankWord = (c) => (/american express|amex/i.test(c.bank || '') ? 'Amex' : null) || (c.bank || '').replace(/\(.*?\)/g, '').replace(/(bank|card|cards)/gi, '').trim().split(/\s+/)[0] || c.bank
+const bankWord = (c) => (/american express|amex/i.test(c.bank || '') ? 'Amex' : null) || (c.bank || '').replace(/\(.*?\)/g, ' ').split(/\s+/).filter((w) => w && !/^(bank|card|cards|of|the|ltd)$/i.test(w))[0] || c.bank
 const shortName = (c, all) => (all.filter((x) => bankWord(x) === bankWord(c)).length > 1 && c.last4 ? `${bankWord(c)} ${c.last4}` : bankWord(c))
 const daysTo = (iso) => Math.round((new Date(`${iso}T00:00:00`) - new Date(`${today()}T00:00:00`)) / 864e5)
 
