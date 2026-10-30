@@ -162,6 +162,7 @@ _ADDED_COLUMNS = [
     ("users", "access_code_salt", "VARCHAR(64)"),
     ("users", "access_code_expires_at", "TIMESTAMPTZ"),
     ("expenses", "split_json", "TEXT"),
+    ("loans", "card_ref", "VARCHAR(60)"),
     ("expenses", "payment_mode", "VARCHAR(50)"),
     ("groups", "category", "VARCHAR(50)"),
     ("expenses", "settled_by", "TEXT"),

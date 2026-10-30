@@ -272,6 +272,16 @@ def _own_bill(db: Session, bill_id: int, caller: User) -> CreditCardStatement:
     return bill
 
 
+def _transfers(db: Session, bill_id: int, caller: User) -> dict:
+    from models import Loan
+    out: dict[str, list] = {}
+    for l in db.query(Loan).filter(Loan.card_ref.like(f"bill:{bill_id}:%")).order_by(Loan.id):
+        if l.lender.lower() == caller.name.lower():
+            out.setdefault(l.card_ref.rsplit(":", 1)[1], []).append(
+                {"loan_id": l.id, "to": l.borrower, "amount": l.principal})
+    return out
+
+
 @router.get("/bills/{bill_id}/details", response_model=dict)
 def bill_details(bill_id: int, db: Session = Depends(get_db), caller: User = Depends(current_user)):
     """The bill's breakup from its PDF: "ready" with the details, "reading"
@@ -283,7 +293,9 @@ def bill_details(bill_id: int, db: Session = Depends(get_db), caller: User = Dep
     card = db.get(CreditCard, bill.card_id) if bill.card_id else None
     head = {"bill": {"id": bill.id, "period": bill.period, "card": card_bills.card_name(card) if card else bill.bank,
                      "total_due": bill.total_due, "minimum_due": bill.minimum_due, "due_date": bill.due_date,
-                     "statement_date": bill.statement_date}}
+                     "statement_date": bill.statement_date},
+            # Lines passed on to someone as a loan: line -> [{loan_id, to, amount}]
+            "transfers": _transfers(db, bill.id, caller)}
     live = card_details.status(bill.id)
     if live and live["status"] == "reading":
         return {**head, **live}

@@ -648,6 +648,9 @@ class Loan(Base):
     # instalments are charged interest - see loan_calc._outstanding_emi.
     emi_plan = Column(Text, nullable=True)
     interest_day = Column(Integer, nullable=True)
+    # A card transaction this loan passes on to someone ("bill:<statement id>:<line>"):
+    # the card bill shows who it went to, and it's never passed on twice by mistake
+    card_ref = Column(String(60), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     payments = relationship("LoanPayment", back_populates="loan",

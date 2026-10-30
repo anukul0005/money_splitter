@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
-  getCardBillDetails, readCardBillDetails, listCards, fetchCardMonth,
+  getCardBillDetails, readCardBillDetails, listCards, fetchCardMonth, createLoan, getFriends,
   getCardPassword, setCardPassword, listCardBanks, setCardBankPassword, deleteCardBank, revealBankPassword,
 } from '../api'
 import Dropdown from '../components/Dropdown'
+import PeoplePicker from '../components/PeoplePicker'
+import DatePicker from '../components/DatePicker'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
 const day = (iso) => (iso ? new Date(`${iso}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '')
@@ -125,7 +128,101 @@ function SpendWindows({ data, selected, onSelect }) {
  * biggest merchants and every transaction. Read once in the background,
  * then saved - this polls while it's being read.
  */
+const r2 = (n) => Math.round(n * 100) / 100
+const todayIso = () => new Date().toISOString().slice(0, 10)
+
+/**
+ * Pass a card spend on to people - all of it to one, or split (equally,
+ * you in it or not, or by amounts typed). Each person's share becomes a
+ * loan from you to them (tied to this line), so it shows in your Owed to
+ * you, in their You owe, and in both Loans sections; anyone not on the app
+ * is simply named.
+ */
+function TransferSheet({ x, line, billId, card, already, onDone, onClose }) {
+  const [people, setPeople] = useState([])
+  const [friends, setFriends] = useState([])
+  const [withMe, setWithMe] = useState(false)
+  const [amts, setAmts] = useState({})              // name -> amount typed (others follow the even share)
+  const [due, setDue] = useState(() => addDays(todayIso(), 30))
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  useEffect(() => { getFriends().then((r) => setFriends(r.data.map((f) => f.name))).catch(() => {}) }, [])
+  const left = r2(x.amount - already)
+  const even = people.length ? r2(left / (people.length + (withMe ? 1 : 0))) : 0
+  const share = (n) => (amts[n] !== undefined && amts[n] !== '' ? parseFloat(amts[n]) || 0 : even)
+  const total = r2(people.reduce((s, n) => s + share(n), 0))
+  const save = async () => {
+    setErr('')
+    if (!people.length) return setErr('Pick who to pass it on to.')
+    if (total <= 0) return setErr('Enter the amounts.')
+    if (total > left + 0.5) return setErr(`That's ${INR(total)} - more than the ${INR(left)} left on this spend.`)
+    setBusy(true)
+    try {
+      for (const n of people) {
+        if (share(n) <= 0) continue
+        await createLoan({
+          role: 'lent', other: n, amount: share(n), start_date: x.date || todayIso(), due_date: due,
+          note: `${x.description} · ${card}${x.date ? ` · ${day(x.date)}` : ''}`, card_ref: `bill:${billId}:${line}`,
+        })
+      }
+      onDone()
+    } catch (e) {
+      setErr(e.response?.data?.detail || 'Could not save.'); setBusy(false)
+    }
+  }
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md bg-cream rounded-xl p-5 space-y-3 shadow-xl max-h-[85dvh] overflow-y-auto">
+        <div className="flex items-start gap-2">
+          <div className="flex-1 min-w-0">
+            <p className="text-base font-black">Split / pass on</p>
+            <p className="text-[11px] text-gray-500 truncate">{x.description} · {INR(x.amount)}{already > 0 ? ` · ${INR(left)} not passed on yet` : ''}</p>
+          </div>
+          <button type="button" onClick={onClose} className="text-xs font-bold text-gray-400">Close</button>
+        </div>
+        <PeoplePicker options={friends} selected={people} onChange={(v) => { setPeople(v); setAmts({}) }}
+          placeholder="Who pays you back? (on the app or not)" allowNew />
+        {people.length > 0 && (
+          <>
+            <label className="flex items-center gap-2 text-xs text-gray-700">
+              <input type="checkbox" checked={withMe} onChange={(e) => { setWithMe(e.target.checked); setAmts({}) }} />
+              I'm in the split too (my share stays mine)
+            </label>
+            <div className="space-y-1.5">
+              {people.map((n) => (
+                <div key={n} className="flex items-center gap-2">
+                  <span className="flex-1 min-w-0 truncate text-sm font-bold text-gray-800">{n}</span>
+                  <div className="relative w-28">
+                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 font-bold pointer-events-none">₹</span>
+                    <input className="input w-full text-right pl-6" inputMode="decimal"
+                      value={amts[n] ?? String(even)} onChange={(e) => setAmts((a) => ({ ...a, [n]: e.target.value.replace(/[^\d.]/g, '') }))} />
+                  </div>
+                </div>
+              ))}
+              <p className="text-[11px] text-gray-500">
+                {withMe ? `Your share: ${INR(r2(left - total))} · ` : ''}Passing on {INR(total)} of {INR(left)}
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] font-bold text-gray-500 mb-1">Pay back by</p>
+              <DatePicker value={due} onChange={setDue} />
+            </div>
+          </>
+        )}
+        {err && <p className="text-xs text-red-600">{err}</p>}
+        <button type="button" onClick={save} disabled={busy || !people.length} className="btn-primary py-2.5 text-sm w-full disabled:opacity-50">
+          {busy ? 'Saving…' : people.length ? `Pass on ${INR(total)}` : 'Pass on'}
+        </button>
+        <p className="text-[10px] text-gray-400">Each share becomes money they owe you - in your Owed to you, their You owe, and Loans.</p>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
 function BillBreakup({ billId: id }) {
+  const nav = useNavigate()
+  const [passing, setPassing] = useState(null)     // { x, line } - the spend being passed on
   const [d, setD] = useState(null)
   const [error, setError] = useState('')
   const [filter, setFilter] = useState('all')
@@ -329,7 +426,11 @@ function BillBreakup({ billId: id }) {
           {byDate.map((g) => (
             <div key={g.date || 'none'}>
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">{longDay(g.date)}</p>
-              {g.items.map((x, i) => (
+              {g.items.map((x, i) => {
+                const line = d.transactions.indexOf(x)
+                const sent = d.transfers?.[String(line)] || []
+                const sentTotal = sent.reduce((s, t) => s + t.amount, 0)
+                return (
                 <div key={i} className="flex items-start justify-between gap-3 py-1.5 border-b border-amber-100 last:border-0">
                   <div className="min-w-0">
                     <p className="text-xs font-semibold text-gray-800 leading-snug">{x.description}</p>
@@ -338,12 +439,27 @@ function BillBreakup({ billId: id }) {
                       {x.kind === 'refund' ? ' · refund' : x.kind === 'cashback' ? ' · cashback' : ''}
                       {x.foreign_amount ? ` · ${x.currency} ${Number(x.foreign_amount).toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : ''}
                     </p>
+                    {sent.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-0.5">
+                        {sent.map((t) => (
+                          <button key={t.loan_id} onClick={() => nav(`/loans?tab=loans&loan=${t.loan_id}`)}
+                            className="text-[10px] font-bold text-green-700 bg-green-50 border border-green-200 rounded px-1.5 py-px">
+                            → {t.to} {INR(t.amount)}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {x.type === 'debit' && sentTotal < x.amount - 0.5 && (
+                      <button onClick={() => setPassing({ x, line, already: sentTotal })}
+                        className="text-[10px] font-bold text-brand-500 mt-0.5">{sent.length ? '+ pass on more' : 'Split / pass on'}</button>
+                    )}
                   </div>
                   <span className={`text-xs font-bold shrink-0 ${x.type === 'credit' ? 'text-green-700' : 'text-gray-900'}`}>
                     {x.type === 'credit' ? '−' : ''}{INR(x.amount)}
                   </span>
                 </div>
-              ))}
+                )
+              })}
             </div>
           ))}
           {txns.length === 0 && <p className="text-xs text-gray-500">Nothing here.</p>}
@@ -358,6 +474,11 @@ function BillBreakup({ billId: id }) {
         </p>
         {error && <p className="text-xs text-red-600 text-center">{error}</p>}
       </div>
+      {passing && (
+        <TransferSheet x={passing.x} line={passing.line} already={passing.already} billId={id} card={b?.card || ''}
+          onClose={() => setPassing(null)}
+          onDone={() => { setPassing(null); getCardBillDetails(id).then((r) => setD(r.data)).catch(() => {}) }} />
+      )}
     </div>
   )
 }

@@ -73,6 +73,7 @@ class LoanCreate(BaseModel):
     note: Optional[str] = None
     emi: Optional[list[EmiItem]] = None   # optional payment plan
     interest_day: Optional[int] = None    # day of month interest is charged on overdue EMIs
+    card_ref: Optional[str] = None        # "bill:<id>:<line>" - a credit card transaction passed on
 
     @field_validator("amount")
     @classmethod
@@ -152,7 +153,7 @@ def _loan_out(loan: Loan) -> dict:
         "principal": loan.principal, "has_interest": loan.has_interest,
         "rate_pct": loan.rate_pct, "start_date": loan.start_date,
         "due_date": loan.due_date, "note": loan.note,
-        "interest_day": loan.interest_day, "emi": bool(emi_plan(loan)), **o,
+        "interest_day": loan.interest_day, "emi": bool(emi_plan(loan)), "card_ref": loan.card_ref, **o,
         "paid": o["total_due"] <= 0.01,
         "payments": [{"id": p.id, "amount": p.amount, "date": p.date} for p in loan.payments],
     }
@@ -242,7 +243,16 @@ def create_loan(payload: LoanCreate, db: Session = Depends(get_db),
     if payload.interest_day is not None and not 1 <= payload.interest_day <= 28:
         raise HTTPException(400, "Interest charge day must be 1-28")
     lender, borrower = (caller.name, other) if payload.role == "lent" else (other, caller.name)
-    loan = Loan(lender=lender, borrower=borrower, principal=payload.amount,
+    card_ref = None
+    if payload.card_ref:
+        import re
+        from models import CreditCardStatement
+        m = re.fullmatch(r"bill:(\d+):(\d+)", payload.card_ref)
+        if not m or payload.role != "lent" or not db.query(CreditCardStatement).filter(
+                CreditCardStatement.id == int(m.group(1)), CreditCardStatement.user_id == caller.id).first():
+            raise HTTPException(400, "That card transaction isn't yours to pass on")
+        card_ref = payload.card_ref
+    loan = Loan(lender=lender, borrower=borrower, principal=payload.amount, card_ref=card_ref,
                 has_interest=payload.interest, rate_pct=3.6, start_date=start,
                 due_date=due, note=payload.note, created_by=caller.name,
                 emi_plan=plan_json, interest_day=payload.interest_day if plan_json else None)
