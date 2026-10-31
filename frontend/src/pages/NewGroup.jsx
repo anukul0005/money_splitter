@@ -8,6 +8,7 @@ import { dn } from '../utils/displayName'
 import ReceiptCropper from '../components/ReceiptCropper'
 import DatePicker from '../components/DatePicker'
 import { useStatementUpload, ANY_STATEMENT } from '../components/StatementUpload'
+import Dropdown from '../components/Dropdown'
 
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
 // Today as every dated group is named ("18 oct 26") - the same pattern a
@@ -60,6 +61,7 @@ export default function NewGroup() {
   const [error, setError]         = useState('')
 
   const [whose, setWhose]         = useState('me')      // me (monthly) | split
+  const [picked, setPicked]       = useState('')        // a previous group with these people, chosen to add to ('' = today's)
   const [payMode, setPayMode]     = useState(() => { try { return localStorage.getItem(PAYMENT_KEY) || 'upi' } catch { return 'upi' } })
   const statement = useStatementUpload(null, { panelClassName: 'mt-2' })
 
@@ -116,6 +118,7 @@ export default function NewGroup() {
     setQuery(''); setChoosing(null); setError('')
     setSplitMode('equal')
   }
+  useEffect(() => { setPicked('') }, [members.join('|')])
   const remove = (name) => {
     setMembers((x) => x.filter((y) => y !== name))
     setLeft((x) => x.filter((y) => y !== name))
@@ -150,6 +153,9 @@ export default function NewGroup() {
     : null
   // Today's group with exactly these people, if it's there already
   const todays = existing?.groups.find((g) => dayKey(g.name) === dayKey(todayName()))
+  // Where it goes: a previous group picked from theirs, else today's (made if not there)
+  const target = (picked && existing?.groups.find((g) => String(g.id) === String(picked))) || todays
+  const pastGroups = (existing?.groups || []).filter((g) => g.id !== todays?.id).sort((a, b) => b.id - a.id)
   const usualCategory = (() => {
     const counts = {}
     existing?.groups.forEach((g) => { if (g.category) counts[g.category] = (counts[g.category] || 0) + 1 })
@@ -256,12 +262,12 @@ export default function NewGroup() {
       if (!title.trim()) return setError('Add a description - the category is worked out from it.')
       if (splitMode === 'equal' && !sharing.length) return setError('Pick at least one person to share it.')
       if (splitMode === 'custom' && Math.abs(pctTotal - 100) > 0.5) return setError(`The split adds up to ${r2(pctTotal)}% - it needs to be 100%.`)
-    } else if (todays) {
-      return nav(`/groups/${todays.id}`)
+    } else if (target) {
+      return nav(`/groups/${target.id}`)
     }
     setSubmitting(true)
     try {
-      let gid = todays?.id
+      let gid = target?.id
       if (!gid) {
         const r = await createGroup({
           name: todayName(), description: '', category: usualCategory, emoji: '',
@@ -509,11 +515,17 @@ export default function NewGroup() {
         {members.length > 0 && (
           <div className="text-[12px] text-gray-700 bg-white border border-amber-200 rounded-md px-3 py-2.5">
             <span className="block text-[9px] font-black text-gray-400 uppercase tracking-widest mb-0.5">Goes to</span>
-            {todays
-              ? <><b>{existing.name}</b> › today's group, <b>{todays.name}</b></>
-              : existing
-                ? <><b>{existing.name}</b> ({existing.groups.length} group{existing.groups.length === 1 ? '' : 's'}) › a new group for today, <b>{todayName()}</b></>
-                : <>A new group with {everyone.map(label).join(', ')}, named <b>{todayName()}</b></>}
+            {existing ? (
+              <>
+                <p className="mb-1.5"><b>{existing.name}</b> <span className="text-gray-400">({existing.groups.length} group{existing.groups.length === 1 ? '' : 's'})</span></p>
+                {/* today's group (made if it isn't there), or one of the earlier ones with them */}
+                <Dropdown size="sm" value={picked} onChange={(v) => setPicked(String(v))}
+                  options={[
+                    { value: '', label: todays ? `Today's group · ${todays.name}` : `New group for today · ${todayName()}` },
+                    ...pastGroups.map((g) => ({ value: String(g.id), label: g.name })),
+                  ]} />
+              </>
+            ) : <>A new group with {everyone.map(label).join(', ')}, named <b>{todayName()}</b></>}
           </div>
         )}
 
@@ -594,7 +606,7 @@ export default function NewGroup() {
                 ? 'Add someone to split with'
                 : amount !== ''
                   ? `Save ${inr(amt)} expense`
-                  : todays ? `Open ${todays.name}` : 'Just create the group'}
+                  : target ? `Open ${target.name}` : 'Just create the group'}
         </button>
       </div>
 
