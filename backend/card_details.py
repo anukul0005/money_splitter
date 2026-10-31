@@ -461,75 +461,6 @@ def statement_text(bank: str, pages: list[str]) -> tuple[str, int]:
     return "\n".join(pages[:keep]), keep
 
 
-OCR_PAGES_MAX = 15      # pictures read per statement at most (each an OCR call)
-
-
-def _unreadable(text: str) -> bool:
-    """A page whose text didn't come out: next to nothing, font codes
-    ("(cid:12)"), or mostly symbols - a PDF with its fonts embedded without a
-    way back to letters, which is how a statement's own pages can read as
-    blank while its plain pages (terms, an illustration) read fine."""
-    t = (text or "").strip()
-    if len(t) < 120:
-        return True
-    if t.count("(cid:") >= 5:
-        return True
-    visible = [c for c in t if not c.isspace()]
-    return sum(c.isalnum() for c in visible) / max(len(visible), 1) < 0.55
-
-
-def _ocr_page(page) -> str:
-    """One PDF page's text read off a picture of it (ocr_providers, the
-    receipt scanner's - cheapest quota first)."""
-    import io
-    from ocr_providers import AzureVisionProvider, GoogleVisionProvider, OCRSpaceProvider
-    img = page.to_image(resolution=150).original.convert("RGB")
-    for q in (75, 60, 45):
-        buf = io.BytesIO()
-        img.save(buf, "JPEG", quality=q)
-        if buf.tell() < 950_000:
-            break
-    data = buf.getvalue()
-    for provider in (OCRSpaceProvider(), AzureVisionProvider(), GoogleVisionProvider()):
-        if not provider.available():
-            continue
-        try:
-            text = provider.extract_text(data)
-            if text and len(text.strip()) > 40:
-                return text
-        except Exception as e:
-            print(f"[card_details] OCR {provider.name}: {e}")
-    return ""
-
-
-def pdf_pages_read(pdf_bytes: bytes, passwords: list[str], keep=None, progress=None) -> tuple[list[str], list[str]] | None:
-    """(each page's text, how each was read: "text" | "ocr" | "unreadable").
-    Like pdf_pages, but a page whose text doesn't come out (_unreadable) among
-    the first `keep` is read off a picture of it instead."""
-    import io
-    import pdfplumber
-    for pw in [None, *passwords]:
-        try:
-            with pdfplumber.open(io.BytesIO(pdf_bytes), password=pw) as pdf:
-                texts = [(p.extract_text() or "") for p in pdf.pages]
-                how = ["text"] * len(texts)
-                limit = len(texts) if keep is None else keep(len(texts))
-                todo = [i for i in range(min(limit, len(texts))) if _unreadable(texts[i])][:OCR_PAGES_MAX]
-                for k, i in enumerate(todo):
-                    if progress:
-                        progress(f"Page {i + 1}'s text is unreadable - reading it from a picture ({k + 1} of {len(todo)})…",
-                                 0.15 + 0.18 * k / max(len(todo), 1))
-                    got = _ocr_page(pdf.pages[i])
-                    if got and not _unreadable(got):
-                        texts[i], how[i] = got, "ocr"
-                    else:
-                        how[i] = "unreadable"
-                return texts, how
-        except Exception:
-            continue
-    return None
-
-
 def pdf_pages(pdf_bytes: bytes, passwords: list[str]) -> list[str] | None:
     """The PDF's text page by page - opened with no password, then each saved
     one in turn (the card's own first)."""
@@ -571,7 +502,7 @@ def read_bill(db, user_id: int, bill_id: int, step=lambda text, frac=None: None)
     (via start) and by the daily auto-sync (card_autosync.py)."""
     import secret_box
     from models import BankPassword, CreditCard, CreditCardStatement, GmailConnection, User
-    from statement_sync import _first_pdf_attachment, _gmail_service
+    from statement_sync import _gmail_service, best_statement_pdf
     bill = db.get(CreditCardStatement, bill_id)
     conn = db.query(GmailConnection).filter(GmailConnection.user_id == user_id).first()
     if not bill or not conn:
@@ -579,8 +510,15 @@ def read_bill(db, user_id: int, bill_id: int, step=lambda text, frac=None: None)
     step("Opening the statement email…", 0.03)
     service = _gmail_service(conn)
     msg = service.users().messages().get(userId="me", id=bill.gmail_message_id, format="full").execute()
-    pdf = _first_pdf_attachment(service, bill.gmail_message_id, msg.get("payload", {}))
     card = db.get(CreditCard, bill.card_id) if bill.card_id else None
+    # Every saved password up front: with two PDFs in the email (the bill and
+    # its terms), each has to be opened to tell which is the bill
+    passwords = [p for p in (secret_box.decrypt(b.password_encrypted) for b in
+                             db.query(BankPassword).filter(BankPassword.user_id == user_id)) if p]
+    if card:
+        from card_bills import passwords_for
+        passwords = passwords_for(card, passwords)
+    pdf = best_statement_pdf(service, bill.gmail_message_id, msg.get("payload", {}), passwords)
     if not pdf and card:
         # The saved email carries no PDF (a "bill is ready" note, or an app
         # like CRED's): the bank's own statement email nearby, if there is one.
@@ -591,7 +529,7 @@ def read_bill(db, user_id: int, bill_id: int, step=lambda text, frac=None: None)
         other = card_bills.find_pdf_email(service, card, around)
         if other:
             m2 = service.users().messages().get(userId="me", id=other, format="full").execute()
-            pdf = _first_pdf_attachment(service, other, m2.get("payload", {}))
+            pdf = best_statement_pdf(service, other, m2.get("payload", {}), passwords)
             if pdf and not db.query(CreditCardStatement).filter(
                     CreditCardStatement.gmail_message_id == other, CreditCardStatement.id != bill.id).first():
                 bill.gmail_message_id = other            # read from the right email from now on
@@ -601,18 +539,10 @@ def read_bill(db, user_id: int, bill_id: int, step=lambda text, frac=None: None)
         raise RuntimeError("Neither this bill's email nor any statement email from the bank around it has a "
                            "PDF attached, so there's no breakup to read")
     step("Unlocking the PDF…", 0.12)
-    passwords = [p for p in (secret_box.decrypt(b.password_encrypted) for b in
-                             db.query(BankPassword).filter(BankPassword.user_id == user_id)) if p]
-    if card:
-        from card_bills import passwords_for
-        passwords = passwords_for(card, passwords)
-    bank = card.bank if card else bill.bank
-    got = pdf_pages_read(pdf, passwords, keep=lambda n: pages_to_read(bank, n), progress=step)
-    if not got:
+    pages = pdf_pages(pdf, passwords)
+    if not pages or len("".join(pages).strip()) < 100:
         raise RuntimeError("The PDF couldn't be opened with the saved passwords")
-    pages, how = got
-    if len("".join(pages).strip()) < 100:
-        raise RuntimeError("The PDF opened but no text could be read from it, even from pictures of its pages")
+    bank = card.bank if card else bill.bank
     text, used = statement_text(bank, pages)
     step(f"Read pages 1–{used} of {len(pages)}", 0.33)
     owner = db.get(User, user_id)
@@ -621,9 +551,6 @@ def read_bill(db, user_id: int, bill_id: int, step=lambda text, frac=None: None)
     # found - so a layout change that stops it matching shows up.
     step("Saving…", 0.98)
     details["pages"] = {"read": used, "total": len(pages),
-                        # how each page read: its text, a picture of it (OCR), or not at all
-                        "ocr": [i + 1 for i, h in enumerate(how[:used]) if h == "ocr"],
-                        "unreadable": [i + 1 for i, h in enumerate(how[:used]) if h == "unreadable"],
                         "stopped_at": STOP_AT[bank].pattern if bank in STOP_AT and
                         any(STOP_AT[bank].search(p) for p in pages[:used]) else None}
     bill.details_json = json.dumps(details)

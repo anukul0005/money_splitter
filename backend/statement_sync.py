@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import io
+import re
 import threading
 from datetime import datetime, timezone
 
@@ -216,7 +217,7 @@ def sync_for_user(db: Session, user_id: int, after: str | None = None, before: s
 def _process_message(db: Session, service, user_id: int, message_id: str,
                      passwords: list[str]) -> bool:
     msg = service.users().messages().get(userId="me", id=message_id).execute()
-    pdf_bytes = _first_pdf_attachment(service, message_id, msg.get("payload", {}))
+    pdf_bytes = best_statement_pdf(service, message_id, msg.get("payload", {}), passwords)
     if not pdf_bytes:
         return False
 
@@ -245,6 +246,53 @@ def _process_message(db: Session, service, user_id: int, message_id: str,
     ))
     db.commit()
     return True
+
+
+def _pdf_attachments(service, message_id: str, part: dict) -> list[bytes]:
+    """Every PDF attached to the email, in order."""
+    from card_bills import _is_pdf
+    out = []
+    body = part.get("body", {})
+    if _is_pdf(part) and (body.get("attachmentId") or body.get("data")):
+        if body.get("attachmentId"):
+            data = service.users().messages().attachments().get(
+                userId="me", messageId=message_id, id=body["attachmentId"],
+            ).execute()["data"]
+        else:
+            data = body["data"]
+        raw = base64.urlsafe_b64decode(data)
+        if b"%PDF" in raw[:1024]:
+            out.append(raw)
+    for sub in part.get("parts", []) or []:
+        out += _pdf_attachments(service, message_id, sub)
+    return out
+
+
+_BILL_WORDS = re.compile(r"total\s*(amount\s*)?due|minimum\s*(amount\s*)?due|payment\s*due\s*date|statement\s*date"
+                         r"|credit\s*limit|opening\s*balance|previous\s*balance|transaction\s*details|\bdr\b|\bcr\b", re.I)
+_TERMS_WORDS = re.compile(r"terms\s*(and|&)\s*conditions|most\s*important\s*terms|\bmitc\b|schedule\s*of\s*charges"
+                          r"|grievance|arbitration|governing\s*law", re.I)
+
+
+def statement_score(text: str | None) -> float:
+    """How much a PDF's text reads like the bill itself rather than its
+    terms and conditions - a statement email can carry both (HSBC sends a
+    23-page T&C PDF next to the bill)."""
+    if not text or len(text.strip()) < 40:
+        return -1e9
+    bill = len(_BILL_WORDS.findall(text))
+    terms = len(_TERMS_WORDS.findall(text))
+    amounts = len(re.findall(r"\d[\d,]*\.\d{2}\b", text))
+    return bill * 5 + min(amounts, 200) * 0.5 - terms * 4 - len(text) / 20000
+
+
+def best_statement_pdf(service, message_id: str, payload: dict, passwords: list[str]) -> bytes | None:
+    """The bill among an email's PDFs: the one whose text reads most like a
+    statement (statement_score) - not simply the first attached."""
+    pdfs = _pdf_attachments(service, message_id, payload)
+    if len(pdfs) <= 1:
+        return pdfs[0] if pdfs else None
+    return max(pdfs, key=lambda b: statement_score(_extract_pdf_text(b, passwords)))
 
 
 def _first_pdf_attachment(service, message_id: str, part: dict) -> bytes | None:

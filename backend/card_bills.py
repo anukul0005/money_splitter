@@ -193,7 +193,7 @@ def find_bill(service, card, d: date, passwords: list[str]) -> dict:
     """Search, rank, read and check - the bill for `card` generated on `d`.
     {"status": "found", fields..., message} or {"status": "not_found", "why"}."""
     import statement_extractor
-    from statement_sync import _extract_pdf_text, _first_pdf_attachment
+    from statement_sync import _extract_pdf_text, best_statement_pdf
 
     resp = service.users().messages().list(userId="me", q=_query(card, d), maxResults=25).execute()
     ids = [m["id"] for m in resp.get("messages", [])]
@@ -217,7 +217,7 @@ def find_bill(service, card, d: date, passwords: list[str]) -> dict:
         tries = [("email", lambda: _body_text(msg.get("payload", {})))]
         if has_pdf:
             tries.append(("pdf", lambda: _extract_pdf_text(
-                _first_pdf_attachment(service, mid, msg.get("payload", {})) or b"", passwords)))
+                best_statement_pdf(service, mid, msg.get("payload", {}), passwords) or b"", passwords)))
         for source, get_text in tries:
             text = get_text()
             if not text or len(text.strip()) < 40:

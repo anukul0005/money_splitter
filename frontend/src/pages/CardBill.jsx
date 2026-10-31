@@ -186,7 +186,7 @@ function BillBreakup({ billId: id }) {
         <div className="h-2 bg-amber-100 overflow-hidden">
           <div className="h-full bg-brand-400 transition-all duration-700" style={{ width: `${Math.max(2, (d?.progress || 0) * 100)}%` }} />
         </div>
-        <p className="text-[10px] text-gray-400">The first read of a statement takes up to a minute (longer when pages have to be read from pictures). After that it opens instantly.</p>
+        <p className="text-[10px] text-gray-400">The first read of a statement takes up to a minute. After that it opens instantly.</p>
       </div>
     </div>
   )
@@ -403,8 +403,6 @@ function BillBreakup({ billId: id }) {
         <p className="text-[10px] text-gray-400 text-center">
           Read from the statement PDF
           {d.pages ? ` (pages 1–${d.pages.read} of ${d.pages.total}${d.pages.read < d.pages.total ? ' - the rest are terms and offers' : ''})` : ''}
-          {d.pages?.ocr?.length ? ` · page${d.pages.ocr.length === 1 ? '' : 's'} ${d.pages.ocr.join(', ')} read from a picture (OCR)` : ''}
-          {d.pages?.unreadable?.length ? ` · page${d.pages.unreadable.length === 1 ? '' : 's'} ${d.pages.unreadable.join(', ')} couldn't be read at all` : ''}
           {d.read_at ? ` on ${new Date(d.read_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}` : ''}
           {t.categorised ? ` · ${t.categorised_by_ai} of ${t.categorised} spends categorised by AI` : ''} ·{' '}
           <button onClick={readAgain} className="font-bold text-brand-500">Read again</button>
