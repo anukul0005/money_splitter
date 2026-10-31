@@ -51,6 +51,7 @@ def _person(merchant: str, venue: str | None = None) -> bool:
 # the liquor shop, paid as KHAO PIO itself, is another place - Khao Pio (FL).
 FIXED = [("NEERAJ KUMAR", "Food & Dining", "Street food & snacks", "Khao Pio (Snacks)")]
 KHAO_SNACKS, KHAO_FL = "Khao Pio (Snacks)", "Khao Pio (FL)"
+KHAO_SNACKS_MAX = 300
 
 
 def _khao_pio(db) -> None:
@@ -67,6 +68,14 @@ def _khao_pio(db) -> None:
     for e in db.query(Expense).filter(Expense.venue.is_(None), Expense.category == "Alcohol").all():
         if place_key(e.title).startswith("khaopio"):
             e.venue = KHAO_FL
+            _touched(db, [e.id])
+    # A big bill there that isn't the snacks counter's UPI is the liquor shop's
+    # (₹1,914 for a group) - Khao Pio (Snacks) is ₹10-200 a visit
+    for e in db.query(Expense).filter(Expense.venue.isnot(None), Expense.amount > KHAO_SNACKS_MAX).all():
+        if place_key(e.venue) in keys | {place_key(KHAO_SNACKS)} and key(e.merchant) != "neerajkumar":
+            e.venue, e.category, e.subcategory = KHAO_FL, "Alcohol", "Liquor store"
+            if e.category_source in ("import", "merchant", "llm", None):
+                e.category_source = "rules"
             _touched(db, [e.id])
     db.flush()
     merge(db, ["Khao Piyo", "KHAO PIO - Snacks"], KHAO_SNACKS, by="#system")
@@ -275,8 +284,8 @@ _MERGE_NOTE = re.compile(r"(?:^|·\s*)(?:PhonePe|Google Pay|GPay|Paytm|BHIM|Amaz
 # shared with everyone; v6: notes count as a description, and near
 # spellings of short place names match).
 # v7: person-named payees shared with everyone. v8: no amount limit on
-# them, and Khao Pio's two places (_khao_pio).
-_BACKFILL_MARK = "#backfill-v8"
+# them, and Khao Pio's two places (_khao_pio). v9: big Khao Pio bills are FL's.
+_BACKFILL_MARK = "#backfill-v9"
 
 
 def share_places(db) -> int:
