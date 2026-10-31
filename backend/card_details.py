@@ -29,6 +29,10 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from itertools import combinations
 
+_status: dict[int, dict] = {}       # bill id -> {"status": "reading"|"error", "step", "progress", "error"}
+_lock = threading.Lock()
+
+
 def _num(v):
     return round(float(v), 2) if isinstance(v, (int, float)) else None
 
