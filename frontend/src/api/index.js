@@ -253,7 +253,7 @@ function remembered(url, params, ttl) {
 }
 
 export const tennisSummary  = ()                 => remembered('/tennis/summary', null, 5 * MIN)
-export const tennisNews     = (source)           => api.get('/tennis/news', { params: { source } })
+export const tennisNews     = (source, sport)    => api.get('/tennis/news', { params: { source, sport } })
 export const tennisArticle  = (id)               => remembered(`/tennis/news/${id}`, null, 30 * MIN)
 export const tennisDay      = (date, tour)       => remembered('/tennis/day', { date, tour }, 2 * MIN)
 export const tennisPlayers  = (q, tour)          => remembered('/tennis/players', { q, tour }, 5 * MIN)

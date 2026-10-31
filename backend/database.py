@@ -221,6 +221,7 @@ _ADDED_COLUMNS = [
     ("expenses", "merchant", "VARCHAR(200)"),
     ("merchant_labels", "venue", "VARCHAR(120)"),
     ("merchant_labels", "max_amount", "DOUBLE PRECISION"),
+    ("tennis_news", "sport", "VARCHAR(20) NOT NULL DEFAULT 'tennis'"),
     ("payments", "settlement_ref", "VARCHAR(32)"),
     ("payments", "settlement_amount", "DOUBLE PRECISION"),
     ("loan_payments", "settlement_ref", "VARCHAR(32)"),

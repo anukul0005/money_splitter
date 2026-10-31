@@ -1,7 +1,8 @@
-"""Tennis news - the headlines the big tennis desks publish, newest first.
+"""Sports news - tennis and football headlines, newest first.
 
-Read from the publishers' own RSS feeds (the Guardian, BBC Sport, Sky
-Sports, ESPN, Tennis365), every POLL_EVERY while the app is up and
+Read from the publishers' own RSS feeds (tennis: the Guardian, BBC Sport,
+Sky Sports, ESPN, Tennis365; football: the Guardian, ESPN), every
+POLL_EVERY while the app is up and
 whenever the News page asks after that long. Each story links back to its
 publisher; only the headline, a line of summary and the thumbnail the feed
 itself carries are kept.
@@ -27,12 +28,16 @@ from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 
 FEEDS = [
-    ("The Guardian", "https://www.theguardian.com/sport/tennis/rss"),
-    ("BBC Sport", "https://feeds.bbci.co.uk/sport/tennis/rss.xml"),
-    ("Sky Sports", "https://www.skysports.com/rss/12110"),
-    ("ESPN", "https://www.espn.com/espn/rss/tennis/news"),
-    ("Tennis365", "https://www.tennis365.com/feed"),
+    ("tennis", "The Guardian", "https://www.theguardian.com/sport/tennis/rss"),
+    ("tennis", "BBC Sport", "https://feeds.bbci.co.uk/sport/tennis/rss.xml"),
+    ("tennis", "Sky Sports", "https://www.skysports.com/rss/12110"),
+    ("tennis", "ESPN", "https://www.espn.com/espn/rss/tennis/news"),
+    ("tennis", "Tennis365", "https://www.tennis365.com/feed"),
+    ("football", "The Guardian", "https://www.theguardian.com/football/rss"),
+    ("football", "ESPN", "https://www.espn.com/espn/rss/soccer/news"),
 ]
+SPORTS = {"tennis": "🎾", "football": "⚽"}
+MAX_AGE = timedelta(days=7)   # a feed's old items (the Guardian's football one goes back years) stay out
 POLL_EVERY = 600            # seconds
 PUSH_EACH = 3               # stories pushed one by one per read; the rest as "+N more"
 FRESH = timedelta(hours=3)  # only stories this new are pushed
@@ -80,8 +85,8 @@ def _when(s: str | None) -> datetime | None:
     return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
 
 
-def parse(source: str, xml: bytes) -> list[dict]:
-    """A feed's items: {source, title, link, published, summary, image}."""
+def parse(source: str, xml: bytes, sport: str = "tennis") -> list[dict]:
+    """A feed's items: {sport, source, title, link, published, summary, image}."""
     out = []
     root = ET.fromstring(xml)
     for it in root.iter("item"):
@@ -96,7 +101,7 @@ def parse(source: str, xml: bytes) -> list[dict]:
                     w = int(el.get("width") or 0)
                     if image is None or w > image[1]:
                         image = (url, w)
-        out.append({"source": source, "title": title[:300], "link": link[:500],
+        out.append({"sport": sport, "source": source, "title": title[:300], "link": link[:500],
                     "published": _when(it.findtext("pubDate")),
                     "summary": _text(it.findtext("description"))[:400] or None,
                     "image": image[0][:500] if image else None})
@@ -105,11 +110,11 @@ def parse(source: str, xml: bytes) -> list[dict]:
 
 def _fetch() -> list[dict]:
     items = []
-    for source, url in FEEDS:
+    for sport, source, url in FEEDS:
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "SplitEasy news reader"})
             with urllib.request.urlopen(req, timeout=15) as r:
-                items += parse(source, r.read())
+                items += parse(source, r.read(), sport)
         except Exception as e:      # one desk down never stops the others
             print(f"[tennis-news] {source}: {e}")
     return items
@@ -133,22 +138,22 @@ def refresh() -> int:
             first = db.query(TennisNews.id).first() is None
             known = {l for (l,) in db.query(TennisNews.link)}
             now = datetime.now(timezone.utc)
-            recent = [(r.id, _words(r.title)) for r in db.query(TennisNews)
+            recent = [(r.id, r.sport, _words(r.title)) for r in db.query(TennisNews)
                       .filter(TennisNews.story.is_(None), TennisNews.published >= now - timedelta(days=2)).all()]
             new = []
             for it in sorted(items, key=lambda x: x["published"] or now):
-                if it["link"] in known:
+                if it["link"] in known or (it["published"] and it["published"] < now - MAX_AGE):
                     continue
                 known.add(it["link"])
                 w = _words(it["title"])
-                story = next((rid for rid, rw in recent if _same_story(w, rw)), None)
+                story = next((rid for rid, rs, rw in recent if rs == it["sport"] and _same_story(w, rw)), None)
                 row = TennisNews(**it, story=story, notified=first or story is not None)
                 if row.published is None or row.published > now:
                     row.published = now
                 db.add(row)
                 db.flush()
                 if story is None:
-                    recent.append((row.id, w))
+                    recent.append((row.id, row.sport, w))
                     new.append(row)
             db.commit()
             fresh = [r for r in new if not r.notified and r.published >= now - FRESH]
@@ -167,14 +172,16 @@ def refresh() -> int:
 def _push(db, rows) -> None:
     from push import send_push_to_user
     from routers.tennis import ANALYTICS_USERS
-    for name in ANALYTICS_USERS:
-        for r in rows[:PUSH_EACH]:
-            send_push_to_user(db, name, f"🎾 {r.source}", headline(r.title), url="/tennis/news")
-        if len(rows) > PUSH_EACH:
-            more = len(rows) - PUSH_EACH
-            send_push_to_user(db, name, "🎾 Tennis news",
-                              headline(f"+{more} more: " + " · ".join(r.title for r in rows[PUSH_EACH:])),
-                              url="/tennis/news")
+    for sport, icon in SPORTS.items():
+        these = [r for r in rows if r.sport == sport]
+        for name in ANALYTICS_USERS:
+            for r in these[:PUSH_EACH]:
+                send_push_to_user(db, name, f"{icon} {r.source}", headline(r.title), url=f"/tennis/news/{r.id}")
+            if len(these) > PUSH_EACH:
+                more = len(these) - PUSH_EACH
+                send_push_to_user(db, name, f"{icon} {sport.title()} news",
+                                  headline(f"+{more} more: " + " · ".join(r.title for r in these[PUSH_EACH:])),
+                                  url=f"/tennis/news?sport={sport}")
 
 
 def maybe_refresh() -> None:
@@ -337,21 +344,23 @@ def article(db, news_id: int) -> dict | None:
                 _bodies.pop(next(iter(_bodies)))
             _bodies[r.id] = body
     also = [{"source": d.source, "link": d.link} for d in db.query(TennisNews).filter(TennisNews.story == r.id)]
-    return {"id": r.id, "title": r.title, "source": r.source, "link": r.link, "image": r.image,
+    return {"id": r.id, "sport": r.sport, "title": r.title, "source": r.source, "link": r.link, "image": r.image,
             "published": r.published.isoformat() if r.published else None, "summary": r.summary,
             "body": body, "also": also}
 
 
-def latest(db, limit: int = 80, source: str | None = None) -> list[dict]:
+def latest(db, limit: int = 80, source: str | None = None, sport: str | None = None) -> list[dict]:
     from models import TennisNews
     q = db.query(TennisNews).filter(TennisNews.story.is_(None))
     if source:
         q = q.filter(TennisNews.source == source)
+    if sport:
+        q = q.filter(TennisNews.sport == sport)
     rows = q.order_by(TennisNews.published.desc()).limit(limit).all()
     also: dict[int, list] = {}
     if rows:
         for d in db.query(TennisNews).filter(TennisNews.story.in_([r.id for r in rows])).all():
             also.setdefault(d.story, []).append({"source": d.source, "link": d.link})
-    return [{"id": r.id, "title": r.title, "headline": headline(r.title), "link": r.link, "source": r.source,
+    return [{"id": r.id, "sport": r.sport, "title": r.title, "headline": headline(r.title), "link": r.link, "source": r.source,
              "published": r.published.isoformat() if r.published else None, "summary": r.summary,
              "image": r.image, "also": also.get(r.id, [])} for r in rows]

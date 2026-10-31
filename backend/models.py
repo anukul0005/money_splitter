@@ -1022,6 +1022,7 @@ class TennisNews(Base):
     id = Column(Integer, primary_key=True, index=True)
     link = Column(String(500), nullable=False, unique=True)
     title = Column(String(300), nullable=False)
+    sport = Column(String(20), nullable=False, default="tennis", server_default="tennis", index=True)
     source = Column(String(40), nullable=False, index=True)
     published = Column(DateTime(timezone=True), nullable=False, index=True)
     summary = Column(Text, nullable=True)

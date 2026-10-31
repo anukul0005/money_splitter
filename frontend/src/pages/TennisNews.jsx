@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { tennisNews } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 
 const SEEN_KEY = 'tennisNewsSeen'
+const SPORTS = [['', 'All'], ['tennis', '🎾 Tennis'], ['football', '⚽ Football']]
+const ICON = { tennis: '🎾', football: '⚽' }
 
 // "12m ago", "3h ago", "2d ago"
 function ago(iso) {
@@ -27,22 +29,25 @@ function readSeen() {
 export default function TennisNews() {
   const nav = useNavigate()
   const [data, setData] = useState(null)
+  const [params, setParams] = useSearchParams()
+  const sport = params.get('sport') || ''
   const [source, setSource] = useState('')
   const [seen] = useState(readSeen)
+  const pickSport = (s) => { setSource(''); setParams(s ? { sport: s } : {}, { replace: true }) }
 
   useEffect(() => {
     let live = true
-    const load = () => tennisNews(source || undefined).then((r) => live && setData(r.data)).catch(() => live && setData((d) => d || { items: [], sources: [] }))
+    const load = () => tennisNews(source || undefined, sport || undefined).then((r) => live && setData(r.data)).catch(() => live && setData((d) => d || { items: [], sources: [] }))
     load()
     const t = setInterval(load, 5 * 60 * 1000)
     return () => { live = false; clearInterval(t) }
-  }, [source])
+  }, [source, sport])
 
   // Opening the page counts as reading what's on it
   useEffect(() => {
     const top = data?.items?.[0]?.published
-    if (top && !source) { try { localStorage.setItem(SEEN_KEY, top) } catch { /* private mode */ } }
-  }, [data, source])
+    if (top && !source && !sport) { try { localStorage.setItem(SEEN_KEY, top) } catch { /* private mode */ } }
+  }, [data, source, sport])
 
   if (!data) return <LoadingSpinner />
 
@@ -50,8 +55,18 @@ export default function TennisNews() {
     <div className="max-w-2xl mx-auto px-4 sm:px-5 pt-6 pb-24 space-y-4">
       <div>
         <button onClick={() => nav(-1)} className="text-xs font-bold text-gray-400 hover:text-gray-600">← Back</button>
-        <h1 className="text-2xl font-black text-gray-900 tracking-tight mt-1">Tennis news</h1>
-        <p className="text-[11px] text-gray-400">Headlines from the tennis desks, newest first · updates every 10 minutes</p>
+        <h1 className="text-2xl font-black text-gray-900 tracking-tight mt-1">Sports news</h1>
+        <p className="text-[11px] text-gray-400">Tennis and football headlines, newest first · updates every 10 minutes</p>
+      </div>
+
+      <div className="flex bg-white border border-amber-200 rounded-lg p-0.5">
+        {SPORTS.map(([s, label]) => (
+          <button key={s || 'all'} onClick={() => pickSport(s)}
+            className={`flex-1 py-1.5 rounded-md text-xs font-black transition-colors ${
+              sport === s ? 'bg-brand-500 text-white' : 'text-gray-500'}`}>
+            {label}
+          </button>
+        ))}
       </div>
 
       <div className="flex gap-1.5 overflow-x-auto -mx-4 px-4 pb-1" style={{ scrollbarWidth: 'none' }}>
@@ -80,7 +95,7 @@ export default function TennisNews() {
               <div className="min-w-0 flex-1">
                 <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">
                   {isNew && <span className="text-brand-600 mr-1">● New</span>}
-                  {x.source} · {ago(x.published)}
+                  {!sport && `${ICON[x.sport] || ''} `}{x.source} · {ago(x.published)}
                 </p>
                 <p className="text-[13px] font-black text-gray-900 leading-snug mt-0.5">{x.headline}</p>
                 {x.summary && x.summary !== x.title && (

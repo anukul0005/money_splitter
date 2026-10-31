@@ -150,7 +150,7 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-1 flex-shrink-0">
             {isAnalyticsUser(user) && (
-              <button onClick={() => nav('/tennis/news')} title="Tennis news" aria-label="Tennis news"
+              <button onClick={() => nav('/tennis/news')} title="Sports news" aria-label="Sports news"
                 className="p-2 text-white/70 hover:text-white active:scale-95 transition-all">
                 {/* newspaper */}
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">

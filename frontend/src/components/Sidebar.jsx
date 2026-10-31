@@ -78,7 +78,7 @@ export default function Sidebar({ user, onLogout }) {
             to="/tennis/news"
             className="block w-full text-left text-xs text-slate-300/50 hover:text-brand-400 font-semibold transition-colors tracking-widest py-1"
           >
-            Tennis news
+            Sports news
           </NavLink>
         )}
         {isAdmin(user) && (

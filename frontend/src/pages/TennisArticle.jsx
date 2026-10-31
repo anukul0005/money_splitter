@@ -26,8 +26,8 @@ export default function TennisArticle() {
 
   return (
     <article className="max-w-2xl mx-auto px-4 sm:px-5 pt-6 pb-24">
-      <button onClick={() => nav('/tennis/news')} className="text-xs font-bold text-gray-400 hover:text-gray-600">← Tennis news</button>
-      <p className="text-[10px] font-bold text-brand-600 uppercase tracking-widest mt-3">{a.source} · {when(a.published)}</p>
+      <button onClick={() => nav('/tennis/news')} className="text-xs font-bold text-gray-400 hover:text-gray-600">← Sports news</button>
+      <p className="text-[10px] font-bold text-brand-600 uppercase tracking-widest mt-3">{a.sport === 'football' ? '⚽' : '🎾'} {a.source} · {when(a.published)}</p>
       <h1 className="text-xl font-black text-gray-900 leading-tight tracking-tight mt-1">{a.title}</h1>
       {a.image && (
         <img src={a.image} alt="" referrerPolicy="no-referrer" className="w-full rounded-lg mt-3 bg-amber-50 object-cover max-h-72"
