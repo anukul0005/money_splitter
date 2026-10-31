@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 const SEARCH_FROM = 10   // options; a longer list gets a filter box
+const MENU_W = 160       // px - a compact menu's min-w-[10rem]
 
 /**
  * A styled stand-in for <select> - the native control pops Safari/iOS's own
@@ -21,6 +22,7 @@ export default function Dropdown({
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const [alignRight, setAlignRight] = useState(true)
   const ref = useRef(null)
 
   useEffect(() => {
@@ -48,7 +50,14 @@ export default function Dropdown({
       <button
         type="button"
         disabled={disabled}
-        onClick={() => { setQuery(''); setOpen((o) => !o) }}
+        onClick={() => {
+          setQuery('')
+          // A compact menu is wider than its trigger: hang it from whichever
+          // edge keeps it on screen (a trigger on the left opens rightwards)
+          const r = ref.current?.getBoundingClientRect()
+          if (r) setAlignRight(r.left + MENU_W > window.innerWidth - 8)
+          setOpen((o) => !o)
+        }}
         className={`${trigger} w-full flex items-center justify-between gap-2 text-left disabled:opacity-50`}
       >
         <span className={`truncate ${current ? '' : 'text-amber-400'}`}>{current?.label ?? placeholder}</span>
@@ -61,7 +70,7 @@ export default function Dropdown({
       </button>
       {open && (
         <div className={`absolute top-full mt-1 z-30 bg-white border border-amber-200 rounded-md shadow-lg overflow-hidden ${
-          size === 'sm' ? 'right-0 min-w-[10rem]' : 'left-0 right-0'
+          size === 'sm' ? `${alignRight ? 'right-0' : 'left-0'} min-w-[10rem] max-w-[calc(100vw-16px)]` : 'left-0 right-0'
         }`}>
           {searchable && (
             <div className="p-2 border-b border-amber-100">
