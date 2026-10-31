@@ -54,6 +54,27 @@ KHAO_SNACKS, KHAO_FL = "Khao Pio (Snacks)", "Khao Pio (FL)"
 KHAO_SNACKS_MAX = 300
 
 
+def split_place(e) -> bool:
+    """Khao Pio is two places: a bill named for it (any spelling - "Khao
+    Piyo", "Khao Pio snacks") that's over KHAO_SNACKS_MAX and isn't paid to
+    the snacks counter's UPI (NEERAJ KUMAR) is the liquor shop, Khao Pio
+    (FL), Alcohol > Liquor store - never an outlier at the snacks place.
+    Run on every expense as it's categorised (expense_classifier._guard).
+    True when it changed e."""
+    from places import place_key
+    if (e.amount or 0) <= KHAO_SNACKS_MAX or key(e.merchant) == "neerajkumar":
+        return False
+    names = [e.venue, e.title] if e.venue else [e.title]
+    if not any(place_key(n).startswith(("khaopio", "khaopiyo")) for n in names if n):
+        return False
+    if place_key(e.venue) == place_key(KHAO_FL) and e.category == "Alcohol":
+        return False
+    e.venue, e.category, e.subcategory = KHAO_FL, "Alcohol", "Liquor store"
+    if e.category_source in ("import", "merchant", "llm", None):
+        e.category_source = "rules"
+    return True
+
+
 def _khao_pio(db) -> None:
     """Split the one "Khao Piyo" place into its two: the liquor bought there
     is Khao Pio (FL), the rest Khao Pio (Snacks); "Khao Pio" said alone from
@@ -72,10 +93,7 @@ def _khao_pio(db) -> None:
     # A big bill there that isn't the snacks counter's UPI is the liquor shop's
     # (₹1,914 for a group) - Khao Pio (Snacks) is ₹10-200 a visit
     for e in db.query(Expense).filter(Expense.venue.isnot(None), Expense.amount > KHAO_SNACKS_MAX).all():
-        if place_key(e.venue) in keys | {place_key(KHAO_SNACKS)} and key(e.merchant) != "neerajkumar":
-            e.venue, e.category, e.subcategory = KHAO_FL, "Alcohol", "Liquor store"
-            if e.category_source in ("import", "merchant", "llm", None):
-                e.category_source = "rules"
+        if split_place(e):
             _touched(db, [e.id])
     db.flush()
     merge(db, ["Khao Piyo", "KHAO PIO - Snacks"], KHAO_SNACKS, by="#system")
@@ -285,7 +303,8 @@ _MERGE_NOTE = re.compile(r"(?:^|·\s*)(?:PhonePe|Google Pay|GPay|Paytm|BHIM|Amaz
 # spellings of short place names match).
 # v7: person-named payees shared with everyone. v8: no amount limit on
 # them, and Khao Pio's two places (_khao_pio). v9: big Khao Pio bills are FL's.
-_BACKFILL_MARK = "#backfill-v9"
+# v10: any spelling of it (split_place).
+_BACKFILL_MARK = "#backfill-v10"
 
 
 def share_places(db) -> int:

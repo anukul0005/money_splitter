@@ -92,6 +92,16 @@ def merchant_name(desc: str) -> str:
     return " ".join(words).title()[:40] or desc[:30].title()
 
 
+def shown_name(t: dict) -> str:
+    """The name a line is shown under: the place people know the merchant as
+    ("UPI-NEERAJ KUMAR" is Khao Pio (Snacks)), else merchant_name()."""
+    return t.get("venue") or merchant_name(t["description"])
+
+
+def shown_key(t: dict) -> str:
+    return f"venue:{t['venue'].lower()}" if t.get("venue") else merchant(t["description"])
+
+
 def _spend(t: dict) -> bool:
     return t["type"] == "debit" and t.get("kind") not in ("fee", "interest", "tax")
 
@@ -332,10 +342,10 @@ def assemble(summary: dict, txns: list[dict], read_at: str | None, period: tuple
         if t["type"] == "debit" and t["category"] != "Card fees & interest":
             by_cat[t["category"]][0] += t["amount"]
             by_cat[t["category"]][1] += 1
-            key = merchant(t["description"])
+            key = shown_key(t)
             by_merchant[key][0] += t["amount"]
             by_merchant[key][1] += 1
-            names.setdefault(key, merchant_name(t["description"]))
+            names.setdefault(key, shown_name(t))
     fees = round(sum(t["amount"] for t in live if t["category"] == "Card fees & interest"), 2)
     spent = round(debits - fees, 2)
 

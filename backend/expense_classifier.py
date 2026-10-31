@@ -247,10 +247,13 @@ def _guard(db, rows) -> None:
     (spend_categories.TEA_STALL_MAX) is unclassified and no place to eat,
     whatever the description led the LLM to say."""
     from spend_categories import UNCLASSIFIED, tea_stall_overpaid
+    from merchant_memory import split_place
     for e in rows:
         if e.category_source in ("llm", "rules") and tea_stall_overpaid(e.amount, e.title, e.merchant, e.venue):
             e.category, e.subcategory = UNCLASSIFIED
             e.venue = None
+        elif e.category_source in ("llm", "rules", "merchant", "import"):
+            split_place(e)       # a big Khao Pio bill is the liquor shop, not the snacks counter
     db.commit()
 
 

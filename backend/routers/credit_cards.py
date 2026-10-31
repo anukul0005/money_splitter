@@ -381,8 +381,8 @@ def insights(month: str | None = None, db: Session = Depends(get_db), caller: Us
             if t.get("excluded") or t["type"] != "debit" or t.get("category") == "Card fees & interest":
                 continue
             amt = t["amount"]
-            key = card_details.merchant(t["description"])
-            m = merchants.setdefault(key, {"name": card_details.merchant_name(t["description"]), "amount": 0.0,
+            key = card_details.shown_key(t)
+            m = merchants.setdefault(key, {"name": card_details.shown_name(t), "amount": 0.0, "known": bool(t.get("category_by") in ("you", "shared")),
                                            "count": 0, "by_card": defaultdict(float), "category": t.get("category")})
             m["amount"] += amt
             m["count"] += 1
@@ -391,7 +391,7 @@ def insights(month: str | None = None, db: Session = Depends(get_db), caller: Us
             c["amount"] += amt
             c["count"] += 1
             c["by_card"][card.id] += amt
-            spends.append({"date": t.get("date"), "name": card_details.merchant_name(t["description"]), "amount": amt,
+            spends.append({"date": t.get("date"), "name": card_details.shown_name(t), "amount": amt,
                            "card_id": card.id, "category": t.get("category")})
     fix = lambda d: {k: round(v, 2) for k, v in d.items()}
     out["cards"] = [{"id": k, "name": v} for k, v in cards.items()]

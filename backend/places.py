@@ -41,12 +41,20 @@ def place_key(name: str | None) -> str:
     return "".join(_words(name or ""))
 
 
+def _qualifier(name: str | None) -> str:
+    m = re.search(r"\(([^)]*)\)\s*$", name or "")
+    return place_key(m.group(1)) if m else ""
+
+
 def same_place_name(a: str | None, b: str | None) -> bool:
     ka, kb = place_key(a), place_key(b)
     if not ka or not kb:
         return False
     if ka == kb:
         return True
+    qa, qb = _qualifier(a), _qualifier(b)
+    if qa and qb and qa != qb:
+        return False       # "Khao Pio (Snacks)" and "Khao Pio (FL)": two places under one name
     if min(len(ka), len(kb)) >= 6 and SequenceMatcher(None, ka, kb).ratio() >= 0.9:
         return True                       # "Omelet" / "Omlet", "Nexe" / "Nexe's"
     wa, wb = _words(a), _words(b)
