@@ -348,7 +348,12 @@ def bill_details(bill_id: int, db: Session = Depends(get_db), caller: User = Dep
     if live and live["status"] == "reading":
         return {**head, **live}
     if bill.details_json:
-        return {**head, "status": "ready", **json.loads(bill.details_json)}
+        # Re-assembled each time it's shown: only the lines that are this bill's
+        # count (card_details.reconcile) - bills read before that fix included
+        saved = json.loads(bill.details_json)
+        fresh = card_details.assemble(saved.get("summary") or {}, saved.get("transactions") or [],
+                                      saved.get("read_at"), _cycle(bill))
+        return {**head, "status": "ready", **saved, **fresh}
     return {**head, **(live or {"status": "none"})}
 
 

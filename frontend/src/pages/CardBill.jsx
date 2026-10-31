@@ -198,9 +198,13 @@ function BillBreakup({ billId: id }) {
 
   const s = d.summary || {}
   const t = d.totals
-  const windows = billWindows(s, d.transactions)
+  // Lines that aren't this bill's (a statement's worked example, a line dated
+  // outside it) are kept on the server, marked - shown only behind a note here
+  const kept = d.transactions.filter((x) => !x.excluded)
+  const leftOut = d.transactions.filter((x) => x.excluded)
+  const windows = billWindows(s, kept)
   const win = windows && windowKey != null ? windows.wins[windowKey] : null
-  const txns = d.transactions.filter((x) => {
+  const txns = kept.filter((x) => {
     if (win) return isSpend(x) && windowOf(win, x)
     if (category) return x.category === category && x.type === 'debit'
     if (filter === 'spends') return x.type === 'debit' && x.category !== 'Card fees & interest'
@@ -376,6 +380,18 @@ function BillBreakup({ billId: id }) {
             </div>
           ))}
           {txns.length === 0 && <p className="text-xs text-gray-500">Nothing here.</p>}
+          {leftOut.length > 0 && (
+            <details className="text-[11px] text-gray-500">
+              <summary className="cursor-pointer font-bold">{leftOut.length} line{leftOut.length === 1 ? '' : 's'} left out - not part of this bill</summary>
+              <p className="text-[10px] text-gray-400 mt-1">Dated outside the bill, or not in its totals - usually the statement's worked example of how interest is charged.</p>
+              {leftOut.map((x, k) => (
+                <div key={k} className="flex justify-between gap-3 py-1 border-b border-amber-50 text-gray-400">
+                  <span className="min-w-0 truncate">{x.date ? `${day(x.date)} · ` : ''}{x.description}</span>
+                  <span className="shrink-0 line-through">{INR(x.amount)}</span>
+                </div>
+              ))}
+            </details>
+          )}
         </div>
 
         <p className="text-[10px] text-gray-400 text-center">

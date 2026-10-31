@@ -27,7 +27,8 @@ import threading
 import urllib.error
 import urllib.request
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from itertools import combinations
 
 CHUNK = 4000            # characters of statement text per transactions call (~a page)
 MIN_SPLIT = 1000        # a chunk shorter than this isn't split any further
@@ -54,6 +55,7 @@ Rules:
 - Foreign currency markup / cross-currency fees and the GST/IGST on them are their own lines: kind "fee" or "tax".
 - amount is positive; type says the direction ("Cr"/"credit"/payments/refunds/waivers are credit). A surcharge waiver or reversal is a credit with kind "refund".
 - Only real transaction rows from this statement - not summary totals, not reward point tables, not offers, not EMI schedules for future months.
+- Never a worked example: statements print illustrations ("Illustration of interest calculation", "Example", "How is interest calculated", sample tables of round-figure purchases, cash withdrawals, joining fees, often dated years back). None of those rows are transactions.
 - time is the transaction's time of day when the statement prints one next to it (e.g. "14:32", "02:32 PM",
   "14:32:05"), as 24-hour "HH:MM"; null when the line has no time. Never invent one, and never take it from a
   reference number.
@@ -282,18 +284,95 @@ def read_statement(text: str, history: dict | None = None) -> dict:
             print(f"[card_details] second reading failed: {e}")
     _categorise(txns, history)
     txns.sort(key=lambda t: (t["date"] or "", -t["amount"]))
+    return assemble(summary, txns, datetime.now(timezone.utc).isoformat())
 
-    debits = round(sum(t["amount"] for t in txns if t["type"] == "debit"), 2)
-    credits = round(sum(t["amount"] for t in txns if t["type"] == "credit"), 2)
+
+def _within(t: dict, lo: date, hi: date) -> bool:
+    try:
+        return lo <= date.fromisoformat(t["date"]) <= hi
+    except (TypeError, ValueError):
+        return True                      # no date: can't tell, so it stays
+
+
+def _drop_to(lines: list[dict], target: float, budget: int = 2_000_000) -> list[dict] | None:
+    """The fewest lines to leave out so the rest add up to `target` (to the
+    rupee), or None. Lines with a vague description ("Purchase", "Cash
+    withdrawal", fees - what an interest illustration is made of) are tried first."""
+    excess = round(sum(t["amount"] for t in lines) - target, 2)
+    if abs(excess) <= 1:
+        return []
+    if excess < 0:
+        return None
+    vague = lambda t: len((t.get("description") or "").split()) <= 3 or not re.search(r"[A-Z]{3,}", t.get("description") or "")
+    cands = sorted([t for t in lines if t["amount"] <= excess + 1], key=lambda t: (not vague(t), t["amount"]))
+    tried = 0
+    for k in range(1, min(len(cands), 12) + 1):
+        for combo in combinations(cands, k):
+            tried += 1
+            if tried > budget:
+                return None
+            if abs(sum(t["amount"] for t in combo) - excess) <= 1:
+                return list(combo)
+    return None
+
+
+def reconcile(summary: dict, txns: list[dict], period: tuple | None = None) -> None:
+    """Leave out what isn't this bill's - marked `excluded` (with why), never
+    deleted, so a line's place in the list stays put. Statements carry sample
+    rows (Axis prints an interest-calculation illustration: "Household goods
+    purchase 25,000", "Cash withdrawal from ATM", dated years back), and those
+    read as transactions. First anything dated outside the bill's period;
+    then, if what's left still doesn't add up to the statement's own
+    purchases & debits (and payments & credits), the fewest lines whose
+    leaving out makes it add up."""
+    for t in txns:
+        t.pop("excluded", None)
+    start, end = summary.get("period_from"), summary.get("period_to")
+    if not (start and end) and period:
+        start, end = period                  # the bill's own (statement date based) - see credit_cards._cycle
+    try:
+        lo = date.fromisoformat(start) - timedelta(days=5)
+        hi = date.fromisoformat(end) + timedelta(days=5)
+    except (TypeError, ValueError):
+        lo = hi = None
+    if lo:
+        for t in txns:
+            if not _within(t, lo, hi):
+                t["excluded"] = "dated outside this bill"
+    # Fees, interest and taxes may be stated apart from purchases - and one may
+    # already include another (SBI's fees & charges carry their GST): every mix
+    parts = [summary.get(k) or 0 for k in ("fees_charges", "interest", "taxes")]
+    extras = sorted({round(sum(x for x, on in zip(parts, (m & 1, m & 2, m & 4)) if on), 2) for m in range(8)} - {0})
+    for kind, key in (("debit", "purchases_debits"), ("credit", "payments_credits")):
+        want = summary.get(key)
+        if want is None:
+            continue
+        lines = [t for t in txns if t["type"] == kind and not t.get("excluded")]
+        # purchases & debits may or may not count the fees - whichever the lines match
+        targets = [want] + ([round(want + x, 2) for x in extras] if kind == "debit" else [])
+        drops = [d for d in (_drop_to(lines, target) for target in targets) if d is not None]
+        if drops:
+            for t in min(drops, key=len):
+                t["excluded"] = "not in this bill's totals"
+
+
+def assemble(summary: dict, txns: list[dict], read_at: str | None, period: tuple | None = None) -> dict:
+    """The bill's breakup from its lines - only the ones that are the bill's
+    (see reconcile). Run on every read, and again whenever a saved bill is
+    shown, so a fix here reaches bills read before it."""
+    reconcile(summary, txns, period)
+    live = [t for t in txns if not t.get("excluded")]
+    debits = round(sum(t["amount"] for t in live if t["type"] == "debit"), 2)
+    credits = round(sum(t["amount"] for t in live if t["type"] == "credit"), 2)
     by_cat = defaultdict(lambda: [0.0, 0])
     by_merchant = defaultdict(lambda: [0.0, 0])
-    for t in txns:
+    for t in live:
         if t["type"] == "debit" and t["category"] != "Card fees & interest":
             by_cat[t["category"]][0] += t["amount"]
             by_cat[t["category"]][1] += 1
             by_merchant[merchant(t["description"])][0] += t["amount"]
             by_merchant[merchant(t["description"])][1] += 1
-    fees = round(sum(t["amount"] for t in txns if t["category"] == "Card fees & interest"), 2)
+    fees = round(sum(t["amount"] for t in live if t["category"] == "Card fees & interest"), 2)
     spent = round(debits - fees, 2)
 
     # previous balance - payments/credits + debits = total due, when the
@@ -303,19 +382,24 @@ def read_statement(text: str, history: dict | None = None) -> dict:
     if prev is not None and total is not None:
         expected = round(prev - credits + debits, 2)
         check = {"expected": expected, "total_due": total, "ok": abs(expected - total) <= 2}
+    elif summary.get("purchases_debits") is not None:
+        expected = debits
+        check = {"expected": expected, "total_due": summary["purchases_debits"],
+                 "ok": abs(expected - summary["purchases_debits"]) <= 2 or abs(spent - summary["purchases_debits"]) <= 2}
     return {
         "summary": summary,
         "transactions": txns,
-        "totals": {"spent": spent, "fees": fees, "debits": debits, "credits": credits, "count": len(txns),
-                   "categorised_by_ai": sum(1 for t in txns if t.get("category_by") == "ai"),
-                   "categorised": sum(1 for t in txns if t.get("category_by"))},
+        "totals": {"spent": spent, "fees": fees, "debits": debits, "credits": credits, "count": len(live),
+                   "left_out": len(txns) - len(live),
+                   "categorised_by_ai": sum(1 for t in live if t.get("category_by") == "ai"),
+                   "categorised": sum(1 for t in live if t.get("category_by"))},
         "by_category": [{"category": c, "amount": round(v[0], 2), "count": v[1],
                          "share": round(v[0] / spent * 100, 1) if spent else 0}
                         for c, v in sorted(by_cat.items(), key=lambda x: -x[1][0])],
         "top_merchants": [{"name": m, "amount": round(v[0], 2), "count": v[1]}
                           for m, v in sorted(by_merchant.items(), key=lambda x: -x[1][0])[:6]],
         "check": check,
-        "read_at": datetime.now(timezone.utc).isoformat(),
+        "read_at": read_at,
     }
 
 
