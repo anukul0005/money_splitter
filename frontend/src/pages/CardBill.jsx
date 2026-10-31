@@ -551,7 +551,7 @@ export default function CardPage() {
   return (
     <div className="pb-24 md:pb-8">
       <div className="px-5 pt-10 md:pt-6 pb-4 bg-cream border-b border-amber-100/60">
-        <button onClick={() => nav(-1)} className="text-xs font-bold text-gray-400 mb-2">← Credit cards</button>
+        <button onClick={() => nav('/loans?tab=cards')} className="text-xs font-bold text-gray-400 mb-2">← Credit cards</button>
         <h1 className="text-xl font-black tracking-tight">
           {card ? `${card.bank}${card.label ? ` ${card.label}` : ''}` : 'Credit card'}
         </h1>
