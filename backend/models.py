@@ -1007,9 +1007,7 @@ class MerchantLabel(Base):
     # every payment to the payee is then that place, under that name.
     venue = Column(String(120), nullable=True)
     taught_by = Column(String(100), nullable=False)
-    # Payments above this aren't this label's: a payee that's a person's name
-    # ("NEERAJ KUMAR" is Khao Piyo's UPI) is the shop for small amounts only -
-    # a bigger transfer to a name is likely just a person. None: any amount.
+    # Payments above this aren't this label's. None (always, for now): any amount.
     max_amount = Column(Float, nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

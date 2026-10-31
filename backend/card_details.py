@@ -128,7 +128,7 @@ def apply_known(txns: list[dict], known: dict) -> None:
         if got:
             t["category"], t["subcategory"], t["category_by"] = got[0], got[1], got[2]
             if len(got) > 4 and got[4]:
-                t["venue"] = got[4]          # "UPI-NEERAJ KUMAR" is Khao Piyo
+                t["venue"] = got[4]          # "UPI-NEERAJ KUMAR" is Khao Pio (Snacks)
 
 
 _CARD_NOTE = ("Merchant name from a credit card statement, often abbreviated and followed by city and country: "

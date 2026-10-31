@@ -18,11 +18,9 @@ to that payee - the untouched imports (whose title becomes the name), the
 ones people described without naming the place ("lunch"), and every later
 import - so the knowledge base counts them as visits to one place.
 
-A payee that is only a person's name ("NEERAJ KUMAR", Khao Piyo's UPI) is
-learnt for everyone too, but only for small payments - up to PERSON_CAP, or
-more if people have filed bigger payments to it (MerchantLabel.max_amount):
-a bigger transfer to a name is likely just a person. A masked number or
-phone UPI id, which says nothing about who was paid, is never learnt.
+A payee that is only a person's name ("NEERAJ KUMAR", Khao Pio (Snacks)'s
+UPI) is learnt for everyone too, at any amount. A masked number or phone UPI
+id, which says nothing about who was paid, is never learnt.
 """
 from __future__ import annotations
 
@@ -37,9 +35,6 @@ _UNINFORMATIVE = {"Other", "Small vendors", "One-off payments"}
 # Rows a label may re-file: imported and never described by a person.
 _REFILEABLE = ("import", "merchant")
 EVERYONE = ""
-# The most a payment to a person-named payee can be and still be that shop,
-# unless people have filed bigger ones to it (rounded up to the next ₹100)
-PERSON_CAP = 300
 
 
 def fits(lab, amount) -> bool:
@@ -51,16 +46,38 @@ def _person(merchant: str, venue: str | None = None) -> bool:
     return not (_rule(merchant) or _BUSINESS.search(merchant or ""))
 
 
-def _cap(db, k: str, category: str) -> float:
-    """PERSON_CAP, or the biggest payment to payee k filed under category,
-    rounded up to the next ₹100 - whichever is more."""
-    import math
-    from models import Expense
-    squashed = func.lower(func.regexp_replace(Expense.merchant, "[^a-zA-Z0-9]", "", "g"))
-    top = (db.query(func.max(Expense.amount))
-           .filter(Expense.merchant.isnot(None), squashed == k, Expense.category == category,
-                   Expense.category_source.in_(("llm", "user", "rules"))).scalar()) or 0
-    return float(max(PERSON_CAP, math.ceil(top / 100) * 100))
+# Payees the app knows for a fact, for everyone: (payee, category,
+# subcategory, place). NEERAJ KUMAR is the UPI of Khao Pio's snacks counter;
+# the liquor shop, paid as KHAO PIO itself, is another place - Khao Pio (FL).
+FIXED = [("NEERAJ KUMAR", "Food & Dining", "Street food & snacks", "Khao Pio (Snacks)")]
+KHAO_SNACKS, KHAO_FL = "Khao Pio (Snacks)", "Khao Pio (FL)"
+
+
+def _khao_pio(db) -> None:
+    """Split the one "Khao Piyo" place into its two: the liquor bought there
+    is Khao Pio (FL), the rest Khao Pio (Snacks); "Khao Pio" said alone from
+    now on is the liquor shop."""
+    from models import Expense, PlaceAlias
+    from places import merge, place_key
+    keys = {"khaopiyo", "khaopio"}
+    for e in db.query(Expense).filter(Expense.venue.isnot(None)).all():
+        if place_key(e.venue) in keys and e.category == "Alcohol":
+            e.venue = KHAO_FL
+            _touched(db, [e.id])
+    for e in db.query(Expense).filter(Expense.venue.is_(None), Expense.category == "Alcohol").all():
+        if place_key(e.title).startswith("khaopio"):
+            e.venue = KHAO_FL
+            _touched(db, [e.id])
+    db.flush()
+    merge(db, ["Khao Piyo", "KHAO PIO - Snacks"], KHAO_SNACKS, by="#system")
+    db.flush()
+    row = db.query(PlaceAlias).filter(PlaceAlias.alias_key == "khaopio").first()
+    if row:
+        row.name = KHAO_FL
+    else:
+        db.add(PlaceAlias(alias_key="khaopio", name=KHAO_FL, created_by="#system"))
+    for payee, cat, sub, venue in FIXED:
+        learn(db, payee, cat, sub, "#system", venue)
 
 
 def key(merchant: str | None) -> str:
@@ -172,7 +189,7 @@ def learn(db, merchant: str, category: str, subcategory: str | None, teacher: st
     if not is_food(category, subcategory):
         venue = None
     db.flush()
-    cap = None if (shared or not _person(merchant)) else max(_cap(db, k, category), (lab.max_amount or 0) if lab else 0)
+    cap = None
     if lab is None:
         lab = MerchantLabel(merchant_key=k, owner=owner, merchant=merchant.strip()[:200],
                             category=category, subcategory=subcategory, venue=venue, taught_by=teacher,
@@ -257,8 +274,9 @@ _MERGE_NOTE = re.compile(r"(?:^|·\s*)(?:PhonePe|Google Pay|GPay|Paytm|BHIM|Amaz
 # didn't read as one; v5: person-named payees that are places to eat
 # shared with everyone; v6: notes count as a description, and near
 # spellings of short place names match).
-# v7: person-named payees shared with everyone, for small payments.
-_BACKFILL_MARK = "#backfill-v7"
+# v7: person-named payees shared with everyone. v8: no amount limit on
+# them, and Khao Pio's two places (_khao_pio).
+_BACKFILL_MARK = "#backfill-v8"
 
 
 def share_places(db) -> int:
@@ -268,8 +286,6 @@ def share_places(db) -> int:
     from models import MerchantLabel
     n = 0
     for lab in db.query(MerchantLabel).filter(MerchantLabel.owner.notin_([EVERYONE, "#system"])).all():
-        if _person(lab.merchant):
-            lab.max_amount = _cap(db, lab.merchant_key, lab.category)
         shared = (db.query(MerchantLabel)
                   .filter(MerchantLabel.merchant_key == lab.merchant_key, MerchantLabel.owner == EVERYONE).first())
         if shared:
@@ -313,12 +329,8 @@ def backfill() -> int:
             recognise_place(db, e)
             learn_from(db, e)
         share_places(db)
-        for lab in db.query(MerchantLabel).filter(MerchantLabel.owner == EVERYONE,
-                                                  MerchantLabel.max_amount.is_(None),
-                                                  MerchantLabel.venue.isnot(None)).all():
-            # shared before as a place to eat (card statements' businesses have no venue)
-            if _person(lab.merchant):
-                lab.max_amount = _cap(db, lab.merchant_key, lab.category)
+        db.query(MerchantLabel).filter(MerchantLabel.max_amount.isnot(None)).update({MerchantLabel.max_amount: None})
+        _khao_pio(db)
         for lab in db.query(MerchantLabel).filter(MerchantLabel.owner != "#system").all():
             apply(db, lab)
         for e in rows:      # "lunch" there before anyone named the place
