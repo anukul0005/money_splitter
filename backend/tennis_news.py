@@ -21,11 +21,10 @@ import html
 import re
 import threading
 import time
+import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
-
-import requests
 
 FEEDS = [
     ("The Guardian", "https://www.theguardian.com/sport/tennis/rss"),
@@ -108,9 +107,9 @@ def _fetch() -> list[dict]:
     items = []
     for source, url in FEEDS:
         try:
-            r = requests.get(url, timeout=15, headers={"User-Agent": "SplitEasy news reader"})
-            r.raise_for_status()
-            items += parse(source, r.content)
+            req = urllib.request.Request(url, headers={"User-Agent": "SplitEasy news reader"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                items += parse(source, r.read())
         except Exception as e:      # one desk down never stops the others
             print(f"[tennis-news] {source}: {e}")
     return items
