@@ -42,6 +42,9 @@ class UserMeOut(UserOut):
     birth_year: Optional[int] = None
     # Opt-in nightly summary of yesterday's spending - see models.User.
     daily_summary: bool = False
+    # Sports news notifications, by sport - see models.User.
+    news_tennis: bool = True
+    news_football: bool = True
     # The drinks side of the app - see models.User.full_access.
     has_full_access: bool = False
     # Pay and when it's credited - see models.User.
@@ -118,6 +121,11 @@ class SetBirthday(BaseModel):
 
 
 class SetDailySummary(BaseModel):
+    enabled: bool
+
+
+class SetNewsAlerts(BaseModel):
+    sport: str          # "tennis" | "football"
     enabled: bool
 
 

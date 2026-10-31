@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   changePassword, setRecovery, getRecoveryQuestion, getMe, setMyEmail, setMyBirthday,
-  setMyDailySummary, setMySalary, listMyUpiIds, addUpiId, deleteUpiId,
+  setMyDailySummary, setMyNewsAlerts, setMySalary, listMyUpiIds, addUpiId, deleteUpiId,
 } from '../api'
-import { useUser, isAdmin, hasFullAccess } from '../UserContext'
+import { useUser, isAdmin, hasFullAccess, isAnalyticsUser } from '../UserContext'
 import UnlockAccess from '../components/UnlockAccess'
 import FullNameCard from '../components/FullNameCard'
 import { ALL_QUESTIONS, RECOVERY_QUESTIONS, KEY_QUESTION, generateKey } from '../utils/security'
@@ -69,6 +69,8 @@ export default function Account() {
 
   // ── Nightly summary of yesterday's spending ──
   const [summaryOn, setSummaryOn]       = useState(false)
+  const [news, setNews]                 = useState({ tennis: true, football: true })
+  const [newsErr, setNewsErr]           = useState('')
   const [summaryBusy, setSummaryBusy]   = useState(false)
   const [summaryError, setSummaryError] = useState('')
 
@@ -115,6 +117,7 @@ export default function Account() {
         setBirthYear(r.data.birth_year ? String(r.data.birth_year) : '')
         setBdayYearInput(r.data.birth_year ? String(r.data.birth_year) : '')
         setSummaryOn(!!r.data.daily_summary)
+        setNews({ tennis: r.data.news_tennis !== false, football: r.data.news_football !== false })
         setSalaryInput(r.data.monthly_salary ? String(r.data.monthly_salary) : '')
         setSalaryDay(r.data.salary_day || '')
         setSalarySaved(r.data.monthly_salary ? { amount: r.data.monthly_salary, day: r.data.salary_day } : null)
@@ -176,6 +179,19 @@ export default function Account() {
       setSummaryError(err.response?.data?.detail || 'Could not change the daily summary.')
     } finally {
       setSummaryBusy(false)
+    }
+  }
+
+  const toggleNews = async (sport) => {
+    setNewsErr('')
+    const next = !news[sport]
+    setNews((n) => ({ ...n, [sport]: next }))         // flips at once; put back if the server says no
+    try {
+      const r = await setMyNewsAlerts(sport, next)
+      setNews({ tennis: r.data.news_tennis !== false, football: r.data.news_football !== false })
+    } catch (err) {
+      setNews((n) => ({ ...n, [sport]: !next }))
+      setNewsErr(err.response?.data?.detail || 'Could not change that.')
     }
   }
 
@@ -607,6 +623,26 @@ export default function Account() {
           </button>
           {summaryError && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2 mt-2">{summaryError}</p>}
         </div>
+
+        {/* ── Sports news notifications ── */}
+        {isAnalyticsUser(user) && (
+          <div className="card">
+            <h2 className="text-sm font-bold text-gray-800">Sports news notifications</h2>
+            <p className="text-xs text-gray-500 leading-relaxed mt-1 mb-2">
+              A notification with the headline when a new story lands in Sports news.
+            </p>
+            {[['tennis', '🎾 Tennis'], ['football', '⚽ Football']].map(([k, label]) => (
+              <div key={k} className="flex items-center justify-between py-2 border-b border-amber-100 last:border-0">
+                <span className="text-sm font-semibold text-gray-800">{label}</span>
+                <button type="button" role="switch" aria-checked={news[k]} onClick={() => toggleNews(k)}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${news[k] ? 'bg-brand-500' : 'bg-gray-300'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${news[k] ? 'translate-x-5' : ''}`} />
+                </button>
+              </div>
+            ))}
+            {newsErr && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2 mt-2">{newsErr}</p>}
+          </div>
+        )}
 
         {/* ── Birthday ── */}
         <div className="card">

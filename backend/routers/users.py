@@ -12,7 +12,7 @@ from schemas import (
     UserSignup, UserLogin, UserOut, LoginOut, SetRecovery, ResetPassword,
     AdminReset, AdminSetRecovery, AdminIssueCode, RedeemCode,
     SetEmail, SetBirthday, RequestLoginCode, VerifyLoginCode, UserMeOut,
-    SetDailySummary, SetSalary,
+    SetDailySummary, SetNewsAlerts, SetSalary,
 )
 from emailer import send_login_code
 
@@ -566,6 +566,18 @@ def set_my_daily_summary(payload: SetDailySummary, db: Session = Depends(get_db)
     """Turn the nightly "yesterday's spending" email/push on or off - your
     own account only, like the settings above."""
     caller.daily_summary = payload.enabled
+    db.commit()
+    db.refresh(caller)
+    return caller
+
+
+@router.post("/me/news-alerts", response_model=UserMeOut)
+def set_my_news_alerts(payload: SetNewsAlerts, db: Session = Depends(get_db),
+                       caller: User = Depends(current_user)):
+    """Turn tennis or football news notifications on or off (tennis_news)."""
+    if payload.sport not in ("tennis", "football"):
+        raise HTTPException(400, "Pick tennis or football")
+    setattr(caller, f"news_{payload.sport}", payload.enabled)
     db.commit()
     db.refresh(caller)
     return caller

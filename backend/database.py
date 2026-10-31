@@ -195,6 +195,8 @@ _ADDED_COLUMNS = [
     ("loans", "interest_day", "INTEGER"),
     ("users", "excluded_payees", "TEXT"),
     ("users", "daily_summary", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("users", "news_tennis", "BOOLEAN NOT NULL DEFAULT TRUE"),
+    ("users", "news_football", "BOOLEAN NOT NULL DEFAULT TRUE"),
     ("users", "last_daily_summary_sent", "VARCHAR(10)"),
     ("expenses", "subcategory", "VARCHAR(100)"),
     ("expenses", "category_source", "VARCHAR(20)"),

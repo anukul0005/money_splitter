@@ -65,6 +65,9 @@ class User(Base):
     # Opt-in nightly email/push of yesterday's spending (see daily_summary.py),
     # and the date it last went out - same idempotency as above.
     daily_summary = Column(Boolean, nullable=False, default=False, server_default="false")
+    # Sports news pushes, by sport (tennis_news.py) - on unless turned off in Account
+    news_tennis = Column(Boolean, nullable=False, default=True, server_default="true")
+    news_football = Column(Boolean, nullable=False, default=True, server_default="true")
     # Take-home pay and when it lands - for the spending analysis ("does
     # spending rise after payday?"). salary_day is "1".."31", "last" (the
     # month's last day) or "last_working" (its last weekday).

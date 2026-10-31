@@ -172,9 +172,13 @@ def refresh() -> int:
 def _push(db, rows) -> None:
     from push import send_push_to_user
     from routers.tennis import ANALYTICS_USERS
+    from models import User
     for sport, icon in SPORTS.items():
         these = [r for r in rows if r.sport == sport]
         for name in ANALYTICS_USERS:
+            u = db.query(User).filter(User.name.ilike(name)).first()
+            if u is not None and not getattr(u, f"news_{sport}", True):
+                continue        # turned off in Account
             for r in these[:PUSH_EACH]:
                 send_push_to_user(db, name, f"{icon} {r.source}", headline(r.title), url=f"/tennis/news/{r.id}")
             if len(these) > PUSH_EACH:
