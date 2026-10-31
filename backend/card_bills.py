@@ -192,7 +192,7 @@ def _check(card, d: date, f: dict) -> str | None:
 def find_bill(service, card, d: date, passwords: list[str]) -> dict:
     """Search, rank, read and check - the bill for `card` generated on `d`.
     {"status": "found", fields..., message} or {"status": "not_found", "why"}."""
-    import statement_extractor
+    import statement_parser
     from statement_sync import _extract_pdf_text, best_statement_pdf
 
     resp = service.users().messages().list(userId="me", q=_query(card, d), maxResults=25).execute()
@@ -208,8 +208,6 @@ def find_bill(service, card, d: date, passwords: list[str]) -> dict:
         cands.append((_score(card, subject, snippet, has_pdf), mid, msg, subject, has_pdf))
     cands.sort(key=lambda c: -c[0])
 
-    hint = (f"bank {card.bank}" + (f", card ending {card.last4}" if card.last4 else "")
-            + f", bill generated on {d.isoformat()}")
     why = []
     for score, mid, msg, subject, has_pdf in cands[:MAX_CANDIDATES]:
         if score <= 0:
@@ -225,7 +223,7 @@ def find_bill(service, card, d: date, passwords: list[str]) -> dict:
                     why.append(f"'{subject[:60]}': PDF couldn't be opened - check the bank's password")
                 continue
             try:
-                f = statement_extractor.extract(text, hint)
+                f = statement_parser.extract(text)
             except Exception as e:
                 why.append(f"'{subject[:60]}': couldn't read it ({str(e)[:80]})")
                 continue

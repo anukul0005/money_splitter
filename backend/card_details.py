@@ -25,87 +25,9 @@ import json
 import re
 import threading
 import time
-import urllib.error
-import urllib.request
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from itertools import combinations
-
-CHUNK = 4000            # characters of statement text per transactions call (~a page)
-MIN_SPLIT = 1000        # a chunk shorter than this isn't split any further
-_status: dict[int, dict] = {}       # bill id -> {"status": "reading"|"error", "error"}
-_lock = threading.Lock()
-
-_SUMMARY_PROMPT = """You read the text of an Indian credit card statement PDF. Extract the statement summary.
-Respond with ONLY a JSON object:
-{"previous_balance": number|null, "payments_credits": number|null, "purchases_debits": number|null,
- "fees_charges": number|null, "interest": number|null, "taxes": number|null, "total_due": number|null,
- "minimum_due": number|null, "due_date": "YYYY-MM-DD"|null, "period_from": "YYYY-MM-DD"|null,
- "period_to": "YYYY-MM-DD"|null, "credit_limit": number|null, "available_limit": number|null,
- "reward_points": number|null}
-Plain numbers, no currency symbols or commas. null for anything not clearly stated - never guess."""
-
-_TXN_PROMPT = """You read part of the text of an Indian credit card statement PDF. List every transaction line in it.
-Respond with ONLY a JSON object: {"transactions": [{"date": "YYYY-MM-DD", "time": "HH:MM"|null, "description": string,
- "amount": number, "type": "debit"|"credit", "kind": "purchase"|"payment"|"refund"|"cashback"|"fee"|"interest"|"tax"|"emi"|"other",
- "foreign_amount": number|null, "currency": string|null}]}
-Rules:
-- amount is ALWAYS the Indian Rupee (INR / Rs / ₹) amount charged to the card - the statement's rupee amount column.
-- International / foreign-currency transactions (USD, EUR, GBP...; often merchants abroad, e.g. "US", "HK", "CZ", "SAN FRANCISCO") show TWO amounts on the line: the original foreign amount and the converted rupee amount. Put the RUPEE amount in amount, the original in foreign_amount and its code (e.g. "USD") in currency. Never put the foreign amount in amount. The rupee amount is the larger number for USD/EUR/GBP charges.
-- For rupee-only lines, foreign_amount and currency are null.
-- Foreign currency markup / cross-currency fees and the GST/IGST on them are their own lines: kind "fee" or "tax".
-- amount is positive; type says the direction ("Cr"/"credit"/payments/refunds/waivers are credit). A surcharge waiver or reversal is a credit with kind "refund".
-- Only real transaction rows from this statement - not summary totals, not reward point tables, not offers, not EMI schedules for future months.
-- Never a worked example: statements print illustrations ("Illustration of interest calculation", "Example", "How is interest calculated", sample tables of round-figure purchases, cash withdrawals, joining fees, often dated years back). None of those rows are transactions.
-- time is the transaction's time of day when the statement prints one next to it (e.g. "14:32", "02:32 PM",
-  "14:32:05"), as 24-hour "HH:MM"; null when the line has no time. Never invent one, and never take it from a
-  reference number.
-- Keep the description as printed (merchant and place), without the reference numbers.
-- If this part has no transactions, return {"transactions": []}."""
-
-
-def _ask(system: str, text: str, max_tokens: int = 6000) -> dict:
-    import expense_classifier as ec
-    from statement_extractor import GROQ_MODEL
-    payload = json.dumps({"model": GROQ_MODEL, "temperature": 0, "max_tokens": max_tokens,
-                          "response_format": {"type": "json_object"},
-                          "messages": [{"role": "system", "content": system}, {"role": "user", "content": text}]}).encode()
-    last: Exception | None = None
-    for url, key, extra in ec._providers():
-        req = urllib.request.Request(url, data=payload, method="POST", headers={
-            "Authorization": f"Bearer {key}", "Content-Type": "application/json", "Accept": "application/json",
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-            **extra})
-        try:
-            with urllib.request.urlopen(req, timeout=90) as resp:
-                choice = json.loads(resp.read().decode())["choices"][0]
-            if choice.get("finish_reason") == "length":
-                # Out of output tokens mid-answer: a shorter input is the
-                # fix, not another provider - see _read_part.
-                raise _Truncated()
-            return json.loads(choice["message"]["content"])
-        except (urllib.error.URLError, KeyError, ValueError, TimeoutError) as e:
-            last = e
-    raise last or RuntimeError("No LLM key configured")
-
-
-class _Truncated(Exception):
-    """The model ran out of output tokens before finishing its answer."""
-
-
-def _chunks(text: str) -> list[str]:
-    out, cur = [], []
-    size = 0
-    for line in text.splitlines():
-        if size + len(line) > CHUNK and cur:
-            out.append("\n".join(cur))
-            cur, size = [], 0
-        cur.append(line)
-        size += len(line) + 1
-    if cur:
-        out.append("\n".join(cur))
-    return out
-
 
 def _num(v):
     return round(float(v), 2) if isinstance(v, (int, float)) else None
@@ -213,110 +135,37 @@ def _categorise(txns: list[dict], history: dict | None = None) -> None:
             t["category"], t["subcategory"] = got[0], got[1]
 
 
-# A line that is plausibly one transaction row: a date, then later an
-# amount with paise ("16 Oct 2026 ... 1,234.56", "16/10/26 ... 99.00").
-_ROW = re.compile(r"(\b\d{1,2}[ /.-](?:\d{1,2}|[A-Za-z]{3,9})[ /.,-]+\d{2,4}\b|\b\d{4}-\d{2}-\d{2}\b)"
-                  r".*\d[\d,]*\.\d{2}\b")
-
-
-def _halves(part: str) -> tuple[str, str]:
-    lines = part.splitlines()
-    mid = len(lines) // 2
-    return "\n".join(lines[:mid]), "\n".join(lines[mid:])
-
-
-def _read_part(part: str, note: str, depth: int = 0) -> list:
-    """The LLM's transaction rows for one chunk. Models drop rows on a busy
-    chunk - cutting the answer off, or just listing fewer - which lost a
-    statement's last fortnight with no error. So a reply that failed, was
-    cut off, or comes back more than a couple of rows (or 10%) short of
-    the chunk's date-and-amount lines is re-read as two halves, and the
-    fuller reading wins. The line count can include a summary line or two
-    ("Total due 20,795.77") - that only costs a re-read, never a row."""
-    try:
-        got = _ask(_TXN_PROMPT, (f"Note: {note}\n\n" if note else "") + part).get("transactions") or []
-        failed = None
-    except Exception as e:      # cut off, unparseable, or every provider down
-        got, failed = None, e
-    rows = sum(1 for ln in part.splitlines() if _ROW.search(ln))
-    short = got is not None and rows >= 4 and len(got) < rows - max(2, rows // 10)
-    if (failed or short) and depth < 3 and len(part) > MIN_SPLIT:
-        a, b = _halves(part)
-        split = _read_part(a, note, depth + 1) + _read_part(b, note, depth + 1)
-        if got is None or len(split) > len(got):
-            return split
-    if failed:
-        raise failed
-    return got
-
-
-def _extract_txns(text: str, note: str = "", progress=None) -> list[dict]:
-    txns = []
-    parts = _chunks(text)
-    for k, part in enumerate(parts):
-        if progress:
-            progress(k, len(parts))
-        for t in _read_part(part, note):
-            amt = _num(t.get("amount"))
-            if not amt or not t.get("description"):
-                continue
-            fx = _num(t.get("foreign_amount"))
-            cur = t.get("currency") if isinstance(t.get("currency"), str) and t.get("currency").upper() not in ("INR", "RS") else None
-            txns.append({"date": t.get("date") if isinstance(t.get("date"), str) else None,
-                         "time": _time(t.get("time")),
-                         "description": str(t["description"]).strip()[:120], "amount": abs(amt),
-                         "type": "credit" if t.get("type") == "credit" else "debit",
-                         "kind": t.get("kind") if t.get("kind") in ("purchase", "payment", "refund", "cashback", "fee",
-                                                                    "interest", "tax", "emi", "other") else "other",
-                         "foreign_amount": abs(fx) if fx and cur else None,
-                         "currency": cur.upper()[:3] if fx and cur else None})
-    return txns
-
-
-_SUMMARY_AT = re.compile(r"total\s*(amount\s*)?due|minimum\s*(amount\s*)?due|statement\s*summary|account\s*summary", re.I)
-
-
-def _summary_text(text: str) -> str:
-    """What the summary is read from: the start of the statement and, when the
-    figures sit further in (HSBC's come after pages of other things), the
-    stretch around the first "Total amount due"."""
-    head = text[:5000]
-    m = _SUMMARY_AT.search(text, 3000)
-    if _SUMMARY_AT.search(head) or not m:
-        return text[:9000]
-    return head + "\n…\n" + text[max(0, m.start() - 2000): m.start() + 4000]
-
-
 def read_statement(text: str, history: dict | None = None, progress=None) -> dict:
+    """The statement's summary and transactions read by code (statement_parser),
+    the spends categorised (AI), and the breakup put together (assemble)."""
+    import statement_parser as sp
     step = progress or (lambda text, frac=None: None)
-    step("Reading the bill's summary…", 0.35)
-    summary = _ask(_SUMMARY_PROMPT, _summary_text(text), 1500)
-    summary = {k: (_num(v) if k not in ("due_date", "period_from", "period_to") else v)
-               for k, v in summary.items()}
-    txns = _extract_txns(text, progress=lambda k, n: step(f"Reading the transactions - part {k + 1} of {n}…", 0.4 + 0.45 * k / max(n, 1)))
-    # Self-check: previous balance - credits + debits should be the bill.
-    # When it isn't (a foreign-currency line read in dollars, a line
-    # missed), ask once more with the gap spelled out and keep whichever
-    # reading comes closer to the bill.
-    prev, total = summary.get("previous_balance"), summary.get("total_due")
-    gap = lambda ts: abs(round(prev - sum(t["amount"] for t in ts if t["type"] == "credit")
-                               + sum(t["amount"] for t in ts if t["type"] == "debit") - total, 2))
-    if prev is not None and total is not None and txns and gap(txns) > 2:
-        debits = round(sum(t["amount"] for t in txns if t["type"] == "debit"), 2)
-        note = (f"A first reading of this statement found debits totalling Rs {debits:,.2f}, but the statement's own "
-                f"summary says purchases/debits are Rs {summary.get('purchases_debits')} and the total due is Rs {total}. "
-                "Check every foreign-currency line uses its RUPEE amount, and that no fee, tax or line is missing.")
-        try:
-            step("Checking the transactions against the bill…", 0.86)
-            again = _extract_txns(text, note)
-            if again and gap(again) < gap(txns):
-                txns = again
-        except Exception as e:
-            print(f"[card_details] second reading failed: {e}")
-    step("Sorting spends into categories…", 0.92)
+    step("Reading the bill's summary…", 0.4)
+    summary = sp.parse_summary(text)
+    anchor = summary.get("statement_date") or summary.get("period_to") or summary.get("due_date")
+    year = int(anchor[:4]) if anchor else date.today().year
+    step("Reading the transactions…", 0.55)
+    txns = sp.parse_transactions(text, year)
+    # A line printed without its year ("18 OCT") read with the statement's: a
+    # December line on a January statement belongs to the year before
+    if anchor:
+        latest = date.fromisoformat(anchor) + timedelta(days=10)
+        for t in txns:
+            if t["date"] and t["date"] > latest.isoformat():
+                d = date.fromisoformat(t["date"])
+                try:
+                    t["date"] = d.replace(year=d.year - 1).isoformat()
+                except ValueError:
+                    t["date"] = d.replace(year=d.year - 1, day=28).isoformat()
+    step("Sorting spends into categories…", 0.75)
     _categorise(txns, history)
     txns.sort(key=lambda t: (t["date"] or "", -t["amount"]))
-    return assemble(summary, txns, datetime.now(timezone.utc).isoformat())
+    out = assemble(summary, txns, datetime.now(timezone.utc).isoformat())
+    # The text it was read from, kept with the bill: a layout the parser doesn't
+    # read yet is fixed from it (never sent to the app - see credit_cards.bill_details)
+    out["source_text"] = text[:200_000]
+    out["reader"] = "code"
+    return out
 
 
 def _within(t: dict, lo: date, hi: date) -> bool:

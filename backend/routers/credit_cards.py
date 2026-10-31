@@ -354,6 +354,8 @@ def bill_details(bill_id: int, db: Session = Depends(get_db), caller: User = Dep
         card_details.rerule(saved.get("transactions") or [])
         fresh = card_details.assemble(saved.get("summary") or {}, saved.get("transactions") or [],
                                       saved.get("read_at"), _cycle(bill))
+        saved.pop("source_text", None)
+        fresh.pop("source_text", None)
         return {**head, "status": "ready", **saved, **fresh}
     return {**head, **(live or {"status": "none"})}
 
