@@ -1,4 +1,4 @@
-import { Component, useEffect, useRef, useState } from 'react'
+import { Component, memo, useEffect, useRef, useState, useTransition } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { tennisDay, tennisLive, tennisLivePoints, tennisPatterns, tennisPlayer, tennisPlayers, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
 import DatePicker from '../components/DatePicker'
@@ -1054,17 +1054,18 @@ export function LiveRow({ m, onOpen, plain }) {
 }
 
 /** Live now, then what starts in the next day and a half, by tournament: the list refreshed every 10 seconds, a WTA game's points every 3. */
-function Live({ tour, onOpen }) {
+function Live({ tour, onOpen, active = true }) {
   const [d, setD] = useState(null)
   const [err, setErr] = useState(false)
   useEffect(() => {
+    if (!active) return undefined          // kept but hidden behind another tab: no polling
     let alive = true
     const load = () => tennisLive(tour).then((r) => { if (alive) { setD(r.data); setErr(false) } }).catch(() => { if (alive) setErr(true) })
     load()
     const t = setInterval(() => { if (!document.hidden) load() }, 10000)
     return () => { alive = false; clearInterval(t) }
-  }, [tour])
-  const pts = useLivePoints(!!d?.matches?.some((m) => m.tour === 'WTA' && m.state === 'live'))
+  }, [tour, active])
+  const pts = useLivePoints(active && !!d?.matches?.some((m) => m.tour === 'WTA' && m.state === 'live'))
   if (!d && !err) return <p className="text-xs text-gray-400 text-center py-6">Loading live matches…</p>
   if (!d) return <p className="text-sm text-red-600 text-center py-6">Couldn't reach the live scores - try again in a minute.</p>
   const groups = (state) => {
@@ -1108,6 +1109,13 @@ function Live({ tour, onOpen }) {
   )
 }
 
+/** One tab, kept mounted: redrawn only when it's shown/hidden or what it
+ *  shows changes (`deps`) - not every time the page around it re-renders,
+ *  which for Sets and Patterns means re-counting thousands of matches. */
+const Pane = memo(function Pane({ hidden, children }) {
+  return <div hidden={hidden}>{children}</div>
+}, (a, b) => a.hidden === b.hidden && a.deps === b.deps)
+
 export default function BettingAnalytics() {
   const nav = useNavigate()
   // the tab and the open player live in the address, so Back from a match page returns to them
@@ -1120,9 +1128,22 @@ export default function BettingAnalytics() {
     Object.entries(next).forEach(([k, v]) => (v ? q.set(k, v) : q.delete(k)))
     return q
   }, { replace: true })
-  const setTab = (t) => go({ tab: t })
+  // The button lights up at once; a heavy tab's first build happens after
+  const [, startTransition] = useTransition()
+  const setTab = (t) => startTransition(() => go({ tab: t }))
   const setSel = (x) => go({ player: x ? `${x.tour}:${x.id}` : null })
   const [tour, setTour] = useState('all')
+  const [opened, setOpened] = useState(() => new Set([tab]))
+  useEffect(() => { setOpened((s) => (s.has(tab) ? s : new Set([...s, tab]))) }, [tab])
+  // Every tab's data asked for while this one is read, so the first switch
+  // to any of them finds it waiting (api.remembered keeps the answers)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      [() => tennisLive('all'), () => tennisDay('', 'all'), () => tennisSets(), () => tennisPatterns(2016)]
+        .forEach((f) => f().catch(() => {}))
+    }, 800)
+    return () => clearTimeout(t)
+  }, [])
   const [sum, setSum] = useState(null)
   const [fresh, setFresh] = useState(0)      // bumped when a background refresh has had time to land
   useEffect(() => {
@@ -1171,13 +1192,20 @@ export default function BettingAnalytics() {
         </div>
       </div>
       <div className="px-5 mt-4 max-w-2xl">
-        <Safe key={tab} what="this tab">
-          {tab === 'live' && <Live tour={tour} onOpen={openLive} />}
-          {tab === 'results' && <Results tour={tour} fresh={fresh} onPlayer={openPlayer} onOpen={openMatch} />}
-          {tab === 'players' && <Players tour={tour} sel={sel} setSel={setSel} onOpen={openMatch} />}
-          {tab === 'sets' && <SetStats tour={tour} />}
-          {tab === 'patterns' && <Patterns />}
-        </Safe>
+        {/* A tab once opened stays mounted, just hidden - going back to it
+            is instant, with its scroll, filters and data as they were */}
+        {[...opened].map((k) => (
+          <Pane key={k} hidden={k !== tab}
+            deps={`${tour}|${k === 'live' ? tab === 'live' : ''}|${k === 'results' ? fresh : ''}|${k === 'players' ? pl : ''}`}>
+            <Safe what="this tab">
+              {k === 'live' && <Live tour={tour} onOpen={openLive} active={tab === 'live'} />}
+              {k === 'results' && <Results tour={tour} fresh={fresh} onPlayer={openPlayer} onOpen={openMatch} />}
+              {k === 'players' && <Players tour={tour} sel={sel} setSel={setSel} onOpen={openMatch} />}
+              {k === 'sets' && <SetStats tour={tour} />}
+              {k === 'patterns' && <Patterns />}
+            </Safe>
+          </Pane>
+        ))}
       </div>
     </div>
   )
