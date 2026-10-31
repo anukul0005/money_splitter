@@ -194,8 +194,17 @@ function CardsDashboard({ cards, colorOf, onPay }) {
   const open = cards.map((c) => ({ c, b: c.bills.find((x) => x.can_pay) }))
     .filter(({ b }) => b && b.total_due != null)
   const owed = open.filter(({ b }) => b.remaining >= PAID).reduce((s, { b }) => s + b.remaining, 0)
-  const billed = open.reduce((s, { b }) => s + (b.total_due || 0), 0)
-  const paid = open.reduce((s, { b }) => s + Math.min(b.paid || 0, b.total_due || 0), 0)
+  // Paid of billed, one spend month at a time (the latest two) - each card's
+  // newest bill can be from different months (ICICI's 6 Oct bill is September's)
+  const byMonth = {}
+  cards.forEach((c) => c.bills.forEach((b) => {
+    const p = b.spend_month || b.period
+    if (!p || !b.total_due) return
+    const m = (byMonth[p] ||= { p, billed: 0, paid: 0, n: 0 })
+    m.billed += b.total_due; m.paid += Math.min(b.paid || 0, b.total_due); m.n += 1
+  }))
+  const paidRows = Object.values(byMonth).sort((x, y) => y.p.localeCompare(x.p)).slice(0, 2)
+  const monthLong = (p) => new Date(`${p}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'long' })
   const minimum = open.filter(({ b }) => b.remaining >= PAID)
     .reduce((s, { b }) => s + Math.min(b.minimum_due ?? 0, b.remaining), 0)
   const dues = open.filter(({ b }) => b.remaining >= PAID && b.due_date)
@@ -237,16 +246,24 @@ function CardsDashboard({ cards, colorOf, onPay }) {
         </div>
       </div>
 
-      {/* this cycle: paid of billed */}
-      {billed > 0 && (
-        <div>
-          <div className="flex justify-between text-[10px] text-gray-500 mb-1">
-            <span>This cycle: <b className="text-gray-800">{INR(Math.round(paid))}</b> paid of {INR(Math.round(billed))}</span>
-            <span className="font-bold">{Math.round((paid / billed) * 100)}%</span>
-          </div>
-          <div className="h-2.5 bg-red-100 overflow-hidden flex">
-            <div className="bg-green-600 h-full" style={{ width: `${(paid / billed) * 100}%` }} />
-          </div>
+      {/* paid of billed, by the month the spending is from */}
+      {paidRows.length > 0 && (
+        <div className="space-y-2.5">
+          {paidRows.map(({ p, billed, paid, n }, i) => (
+            <div key={p}>
+              <div className="flex justify-between text-[10px] text-gray-500 mb-1">
+                <span>
+                  {monthLong(p)} bills ({n}): {paid >= billed - PAID
+                    ? <b className="text-green-700">all {INR(Math.round(billed))} paid</b>
+                    : <><b className="text-gray-800">{INR(Math.round(paid))}</b> paid of {INR(Math.round(billed))}</>}
+                </span>
+                <span className="font-bold">{Math.round((paid / billed) * 100)}%</span>
+              </div>
+              <div className={`${i === 0 ? 'h-2.5' : 'h-1.5'} bg-red-100 overflow-hidden flex`}>
+                <div className="bg-green-600 h-full" style={{ width: `${Math.min(100, (paid / billed) * 100)}%` }} />
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
