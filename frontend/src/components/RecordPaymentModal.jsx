@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { getGroups, createPaymentAuto, updatePayment, deletePayment } from '../api'
+import { getGroups, getLoans, createPaymentAuto, updatePayment, deletePayment, repayLoan, repayBill } from '../api'
 import { useUser } from '../UserContext'
 import Dropdown from './Dropdown'
 import DatePicker from './DatePicker'
@@ -35,10 +35,16 @@ export default function RecordPaymentModal({ onClose, onSaved, prefillFriend, pa
   const [error, setError] = useState('')
   const [busy, setBusy]   = useState(false)
 
-  // Everyone who shares an active group with the current user, plus the user
+  // Open loans and shared bills - people there may not be in any group, or
+  // on the app at all (Mom), and a payment to them pays those down instead
+  const [loans, setLoans] = useState({ loans: [], bills: [] })
+  const [groupPeople, setGroupPeople] = useState(new Set())
+
+  // Everyone who shares an active group with the current user, plus the user,
+  // plus everyone in an open loan or bill with them
   useEffect(() => {
-    getGroups()
-      .then((r) => {
+    Promise.all([getGroups(), getLoans().catch(() => ({ data: { loans: [], bills: [] } }))])
+      .then(([r, lr]) => {
         const mine = r.data.filter((g) =>
           !g.is_historical &&
           (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase())
@@ -47,6 +53,13 @@ export default function RecordPaymentModal({ onClose, onSaved, prefillFriend, pa
         mine.forEach((g) => (g.member_names ?? []).forEach((n) => {
           if (!seen.has(n.toLowerCase())) seen.set(n.toLowerCase(), n)
         }))
+        setGroupPeople(new Set(seen.keys()))
+        const ld = lr.data || { loans: [], bills: [] }
+        setLoans({ loans: ld.loans ?? [], bills: ld.bills ?? [] })
+        const add = (n) => { if (n && !seen.has(n.toLowerCase())) seen.set(n.toLowerCase(), n) }
+        ;(ld.loans ?? []).filter((l) => l.total_due > 0.01).forEach((l) => { add(l.lender); add(l.borrower) })
+        ;(ld.bills ?? []).forEach((b) => { add(b.payer); (b.charges ?? []).forEach((c) => add(c.member)) })
+        if (user?.name) add(user.name)
         const names = [...seen.values()].sort((a, b) => a.localeCompare(b))
         setPeople(names)
         setForm((f) => ({
@@ -82,6 +95,42 @@ export default function RecordPaymentModal({ onClose, onSaved, prefillFriend, pa
       date: form.date,
       note: form.note || null,
       recorded_by: user?.name || null,
+    }
+
+    // Someone outside every group (only in a loan or bill, maybe not on the
+    // app): the payment pays down the open loans / bill shares from the payer
+    // to them, oldest first
+    const same = (a, b) => (a || '').toLowerCase() === (b || '').toLowerCase()
+    const outside = !editing && (!groupPeople.has(form.from_member.toLowerCase()) || !groupPeople.has(form.to_member.toLowerCase()))
+    if (outside) {
+      const debts = [
+        ...loans.loans.filter((l) => l.total_due > 0.01 && same(l.borrower, form.from_member) && same(l.lender, form.to_member))
+          .sort((a, b) => a.id - b.id).map((l) => ({ due: l.total_due, pay: (amt) => repayLoan(l.id, { amount: amt, date: form.date }) })),
+        ...loans.bills.filter((b) => same(b.payer, form.to_member)).map((b) => ({
+          due: (b.charges ?? []).filter((c) => same(c.member, form.from_member) && !c.paid).reduce((s, c) => s + (c.due ?? c.share), 0),
+          pay: (amt) => repayBill(b.id, { member: form.from_member, amount: amt }),
+        })).filter((d) => d.due > 0.01),
+      ]
+      const owed = debts.reduce((s, d) => s + d.due, 0)
+      if (!debts.length) return setError(`${dn(form.from_member, people)} doesn't owe ${dn(form.to_member, people)} anything in a loan or bill.`)
+      if (amt > owed + 0.01) return setError(`Only ${INR(Math.round(owed * 100) / 100)} is owed to ${dn(form.to_member, people)} - enter that or less.`)
+      setBusy(true)
+      try {
+        let left = amt
+        for (const d of debts) {
+          if (left <= 0.01) break
+          const part = Math.round(Math.min(left, d.due) * 100) / 100
+          await d.pay(part)
+          left -= part
+        }
+        onSaved?.()
+        onClose?.()
+      } catch (err) {
+        setError(err.response?.data?.detail || 'Could not save that payment.')
+      } finally {
+        setBusy(false)
+      }
+      return
     }
 
     setBusy(true)
