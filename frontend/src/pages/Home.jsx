@@ -150,6 +150,16 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-1 flex-shrink-0">
             {isAnalyticsUser(user) && (
+              <button onClick={() => nav('/tennis/news')} title="Tennis news" aria-label="Tennis news"
+                className="p-2 text-white/70 hover:text-white active:scale-95 transition-all">
+                {/* newspaper */}
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path d="M4 5h13v14H6a2 2 0 0 1-2-2V5z" /><path d="M17 9h3v8a2 2 0 0 1-2 2" />
+                  <path d="M7.5 9h6M7.5 12.5h6M7.5 16h4" />
+                </svg>
+              </button>
+            )}
+            {isAnalyticsUser(user) && (
               <button onClick={() => nav('/betting')} title="Betting analytics" aria-label="Betting analytics"
                 className="p-2 text-white/70 hover:text-white active:scale-95 transition-all">
                 {/* tennis ball */}

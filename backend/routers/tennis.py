@@ -192,6 +192,16 @@ def live_points(_: User = Depends(owner)):
     return tennis_live.points()
 
 
+@router.get("/news", response_model=dict)
+def news(source: str | None = None, limit: int = 80, db: Session = Depends(get_db), _: User = Depends(owner)):
+    """Tennis headlines, newest first, one per story (tennis_news) - read
+    again in the background when the last read is 10 minutes old."""
+    import tennis_news
+    tennis_news.maybe_refresh()
+    return {"items": tennis_news.latest(db, min(max(limit, 1), 200), source),
+            "sources": [s for s, _u in tennis_news.FEEDS]}
+
+
 @router.get("/live/feed", response_model=dict)
 def live_feed(espn: str, _: User = Depends(owner)):
     """Text commentary of a live WTA match (tennis_feed), newest line first."""

@@ -55,6 +55,9 @@ async def lifespan(app: FastAPI):
     # The Live tab's ESPN matches and WTA points, ready before it's opened.
     import tennis_live
     threading.Thread(target=tennis_live.warm, daemon=True, name="tennis-live").start()
+    # Tennis news: the publishers' feeds read every 10 minutes, new stories pushed.
+    import tennis_news
+    threading.Thread(target=tennis_news.loop, daemon=True, name="tennis-news").start()
     # Woken after 12:30 IST with today's daily jobs not yet run (the cron
     # ping was refused, say)? Run them now - see routers/cron.py.
     cron.maybe_catch_up()

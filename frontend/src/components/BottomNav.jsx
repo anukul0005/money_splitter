@@ -76,6 +76,15 @@ export default function BottomNav({ user, onLogout }) {
                     Betting analytics
                   </NavLink>
                 )}
+                {isAnalyticsUser(user) && (
+                  <NavLink
+                    to="/tennis/news"
+                    onClick={() => setMenuOpen(false)}
+                    className="block w-full text-left px-4 py-2.5 text-xs font-semibold text-slate-300/60 hover:text-brand-400 hover:bg-field-800 transition-colors"
+                  >
+                    Tennis news
+                  </NavLink>
+                )}
                 {isAdmin(user) && (
                   <NavLink
                     to="/admin/codes"

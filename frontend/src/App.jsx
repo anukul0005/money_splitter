@@ -13,6 +13,7 @@ import MyBottles         from './pages/MyBottles'
 import BettingAnalytics  from './pages/BettingAnalytics'
 import MyBets            from './pages/MyBets'
 import TennisMatch       from './pages/TennisMatch'
+import TennisNews        from './pages/TennisNews'
 import NewGroup    from './pages/NewGroup'
 import MonthlyGroup from './pages/MonthlyGroup'
 import EditGroup   from './pages/EditGroup'
@@ -155,6 +156,7 @@ export default function App() {
                     <Route path="/betting" element={<BettingAnalytics />} />
                     <Route path="/betting/match" element={<TennisMatch />} />
                     <Route path="/my-bets" element={<MyBets />} />
+                    <Route path="/tennis/news" element={<TennisNews />} />
                   </>
                 )}
               </Routes>

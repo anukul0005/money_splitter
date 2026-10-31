@@ -1012,6 +1012,25 @@ class MerchantLabel(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class TennisNews(Base):
+    """A tennis headline from a publisher's RSS feed - see tennis_news.py.
+    `story` points at the item it's the same story as (another desk's
+    telling), which is then shown under that one rather than on its own."""
+
+    __tablename__ = "tennis_news"
+
+    id = Column(Integer, primary_key=True, index=True)
+    link = Column(String(500), nullable=False, unique=True)
+    title = Column(String(300), nullable=False)
+    source = Column(String(40), nullable=False, index=True)
+    published = Column(DateTime(timezone=True), nullable=False, index=True)
+    summary = Column(Text, nullable=True)
+    image = Column(String(500), nullable=True)
+    story = Column(Integer, nullable=True, index=True)
+    notified = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class DrinkBottle(Base):
     """A bottle (or can) one expense bought, as read from its description,
     notes and receipt (bottles.py): "Old Monk", half (375 ml), 1, Rs 640.
