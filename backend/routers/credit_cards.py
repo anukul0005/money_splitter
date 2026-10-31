@@ -351,6 +351,7 @@ def bill_details(bill_id: int, db: Session = Depends(get_db), caller: User = Dep
         # Re-assembled each time it's shown: only the lines that are this bill's
         # count (card_details.reconcile) - bills read before that fix included
         saved = json.loads(bill.details_json)
+        card_details.rerule(saved.get("transactions") or [])
         fresh = card_details.assemble(saved.get("summary") or {}, saved.get("transactions") or [],
                                       saved.get("read_at"), _cycle(bill))
         return {**head, "status": "ready", **saved, **fresh}

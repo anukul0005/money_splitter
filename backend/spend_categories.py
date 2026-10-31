@@ -42,7 +42,7 @@ _RULES: list[tuple[str, str, str]] = [
     # Food & dining
     ("Food & Dining", "Office canteen", r"smartq|coriander|tapri kpmg|canteen|indiyeah|anmol catering|grubox|vendiman|culinary brands|bird catering"),
     ("Food & Dining", "Food delivery", r"swiggy(?! ?instamart)|zomato|eternal limited|bundl tech|dominos|jubilant food"),
-    ("Groceries", "Quick commerce", r"blinkit|zepto|instamart|bigbasket|commodum|^pincode$"),
+    ("Groceries", "Quick commerce", r"blinkit|blink\s*commerce|grofers|zepto|instamart|bigbasket|commodum|^pincode$"),
     ("Tobacco & Paan", "Paan & cigarettes", r"\bpaa?n\b|pan bhandar|pan corner|pan shop|bidi|khoka|cigarette"),
     ("Food & Dining", "Restaurants", r"restaurant|dhaba|kitchen|district|haldiram|mcdonald|connaught plaza|kfc|subway|burger king|taco bell|biryani|"
                                       r"zensho|postman|tandoori|spice king|bikaner|sagar ratna|wow momo|theobroma|cafe|caf[eé]|bistro|dining|"
@@ -57,7 +57,7 @@ _RULES: list[tuple[str, str, str]] = [
     ("Food & Dining", "Juice & beverages", r"juice|shake|soda|sharbat|coke|cola|pepsi|sprite|water bottle|nariyal|lemon|diet munch|ice ?cream|kwality|amul|dairy|mother dairy|milk"),
     ("Food & Dining", "Sweets & bakery", r"sweet|bakery|bakers|cake|pastry|halwai|mishti|mishthan|laddu|namkeen"),
     # Alcohol
-    ("Alcohol", "Liquor store", r"wine|beer|spirits|liquor|vandyk|21 and above|rs beverages|\bfl\b|beverages"),
+    ("Alcohol", "Liquor store", r"wine|beer|spirits|liquor|booze|theka|tavern|taproom|alco\s*bev|vandyk|21 and above|rs beverages|\bfl\b|beverages"),
     ("Alcohol", "Bar", r"\bbar\b|pub\b"),
     # Groceries
     ("Groceries", "Fruits & vegetables", r"fruit|vegetabl|vegitabl|sabzi|green grocers"),

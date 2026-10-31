@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+import time
 import urllib.error
 import urllib.request
 from collections import defaultdict
@@ -184,12 +185,18 @@ def _categorise(txns: list[dict], history: dict | None = None) -> None:
         batch = names[start:start + 20]
         items = [{"id": i, "description": n, "notes": note(n), "amount": next(t["amount"] for t in spends if t["description"] == n),
                   "group": "credit card statement"} for i, n in enumerate(batch)]
-        try:
-            for r in ec._chat(items).get("results", []):
-                if isinstance(r, dict) and isinstance(r.get("id"), int) and r["id"] < len(batch):
-                    answer[batch[r["id"]]] = ec._clean(r.get("category"), r.get("subcategory"))
-        except Exception as e:
-            print(f"[card_details] categoriser unavailable, using rules: {e}")
+        # The statement was just read with the same AI: its per-minute limit
+        # is the usual reason this fails - wait and try again before rules
+        for attempt in range(3):
+            try:
+                for r in ec._chat(items).get("results", []):
+                    if isinstance(r, dict) and isinstance(r.get("id"), int) and r["id"] < len(batch):
+                        answer[batch[r["id"]]] = ec._clean(r.get("category"), r.get("subcategory"))
+                break
+            except Exception as e:
+                print(f"[card_details] categoriser try {attempt + 1}: {e}")
+                if attempt < 2:
+                    time.sleep(15 * (attempt + 1))
     for t in txns:
         if t["type"] == "credit":
             t["category"], t["subcategory"] = "Payments & refunds", None
@@ -199,6 +206,10 @@ def _categorise(txns: list[dict], history: dict | None = None) -> None:
             got = answer.get(t["description"])
             t["category_by"] = "ai" if got else "rules"
             got = got or categorize(t["description"], t["amount"])
+            # A card swipe is a shop, never a person - only a UPI line can pay one
+            if not answer.get(t["description"]) and got[0] in ("One-off payments", "Small vendors") \
+                    and not re.match(r"\s*upi", t["description"], re.I):
+                got = ("Other", "Unclassified merchant")
             t["category"], t["subcategory"] = got[0], got[1]
 
 
@@ -375,6 +386,19 @@ def reconcile(summary: dict, txns: list[dict], period: tuple | None = None) -> N
         if drops:
             for t in min(drops, key=len):
                 t["excluded"] = "not in this bill's totals"
+
+
+def rerule(txns: list[dict]) -> None:
+    """Lines the rules filed (the AI didn't answer when the bill was read) are
+    filed again by today's rules - a rule added later reaches bills read before it."""
+    from spend_categories import categorize
+    for t in txns:
+        if t.get("category_by") != "rules" or t["type"] != "debit" or t.get("kind") in ("fee", "interest", "tax"):
+            continue
+        got = categorize(t["description"], t["amount"])
+        if got[0] in ("One-off payments", "Small vendors") and not re.match(r"\s*upi", t["description"], re.I):
+            got = ("Other", "Unclassified merchant")
+        t["category"], t["subcategory"] = got[0], got[1]
 
 
 def assemble(summary: dict, txns: list[dict], read_at: str | None, period: tuple | None = None) -> dict:
