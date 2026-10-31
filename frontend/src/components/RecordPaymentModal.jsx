@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { getGroups, getLoans, createPaymentAuto, updatePayment, deletePayment, repayLoan, repayBill } from '../api'
+import { getGroups, getLoans, createPaymentAuto, updatePayment, deletePayment, repayLoan, repayBill, createLoan } from '../api'
 import { useUser } from '../UserContext'
 import Dropdown from './Dropdown'
 import DatePicker from './DatePicker'
@@ -111,9 +111,10 @@ export default function RecordPaymentModal({ onClose, onSaved, prefillFriend, pa
           pay: (amt) => repayBill(b.id, { member: form.from_member, amount: amt }),
         })).filter((d) => d.due > 0.01),
       ]
-      const owed = debts.reduce((s, d) => s + d.due, 0)
-      if (!debts.length) return setError(`${dn(form.from_member, people)} doesn't owe ${dn(form.to_member, people)} anything in a loan or bill.`)
-      if (amt > owed + 0.01) return setError(`Only ${INR(Math.round(owed * 100) / 100)} is owed to ${dn(form.to_member, people)} - enter that or less.`)
+      // Paid more than was owed (or nothing was): the extra is now owed back
+      // the other way - a loan from the payer to them, due the same day
+      const iPaid = same(form.from_member, user?.name), iGot = same(form.to_member, user?.name)
+      if (!iPaid && !iGot) return setError('One side of the payment has to be you.')
       setBusy(true)
       try {
         let left = amt
@@ -122,6 +123,15 @@ export default function RecordPaymentModal({ onClose, onSaved, prefillFriend, pa
           const part = Math.round(Math.min(left, d.due) * 100) / 100
           await d.pay(part)
           left -= part
+        }
+        if (left > 0.01) {
+          await createLoan({
+            role: iPaid ? 'lent' : 'borrowed',
+            other: iPaid ? form.to_member : form.from_member,
+            amount: Math.round(left * 100) / 100,
+            start_date: form.date, due_date: form.date,
+            note: `Paid ${INR(amt)} on ${form.date}${form.note ? ` (${form.note})` : ''} - more than was owed`,
+          })
         }
         onSaved?.()
         onClose?.()
