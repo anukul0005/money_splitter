@@ -82,9 +82,11 @@ def merchant_name(desc: str) -> str:
     """The merchant's name as shown - whole ("Sri Ram And Son"), less the
     gateway prefix, reference numbers, company suffixes and the city and
     country on the end. merchant() stays the short key lines are grouped by."""
-    d = re.sub(r"^(upi|pos|ecom|nfc|www\.|razorpay\*?|payu\*?|paytm\*?|bbps)[\s/*-]*", "", desc.strip(), flags=re.I)
+    d = re.sub(r"^[^\w]+", "", desc.strip())                       # "#AMAZON IN"
+    d = re.sub(r"^(upi|pos|ecom|nfc|www\.|razorpay\*?|payu\*?|paytm\*?|bbps)[\s/*-]*", "", d, flags=re.I)
+    d = d.split(",")[0]                    # "AIRBNB PAYMENTS IND,GURGAON HOTELS": the merchant comes before the comma
     d = re.sub(r"[\d#*/_.-]{3,}.*$", "", d)
-    words = [w for w in re.split(r"[\s,]+", d) if w and not w.isdigit() and w.lower() not in _SUFFIX]
+    words = [w for w in re.split(r"\s+", d) if w and not w.isdigit() and w.lower() not in _SUFFIX]
     while len(words) > 1 and words[-1].lower() in _PLACE_TAIL:
         words.pop()
     return " ".join(words).title()[:40] or desc[:30].title()

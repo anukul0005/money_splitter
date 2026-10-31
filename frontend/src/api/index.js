@@ -140,6 +140,7 @@ export const setCardBankPassword = (data)     => api.post('/credit-cards/banks',
 export const deleteCardBank     = (bank)      => api.delete(`/credit-cards/banks/${encodeURIComponent(bank)}`)
 export const getCardBankOptions = ()          => api.get('/credit-cards/bank-options')
 export const listCards          = ()          => api.get('/credit-cards/cards')
+export const getCardInsights    = (month)     => api.get('/credit-cards/insights', { params: { month } })
 export const addCard            = (data)      => api.post('/credit-cards/cards', data)
 export const updateCard         = (id, data)  => api.put(`/credit-cards/cards/${id}`, data)
 export const deleteCard         = (id)        => api.delete(`/credit-cards/cards/${id}`)

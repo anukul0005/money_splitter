@@ -126,6 +126,50 @@ function SpendWindows({ data, selected, onSelect }) {
  * biggest merchants and every transaction. Read once in the background,
  * then saved - this polls while it's being read.
  */
+/**
+ * A bill's spending by the day: the average over every day of the billing
+ * period (days with nothing spent count too), how many days had any spend,
+ * and the typical spend - the average of the middle of the amounts (25th to
+ * 80th percentile), so a one-off big buy or a run of tiny ones don't skew it.
+ */
+function SpendStats({ spends, from, to }) {
+  if (!spends.length) return null
+  const dated = spends.filter((x) => x.date).map((x) => x.date).sort()
+  const start = from || dated[0], end = to || dated[dated.length - 1]
+  const days = start && end ? Math.max(1, daysBetween(start, end) + 1) : 0
+  const total = spends.reduce((s, x) => s + x.amount, 0)
+  const active = new Set(dated).size
+  const amounts = spends.map((x) => x.amount).sort((a, b) => a - b)
+  const at = (q) => amounts[Math.min(amounts.length - 1, Math.max(0, Math.round(q * (amounts.length - 1))))]
+  const lo = at(0.25), hi = at(0.8)
+  const mid = amounts.filter((a) => a >= lo && a <= hi)
+  const typical = mid.reduce((s, a) => s + a, 0) / Math.max(mid.length, 1)
+  return (
+    <div className="card">
+      {days > 0 && (
+        <div className="flex items-stretch pb-4 mb-4 border-b border-amber-100">
+          <div className="flex-1 pr-4">
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Average per day</p>
+            <p className="text-2xl font-black text-gray-900 mt-1 tracking-tight">{INR(Math.round(total / days))}</p>
+            <p className="text-[11px] text-gray-400 mt-0.5">over {days} days, ₹0 days included</p>
+          </div>
+          <div className="w-px bg-amber-100" />
+          <div className="flex-1 pl-4">
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Days with spending</p>
+            <p className="text-2xl font-black text-brand-600 mt-1 tracking-tight">{active} / {days}</p>
+            <p className="text-[11px] text-gray-400 mt-0.5">{INR(Math.round(total))} in total</p>
+          </div>
+        </div>
+      )}
+      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Typical spend</p>
+      <p className="text-2xl font-black text-gray-900 mt-1 tracking-tight">{INR(Math.round(typical))}</p>
+      <p className="text-[11px] text-gray-400 mt-0.5">
+        average of the middle {mid.length} of {amounts.length} spends ({INR(Math.round(lo))} – {INR(Math.round(hi))}) · outliers left out
+      </p>
+    </div>
+  )
+}
+
 function BillBreakup({ billId: id }) {
   const nav = useNavigate()
   const [passing, setPassing] = useState(null)     // { x, line } - the spend being passed on
@@ -290,6 +334,8 @@ function BillBreakup({ billId: id }) {
             </p>
           )}
         </div>
+
+        <SpendStats spends={kept.filter(isSpend)} from={s.period_from} to={s.period_to} />
 
         {/* By category */}
         <div className="card space-y-2.5">

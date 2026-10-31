@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   getGmailStatus, getGmailConnectUrl, disconnectGmail,
   getCardBankOptions, listCards, addCard, updateCard, deleteCard, deleteCardBill,
-  fetchCardBills, getScanProgress, recordCardPayment, deleteCardPayment,
+  fetchCardBills, getScanProgress, recordCardPayment, deleteCardPayment, getCardInsights,
 } from '../api'
 import Dropdown from './Dropdown'
 import DatePicker from './DatePicker'
@@ -325,6 +325,108 @@ function CardsDashboard({ cards, colorOf, onPay }) {
   )
 }
 
+/** One month's card spending across every card, merchant by merchant - the
+ *  month the spending is from (a bill's spend_month), picked from the months
+ *  there are read bills for. */
+function MonthInsights({ cards, colorOf }) {
+  const [month, setMonth] = useState(null)
+  const [d, setD] = useState(null)
+  useEffect(() => { getCardInsights(month || undefined).then((r) => setD(r.data)).catch(() => setD(null)) }, [month])
+  if (!d || !d.month || !d.total) return null
+  const byId = Object.fromEntries(cards.map((c) => [c.id, c]))
+  const used = d.cards.filter((c) => byId[c.id])
+  const label = (c) => shortName(byId[c.id], cards)
+  const monthName = (p) => new Date(`${p}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
+  const stacked = (rows, height) => (
+    <div className="relative" style={{ height }}>
+      <Bar
+        data={{
+          labels: rows.map((r) => (r.name.length > 22 ? `${r.name.slice(0, 21)}…` : r.name)),
+          datasets: used.map((c) => ({
+            label: label(c), data: rows.map((r) => r.by_card[c.id] || 0), backgroundColor: colorOf(c.id),
+            borderRadius: 0, borderSkipped: false, barPercentage: 0.8, categoryPercentage: 0.85,
+          })),
+        }}
+        options={{
+          indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false, axis: 'y' },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              filter: (item) => item.raw > 0,
+              callbacks: {
+                title: (items) => rows[items[0].dataIndex].name,
+                label: (c) => ` ${c.dataset.label}: ${INR(c.raw)}`,
+                footer: (items) => { const r = rows[items[0].dataIndex]; return `${INR(r.amount)} · ${r.count} spend${r.count === 1 ? '' : 's'}` },
+              },
+            },
+          },
+          scales: {
+            x: { stacked: true, beginAtZero: true, ticks: { font: TICK_FONT, maxTicksLimit: 5, callback: (v) => kInr(v) }, grid: { color: '#f1f5f9' }, border: { display: false } },
+            y: { stacked: true, grid: { display: false }, ticks: { font: { ...TICK_FONT, size: 10 } } },
+          },
+        }}
+      />
+    </div>
+  )
+  const H = 'text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5'
+  return (
+    <div className="card space-y-5">
+      <div className="flex items-center gap-2">
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-black text-gray-800">Where the cards went</p>
+          <p className="text-[10px] text-gray-400">{INR(Math.round(d.total))} across {used.length} card{used.length === 1 ? '' : 's'} · {d.merchant_count} merchants</p>
+        </div>
+        <Dropdown size="sm" value={d.month} onChange={(v) => setMonth(v)}
+          options={d.months.map((m) => ({ value: m, label: monthName(m) }))} />
+      </div>
+
+      <div>
+        <p className={H}>Biggest merchants</p>
+        {stacked(d.merchants, `${d.merchants.length * 30 + 30}px`)}
+      </div>
+
+      <div>
+        <p className={H}>By category</p>
+        {stacked(d.categories.slice(0, 8), `${Math.min(d.categories.length, 8) * 30 + 30}px`)}
+      </div>
+
+      {d.frequent.length > 0 && (
+        <div>
+          <p className={H}>Most visited</p>
+          {d.frequent.map((m) => (
+            <div key={m.name} className="flex items-center gap-2 py-1 text-[11px] border-b border-amber-50 last:border-0">
+              <span className="flex-1 min-w-0 truncate font-semibold text-gray-700">{m.name}</span>
+              <span className="text-gray-400 shrink-0">{m.count}× · avg {INR(Math.round(m.amount / m.count))}</span>
+              <span className="w-16 text-right font-black text-gray-900 tabular-nums shrink-0">{INR(Math.round(m.amount))}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div>
+        <p className={H}>Biggest single spends</p>
+        {d.biggest.map((b, i) => (
+          <div key={i} className="flex items-center gap-2 py-1 text-[11px] border-b border-amber-50 last:border-0">
+            <span className="w-2 h-2 rounded-sm shrink-0" style={{ background: colorOf(b.card_id) }} />
+            <span className="flex-1 min-w-0 truncate font-semibold text-gray-700">{b.name}</span>
+            <span className="text-gray-400 shrink-0">{b.date ? day(b.date) : ''} · {b.category}</span>
+            <span className="w-16 text-right font-black text-gray-900 tabular-nums shrink-0">{INR(Math.round(b.amount))}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap gap-x-3 gap-y-1">
+        {used.map((c) => (
+          <span key={c.id} className="flex items-center gap-1 text-[10px] font-semibold text-gray-500">
+            <span className="w-2 h-2 rounded-sm" style={{ background: colorOf(c.id) }} />{label(c)}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 /** "Record payment": pick a card, the amount (full / minimum in a tap) and the day - set against its latest bill. */
 function PayForm({ cards, cardId, setCardId, busy, onSave, onClose }) {
   const [amount, setAmount] = useState('')
@@ -499,6 +601,7 @@ export default function CreditCards({ initialMsg = '' }) {
       {error && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{error}</p>}
 
       {cards?.length > 0 && <CardsDashboard cards={cards} colorOf={colorOf} onPay={openPay} />}
+      {cards?.length > 0 && <MonthInsights cards={cards} colorOf={colorOf} />}
 
       {cards === null && <p className="text-xs text-gray-400 text-center py-4">Loading…</p>}
       {cards?.length === 0 && !adding && <p className="text-sm text-gray-400 text-center py-8">No cards yet</p>}

@@ -344,6 +344,69 @@ class LineCategory(BaseModel):
     subcategory: str | None = None
 
 
+@router.get("/insights", response_model=dict)
+def insights(month: str | None = None, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Every card's spending in one month (the month the spending is from -
+    _spend_month), merchant by merchant: the biggest merchants and the most
+    visited, categories, and the biggest single spends, each split by card.
+    Only the lines that are the bills' own count (card_details.assemble), with
+    merchants filed by hand taking their category."""
+    import json
+    from collections import defaultdict
+    import card_details
+    rows = (db.query(CreditCardStatement, CreditCard)
+            .join(CreditCard, CreditCard.id == CreditCardStatement.card_id)
+            .filter(CreditCardStatement.user_id == caller.id, CreditCardStatement.details_json.isnot(None)).all())
+    by_month: dict[str, list] = defaultdict(list)
+    for bill, card in rows:
+        by_month[_spend_month(bill)].append((bill, card))
+    months = sorted((m for m in by_month if m), reverse=True)
+    month = month if month in by_month else (months[0] if months else None)
+    out = {"months": months, "month": month, "cards": [], "total": 0, "merchants": [], "frequent": [],
+           "categories": [], "biggest": []}
+    if not month:
+        return out
+    merchants: dict[str, dict] = {}
+    cats: dict[str, dict] = {}
+    spends = []
+    cards = {}
+    for bill, card in by_month[month]:
+        saved = json.loads(bill.details_json)
+        ts = saved.get("transactions") or []
+        card_details.rerule(ts)
+        card_details.apply_known(ts, card_details.known_categories(db, ts, caller.name))
+        card_details.assemble(saved.get("summary") or {}, ts, saved.get("read_at"), _cycle(bill))
+        cards[card.id] = card_bills.card_name(card)
+        for t in ts:
+            if t.get("excluded") or t["type"] != "debit" or t.get("category") == "Card fees & interest":
+                continue
+            amt = t["amount"]
+            key = card_details.merchant(t["description"])
+            m = merchants.setdefault(key, {"name": card_details.merchant_name(t["description"]), "amount": 0.0,
+                                           "count": 0, "by_card": defaultdict(float), "category": t.get("category")})
+            m["amount"] += amt
+            m["count"] += 1
+            m["by_card"][card.id] += amt
+            c = cats.setdefault(t.get("category") or "Other", {"amount": 0.0, "count": 0, "by_card": defaultdict(float)})
+            c["amount"] += amt
+            c["count"] += 1
+            c["by_card"][card.id] += amt
+            spends.append({"date": t.get("date"), "name": card_details.merchant_name(t["description"]), "amount": amt,
+                           "card_id": card.id, "category": t.get("category")})
+    fix = lambda d: {k: round(v, 2) for k, v in d.items()}
+    out["cards"] = [{"id": k, "name": v} for k, v in cards.items()]
+    out["total"] = round(sum(x["amount"] for x in spends), 2)
+    out["merchants"] = [{**m, "amount": round(m["amount"], 2), "by_card": fix(m["by_card"])}
+                        for m in sorted(merchants.values(), key=lambda m: -m["amount"])[:8]]
+    out["frequent"] = [{**m, "amount": round(m["amount"], 2), "by_card": fix(m["by_card"])}
+                       for m in sorted(merchants.values(), key=lambda m: (-m["count"], -m["amount"])) if m["count"] > 1][:6]
+    out["categories"] = [{"name": k, "amount": round(v["amount"], 2), "count": v["count"], "by_card": fix(v["by_card"])}
+                         for k, v in sorted(cats.items(), key=lambda kv: -kv[1]["amount"])]
+    out["biggest"] = sorted(spends, key=lambda x: -x["amount"])[:5]
+    out["merchant_count"] = len(merchants)
+    return out
+
+
 @router.get("/categories", response_model=dict)
 def categories(caller: User = Depends(current_user)):
     """The categories a card spend can be filed under."""
