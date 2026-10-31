@@ -147,7 +147,7 @@ function BillBreakup({ billId: id }) {
       if (r.status === 'none' && !started.current) {
         started.current = true
         await readCardBillDetails(id)
-        r = { ...r, status: 'reading', step: 'Opening the statement email…' }
+        r = { ...r, status: 'reading', step: 'Opening the statement email…', progress: 0.01 }
       }
       setD(r)
       if (r.status === 'reading') setTimeout(() => poll(g), 2000)
@@ -167,7 +167,7 @@ function BillBreakup({ billId: id }) {
     setError('')
     try {
       await readCardBillDetails(id)
-      setD((x) => ({ ...x, status: 'reading', step: 'Opening the statement email…' }))
+      setD((x) => ({ ...x, status: 'reading', step: 'Opening the statement email…', progress: 0.01 }))
       const g = gen.current
       setTimeout(() => poll(g), 2000)
     } catch (e) { setError(e.response?.data?.detail || 'Could not start reading.') }
@@ -177,10 +177,16 @@ function BillBreakup({ billId: id }) {
   if (error && !d) return <p className="text-sm text-red-600">{error}</p>
   if (!d || d.status === 'reading') return (
     <div>
-      <div className="flex flex-col items-center py-14 gap-3 px-8 text-center">
-        <div className="w-8 h-8 border-[3px] border-brand-400/30 border-t-brand-400 rounded-full animate-spin" />
-        <p className="text-xs text-gray-600">{d?.step || 'Loading…'}</p>
-        <p className="text-[11px] text-gray-400">The first read of a statement takes up to a minute. After that it opens instantly.</p>
+      {/* A progress bar with the step it's on (the server reports how far along it is) */}
+      <div className="card py-6 px-5 space-y-2">
+        <div className="flex items-baseline justify-between text-[11px]">
+          <span className="text-gray-700 font-semibold">{d?.step || 'Loading…'}</span>
+          <span className="font-black text-gray-900 tabular-nums">{Math.round((d?.progress || 0) * 100)}%</span>
+        </div>
+        <div className="h-2 bg-amber-100 overflow-hidden">
+          <div className="h-full bg-brand-400 transition-all duration-700" style={{ width: `${Math.max(2, (d?.progress || 0) * 100)}%` }} />
+        </div>
+        <p className="text-[10px] text-gray-400">The first read of a statement takes up to a minute (longer when pages have to be read from pictures). After that it opens instantly.</p>
       </div>
     </div>
   )
@@ -397,6 +403,8 @@ function BillBreakup({ billId: id }) {
         <p className="text-[10px] text-gray-400 text-center">
           Read from the statement PDF
           {d.pages ? ` (pages 1–${d.pages.read} of ${d.pages.total}${d.pages.read < d.pages.total ? ' - the rest are terms and offers' : ''})` : ''}
+          {d.pages?.ocr?.length ? ` · page${d.pages.ocr.length === 1 ? '' : 's'} ${d.pages.ocr.join(', ')} read from a picture (OCR)` : ''}
+          {d.pages?.unreadable?.length ? ` · page${d.pages.unreadable.length === 1 ? '' : 's'} ${d.pages.unreadable.join(', ')} couldn't be read at all` : ''}
           {d.read_at ? ` on ${new Date(d.read_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}` : ''}
           {t.categorised ? ` · ${t.categorised_by_ai} of ${t.categorised} spends categorised by AI` : ''} ·{' '}
           <button onClick={readAgain} className="font-bold text-brand-500">Read again</button>
