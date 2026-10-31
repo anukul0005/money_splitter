@@ -397,7 +397,7 @@ def insights(month: str | None = None, db: Session = Depends(get_db), caller: Us
     out["cards"] = [{"id": k, "name": v} for k, v in cards.items()]
     out["total"] = round(sum(x["amount"] for x in spends), 2)
     out["merchants"] = [{**m, "amount": round(m["amount"], 2), "by_card": fix(m["by_card"])}
-                        for m in sorted(merchants.values(), key=lambda m: -m["amount"])[:8]]
+                        for m in sorted(merchants.values(), key=lambda m: -m["amount"])[:10]]
     out["frequent"] = [{**m, "amount": round(m["amount"], 2), "by_card": fix(m["by_card"])}
                        for m in sorted(merchants.values(), key=lambda m: (-m["count"], -m["amount"])) if m["count"] > 1][:6]
     out["categories"] = [{"name": k, "amount": round(v["amount"], 2), "count": v["count"], "by_card": fix(v["by_card"])}

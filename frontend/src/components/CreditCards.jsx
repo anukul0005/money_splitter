@@ -331,6 +331,7 @@ function CardsDashboard({ cards, colorOf, onPay }) {
 function MonthInsights({ cards, colorOf }) {
   const [month, setMonth] = useState(null)
   const [d, setD] = useState(null)
+  const [allMerchants, setAllMerchants] = useState(false)     // top 5, or top 10 when opened
   useEffect(() => { getCardInsights(month || undefined).then((r) => setD(r.data)).catch(() => setD(null)) }, [month])
   if (!d || !d.month || !d.total) return null
   const byId = Object.fromEntries(cards.map((c) => [c.id, c]))
@@ -383,12 +384,15 @@ function MonthInsights({ cards, colorOf }) {
 
       <div>
         <p className={H}>Biggest merchants</p>
-        {stacked(d.merchants, `${d.merchants.length * 30 + 30}px`)}
-      </div>
-
-      <div>
-        <p className={H}>By category</p>
-        {stacked(d.categories.slice(0, 8), `${Math.min(d.categories.length, 8) * 30 + 30}px`)}
+        {(() => {
+          const shown = d.merchants.slice(0, allMerchants ? 10 : 5)
+          return stacked(shown, `${shown.length * 30 + 30}px`)
+        })()}
+        {d.merchants.length > 5 && (
+          <button onClick={() => setAllMerchants((v) => !v)} className="mt-1 text-[11px] font-bold text-brand-500">
+            {allMerchants ? 'Show top 5' : `Show top ${Math.min(10, d.merchants.length)}`}
+          </button>
+        )}
       </div>
 
       {d.frequent.length > 0 && (
