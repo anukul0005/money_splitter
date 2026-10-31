@@ -73,6 +73,32 @@ def merchant(desc: str) -> str:
     return " ".join(words).title() or desc[:30].title()
 
 
+_PLACE_TAIL = _NOISE - {"retail", "store", "stores", "systems", "services", "solutions", "technologies",
+                         "payments", "online", "the", "company", "co"}
+_SUFFIX = {"pvt", "ltd", "limited", "private", "llp", "inc", "corp"}
+
+
+def merchant_name(desc: str) -> str:
+    """The merchant's name as shown - whole ("Sri Ram And Son"), less the
+    gateway prefix, reference numbers, company suffixes and the city and
+    country on the end. merchant() stays the short key lines are grouped by."""
+    d = re.sub(r"^(upi|pos|ecom|nfc|www\.|razorpay\*?|payu\*?|paytm\*?|bbps)[\s/*-]*", "", desc.strip(), flags=re.I)
+    d = re.sub(r"[\d#*/_.-]{3,}.*$", "", d)
+    words = [w for w in re.split(r"[\s,]+", d) if w and not w.isdigit() and w.lower() not in _SUFFIX]
+    while len(words) > 1 and words[-1].lower() in _PLACE_TAIL:
+        words.pop()
+    return " ".join(words).title()[:40] or desc[:30].title()
+
+
+def apply_user_categories(txns: list[dict], mine: dict) -> None:
+    """The user's own filing of a merchant (users.card_categories, by its full
+    name - "Sri Ram And Son", not every "Sri Ram") over whatever the AI or the rules said."""
+    for t in txns:
+        got = mine.get(merchant_name(t.get("description") or "").lower())
+        if got and t["type"] == "debit" and t.get("kind") not in ("fee", "interest", "tax"):
+            t["category"], t["subcategory"], t["category_by"] = got[0], got[1], "you"
+
+
 _CARD_NOTE = ("Merchant name from a credit card statement, often abbreviated and followed by city and country: "
               "'SERV'/'SERVICE STN'/'FILLING' is a fuel station, 'SI' is a standing-instruction subscription, "
               "'US'/'HK'/'CZ'/'SG' at the end means a merchant abroad. Software, AI and cloud subscriptions "
@@ -264,12 +290,15 @@ def assemble(summary: dict, txns: list[dict], read_at: str | None, period: tuple
     credits = round(sum(t["amount"] for t in live if t["type"] == "credit"), 2)
     by_cat = defaultdict(lambda: [0.0, 0])
     by_merchant = defaultdict(lambda: [0.0, 0])
+    names: dict[str, str] = {}
     for t in live:
         if t["type"] == "debit" and t["category"] != "Card fees & interest":
             by_cat[t["category"]][0] += t["amount"]
             by_cat[t["category"]][1] += 1
-            by_merchant[merchant(t["description"])][0] += t["amount"]
-            by_merchant[merchant(t["description"])][1] += 1
+            key = merchant(t["description"])
+            by_merchant[key][0] += t["amount"]
+            by_merchant[key][1] += 1
+            names.setdefault(key, merchant_name(t["description"]))
     fees = round(sum(t["amount"] for t in live if t["category"] == "Card fees & interest"), 2)
     spent = round(debits - fees, 2)
 
@@ -294,7 +323,7 @@ def assemble(summary: dict, txns: list[dict], read_at: str | None, period: tuple
         "by_category": [{"category": c, "amount": round(v[0], 2), "count": v[1],
                          "share": round(v[0] / spent * 100, 1) if spent else 0}
                         for c, v in sorted(by_cat.items(), key=lambda x: -x[1][0])],
-        "top_merchants": [{"name": m, "amount": round(v[0], 2), "count": v[1]}
+        "top_merchants": [{"name": names.get(m, m), "amount": round(v[0], 2), "count": v[1]}
                           for m, v in sorted(by_merchant.items(), key=lambda x: -x[1][0])[:6]],
         "check": check,
         "read_at": read_at,

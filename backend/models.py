@@ -91,6 +91,9 @@ class User(Base):
     # is a friend, "Ajay kiryana store" is groceries. An entry "txn:<id>"
     # excludes that one payment instead of the payee. See import_statement.
     excluded_payees = Column(Text, nullable=True)
+    # How the user re-filed card statement merchants: JSON {merchant name: [category, subcategory]}
+    # (card_details.merchant_name, lower-cased) - applied to every bill, ahead of the AI's guess
+    card_categories = Column(Text, nullable=True)
     # "Full access": the drinks side of the app (the drinks recommender, the
     # party forecast, drink price editing). Off for everyone by default - a
     # new account never sees it, or any mention of it - and switched on by

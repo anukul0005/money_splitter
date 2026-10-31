@@ -149,6 +149,8 @@ export const recordCardPayment  = (id, data)  => api.post(`/credit-cards/bills/$
 export const deleteCardPayment  = (id)        => api.delete(`/credit-cards/payments/${id}`)
 export const getCardBillDetails = (id)        => api.get(`/credit-cards/bills/${id}/details`)
 export const readCardBillDetails = (id)       => api.post(`/credit-cards/bills/${id}/details`)
+export const getCardCategories = ()           => api.get('/credit-cards/categories')
+export const setCardLineCategory = (id, line, body) => api.post(`/credit-cards/bills/${id}/lines/${line}/category`, body)
 export const fetchCardMonth     = (id, period) => api.post(`/credit-cards/cards/${id}/fetch-month`, null, { params: { period } })
 export const getCardPassword    = (id)        => api.get(`/credit-cards/cards/${id}/password`)
 export const setCardPassword    = (id, password) => api.put(`/credit-cards/cards/${id}/password`, { password })

@@ -339,6 +339,51 @@ def _emi_covered(db: Session, bill: CreditCardStatement, caller: User) -> dict:
     return out
 
 
+def _my_categories(caller: User) -> dict:
+    import json
+    try:
+        return json.loads(caller.card_categories or "{}")
+    except ValueError:
+        return {}
+
+
+class LineCategory(BaseModel):
+    category: str
+    subcategory: str | None = None
+
+
+@router.get("/categories", response_model=dict)
+def categories(caller: User = Depends(current_user)):
+    """The categories a card spend can be filed under."""
+    from spend_categories import TAXONOMY
+    return {"categories": {c: subs for c, subs in TAXONOMY.items()}}
+
+
+@router.post("/bills/{bill_id}/lines/{line}/category", response_model=dict)
+def set_line_category(bill_id: int, line: int, payload: LineCategory, db: Session = Depends(get_db),
+                      caller: User = Depends(current_user)):
+    """File one spend yourself - and its merchant, on every bill from now on
+    (users.card_categories, applied ahead of the AI's guess)."""
+    import json
+    import card_details
+    from spend_categories import TAXONOMY
+    if payload.category not in TAXONOMY or (payload.subcategory and payload.subcategory not in TAXONOMY[payload.category]):
+        raise HTTPException(400, "Pick a category from the list")
+    bill = _own_bill(db, bill_id, caller)
+    details = json.loads(bill.details_json or "{}")
+    txns = details.get("transactions") or []
+    if not 0 <= line < len(txns):
+        raise HTTPException(404, "No such line on this bill")
+    t = txns[line]
+    t["category"], t["subcategory"], t["category_by"] = payload.category, payload.subcategory, "you"
+    bill.details_json = json.dumps(details)
+    mine = _my_categories(caller)
+    mine[card_details.merchant_name(t["description"]).lower()] = [payload.category, payload.subcategory]
+    caller.card_categories = json.dumps(mine)
+    db.commit()
+    return {"ok": True, "merchant": card_details.merchant_name(t["description"])}
+
+
 @router.get("/bills/{bill_id}/details", response_model=dict)
 def bill_details(bill_id: int, db: Session = Depends(get_db), caller: User = Depends(current_user)):
     """The bill's breakup from its PDF: "ready" with the details, "reading"
@@ -363,6 +408,7 @@ def bill_details(bill_id: int, db: Session = Depends(get_db), caller: User = Dep
         # count (card_details.reconcile) - bills read before that fix included
         saved = json.loads(bill.details_json)
         card_details.rerule(saved.get("transactions") or [])
+        card_details.apply_user_categories(saved.get("transactions") or [], _my_categories(caller))
         fresh = card_details.assemble(saved.get("summary") or {}, saved.get("transactions") or [],
                                       saved.get("read_at"), _cycle(bill))
         saved.pop("source_text", None)

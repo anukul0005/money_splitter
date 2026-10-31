@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
-  getCardBillDetails, readCardBillDetails, listCards, fetchCardMonth,
+  getCardBillDetails, readCardBillDetails, listCards, fetchCardMonth, getCardCategories, setCardLineCategory,
   getCardPassword, setCardPassword, listCardBanks, setCardBankPassword, deleteCardBank, revealBankPassword,
 } from '../api'
 import Dropdown from '../components/Dropdown'
@@ -129,6 +129,20 @@ function SpendWindows({ data, selected, onSelect }) {
 function BillBreakup({ billId: id }) {
   const nav = useNavigate()
   const [passing, setPassing] = useState(null)     // { x, line } - the spend being passed on
+  // Filing a spend yourself: the line being re-filed, and the list to pick from
+  const [filing, setFiling] = useState(null)       // { line, category, subcategory }
+  const [taxonomy, setTaxonomy] = useState(null)
+  const startFiling = (line, x) => {
+    setFiling({ line, category: x.category, subcategory: x.subcategory || '' })
+    if (!taxonomy) getCardCategories().then((r) => setTaxonomy(r.data.categories)).catch(() => setTaxonomy({}))
+  }
+  const saveFiling = async () => {
+    try {
+      await setCardLineCategory(id, filing.line, { category: filing.category, subcategory: filing.subcategory || null })
+      setFiling(null)
+      setD((await getCardBillDetails(id)).data)
+    } catch (e) { setError(e.response?.data?.detail || 'Could not save the category.') }
+  }
   const [d, setD] = useState(null)
   const [error, setError] = useState('')
   const [filter, setFilter] = useState('all')
@@ -352,10 +366,38 @@ function BillBreakup({ billId: id }) {
                   <div className="min-w-0">
                     <p className="text-xs font-semibold text-gray-800 leading-snug">{x.description}</p>
                     <p className="text-[10px] text-gray-400">
-                      {x.time ? `${x.time} · ` : ''}{x.category}{x.subcategory ? ` · ${x.subcategory}` : ''}
+                      {x.time ? `${x.time} · ` : ''}
+                      {/* a spend's category: tap to file it yourself (kept for the merchant, every bill) */}
+                      {x.type === 'debit' && x.category !== 'Card fees & interest' ? (
+                        <button onClick={() => startFiling(line, x)} className="underline decoration-dotted underline-offset-2 hover:text-brand-500">
+                          {x.category}{x.subcategory ? ` · ${x.subcategory}` : ''}
+                        </button>
+                      ) : <>{x.category}{x.subcategory ? ` · ${x.subcategory}` : ''}</>}
+                      {x.category_by === 'you' ? ' · filed by you' : ''}
                       {x.kind === 'refund' ? ' · refund' : x.kind === 'cashback' ? ' · cashback' : ''}
                       {x.foreign_amount ? ` · ${x.currency} ${Number(x.foreign_amount).toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : ''}
                     </p>
+                    {filing?.line === line && (
+                      <div className="mt-1.5 p-2 bg-amber-50 border border-amber-200 rounded-md space-y-1.5">
+                        {!taxonomy ? <p className="text-[10px] text-gray-400">Loading…</p> : (
+                          <>
+                            <Dropdown value={filing.category} placeholder="Category"
+                              onChange={(v) => setFiling((f) => ({ ...f, category: v, subcategory: '' }))}
+                              options={Object.keys(taxonomy).map((c) => ({ value: c, label: c }))} />
+                            {(taxonomy[filing.category] || []).length > 0 && (
+                              <Dropdown value={filing.subcategory} placeholder="Sub-category (optional)"
+                                onChange={(v) => setFiling((f) => ({ ...f, subcategory: v }))}
+                                options={taxonomy[filing.category].map((c) => ({ value: c, label: c }))} />
+                            )}
+                            <div className="flex items-center gap-2">
+                              <button onClick={saveFiling} className="btn-primary !w-auto px-3 py-1.5 text-[11px]">Save</button>
+                              <button onClick={() => setFiling(null)} className="text-[11px] font-bold text-gray-500">Cancel</button>
+                              <span className="text-[10px] text-gray-400 flex-1 text-right">Used for this merchant on every bill</span>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
                     {sent.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-0.5">
                         {sent.map((t) => (
