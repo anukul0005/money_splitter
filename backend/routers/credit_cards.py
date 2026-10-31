@@ -339,14 +339,6 @@ def _emi_covered(db: Session, bill: CreditCardStatement, caller: User) -> dict:
     return out
 
 
-def _my_categories(caller: User) -> dict:
-    import json
-    try:
-        return json.loads(caller.card_categories or "{}")
-    except ValueError:
-        return {}
-
-
 class LineCategory(BaseModel):
     category: str
     subcategory: str | None = None
@@ -362,10 +354,15 @@ def categories(caller: User = Depends(current_user)):
 @router.post("/bills/{bill_id}/lines/{line}/category", response_model=dict)
 def set_line_category(bill_id: int, line: int, payload: LineCategory, db: Session = Depends(get_db),
                       caller: User = Depends(current_user)):
-    """File one spend yourself - and its merchant, on every bill from now on
-    (users.card_categories, applied ahead of the AI's guess)."""
+    """File one spend yourself. The merchant goes into the shared merchant
+    memory (merchant_memory.learn): everyone's bills and statement imports
+    file it so from then on, and no AI is asked about it again. A card swipe
+    is a business, so it's shared even when its name reads like a person's;
+    a UPI line to a person's name stays the filer's own."""
     import json
+    import re
     import card_details
+    import merchant_memory
     from spend_categories import TAXONOMY
     if payload.category not in TAXONOMY or (payload.subcategory and payload.subcategory not in TAXONOMY[payload.category]):
         raise HTTPException(400, "Pick a category from the list")
@@ -377,9 +374,8 @@ def set_line_category(bill_id: int, line: int, payload: LineCategory, db: Sessio
     t = txns[line]
     t["category"], t["subcategory"], t["category_by"] = payload.category, payload.subcategory, "you"
     bill.details_json = json.dumps(details)
-    mine = _my_categories(caller)
-    mine[card_details.merchant_name(t["description"]).lower()] = [payload.category, payload.subcategory]
-    caller.card_categories = json.dumps(mine)
+    merchant_memory.learn(db, card_details.merchant_name(t["description"]), payload.category, payload.subcategory,
+                          caller.name, shared=not re.match(r"\s*upi", t["description"], re.I))
     db.commit()
     return {"ok": True, "merchant": card_details.merchant_name(t["description"])}
 
@@ -408,7 +404,8 @@ def bill_details(bill_id: int, db: Session = Depends(get_db), caller: User = Dep
         # count (card_details.reconcile) - bills read before that fix included
         saved = json.loads(bill.details_json)
         card_details.rerule(saved.get("transactions") or [])
-        card_details.apply_user_categories(saved.get("transactions") or [], _my_categories(caller))
+        ts = saved.get("transactions") or []
+        card_details.apply_known(ts, card_details.known_categories(db, ts, caller.name))
         fresh = card_details.assemble(saved.get("summary") or {}, saved.get("transactions") or [],
                                       saved.get("read_at"), _cycle(bill))
         saved.pop("source_text", None)

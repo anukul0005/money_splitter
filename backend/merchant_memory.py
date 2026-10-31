@@ -121,12 +121,17 @@ def learn_from(db, e) -> None:
 
 
 def learn(db, merchant: str, category: str, subcategory: str | None, teacher: str,
-          venue: str | None = None) -> None:
+          venue: str | None = None, shared: bool = False) -> None:
+    """shared: the payee is known to be a business (a card statement's
+    merchant - a card swipe never pays a person), so the label is everyone's
+    even when its name reads like a person's ("SRI RAM AND SON")."""
     from models import Expense, MerchantLabel
 
     owner = _scope(merchant, teacher, venue if is_food(category, subcategory) else None)
     if owner is None:
         return
+    if shared:
+        owner = EVERYONE
     k = key(merchant)
     if owner != EVERYONE and db.query(MerchantLabel.id).filter(
             MerchantLabel.merchant_key == k, MerchantLabel.owner == EVERYONE).first():

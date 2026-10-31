@@ -373,28 +373,25 @@ function BillBreakup({ billId: id }) {
                           {x.category}{x.subcategory ? ` · ${x.subcategory}` : ''}
                         </button>
                       ) : <>{x.category}{x.subcategory ? ` · ${x.subcategory}` : ''}</>}
-                      {x.category_by === 'you' ? ' · filed by you' : ''}
+                      {x.category_by === 'you' ? ' · filed by you' : x.category_by === 'shared' ? ' · known merchant' : ''}
                       {x.kind === 'refund' ? ' · refund' : x.kind === 'cashback' ? ' · cashback' : ''}
                       {x.foreign_amount ? ` · ${x.currency} ${Number(x.foreign_amount).toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : ''}
                     </p>
                     {filing?.line === line && (
-                      <div className="mt-1.5 p-2 bg-amber-50 border border-amber-200 rounded-md space-y-1.5">
+                      <div className="mt-1 p-1.5 bg-amber-50 border border-amber-200 rounded-md">
                         {!taxonomy ? <p className="text-[10px] text-gray-400">Loading…</p> : (
-                          <>
-                            <Dropdown value={filing.category} placeholder="Category"
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <Dropdown size="sm" className="flex-1 min-w-[7rem]" value={filing.category} placeholder="Category"
                               onChange={(v) => setFiling((f) => ({ ...f, category: v, subcategory: '' }))}
                               options={Object.keys(taxonomy).map((c) => ({ value: c, label: c }))} />
                             {(taxonomy[filing.category] || []).length > 0 && (
-                              <Dropdown value={filing.subcategory} placeholder="Sub-category (optional)"
+                              <Dropdown size="sm" className="flex-1 min-w-[7rem]" value={filing.subcategory} placeholder="Sub (optional)"
                                 onChange={(v) => setFiling((f) => ({ ...f, subcategory: v }))}
                                 options={taxonomy[filing.category].map((c) => ({ value: c, label: c }))} />
                             )}
-                            <div className="flex items-center gap-2">
-                              <button onClick={saveFiling} className="btn-primary !w-auto px-3 py-1.5 text-[11px]">Save</button>
-                              <button onClick={() => setFiling(null)} className="text-[11px] font-bold text-gray-500">Cancel</button>
-                              <span className="text-[10px] text-gray-400 flex-1 text-right">Used for this merchant on every bill</span>
-                            </div>
-                          </>
+                            <button onClick={saveFiling} className="text-[11px] font-black text-brand-600 px-1">Save</button>
+                            <button onClick={() => setFiling(null)} className="text-[11px] font-bold text-gray-400">✕</button>
+                          </div>
                         )}
                       </div>
                     )}

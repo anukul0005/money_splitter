@@ -90,13 +90,32 @@ def merchant_name(desc: str) -> str:
     return " ".join(words).title()[:40] or desc[:30].title()
 
 
-def apply_user_categories(txns: list[dict], mine: dict) -> None:
-    """The user's own filing of a merchant (users.card_categories, by its full
-    name - "Sri Ram And Son", not every "Sri Ram") over whatever the AI or the rules said."""
+def _spend(t: dict) -> bool:
+    return t["type"] == "debit" and t.get("kind") not in ("fee", "interest", "tax")
+
+
+def known_categories(db, txns: list[dict], user_name: str) -> dict[str, tuple]:
+    """{description: (category, subcategory, who)} for the spends whose merchant
+    someone has filed by hand - the shared merchant memory (merchant_memory,
+    MerchantLabel), by the merchant's full name. These are what the merchant
+    is: no AI is asked about them."""
+    import merchant_memory as mm
+    keys = {t["description"]: mm.key(merchant_name(t["description"])) for t in txns if _spend(t)}
+    labels = mm.labels_for(db, set(keys.values()), user_name)
+    out = {}
+    for desc, k in keys.items():
+        lab = labels.get(k)
+        if lab:
+            who = "you" if (lab.taught_by or "").lower() == (user_name or "").lower() else "shared"
+            out[desc] = (lab.category, lab.subcategory, who)
+    return out
+
+
+def apply_known(txns: list[dict], known: dict) -> None:
     for t in txns:
-        got = mine.get(merchant_name(t.get("description") or "").lower())
-        if got and t["type"] == "debit" and t.get("kind") not in ("fee", "interest", "tax"):
-            t["category"], t["subcategory"], t["category_by"] = got[0], got[1], "you"
+        got = known.get(t["description"]) if _spend(t) else None
+        if got:
+            t["category"], t["subcategory"], t["category_by"] = got[0], got[1], got[2]
 
 
 _CARD_NOTE = ("Merchant name from a credit card statement, often abbreviated and followed by city and country: "
@@ -120,13 +139,16 @@ def user_history(db, user_name: str) -> dict[str, tuple[str, str | None]]:
     return {k: c.most_common(1)[0][0] for k, c in seen.items() if k}
 
 
-def _categorise(txns: list[dict], history: dict | None = None) -> None:
+def _categorise(txns: list[dict], history: dict | None = None, known: dict | None = None) -> None:
     """The AI categoriser decides; it's told what card-statement names look
     like and, where there is one, how the user filed the same merchant before."""
     import expense_classifier as ec
     from spend_categories import categorize
     history = history or {}
-    spends = [t for t in txns if t["type"] == "debit" and t["kind"] in ("purchase", "emi", "other")]
+    known = known or {}
+    # Merchants someone has filed by hand aren't asked about
+    spends = [t for t in txns if t["type"] == "debit" and t["kind"] in ("purchase", "emi", "other")
+              and t["description"] not in known]
     names = sorted({t["description"] for t in spends})
     answer: dict[str, tuple[str, str | None]] = {}
 
@@ -154,6 +176,9 @@ def _categorise(txns: list[dict], history: dict | None = None) -> None:
             t["category"], t["subcategory"] = "Payments & refunds", None
         elif t["kind"] in ("fee", "interest", "tax"):
             t["category"], t["subcategory"] = "Card fees & interest", t["kind"].title()
+        elif t["description"] in known:
+            k = known[t["description"]]
+            t["category"], t["subcategory"], t["category_by"] = k[0], k[1], k[2]
         else:
             got = answer.get(t["description"])
             t["category_by"] = "ai" if got else "rules"
@@ -165,7 +190,7 @@ def _categorise(txns: list[dict], history: dict | None = None) -> None:
             t["category"], t["subcategory"] = got[0], got[1]
 
 
-def read_statement(text: str, history: dict | None = None, progress=None) -> dict:
+def read_statement(text: str, history: dict | None = None, progress=None, known_for=None) -> dict:
     """The statement's summary and transactions read by code (statement_parser),
     the spends categorised (AI), and the breakup put together (assemble)."""
     import statement_parser as sp
@@ -188,7 +213,7 @@ def read_statement(text: str, history: dict | None = None, progress=None) -> dic
                 except ValueError:
                     t["date"] = d.replace(year=d.year - 1, day=28).isoformat()
     step("Sorting spends into categories…", 0.75)
-    _categorise(txns, history)
+    _categorise(txns, history, known_for(txns) if known_for else None)
     txns.sort(key=lambda t: (t["date"] or "", -t["amount"]))
     out = assemble(summary, txns, datetime.now(timezone.utc).isoformat())
     # The text it was read from, kept with the bill: a layout the parser doesn't
@@ -452,7 +477,8 @@ def read_bill(db, user_id: int, bill_id: int, step=lambda text, frac=None: None)
     text, used = statement_text(bank, pages)
     step(f"Read pages 1–{used} of {len(pages)}", 0.33)
     owner = db.get(User, user_id)
-    details = read_statement(text, user_history(db, owner.name) if owner else None, step)
+    details = read_statement(text, user_history(db, owner.name) if owner else None, step,
+                             (lambda ts: known_categories(db, ts, owner.name)) if owner else None)
     # stopped_at: whether the bank's end-of-statement heading (STOP_AT) was
     # found - so a layout change that stops it matching shows up.
     step("Saving…", 0.98)
