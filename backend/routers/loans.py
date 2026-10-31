@@ -155,7 +155,8 @@ def _loan_out(loan: Loan) -> dict:
         "due_date": loan.due_date, "note": loan.note,
         "interest_day": loan.interest_day, "emi": bool(emi_plan(loan)), "card_ref": loan.card_ref, **o,
         "paid": o["total_due"] <= 0.01,
-        "payments": [{"id": p.id, "amount": p.amount, "date": p.date} for p in loan.payments],
+        "payments": [{"id": p.id, "amount": p.amount, "date": p.date,
+                      "set_off": (p.settlement_ref or "").startswith("setoff:")} for p in loan.payments],
     }
 
 
@@ -173,10 +174,49 @@ def _bill_out(bill: RecurringBill) -> dict:
     }
 
 
+def _set_off(db: Session, me: str, loans: list[Loan]) -> None:
+    """Loans running both ways between the caller and one person cancel out:
+    Mom lent ₹15,000 (₹7,662 left) and owes ₹7,662 on a purchase passed on to
+    her - nobody owes anybody. The smaller side is recorded as repaid on
+    both, oldest loans first, each payment tagged with the loan it was set
+    against ("setoff:<id>", so deleting that loan takes it back)."""
+    today = date.today().isoformat()
+    by_person: dict[str, tuple[list, list]] = {}
+    for l in loans:
+        other = l.lender if _same(l.borrower, me) else l.borrower
+        side = by_person.setdefault(other.lower(), ([], []))
+        side[0 if _same(l.borrower, me) else 1].append(l)
+    changed = False
+    for mine, theirs in by_person.values():
+        if not (mine and theirs):
+            continue
+        mine.sort(key=lambda l: (l.start_date or "", l.id))
+        theirs.sort(key=lambda l: (l.start_date or "", l.id))
+        i = j = 0
+        while i < len(mine) and j < len(theirs):
+            a, b = outstanding(mine[i])["total_due"], outstanding(theirs[j])["total_due"]
+            if a <= 0.01:
+                i += 1
+                continue
+            if b <= 0.01:
+                j += 1
+                continue
+            amt = round(min(a, b), 2)
+            db.add(LoanPayment(loan_id=mine[i].id, amount=amt, date=today, settlement_ref=f"setoff:{theirs[j].id}"))
+            db.add(LoanPayment(loan_id=theirs[j].id, amount=amt, date=today, settlement_ref=f"setoff:{mine[i].id}"))
+            db.flush()
+            db.refresh(mine[i])
+            db.refresh(theirs[j])
+            changed = True
+    if changed:
+        db.commit()
+
+
 @router.get("/", response_model=dict)
 def list_all(db: Session = Depends(get_db), caller: User = Depends(current_user)):
     me = caller.name
     loans = [l for l in db.query(Loan).all() if _same(l.lender, me) or _same(l.borrower, me)]
+    _set_off(db, me, loans)
     # Someone who stopped a bill still sees it - what they owe on it, and
     # once paid, the record that they did.
     bills = [b for b in db.query(RecurringBill).filter(RecurringBill.active == True).all()  # noqa: E712
@@ -306,6 +346,8 @@ def repay(loan_id: int, payload: RepayIn, db: Session = Depends(get_db),
 def delete_loan(loan_id: int, db: Session = Depends(get_db),
                 caller: User = Depends(current_user)):
     loan = _loan_for(db, loan_id, caller)
+    # what was set off against this loan on the other one is owed again
+    db.query(LoanPayment).filter(LoanPayment.settlement_ref == f"setoff:{loan.id}").delete()
     db.delete(loan)
     db.commit()
 

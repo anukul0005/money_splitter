@@ -428,7 +428,7 @@ export default function Loans() {
                 )}
                 {l.payments.length > 0 && (
                   <p className="text-[11px] text-gray-400 mt-1">
-                    Repaid: {l.payments.map((p) => `${INR(p.amount)} on ${p.date}`).join(', ')}
+                    Repaid: {l.payments.map((p) => `${INR(p.amount)} on ${p.date}${p.set_off ? ' (set off against the other loan)' : ''}`).join(', ')}
                   </p>
                 )}
                 <div className="flex gap-2 mt-3">
