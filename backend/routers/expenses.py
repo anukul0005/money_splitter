@@ -681,7 +681,8 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
         key = _norm(t.merchant)
         if tea_stall_overpaid(t.amount, t.merchant):
             continue                  # decided below, whatever anyone says - not worth an LLM call
-        if key and key not in labels and key not in taught and categorize(t.merchant, t.amount)[0] in _UNPLACED:
+        if key and key not in labels and not merchant_memory.fits(taught.get(key), t.amount) \
+                and categorize(t.merchant, t.amount)[0] in _UNPLACED:
             unknown[key].append(t)
     llm = {"asked": len(unknown), "answered": 0, "error": None}
     if unknown and payee_classifier.available():
@@ -712,7 +713,7 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
             keep.append((t, *UNCLASSIFIED, "import", None))
             continue
         mem = taught.get(_norm(t.merchant))
-        if mem is not None and (lab is None or lab.source != "user"):
+        if merchant_memory.fits(mem, t.amount) and (lab is None or lab.source != "user"):
             keep.append((t, mem.category, mem.subcategory, "merchant", mem.venue))
             continue
         if lab is not None and lab.decision != "spending":

@@ -404,7 +404,9 @@ function BillBreakup({ billId: id }) {
                 return (
                 <div key={i} className="flex items-start justify-between gap-3 py-1.5 border-b border-amber-100 last:border-0">
                   <div className="min-w-0">
-                    <p className="text-xs font-semibold text-gray-800 leading-snug">{x.description}</p>
+                    <p className="text-xs font-semibold text-gray-800 leading-snug">
+                      {x.description}{x.venue && <span className="text-brand-600"> · {x.venue}</span>}
+                    </p>
                     <p className="text-[10px] text-gray-400">
                       {x.time ? `${x.time} · ` : ''}
                       {/* a spend's category: tap to file it yourself (kept for the merchant, every bill) */}

@@ -109,15 +109,26 @@ def known_categories(db, txns: list[dict], user_name: str) -> dict[str, tuple]:
         lab = labels.get(k)
         if lab:
             who = "you" if (lab.taught_by or "").lower() == (user_name or "").lower() else "shared"
-            out[desc] = (lab.category, lab.subcategory, who)
+            out[desc] = (lab.category, lab.subcategory, who, lab.max_amount, lab.venue)
     return out
+
+
+def _known(t: dict, known: dict):
+    """t's merchant as someone filed it - when t isn't bigger than that label
+    goes up to (a person's name is the shop for small payments only)."""
+    got = known.get(t["description"]) if _spend(t) else None
+    if got and (len(got) < 4 or got[3] is None or t["amount"] <= got[3] + 0.01):
+        return got
+    return None
 
 
 def apply_known(txns: list[dict], known: dict) -> None:
     for t in txns:
-        got = known.get(t["description"]) if _spend(t) else None
+        got = _known(t, known)
         if got:
             t["category"], t["subcategory"], t["category_by"] = got[0], got[1], got[2]
+            if len(got) > 4 and got[4]:
+                t["venue"] = got[4]          # "UPI-NEERAJ KUMAR" is Khao Piyo
 
 
 _CARD_NOTE = ("Merchant name from a credit card statement, often abbreviated and followed by city and country: "
@@ -150,7 +161,7 @@ def _categorise(txns: list[dict], history: dict | None = None, known: dict | Non
     known = known or {}
     # Merchants someone has filed by hand aren't asked about
     spends = [t for t in txns if t["type"] == "debit" and t["kind"] in ("purchase", "emi", "other")
-              and t["description"] not in known]
+              and not _known(t, known)]
     names = sorted({t["description"] for t in spends})
     answer: dict[str, tuple[str, str | None]] = {}
 
@@ -178,9 +189,8 @@ def _categorise(txns: list[dict], history: dict | None = None, known: dict | Non
             t["category"], t["subcategory"] = "Payments & refunds", None
         elif t["kind"] in ("fee", "interest", "tax"):
             t["category"], t["subcategory"] = "Card fees & interest", t["kind"].title()
-        elif t["description"] in known:
-            k = known[t["description"]]
-            t["category"], t["subcategory"], t["category_by"] = k[0], k[1], k[2]
+        elif _known(t, known):
+            apply_known([t], known)
         else:
             got = answer.get(t["description"])
             t["category_by"] = "ai" if got else "rules"

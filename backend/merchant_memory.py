@@ -18,9 +18,11 @@ to that payee - the untouched imports (whose title becomes the name), the
 ones people described without naming the place ("lunch"), and every later
 import - so the knowledge base counts them as visits to one place.
 
-A payee that is only a person's name is learnt for its teacher alone (see
-models.MerchantLabel.owner); a masked number or phone UPI id, which says
-nothing about who was paid, is never learnt.
+A payee that is only a person's name ("NEERAJ KUMAR", Khao Piyo's UPI) is
+learnt for everyone too, but only for small payments - up to PERSON_CAP, or
+more if people have filed bigger payments to it (MerchantLabel.max_amount):
+a bigger transfer to a name is likely just a person. A masked number or
+phone UPI id, which says nothing about who was paid, is never learnt.
 """
 from __future__ import annotations
 
@@ -35,6 +37,30 @@ _UNINFORMATIVE = {"Other", "Small vendors", "One-off payments"}
 # Rows a label may re-file: imported and never described by a person.
 _REFILEABLE = ("import", "merchant")
 EVERYONE = ""
+# The most a payment to a person-named payee can be and still be that shop,
+# unless people have filed bigger ones to it (rounded up to the next ₹100)
+PERSON_CAP = 300
+
+
+def fits(lab, amount) -> bool:
+    """lab applies to a payment of this amount (see MerchantLabel.max_amount)."""
+    return lab is not None and (lab.max_amount is None or (amount or 0) <= lab.max_amount + 0.01)
+
+
+def _person(merchant: str, venue: str | None = None) -> bool:
+    return not (_rule(merchant) or _BUSINESS.search(merchant or ""))
+
+
+def _cap(db, k: str, category: str) -> float:
+    """PERSON_CAP, or the biggest payment to payee k filed under category,
+    rounded up to the next ₹100 - whichever is more."""
+    import math
+    from models import Expense
+    squashed = func.lower(func.regexp_replace(Expense.merchant, "[^a-zA-Z0-9]", "", "g"))
+    top = (db.query(func.max(Expense.amount))
+           .filter(Expense.merchant.isnot(None), squashed == k, Expense.category == category,
+                   Expense.category_source.in_(("llm", "user", "rules"))).scalar()) or 0
+    return float(max(PERSON_CAP, math.ceil(top / 100) * 100))
 
 
 def key(merchant: str | None) -> str:
@@ -53,7 +79,7 @@ def _scope(merchant: str, teacher: str, venue: str | None = None) -> str | None:
     m = (merchant or "").strip()
     if len(key(m)) < 4 or "*" in m or _ANONYMOUS.search(m) or sum(c.isdigit() for c in m) >= 6:
         return None
-    return EVERYONE if (venue or _rule(m) or _BUSINESS.search(m)) else teacher
+    return EVERYONE      # a person's name too - capped, see learn()
 
 
 def _described(e) -> bool:
@@ -145,12 +171,15 @@ def learn(db, merchant: str, category: str, subcategory: str | None, teacher: st
         venue = old_venue
     if not is_food(category, subcategory):
         venue = None
+    db.flush()
+    cap = None if (shared or not _person(merchant)) else max(_cap(db, k, category), (lab.max_amount or 0) if lab else 0)
     if lab is None:
         lab = MerchantLabel(merchant_key=k, owner=owner, merchant=merchant.strip()[:200],
-                            category=category, subcategory=subcategory, venue=venue, taught_by=teacher)
+                            category=category, subcategory=subcategory, venue=venue, taught_by=teacher,
+                            max_amount=cap)
         db.add(lab)
-    elif (lab.category, lab.subcategory, lab.venue, lab.taught_by) != (category, subcategory, venue, teacher):
-        lab.category, lab.subcategory, lab.venue, lab.taught_by = category, subcategory, venue, teacher
+    elif (lab.category, lab.subcategory, lab.venue, lab.taught_by, lab.max_amount) != (category, subcategory, venue, teacher, cap):
+        lab.category, lab.subcategory, lab.venue, lab.taught_by, lab.max_amount = category, subcategory, venue, teacher, cap
     else:
         return
     apply(db, lab, old_venue)
@@ -184,6 +213,8 @@ def apply(db, lab, old_venue: str | None = None) -> None:
     for row in q.all():
         if tea_stall_overpaid(row.amount, row.title, row.merchant):
             continue        # stays unclassified, whatever the payee usually is
+        if not fits(lab, row.amount):
+            continue        # too big to be this shop - a person's name paid a person
         if _refileable(row):
             title = venue or row.merchant
             if (row.category, row.subcategory, row.venue, row.title, row.category_source) \
@@ -208,7 +239,7 @@ def fill_venue(db, e) -> None:
     if tea_stall_overpaid(e.amount, e.title, e.merchant):
         return
     lab = labels_for(db, {key(e.merchant)}, e.paid_by).get(key(e.merchant))
-    if lab is not None and lab.venue:
+    if fits(lab, e.amount) and lab.venue:
         e.venue = lab.venue
         if e.id:
             _touched(db, [e.id])
@@ -226,7 +257,8 @@ _MERGE_NOTE = re.compile(r"(?:^|·\s*)(?:PhonePe|Google Pay|GPay|Paytm|BHIM|Amaz
 # didn't read as one; v5: person-named payees that are places to eat
 # shared with everyone; v6: notes count as a description, and near
 # spellings of short place names match).
-_BACKFILL_MARK = "#backfill-v6"
+# v7: person-named payees shared with everyone, for small payments.
+_BACKFILL_MARK = "#backfill-v7"
 
 
 def share_places(db) -> int:
@@ -235,8 +267,9 @@ def share_places(db) -> int:
     Returns how many."""
     from models import MerchantLabel
     n = 0
-    for lab in db.query(MerchantLabel).filter(MerchantLabel.venue.isnot(None),
-                                              MerchantLabel.owner.notin_([EVERYONE, "#system"])).all():
+    for lab in db.query(MerchantLabel).filter(MerchantLabel.owner.notin_([EVERYONE, "#system"])).all():
+        if _person(lab.merchant):
+            lab.max_amount = _cap(db, lab.merchant_key, lab.category)
         shared = (db.query(MerchantLabel)
                   .filter(MerchantLabel.merchant_key == lab.merchant_key, MerchantLabel.owner == EVERYONE).first())
         if shared:
@@ -280,6 +313,12 @@ def backfill() -> int:
             recognise_place(db, e)
             learn_from(db, e)
         share_places(db)
+        for lab in db.query(MerchantLabel).filter(MerchantLabel.owner == EVERYONE,
+                                                  MerchantLabel.max_amount.is_(None),
+                                                  MerchantLabel.venue.isnot(None)).all():
+            # shared before as a place to eat (card statements' businesses have no venue)
+            if _person(lab.merchant):
+                lab.max_amount = _cap(db, lab.merchant_key, lab.category)
         for lab in db.query(MerchantLabel).filter(MerchantLabel.owner != "#system").all():
             apply(db, lab)
         for e in rows:      # "lunch" there before anyone named the place
