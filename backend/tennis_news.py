@@ -193,6 +193,137 @@ def loop() -> None:
         time.sleep(POLL_EVERY)
 
 
+# ── The article itself, read in the app (a reader view) ──────────────────────
+from html.parser import HTMLParser
+
+_SKIP = {"script", "style", "nav", "footer", "aside", "header", "form", "figure", "figcaption",
+         "noscript", "button", "svg", "select", "template", "iframe"}
+_BLOCKS = {"p": "p", "h2": "h", "h3": "h", "blockquote": "q", "li": "li"}
+_BOX = re.compile(r"(article|story|content|body|post|entry|rich-?text)", re.I)
+_JUNK = re.compile(r"(sign up|subscribe|newsletter|follow us|cookie|advertis|download the|read more:|"
+                   r"get sky sports|watch .* live on|click here|all rights reserved|^image:|^photo:|"
+                   r"terms and conditions|privacy policy|share this|related:|^read next|^also read|^more:)", re.I)
+_INVISIBLE = re.compile("[​-‏⁠﻿­]")
+_VOID = {"br", "img", "hr", "meta", "link", "input", "source", "wbr", "area", "col", "embed", "track", "param"}
+
+
+class _Reader(HTMLParser):
+    """Every paragraph-ish block of a page with the box it sits in - the
+    nearest <article>/<main>, or a div whose class says it's the story."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.stack: list[tuple[str, str | None]] = []   # (tag, box id if this element is a box)
+        self.skip = 0
+        self.block: tuple[str, list[str], str] | None = None
+        self.out: list[tuple[str, str, str]] = []        # (box, kind, text)
+        self.n = 0
+
+    def _box(self) -> str:
+        for tag, box in reversed(self.stack):
+            if box:
+                return box
+        return "page"
+
+    def handle_starttag(self, tag, attrs):
+        if tag in _VOID:
+            if tag == "br" and self.block:
+                self.block[1].append(" ")
+            return
+        a = dict(attrs)
+        box = None
+        if tag in ("article", "main") or (tag in ("div", "section") and _BOX.search(
+                f"{a.get('class') or ''} {a.get('id') or ''} {a.get('data-component') or ''}")):
+            self.n += 1
+            box = f"{tag}{self.n}"
+        self.stack.append((tag, box))
+        if tag in _SKIP:
+            self.skip += 1
+        elif tag in _BLOCKS and not self.skip and self.block is None:
+            self.block = (tag, [], self._box())
+
+    def handle_endtag(self, tag):
+        if tag in _VOID:
+            return
+        if self.block and tag == self.block[0]:
+            text = " ".join(_INVISIBLE.sub("", "".join(self.block[1])).split())
+            if text:
+                self.out.append((self.block[2], _BLOCKS[tag], text))
+            self.block = None
+        # close back to the matching open tag (pages don't always nest cleanly)
+        for i in range(len(self.stack) - 1, -1, -1):
+            if self.stack[i][0] == tag:
+                for t, _b in self.stack[i:]:
+                    if t in _SKIP:
+                        self.skip -= 1
+                del self.stack[i:]
+                break
+
+    def handle_data(self, data):
+        if self.block and not self.skip:
+            self.block[1].append(data)
+
+
+def extract(page: str) -> list[dict]:
+    """The story's text from an article page: the box with the most
+    paragraph text, its paragraphs and sub-headings in order, boilerplate out."""
+    r = _Reader()
+    try:
+        r.feed(page)
+    except Exception:
+        pass
+    by_box: dict[str, int] = {}
+    for box, kind, text in r.out:
+        if kind == "p" and len(text) >= 40:
+            by_box[box] = by_box.get(box, 0) + len(text)
+    if not by_box:
+        return []
+    # an <article> wrapping the story's box counts the story's paragraphs too -
+    # the box with the most text is the story
+    best = max(by_box, key=by_box.get)
+    out, seen = [], set()
+    for box, kind, text in r.out:
+        if box != best or text in seen or _JUNK.search(text):
+            continue
+        if kind == "li" or (kind == "p" and len(text) < 25 and not text.startswith(("\"", "“", "'"))):
+            continue
+        seen.add(text)
+        out.append({"type": "h" if kind == "h" else ("quote" if kind == "q" else "p"), "text": text})
+    while out and out[-1]["type"] == "h":
+        out.pop()
+    return out
+
+
+_bodies: dict[int, list[dict]] = {}
+
+
+def article(db, news_id: int) -> dict | None:
+    """One story to read in the app: its headline, picture, source and text
+    (read from the publisher's page once, then kept while the app is up)."""
+    from models import TennisNews
+    r = db.get(TennisNews, news_id)
+    if not r:
+        return None
+    body = _bodies.get(r.id)
+    if body is None:
+        try:
+            req = urllib.request.Request(r.link, headers={"User-Agent": "Mozilla/5.0 (compatible; SplitEasy reader)"})
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                charset = resp.headers.get_content_charset() or "utf-8"
+                body = extract(resp.read().decode(charset, "replace"))
+        except Exception as e:
+            print(f"[tennis-news] article {r.id}: {e}")
+            body = []
+        if body:
+            if len(_bodies) > 300:
+                _bodies.pop(next(iter(_bodies)))
+            _bodies[r.id] = body
+    also = [{"source": d.source, "link": d.link} for d in db.query(TennisNews).filter(TennisNews.story == r.id)]
+    return {"id": r.id, "title": r.title, "source": r.source, "link": r.link, "image": r.image,
+            "published": r.published.isoformat() if r.published else None, "summary": r.summary,
+            "body": body, "also": also}
+
+
 def latest(db, limit: int = 80, source: str | None = None) -> list[dict]:
     from models import TennisNews
     q = db.query(TennisNews).filter(TennisNews.story.is_(None))

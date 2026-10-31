@@ -202,6 +202,16 @@ def news(source: str | None = None, limit: int = 80, db: Session = Depends(get_d
             "sources": [s for s, _u in tennis_news.FEEDS]}
 
 
+@router.get("/news/{news_id}", response_model=dict)
+def news_article(news_id: int, db: Session = Depends(get_db), _: User = Depends(owner)):
+    """One story's text, to read in the app (tennis_news.article)."""
+    import tennis_news
+    got = tennis_news.article(db, news_id)
+    if not got:
+        raise HTTPException(404, "Story not found")
+    return got
+
+
 @router.get("/live/feed", response_model=dict)
 def live_feed(espn: str, _: User = Depends(owner)):
     """Text commentary of a live WTA match (tennis_feed), newest line first."""

@@ -22,7 +22,7 @@ function readSeen() {
  * /tennis/news - tennis headlines from the publishers' own feeds (Guardian,
  * BBC Sport, Sky Sports, ESPN, Tennis365), newest first, one card per
  * story with the other desks that ran it underneath. Each opens on the
- * publisher's site. New stories since the last visit are marked.
+ * opens in the app (TennisArticle). New stories since the last visit are marked.
  */
 export default function TennisNews() {
   const nav = useNavigate()
@@ -70,8 +70,8 @@ export default function TennisNews() {
         {data.items.map((x) => {
           const isNew = seen && x.published > seen
           return (
-            <a key={x.id} href={x.link} target="_blank" rel="noopener noreferrer"
-              className="card !p-3 flex gap-3 items-start active:scale-[0.99] transition-transform">
+            <button key={x.id} onClick={() => nav(`/tennis/news/${x.id}`)}
+              className="card !p-3 flex gap-3 items-start text-left w-full active:scale-[0.99] transition-transform">
               {x.image && (
                 <img src={x.image} alt="" loading="lazy" referrerPolicy="no-referrer"
                   className="w-20 h-16 object-cover rounded-md shrink-0 bg-amber-50"
@@ -90,7 +90,7 @@ export default function TennisNews() {
                   <p className="text-[10px] text-gray-400 mt-1">Also on {[...new Set(x.also.map((a) => a.source))].join(', ')}</p>
                 )}
               </div>
-            </a>
+            </button>
           )
         })}
       </div>
