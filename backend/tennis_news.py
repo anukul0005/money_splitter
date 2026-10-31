@@ -202,7 +202,17 @@ _BLOCKS = {"p": "p", "h2": "h", "h3": "h", "blockquote": "q", "li": "li"}
 _BOX = re.compile(r"(article|story|content|body|post|entry|rich-?text)", re.I)
 _JUNK = re.compile(r"(sign up|subscribe|newsletter|follow us|cookie|advertis|download the|read more:|"
                    r"get sky sports|watch .* live on|click here|all rights reserved|^image:|^photo:|"
-                   r"terms and conditions|privacy policy|share this|related:|^read next|^also read|^more:)", re.I)
+                   r"terms and conditions|privacy policy|share this|related:|^read next|^also read|^more:|"
+                   r"^want more from|preferred source)", re.I)
+# A box of links to other stories set in the article ("More ATP Tour News",
+# "Related", "Read more"): its heading and the headlines under it go
+_LINK_BOX = re.compile(r"^(more\b|related\b|read more|also read|latest\b|recommended|you may|you might|"
+                       r"trending|top stories|most read|popular)", re.I)
+
+
+def _headline_like(text: str) -> bool:
+    """A link to another story, not a sentence: short, no closing full stop."""
+    return len(text) < 170 and not re.search(r"[.!?\"”’']\s*$", text)
 _INVISIBLE = re.compile("[​-‏⁠﻿­]")
 _VOID = {"br", "img", "hr", "meta", "link", "input", "source", "wbr", "area", "col", "embed", "track", "param"}
 
@@ -282,9 +292,17 @@ def extract(page: str) -> list[dict]:
     # the box with the most text is the story
     best = max(by_box, key=by_box.get)
     out, seen = [], set()
+    in_links = False
     for box, kind, text in r.out:
         if box != best or text in seen or _JUNK.search(text):
             continue
+        if kind == "h" and _LINK_BOX.search(text):
+            in_links = True           # "More ATP Tour News" - out, with its links
+            continue
+        if in_links:
+            if _headline_like(text):
+                continue
+            in_links = False          # the story carries on below the box
         if kind == "li" or (kind == "p" and len(text) < 25 and not text.startswith(("\"", "“", "'"))):
             continue
         seen.add(text)
