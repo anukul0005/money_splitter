@@ -286,10 +286,25 @@ def statement_score(text: str | None) -> float:
     return bill * 5 + min(amounts, 200) * 0.5 - terms * 4 - len(text) / 20000
 
 
+def _locked(pdf_bytes: bytes) -> bool:
+    """Whether the PDF needs a password to open. Banks lock the statement;
+    what rides along with it (terms and conditions, offers) isn't locked."""
+    try:
+        with pdfplumber.open(io.BytesIO(pdf_bytes)):
+            return False
+    except Exception:
+        return True
+
+
 def best_statement_pdf(service, message_id: str, payload: dict, passwords: list[str]) -> bytes | None:
-    """The bill among an email's PDFs: the one whose text reads most like a
-    statement (statement_score) - not simply the first attached."""
+    """The bill among an email's PDFs. A PDF that opens without a password is
+    never the bill when the email also has a locked one, so only locked ones
+    are considered then; among those left, the one whose text reads most like
+    a statement (statement_score) - not simply the first attached."""
     pdfs = _pdf_attachments(service, message_id, payload)
+    locked = [b for b in pdfs if _locked(b)]
+    if locked:
+        pdfs = locked
     if len(pdfs) <= 1:
         return pdfs[0] if pdfs else None
     return max(pdfs, key=lambda b: statement_score(_extract_pdf_text(b, passwords)))
