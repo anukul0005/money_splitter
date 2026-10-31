@@ -121,10 +121,21 @@ def _cycle(r: CreditCardStatement) -> tuple[str | None, str | None]:
     return start.isoformat(), (d - timedelta(days=1)).isoformat()
 
 
+def _spend_month(r: CreditCardStatement) -> str | None:
+    """The month a bill's spending is from - where the middle of its billing
+    period falls, not the month it was generated: ICICI's 6 Oct bill (6 Sep -
+    5 Oct) is September's, SBI's 21 Oct one (21 Sep - 20 Oct) October's."""
+    a, b = _cycle(r)
+    if not (a and b):
+        return r.period
+    lo, hi = date.fromisoformat(a), date.fromisoformat(b)
+    return (lo + (hi - lo) / 2).strftime("%Y-%m")
+
+
 def _bill_out(r: CreditCardStatement, payments: list[CardPayment], latest: bool) -> dict:
     paid = round(sum(p.amount for p in payments), 2)
     cycle_from, cycle_to = _cycle(r)
-    return {"cycle_from": cycle_from, "cycle_to": cycle_to,"payments": [{"id": p.id, "amount": p.amount, "paid_on": p.paid_on} for p in payments],
+    return {"cycle_from": cycle_from, "cycle_to": cycle_to, "spend_month": _spend_month(r),"payments": [{"id": p.id, "amount": p.amount, "paid_on": p.paid_on} for p in payments],
             "paid": paid, "remaining": round(max((r.total_due or 0) - paid, 0), 2) if r.total_due is not None else None,
             "can_pay": latest, "has_details": bool(r.details_json), "id": r.id, "card_id": r.card_id, "period": r.period, "bank": r.bank, "card_last4": r.card_last4,
             "statement_date": r.statement_date, "due_date": r.due_date, "total_due": r.total_due,
@@ -337,7 +348,7 @@ def bill_details(bill_id: int, db: Session = Depends(get_db), caller: User = Dep
     import card_details
     bill = _own_bill(db, bill_id, caller)
     card = db.get(CreditCard, bill.card_id) if bill.card_id else None
-    head = {"bill": {"id": bill.id, "period": bill.period, "card": card_bills.card_name(card) if card else bill.bank,
+    head = {"bill": {"id": bill.id, "period": bill.period, "spend_month": _spend_month(bill), "card": card_bills.card_name(card) if card else bill.bank,
                      "total_due": bill.total_due, "minimum_due": bill.minimum_due, "due_date": bill.due_date,
                      "statement_date": bill.statement_date},
             # Lines passed on to someone as a loan: line -> [{loan_id, to, amount}]
