@@ -34,6 +34,46 @@ function ago(iso) {
   return `${Math.round(mins / 1440)} days ago`
 }
 
+/** "8 Nov 26" from "2026-11-08" */
+const shortDate = (iso) => {
+  const d = iso ? new Date(`${iso}T00:00:00`) : null
+  return d && !Number.isNaN(d.getTime())
+    ? d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' }) : iso || ''
+}
+
+/** An EMI loan's open instalments, soonest first: each date, that EMI, and the total to be paid by then. */
+function DueBy({ emis, positive }) {
+  let run = 0
+  return (
+    <span className="block mt-1.5 space-y-0.5">
+      <span className="flex text-[8.87px] font-bold uppercase tracking-widest text-gray-400">
+        <span className="flex-1">Due by</span><span className="w-20 text-right">EMI</span><span className="w-20 text-right">Total by then</span>
+      </span>
+      {emis.map((i, k) => {
+        run += i.balance
+        return (
+          <span key={k} className="flex text-[0.68rem] tabular-nums">
+            <span className={`flex-1 font-semibold ${i.overdue ? 'text-red-600' : 'text-gray-600'}`}>
+              {shortDate(i.date)}{i.overdue ? ' · overdue' : ''}
+            </span>
+            <span className="w-20 text-right font-bold text-gray-700">{INR(i.balance)}</span>
+            <span className={`w-20 text-right font-black ${positive ? 'text-green-700' : 'text-red-700'}`}>{INR(run)}</span>
+          </span>
+        )
+      })}
+    </span>
+  )
+}
+
+/** The next EMI across someone's loans: {date, amount} (every EMI on that date added up), or null. */
+const nextEmi = (items) => {
+  const all = items.flatMap((it) => it.emis || [])
+  if (!all.length) return null
+  const date = all.map((i) => i.date).sort()[0]
+  return { date, amount: all.filter((i) => i.date === date).reduce((s, i) => s + i.balance, 0),
+           overdue: all.some((i) => i.date === date && i.overdue) }
+}
+
 /** A loan or recurring bill in a balance breakdown. */
 function LoanItem({ it, nav }) {
   return (
@@ -42,12 +82,17 @@ function LoanItem({ it, nav }) {
       const [, kind, id] = it.key.match(/^(bill|loan)(\d+)$/) || []
       nav(kind ? `/loans?tab=${kind === 'bill' ? 'bills' : 'loans'}&${kind}=${id}` : '/loans')
     }}
-      className="w-full text-left flex items-center gap-2 rounded-md px-3 py-2 border-2 border-dashed border-orange-200 bg-orange-50 hover:bg-orange-100 transition-colors">
-      <span className="text-[8.87px] font-bold uppercase tracking-widest text-orange-600 flex-shrink-0">{it.tag}</span>
-      <span className="text-[0.739rem] font-semibold text-gray-700 flex-1 min-w-0 truncate">{it.label}</span>
-      <span className={`text-[0.739rem] font-black flex-shrink-0 ${it.positive ? 'text-green-700' : 'text-red-700'}`}>
-        {INR(it.amount)}
+      className="w-full text-left block rounded-md px-3 py-2 border-2 border-dashed border-orange-200 bg-orange-50 hover:bg-orange-100 transition-colors">
+      <span className="flex items-center gap-2">
+        <span className="text-[8.87px] font-bold uppercase tracking-widest text-orange-600 flex-shrink-0">{it.emis?.length ? 'EMI loan' : it.tag}</span>
+        <span className="text-[0.739rem] font-semibold text-gray-700 flex-1 min-w-0 truncate">{it.label}</span>
+        <span className={`text-[0.739rem] font-black flex-shrink-0 ${it.positive ? 'text-green-700' : 'text-red-700'}`}>
+          {INR(it.amount)}
+        </span>
       </span>
+      {it.emis?.length > 0
+        ? <DueBy emis={it.emis} positive={it.positive} />
+        : it.tag === 'Loan' && it.dueDate && <span className="block text-[9.85px] text-gray-500 mt-0.5">Due by {shortDate(it.dueDate)}</span>}
     </button>
   )
 }
@@ -74,6 +119,7 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
     }
   }
   const loanOnly = row.groups.length === 0 && row.loanItems.length > 0
+  const next = nextEmi(row.loanItems)
 
   // "Pay via UPI" - on a "you owe" row this is their saved UPI ID, to
   // actually pay them; on an "owed to you" row there's nothing of theirs to
@@ -177,6 +223,12 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
         </div>
       </div>
 
+      {next && (
+        <button onClick={onToggle} className={`block text-left text-[10.84px] font-bold mt-1 pl-5 ${next.overdue ? 'text-red-600' : 'text-gray-600'}`}>
+          {next.overdue ? 'EMI overdue' : 'Next EMI'}: {INR(next.amount)} by {shortDate(next.date)}
+          <span className="font-normal text-gray-400"> · tap for the schedule</span>
+        </button>
+      )}
       {lastNudge && !bellOpen && !nudge.msg && (
         <p className="text-[10px] text-gray-400 mt-1 pl-5">Reminded {ago(lastNudge)}</p>
       )}
