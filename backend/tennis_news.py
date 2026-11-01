@@ -15,14 +15,20 @@ its words with one already on file in the last two days is filed under it
 New stories are pushed (not emailed - that'd be a mail per headline) to the
 app users (OPEN_SPORTS), each for the sports switched on in Account - the headline cut to 20 words: a few one by one, the rest as a
 "+N more". The very first read files what's there without a push, so the
-first deploy doesn't fire a day's backlog.
+first deploy doesn't fire a day's backlog. A story naming the same people or
+event as one already notified in the last REPEAT_WINDOW (`_repeats`: "PV
+Sindhu wins Hylo Open" / "Sindhu beats Kjaersfelt to clinch ... Hylo Open
+final") is filed but not pushed again - bar the first with the result in it
+after a preview or a live blog.
 """
 from __future__ import annotations
 
+import difflib
 import html
 import re
 import threading
 import time
+import unicodedata
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
@@ -60,6 +66,7 @@ POLL_EVERY = 600            # seconds
 PUSH_EACH = 3               # stories pushed one by one per read; the rest as "+N more"
 FRESH = timedelta(hours=3)  # only stories this new are pushed
 HEADLINE_WORDS = 20
+REPEAT_WINDOW = timedelta(hours=12)   # a story about the same names as one notified this recently isn't pushed
 _MEDIA = "{http://search.yahoo.com/mrss/}"
 _STOP = {"after", "with", "from", "that", "this", "have", "will", "into", "over", "about", "their", "says",
          "said", "what", "when", "they", "been", "were", "more", "than", "tennis", "open", "badminton"}
@@ -88,6 +95,63 @@ def _same_story(a: set[str], b: set[str]) -> bool:
     Fery to reach Vienna semi-finals"."""
     common = len(a & b)
     return common >= 3 and common / max(min(len(a), len(b)), 1) >= 0.6
+
+
+# Capitalised words in headlines that aren't names: they don't make two stories the same
+_GENERIC = set("""
+open live updates update list final finals title titles tour world championships championship masters cup
+grand slam super series watch exclusive report video highlights photos preview result results score scores
+day round quarterfinal quarterfinals semifinal semifinals semi semis how why what who when where the and
+for after his her she they says vs wins beats win beat star stars new top first second third players player
+men women mens womens singles doubles mixed match matches season year live blog analysis opinion explained
+bwf atp wta itf india indian british american spanish french german italian chinese japanese korean danish
+indonesian malaysian thai australian canadian russian serbian swiss polish czech kazakh filipino
+monday tuesday wednesday thursday friday saturday sunday january february march april may june july august
+september october november december
+""".split())
+
+
+def _norm_word(w: str) -> str:
+    w = unicodedata.normalize("NFKD", w.replace("ø", "o").replace("Ø", "O").replace("æ", "ae").replace("ß", "ss"))
+    return "".join(c for c in w if not unicodedata.combining(c)).lower().replace("'s", "").replace("’s", "")
+
+
+def _names(title: str) -> list[set[str]]:
+    """The names a headline is about: runs of capitalised words ("PV Sindhu",
+    "Line Højmark Kjaersfelt", "Hylo Open"), each as its words, generic ones out."""
+    out = []
+    for chunk in re.split(r"[,:;|()\[\]\"“”‘]|\s[-–—]\s|\s'|'\s", title or ""):
+        run: list[str] = []
+        for w in re.findall(r"[^\W\d_][\w'’-]*", chunk) + [""]:
+            if w[:1].isupper():
+                run.append(w)
+                continue
+            words = {n for n in (_norm_word(x) for x in run) if len(n) >= 3 and n not in _GENERIC}
+            if words:
+                out.append(words)
+            run = []
+    return out
+
+
+def _alike(a: str, b: str) -> bool:
+    """The same word, or one misspelt ("Kjaersfelt" / "Kjadersfelt")."""
+    return a == b or (min(len(a), len(b)) >= 5 and difflib.SequenceMatcher(None, a, b).ratio() >= 0.85)
+
+
+def _repeats(a: list[set[str]], b: list[set[str]]) -> bool:
+    """Two headlines about the same thing: two or more of the names in one are in the other."""
+    hit = sum(1 for x in a if any(_alike(u, v) for y in b for u in x for v in y))
+    return hit >= 2
+
+
+_RESULT = re.compile(r"\b(wins?|won|beats?|beaten|clinch\w*|crowned|champion|lifts?|stuns?|knocks? out|"
+                     r"defeats?|downs?|edges?|thrash\w*|routs?|triumphs?|retains?|claims?|takes? the title)\b", re.I)
+_NOT_RESULT = re.compile(r"\b(live|vs?\.?|preview|prediction|eyes?|to face|faces|aims?|targets?|hopes?|can|will)\b", re.I)
+
+
+def _result(title: str) -> bool:
+    """A headline with the outcome in it ("Sindhu wins Hylo Open"), not a preview or a live blog."""
+    return bool(_RESULT.search(title or "")) and not _NOT_RESULT.search(title or "")
 
 
 def _when(s: str | None) -> datetime | None:
@@ -176,7 +240,7 @@ def refresh() -> int:
                     recent.append((row.id, row.sport, w))
                     new.append(row)
             db.commit()
-            fresh = [r for r in new if not r.notified and r.published >= now - FRESH]
+            fresh = _not_repeats(db, [r for r in new if not r.notified and r.published >= now - FRESH], now)
             if fresh:
                 _push(db, sorted(fresh, key=lambda r: r.published, reverse=True))
                 for r in new:
@@ -187,6 +251,30 @@ def refresh() -> int:
             db.close()
     finally:
         _lock.release()
+
+
+def _not_repeats(db, rows, now) -> list:
+    """The stories to push: none about the same names as one notified in the
+    last REPEAT_WINDOW, or as one earlier in this read."""
+    from models import TennisNews
+    if not rows:
+        return rows
+    ids = {r.id for r in rows}
+    seen: dict[str, list] = {}               # sport -> [(names, was a result)]
+    for old in db.query(TennisNews).filter(TennisNews.notified.is_(True),
+                                          TennisNews.published >= now - REPEAT_WINDOW).all():
+        if old.id not in ids:
+            seen.setdefault(old.sport, []).append((_names(old.title), _result(old.title)))
+    keep = []
+    for r in sorted(rows, key=lambda r: r.published):
+        n, res = _names(r.title), _result(r.title)
+        same = [was for o, was in seen.get(r.sport, []) if _repeats(n, o)]
+        # the same names again: skipped - unless it's the outcome after a preview or a live blog
+        if same and not (res and not any(same)):
+            continue
+        seen.setdefault(r.sport, []).append((n, res))
+        keep.append(r)
+    return keep
 
 
 def _push(db, rows) -> None:
@@ -243,7 +331,7 @@ _BOX = re.compile(r"(article|story|content|body|post|entry|rich-?text)", re.I)
 _JUNK = re.compile(r"(sign up|subscribe|newsletter|follow us|cookie|advertis|download the|read more:|"
                    r"get sky sports|watch .* live on|click here|all rights reserved|^image:|^photo:|"
                    r"terms and conditions|privacy policy|share this|related:|^read next|^also read|^more:|"
-                   r"^want more from|preferred source|^published on|^updated on)", re.I)
+                   r"^want more from|preferred source|^published on\b|^updated on\b)", re.I)
 # A box of links to other stories set in the article ("More ATP Tour News",
 # "Related", "Read more"): its heading and the headlines under it go
 _LINK_BOX = re.compile(r"^(more\b|related\b|read more|also read|latest\b|recommended|you may|you might|"
