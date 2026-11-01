@@ -180,9 +180,23 @@ def sets_tournament(tour: str, name: str, db: Session = Depends(get_db), _: User
 
 @router.get("/live", response_model=dict)
 def live(tour: str = "all", db: Session = Depends(get_db), _: User = Depends(owner)):
-    """Matches in progress and starting within a day and a half (tennis_live)."""
+    """Matches in progress and starting within a day and a half (tennis_live),
+    each player with their ranking now (tennis_rankings)."""
     import tennis_live
-    return tennis_live.matches(db, tour)
+    import tennis_rankings
+    data = tennis_live.matches(db, tour)
+    ranks = {t: tennis_rankings.by_espn(t) for t in ("ATP", "WTA")}
+    return {**data, "matches": [{**m, "players": [{**p, "rank": ranks.get(m.get("tour"), {}).get(p.get("espn_id"))}
+                                                   for p in m.get("players", [])]} for m in data.get("matches", [])]}
+
+
+@router.get("/rankings", response_model=dict)
+def rankings(tour: str = "ATP", db: Session = Depends(get_db), _: User = Depends(owner)):
+    """The current ATP or WTA singles top 150 (ESPN), with knowledge-base ids."""
+    import tennis_rankings
+    if tour.upper() not in ("ATP", "WTA"):
+        raise HTTPException(400, "ATP or WTA")
+    return tennis_rankings.with_players(db, tour.upper())
 
 
 @router.get("/live/points", response_model=dict)
@@ -275,6 +289,8 @@ def matchup(tour: str, a: int | None = None, b: int | None = None, surface: str 
         match = _match(r)
         tour, a, b, surface = r["tour"], r["winner_id"], r["loser_id"], r["surface"] or ""
     surface = surface or None
+    import tennis_rankings
+    rank_now = tennis_rankings.by_player(db, tour) if tour in ("ATP", "WTA") else {}
     out = {"tour": tour, "surface": surface, "match": match, "players": {}}
     for key, pid in (("a", a), ("b", b)):
         if not pid:
@@ -283,7 +299,8 @@ def matchup(tour: str, a: int | None = None, b: int | None = None, surface: str 
                        {"t": tour, "p": pid}).mappings().first()
         rows = db.execute(text(f"SELECT {COLS} FROM tennis_matches WHERE tour = :t AND (winner_id = :p OR loser_id = :p) "
                                f"ORDER BY play_date DESC, match_id DESC"), {"t": tour, "p": pid}).mappings().all()
-        out["players"][key] = {"info": dict(p) if p else {"player_id": pid}, **_form(rows, pid, surface)}
+        out["players"][key] = {"info": dict(p) if p else {"player_id": pid}, "rank": rank_now.get(pid),
+                               **_form(rows, pid, surface)}
     if a and b:
         out["h2h"] = h2h(tour, a, b, db, _)
     return out

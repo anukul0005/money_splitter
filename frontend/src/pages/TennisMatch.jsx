@@ -25,6 +25,9 @@ function Side({ label, a, b, fmt = (v) => v, better = 'high' }) {
   )
 }
 
+/** A player's ranking now, beside their name. */
+const Rank = ({ r }) => (r ? <span className="ml-1 text-[10px] font-semibold text-gray-400">#{r}</span> : null)
+
 const rec = (r) => (r && r.won + r.lost ? `${r.won}–${r.lost}` : null)
 const recPct = (r) => (r && r.won + r.lost ? r.pct : null)
 
@@ -192,9 +195,9 @@ export default function TennisMatch() {
               <div className="card">
                 <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Head to head</p>
                 <div className="flex items-center justify-between mt-1">
-                  <span className="text-sm font-bold flex-1 min-w-0 truncate">{nameA}</span>
+                  <span className="text-sm font-bold flex-1 min-w-0 truncate">{nameA}<Rank r={A?.rank} /></span>
                   <span className="text-2xl font-black text-brand-600 px-3 tabular-nums">{d.h2h.a_wins} – {d.h2h.b_wins}</span>
-                  <span className="text-sm font-bold flex-1 min-w-0 truncate text-right">{nameB}</span>
+                  <span className="text-sm font-bold flex-1 min-w-0 truncate text-right">{nameB}<Rank r={B?.rank} /></span>
                 </div>
                 {d.h2h.matches.length === 0 && <p className="text-[11px] text-gray-400 mt-1">They haven't met at tour level.</p>}
                 {d.h2h.matches.filter((x) => x.id !== m?.id).map((x) => (
@@ -214,6 +217,7 @@ export default function TennisMatch() {
                   <span />
                   <button disabled={!B} onClick={() => B && openPlayer(tour, B.info.player_id)} className="text-right text-xs font-black text-brand-600 truncate">{nameB} ›</button>
                 </div>
+                <Side label={`${tour} ranking now`} a={A?.rank ?? null} b={B?.rank ?? null} fmt={(v) => `#${v}`} better="low" />
                 <Side label="Career" a={rec(A?.career)} b={rec(B?.career)} />
                 <Side label="Win % · 12 months" a={recPct(A?.last_12_months)} b={recPct(B?.last_12_months)} fmt={(v) => `${v}%`} />
                 {surface && <Side label={`${surface} · 12 months`} a={recPct(A?.surface_12_months)} b={recPct(B?.surface_12_months)}

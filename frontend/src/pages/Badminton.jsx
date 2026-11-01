@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import RankingList from '../components/RankingList'
 import {
   badmintonH2H, badmintonLive, badmintonMatch, badmintonPlayer, badmintonPlayers, badmintonRankings,
   badmintonStats, badmintonTournament, badmintonTournaments,
@@ -252,7 +253,7 @@ function Results({ onPlayer, sum }) {
           {(d?.years?.length ? d.years : [new Date().getFullYear()]).map((y) => <option key={y} value={y}>{y}</option>)}
         </select>
         <p className="flex-1 text-[11px] text-gray-400 text-right">
-          {sum?.sync?.running ? `reading BWF's archive… ${sum.sync.done}/${sum.sync.todo} tournaments` : ''}
+          {sum?.sync?.running ? (sum.sync.todo ? `reading BWF's archive… ${sum.sync.done}/${sum.sync.todo} tournaments` : "reading BWF's calendars…") : ''}
         </p>
       </div>
       {!d && <p className="text-xs text-gray-400 text-center py-6">Loading…</p>}
@@ -372,6 +373,17 @@ function PlayerView({ id, onPlayer, onBack }) {
   )
 }
 
+/** BWF's men's / women's singles top 20, a tap away from the top 50. */
+function BwfRankings({ event, onPlayer }) {
+  const [rk, setRk] = useState(null)
+  useEffect(() => { badmintonRankings(event).then((r) => setRk(r.data)).catch(() => setRk({ rows: [] })) }, [event])
+  const rows = (rk?.rows || []).map((r) => ({
+    rank: r.rank, change: r.change, points: r.points, country: r.players[0]?.country,
+    names: r.players.map((p) => ({ name: p.name, onClick: p.id ? () => onPlayer(p.id) : null })),
+  }))
+  return <RankingList title={`${EVENT[event]} rankings`} sub={rk?.week || ''} rows={rows} first={20} max={50} loading={!rk} />
+}
+
 function Players({ sel, onPlayer }) {
   const [q, setQ] = useState('')
   const [list, setList] = useState([])
@@ -393,6 +405,7 @@ function Players({ sel, onPlayer }) {
         </button>
       ))}
       {q.trim().length >= 2 && list.length === 0 && <p className="text-xs text-gray-400 text-center py-6">No player by that name on file.</p>}
+      {q.trim().length < 2 && ['MS', 'WS'].map((e) => <BwfRankings key={e} event={e} onPlayer={onPlayer} />)}
     </div>
   )
 }
@@ -403,9 +416,7 @@ function Stats({ onPlayer }) {
   const [ev, setEv] = useState('MS')
   const [since, setSince] = useState(new Date().getFullYear() - 1)
   const [d, setD] = useState(null)
-  const [rk, setRk] = useState(null)
   useEffect(() => { setD(null); badmintonStats(ev, since).then((r) => setD(r.data)).catch(() => setD({ error: true })) }, [ev, since])
-  useEffect(() => { setRk(null); badmintonRankings(ev).then((r) => setRk(r.data)).catch(() => setRk({ rows: [] })) }, [ev])
   const years = []
   for (let y = new Date().getFullYear(); y >= 2018; y -= 1) years.push(y)
   return (
@@ -458,23 +469,7 @@ function Stats({ onPlayer }) {
           </div>
         </>
       )}
-      <div className="card">
-        <p className="text-xs font-black text-gray-800">BWF world rankings <span className="font-medium text-gray-400">{rk?.week || ''}</span></p>
-        {!rk && <p className="text-xs text-gray-400 py-3">Loading…</p>}
-        {rk?.rows.map((r) => (
-          <div key={r.rank + names({ players: r.players })} className="flex items-center text-[12px] py-1 border-t border-gray-100 first:border-t-0">
-            <span className="w-7 font-black text-gray-800">{r.rank}</span>
-            <span className={`w-7 text-[10px] font-bold ${r.change > 0 ? 'text-green-600' : r.change < 0 ? 'text-red-500' : 'text-gray-300'}`}>
-              {r.change > 0 ? `▲${r.change}` : r.change < 0 ? `▼${-r.change}` : '–'}
-            </span>
-            <span className="flex-1 min-w-0 truncate">
-              {r.players.map((p, k) => <span key={k}>{k > 0 && ' / '}<button onClick={() => p.id && onPlayer(p.id)} className="font-semibold text-gray-800 hover:text-brand-600">{p.name}</button></span>)}
-              <span className="ml-1 text-gray-400">{r.players[0]?.country || ''}</span>
-            </span>
-            <span className="w-16 text-right tabular-nums text-gray-500">{r.points.toLocaleString('en-IN')}</span>
-          </div>
-        ))}
-      </div>
+      <BwfRankings event={ev} onPlayer={onPlayer} />
     </div>
   )
 }

@@ -1,6 +1,7 @@
 import { Component, memo, useEffect, useRef, useState, useTransition } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { badmintonSummary, tennisDay, tennisLive, tennisLivePoints, tennisPatterns, tennisPlayer, tennisPlayers, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
+import { badmintonSummary, tennisDay, tennisLive, tennisLivePoints, tennisPatterns, tennisPlayer, tennisPlayers, tennisRankings, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
+import RankingList from '../components/RankingList'
 import Badminton, { B_TABS } from './Badminton'
 import DatePicker from '../components/DatePicker'
 
@@ -250,6 +251,20 @@ function PlayerView({ sel, onPlayer, onOpen }) {
   )
 }
 
+/** The ATP / WTA top 20 (ESPN, now), a tap away from the top 100; a ranked name opens that player. */
+function TourRankings({ tour, onPick }) {
+  const [rk, setRk] = useState(null)
+  useEffect(() => { tennisRankings(tour).then((r) => setRk(r.data)).catch(() => setRk({ rows: [] })) }, [tour])
+  const rows = (rk?.rows || []).map((r) => ({
+    rank: r.rank, change: r.previous && r.rank ? r.previous - r.rank : 0, country: r.ioc, points: r.points,
+    names: [{ name: r.name, onClick: r.player_id ? () => onPick({ tour, id: r.player_id }) : null }],
+  }))
+  return (
+    <RankingList title={`${tour} rankings`} sub={rk?.updated ? `as of ${fmtShort(rk.updated.slice(0, 10))}` : ''}
+      rows={rows} first={20} max={100} loading={!rk} />
+  )
+}
+
 function Players({ tour, sel, setSel, onOpen }) {
   const [q, setQ] = useState('')
   const [found, setFound] = useState(null)
@@ -277,6 +292,7 @@ function Players({ tour, sel, setSel, onOpen }) {
           ))}
         </div>
       )}
+      {!sel && !found && (tour === 'all' ? ['ATP', 'WTA'] : [tour]).map((t) => <TourRankings key={t} tour={t} onPick={setSel} />)}
       {sel && (
         <>
           <button onClick={() => setSel(null)} className="text-xs font-bold text-gray-400">← Search results</button>
@@ -1024,6 +1040,7 @@ export function LiveRow({ m, onOpen, plain }) {
             <Flag ioc={p.ioc} />
             <span className="flex-1 min-w-0 truncate text-[13px] font-bold">
               {p.name}{p.seed && <span className="ml-1 text-[10px] font-semibold text-gray-400">({p.seed})</span>}
+              {p.rank && <span className="ml-1 text-[9px] font-normal text-gray-300">#{p.rank}</span>}
               {live && p.serving && (
                 <span title="Serving" aria-label="serving"
                   className="ml-1.5 inline-block w-2 h-2 rounded-full bg-lime-400 ring-1 ring-lime-600 align-middle" />
@@ -1196,7 +1213,7 @@ export default function BettingAnalytics() {
             <p className="mt-1 text-[11px] leading-snug text-gray-400">
               {bsum?.matches ? `${Number(bsum.matches).toLocaleString('en-IN')} BWF matches · ${fmtShort(bsum.first)} – ${fmtShort(bsum.last)}` : 'BWF World Tour, Worlds & Olympics from 2018'}
               <br />
-              {bsum?.sync?.running ? `reading BWF's archive - ${bsum.sync.done} of ${bsum.sync.todo} tournaments` : 'live scores from bwfbadminton.com'}
+              {bsum?.sync?.running ? (bsum.sync.todo ? `reading BWF's archive - ${bsum.sync.done} of ${bsum.sync.todo} tournaments` : "reading BWF's calendars, 2018 to now…") : 'live scores from bwfbadminton.com'}
             </p>
             <div className="grid grid-cols-4 mt-2.5 rounded-md border border-amber-300 overflow-hidden">
               {B_TABS.map(([k, l]) => (

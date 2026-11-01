@@ -276,6 +276,7 @@ export const tennisLivePoints = ()               => api.get('/tennis/live/points
 export const tennisLiveFeed = (espn)             => api.get('/tennis/live/feed', { params: { espn } })
 export const tennisMatchup  = (params)           => remembered('/tennis/matchup', params, 2 * MIN)
 export const tennisSets     = ()                 => remembered('/tennis/sets', null, 10 * MIN)
+export const tennisRankings = (tour)             => remembered('/tennis/rankings', { tour }, 30 * MIN)
 export const tennisPatterns = (since = 0)        => remembered('/tennis/patterns', { since }, 10 * MIN)
 
 // My bets - 1xbet history read from Gmail (backend routers/bets.py; owner only)
