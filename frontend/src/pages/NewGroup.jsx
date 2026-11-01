@@ -74,7 +74,7 @@ export default function NewGroup() {
   const [splitMode, setSplitMode] = useState('equal')   // equal | custom
   const [left, setLeft]           = useState([])        // left out of an equal split
   const [pcts, setPcts]           = useState({})        // custom: name -> %
-  const [typed, setTyped]         = useState({})        // custom: the %s typed by hand - the rest share what's left
+  const [typed, setTyped]         = useState([])        // custom: names whose % was typed, oldest first - the rest share what's left
   const [receipt, setReceipt]     = useState(null)
   const [scan, setScan]           = useState({ busy: false, error: '', note: '' })
   const [cropFile, setCropFile]   = useState(null)
@@ -174,17 +174,22 @@ export default function NewGroup() {
   const pctOf = (n) => parseFloat(pcts[n]) || 0
   const pctTotal = everyone.reduce((s, n) => s + pctOf(n), 0)
   const onPct = (name, v) => {
-    const nowTyped = { ...typed, [name]: v !== '' }
+    if (v !== '' && parseFloat(v) > 100) v = '100'
+    if (v !== '' && parseFloat(v) < 0) v = '0'
+    let nowTyped = typed.filter((n) => n !== name && everyone.includes(n))
+    if (v !== '') nowTyped.push(name)
+    // Everyone typed: the one typed longest ago gives way and takes what's left
+    if (!everyone.some((n) => !nowTyped.includes(n))) nowTyped = nowTyped.slice(1)
     const next = { ...pcts, [name]: v }
-    const free = everyone.filter((n) => !nowTyped[n])
-    const fixed = everyone.filter((n) => nowTyped[n]).reduce((s, n) => s + (parseFloat(next[n]) || 0), 0)
+    const free = everyone.filter((n) => !nowTyped.includes(n) && n !== name)
+    const fixed = nowTyped.reduce((s, n) => s + (parseFloat(next[n]) || 0), 0)
     free.forEach((n) => { next[n] = String(r2(Math.max(0, 100 - fixed) / free.length)) })
     setTyped(nowTyped); setPcts(next)
   }
   const startCustom = () => {
     setSplitMode('custom')
     const even = String(r2(100 / everyone.length))
-    setPcts(Object.fromEntries(everyone.map((n) => [n, even]))); setTyped({})
+    setPcts(Object.fromEntries(everyone.map((n) => [n, even]))); setTyped([])
   }
   // name -> rupees, for those with a share; canon gives each name as the group spells it
   const shares = (canon) => Object.fromEntries(
