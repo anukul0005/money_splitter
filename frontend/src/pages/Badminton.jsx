@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import RankingList from '../components/RankingList'
+import RankingList, { RankingSwitch } from '../components/RankingList'
 import {
   badmintonH2H, badmintonLive, badmintonMatch, badmintonPlayer, badmintonPlayers, badmintonRankings,
   badmintonStats, badmintonTournament, badmintonTournaments,
@@ -386,6 +386,7 @@ function BwfRankings({ event, onPlayer }) {
 
 function Players({ sel, onPlayer }) {
   const [q, setQ] = useState('')
+  const [rev, setRev] = useState('MS')        // the rankings shown: men's or women's singles
   const [list, setList] = useState([])
   useEffect(() => {
     if (q.trim().length < 2) { setList([]); return undefined }
@@ -405,7 +406,11 @@ function Players({ sel, onPlayer }) {
         </button>
       ))}
       {q.trim().length >= 2 && list.length === 0 && <p className="text-xs text-gray-400 text-center py-6">No player by that name on file.</p>}
-      {q.trim().length < 2 && ['MS', 'WS'].map((e) => <BwfRankings key={e} event={e} onPlayer={onPlayer} />)}
+      {q.trim().length < 2 && (
+        <RankingSwitch value={rev} onChange={setRev} options={[['MS', "Men's singles"], ['WS', "Women's singles"]]}>
+          <BwfRankings key={rev} event={rev} onPlayer={onPlayer} />
+        </RankingSwitch>
+      )}
     </div>
   )
 }

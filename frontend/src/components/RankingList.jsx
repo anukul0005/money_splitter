@@ -1,4 +1,36 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+
+/**
+ * Men's | Women's (or any two lists): a switch above, and a swipe left / right
+ * on the list flips it too.
+ */
+export function RankingSwitch({ value, onChange, options, children }) {
+  const start = useRef(null)
+  const i = options.findIndex(([k]) => k === value)
+  const onTouchStart = (e) => { const t = e.touches[0]; start.current = [t.clientX, t.clientY] }
+  const onTouchEnd = (e) => {
+    if (!start.current) return
+    const t = e.changedTouches[0]
+    const dx = t.clientX - start.current[0], dy = t.clientY - start.current[1]
+    start.current = null
+    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5) return     // a scroll, not a swipe
+    const next = options[i + (dx < 0 ? 1 : -1)]
+    if (next) onChange(next[0])
+  }
+  return (
+    <div className="space-y-2">
+      <div className="flex rounded-md border border-amber-300 overflow-hidden">
+        {options.map(([k, label]) => (
+          <button key={k} onClick={() => onChange(k)}
+            className={`flex-1 py-1.5 text-xs font-black transition-colors ${value === k ? 'bg-field-950 text-white' : 'bg-white text-gray-600'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>{children}</div>
+    </div>
+  )
+}
 
 /**
  * A rankings table (tennis ATP / WTA, badminton BWF): the first `first`

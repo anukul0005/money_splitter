@@ -1,7 +1,7 @@
 import { Component, memo, useEffect, useRef, useState, useTransition } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { badmintonSummary, tennisDay, tennisLive, tennisLivePoints, tennisPatterns, tennisPlayer, tennisPlayers, tennisRankings, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
-import RankingList from '../components/RankingList'
+import RankingList, { RankingSwitch } from '../components/RankingList'
 import Badminton, { B_TABS } from './Badminton'
 import DatePicker from '../components/DatePicker'
 
@@ -267,6 +267,8 @@ function TourRankings({ tour, onPick }) {
 
 function Players({ tour, sel, setSel, onOpen }) {
   const [q, setQ] = useState('')
+  const [rt, setRt] = useState(tour === 'WTA' ? 'WTA' : 'ATP')       // the rankings shown: men's or women's
+  useEffect(() => { if (tour !== 'all') setRt(tour) }, [tour])
   const [found, setFound] = useState(null)
   const timer = useRef(null)
   useEffect(() => {
@@ -292,7 +294,11 @@ function Players({ tour, sel, setSel, onOpen }) {
           ))}
         </div>
       )}
-      {!sel && !found && (tour === 'all' ? ['ATP', 'WTA'] : [tour]).map((t) => <TourRankings key={t} tour={t} onPick={setSel} />)}
+      {!sel && !found && (
+        <RankingSwitch value={rt} onChange={setRt} options={[['ATP', "Men's singles · ATP"], ['WTA', "Women's singles · WTA"]]}>
+          <TourRankings key={rt} tour={rt} onPick={setSel} />
+        </RankingSwitch>
+      )}
       {sel && (
         <>
           <button onClick={() => setSel(null)} className="text-xs font-bold text-gray-400">← Search results</button>
