@@ -41,6 +41,30 @@ const donutPctPlugin = {
 }
 Chart.register(donutPctPlugin)
 
+// Inline plugin: the amount at the end of each horizontal bar (the who-paid chart)
+const barValuePlugin = {
+  id: 'barValue',
+  afterDatasetsDraw(chart, _args, opts) {
+    if (!opts?.on || chart.config.options.indexAxis !== 'y') return
+    const { ctx } = chart
+    chart.data.datasets.forEach((dataset, di) => {
+      const meta = chart.getDatasetMeta(di)
+      if (meta.hidden) return
+      meta.data.forEach((el, idx) => {
+        const v = dataset.data[idx]
+        ctx.save()
+        ctx.fillStyle = '#111827'
+        ctx.font = "bold 11px Num, 'IBM Plex Sans', system-ui, sans-serif"
+        ctx.textAlign = 'left'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(INR(v), Math.max(el.x, el.base) + 6, el.y)
+        ctx.restore()
+      })
+    })
+  },
+}
+Chart.register(barValuePlugin)
+
 /**
  * The charts that used to live in a group's "Charts" tab.
  *
@@ -124,9 +148,11 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
     plugins: {
       legend: { display: false },
       tooltip: { callbacks: { label: (c) => ` ${INR(c.parsed.x)}` } },
+      barValue: { on: true },
     },
     scales: {
-      x: { ticks: { callback: (v) => `₹${(v/1000).toFixed(0)}k`, font: { size: 11, family: "Num, 'IBM Plex Sans'" } }, grid: { color: '#f1f5f9' } },
+      // room past the longest bar for its amount
+      x: { grace: '30%', ticks: { callback: (v) => compactINR(v), font: { size: 11, family: "Num, 'IBM Plex Sans'" } }, grid: { color: '#f1f5f9' } },
       y: { ticks: { font: { size: 12, family: "Num, 'IBM Plex Sans'" } }, grid: { display: false } },
     },
   }
@@ -512,6 +538,24 @@ export default function StatsPanel({ stats, expenses = [], isSolo = false }) {
               <div className="card">
                 <h3 className="text-xs font-bold text-gray-500 mb-3">Who paid how much?</h3>
                 <Bar data={memberChartData} options={hBarOptions} />
+                {/* paid at the till vs. in the end: shares settled since move the money */}
+                {stats.by_member?.some((x) => x.paid_upfront != null && Math.abs(x.paid_upfront - x.total_paid) >= 1) && (
+                  <div className="mt-3 pt-2 border-t border-amber-100 space-y-1">
+                    {stats.by_member.map((x) => {
+                      const diff = Math.round(x.total_paid - (x.paid_upfront ?? x.total_paid))
+                      return (
+                        <p key={x.member} className="text-[11px] text-gray-500 flex gap-2">
+                          <span className="font-bold text-gray-800 flex-1 min-w-0 truncate">{dn(x.member, stats.by_member.map((y) => y.member))}</span>
+                          <span className="tabular-nums">
+                            {INR(x.paid_upfront ?? 0)} paid at the time
+                            {diff !== 0 && <> {diff > 0 ? '+' : '−'} {INR(Math.abs(diff))} {diff > 0 ? 'settled to others' : 'settled back to them'}</>}
+                          </span>
+                        </p>
+                      )
+                    })}
+                    <p className="text-[10px] text-gray-400">The bars are what each paid in the end, after shares were settled.</p>
+                  </div>
+                )}
               </div>
               {hasMultipleMonths && <MonthlyCard />}
             </>

@@ -373,7 +373,8 @@ class CategoryStat(BaseModel):
 
 class MemberStat(BaseModel):
     member: str
-    total_paid: float
+    total_paid: float                    # what they've paid in the end - shares settled to them taken off, settled by them added
+    paid_upfront: float | None = None    # the bills they paid at the till
 
 class TimelineStat(BaseModel):
     date: str

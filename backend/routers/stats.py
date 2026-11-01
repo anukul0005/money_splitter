@@ -14,6 +14,46 @@ from schemas import GroupStats, CategoryStat, MemberStat, TimelineStat
 router = APIRouter(prefix="/stats", tags=["stats"])
 
 
+def _settled_back(e, member_names: list[str]) -> float:
+    """How much of a bill the other members have settled with its payer -
+    the shares settlements._calculate moves off the payer."""
+    settled = set(_json.loads(e.settled_by) if e.settled_by else [])
+    if not settled:
+        return 0.0
+    if e.split_json:
+        shares = {k: float(v) for k, v in _json.loads(e.split_json).items()}
+    else:
+        divider = e.divider or len(member_names)
+        each = e.individual_amount or round(e.amount / divider, 2)
+        people = [x.strip() for x in e.participants.split(",")] if e.participants else member_names[:divider]
+        shares = {x: each for x in people}
+    return sum(v for k, v in shares.items() if k in settled and k != e.paid_by and k in member_names)
+
+
+def _paid_by_member(groups) -> list[dict]:
+    """Who paid how much, in the end: a bill's payer, less the shares the
+    others have since settled with them; each settler, plus what they
+    settled; recorded payments moved the same way - the balances' own
+    "paid" (settlements._calculate). Biggest first, with what each paid
+    at the till alongside (paid_upfront)."""
+    from routers.settlements import _calculate
+    upfront: dict[str, float] = defaultdict(float)
+    actual: dict[str, float] = defaultdict(float)
+    for g in groups:
+        names = {m.name for m in g.members}
+        for e in g.expenses:
+            upfront[e.paid_by] += e.amount
+            if e.paid_by not in names:          # someone not in the group: their bills, less what was settled with them
+                actual[e.paid_by] += e.amount - _settled_back(e, [m.name for m in g.members])
+        for b in _calculate(g).balances:
+            actual[b.member] += b.paid
+    tidy = lambda v: round(v, 2) if abs(v) >= 0.5 else 0.0      # paisa left over from rounded shares
+    rows = [{"member": m, "total_paid": tidy(actual.get(m, 0.0)), "paid_upfront": tidy(upfront.get(m, 0.0))}
+            for m in set(actual) | set(upfront)]
+    return sorted([r for r in rows if abs(r["total_paid"]) > 0.005 or r["paid_upfront"] > 0.005],
+                  key=lambda r: -r["total_paid"])
+
+
 @router.get("/user-summary", response_model=dict)
 def get_user_summary(db: Session = Depends(get_db), caller: User = Depends(current_user)):
     """Cross-group personal stats for the signed-in member."""
@@ -363,7 +403,6 @@ def get_aggregate_stats(ids: str, db: Session = Depends(get_db),
 
     by_cat: dict[str, float] = defaultdict(float)
     by_cat_display: dict[str, str] = {}
-    by_member: dict[str, float] = defaultdict(float)
     expenses: list[dict] = []
     members: set[str] = set()
 
@@ -375,7 +414,6 @@ def get_aggregate_stats(ids: str, db: Session = Depends(get_db),
             key = raw.lower()
             by_cat_display.setdefault(key, raw)
             by_cat[key] += e.amount
-            by_member[e.paid_by] += e.amount
             expenses.append({"date": e.date, "amount": e.amount})
 
     return {
@@ -388,10 +426,7 @@ def get_aggregate_stats(ids: str, db: Session = Depends(get_db),
             {"category": by_cat_display[k], "total": round(v, 2)}
             for k, v in sorted(by_cat.items(), key=lambda x: -x[1])
         ],
-        "by_member": [
-            {"member": k, "total_paid": round(v, 2)}
-            for k, v in sorted(by_member.items(), key=lambda x: -x[1])
-        ],
+        "by_member": _paid_by_member(groups),
         "expenses": expenses,
     }
 
@@ -697,7 +732,6 @@ def get_group_stats(group_id: int, db: Session = Depends(get_db),
 
     by_cat: dict[str, float] = defaultdict(float)
     by_cat_display: dict[str, str] = {}
-    by_member: dict[str, float] = defaultdict(float)
     by_date: dict[str, float] = defaultdict(float)
 
     for e in expenses:
@@ -706,7 +740,6 @@ def get_group_stats(group_id: int, db: Session = Depends(get_db),
         if key not in by_cat_display:
             by_cat_display[key] = raw
         by_cat[key] += e.amount
-        by_member[e.paid_by] += e.amount
         if e.date:
             raw = str(e.date)
             if len(raw) >= 7:
@@ -716,7 +749,7 @@ def get_group_stats(group_id: int, db: Session = Depends(get_db),
         group_id=group_id,
         total=total,
         by_category=[CategoryStat(category=by_cat_display[k], total=round(v, 2)) for k, v in sorted(by_cat.items(), key=lambda x: -x[1])],
-        by_member=[MemberStat(member=k, total_paid=round(v, 2)) for k, v in sorted(by_member.items(), key=lambda x: -x[1])],
+        by_member=[MemberStat(**r) for r in _paid_by_member([group])],
         by_date=[TimelineStat(date=k, total=round(v, 2)) for k, v in sorted(by_date.items())],
     )
 

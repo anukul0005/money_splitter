@@ -36,6 +36,14 @@ import urllib.request
 # LEDGER_VISION_MODEL (e.g. gemini-3.8-pro) if ever needed.
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 VISION_MODEL = os.getenv("LEDGER_VISION_MODEL", "gemini-3.8-flash")
+# When the newest Flash is overloaded ("high demand", 503) or slow to answer,
+# the page goes to the one before it, then the one before that - each is a
+# separate free quota, and an older Flash reads a page fine (3.5 does one in
+# ~10s). LEDGER_VISION_FALLBACKS (comma-separated) overrides the list.
+FALLBACKS = [m.strip() for m in os.getenv("LEDGER_VISION_FALLBACKS", "gemini-3.7-flash,gemini-3.5-flash,gemini-2.5-flash").split(",")
+             if m.strip()]
+FIRST_WAIT = 75          # seconds the first model gets before the next one is tried
+NEXT_WAIT = 60
 
 _PROMPT = """This photo is one of two things. Decide which first.
 
@@ -85,15 +93,36 @@ def _image_b64(raw: bytes) -> str:
     return base64.b64encode(buf.getvalue()).decode()
 
 
+class _Busy(Exception):
+    """This model can't take the page right now - try the next one."""
+
+
 def _ask_vision(prompt: str, image_b64: str) -> dict:
-    """Send the page to Gemini (2.5 Flash by default) and parse its JSON reply. Raises
-    RuntimeError when no key is set or the request fails."""
+    """Send the page to Gemini Flash and parse its JSON reply - falling back to
+    an older Flash when one is overloaded, out of quota or too slow. Raises
+    RuntimeError when no key is set or no model could read it."""
     from database import get_settings
     key = get_settings().gemini_api_key
     if not key:
         raise RuntimeError("The notebook reader isn't set up yet - add a Gemini API key (GEMINI_API_KEY).")
+    models = list(dict.fromkeys([VISION_MODEL, *FALLBACKS]))
+    busy = []
+    for i, model in enumerate(models):
+        try:
+            return _ask_model(key, model, prompt, image_b64, FIRST_WAIT if i == 0 else NEXT_WAIT)
+        except _Busy as e:
+            print(f"[ledger-reader] {model}: {e} - trying the next model")
+            busy.append(str(e))
+    if any("limit" in b for b in busy) and all("limit" in b for b in busy):
+        raise RuntimeError("The notebook reader has hit its free Gemini limit for now - "
+                           "try again in a minute (or tomorrow, if it's the daily limit).")
+    raise RuntimeError("Gemini is overloaded right now (every model tried was busy or too slow) - "
+                       "try again in a few minutes.")
+
+
+def _ask_model(key: str, model: str, prompt: str, image_b64: str, wait: int) -> dict:
     body = json.dumps({
-        "model": VISION_MODEL, "temperature": 0, "max_tokens": 4000,
+        "model": model, "temperature": 0, "max_tokens": 8000,
         "response_format": {"type": "json_object"},
         "messages": [{"role": "user", "content": [
             {"type": "text", "text": prompt},
@@ -102,19 +131,24 @@ def _ask_vision(prompt: str, image_b64: str) -> dict:
     req = urllib.request.Request(GEMINI_URL, data=body, method="POST", headers={
         "Authorization": f"Bearer {key}", "Content-Type": "application/json", "Accept": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=wait) as resp:
             content = json.loads(resp.read().decode())["choices"][0]["message"]["content"]
     except urllib.error.HTTPError as e:
         if e.code == 429:
-            raise RuntimeError("The notebook reader has hit its free Gemini limit for now - "
-                               "try again in a minute (or tomorrow, if it's the daily limit).") from None
+            raise _Busy("over its free limit") from None
+        if e.code in (500, 502, 503, 504):
+            raise _Busy(f"overloaded ({e.code})") from None
+        if e.code == 404:
+            raise _Busy("not available to this key") from None
         if e.code in (401, 403):
             raise RuntimeError("The notebook reader's Gemini key was refused - "
                                "check GEMINI_API_KEY on the server.") from None
         detail = e.read().decode(errors="replace")[:200]
         raise RuntimeError(f"Gemini rejected the page ({e.code}): {detail}") from None
-    except (urllib.error.URLError, KeyError, ValueError, TimeoutError) as e:
-        raise RuntimeError(f"Couldn't reach Gemini: {e}") from None
+    except (TimeoutError, OSError) as e:          # "The read operation timed out", a dropped connection
+        raise _Busy(f"no answer in {wait}s ({e})") from None
+    except (KeyError, ValueError) as e:
+        raise _Busy(f"an unreadable reply ({e})") from None
     m = re.search(r"\{.*\}", content, re.S)       # tolerate ```json fences
     return json.loads(m.group(0) if m else content)
 
