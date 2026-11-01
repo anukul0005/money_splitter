@@ -157,10 +157,11 @@ export default function App() {
                     <Route path="/betting" element={<BettingAnalytics />} />
                     <Route path="/betting/match" element={<TennisMatch />} />
                     <Route path="/my-bets" element={<MyBets />} />
-                    <Route path="/tennis/news" element={<TennisNews />} />
-                    <Route path="/tennis/news/:id" element={<TennisArticle />} />
                   </>
                 )}
+                {/* Sports news: badminton for everyone, tennis and football for the sports people (the server decides) */}
+                <Route path="/tennis/news" element={<TennisNews />} />
+                <Route path="/tennis/news/:id" element={<TennisArticle />} />
               </Routes>
             </div>
             </div>

@@ -73,14 +73,12 @@ export default function Sidebar({ user, onLogout }) {
             Betting analytics
           </NavLink>
         )}
-        {isAnalyticsUser(user) && (
-          <NavLink
-            to="/tennis/news"
-            className="block w-full text-left text-xs text-slate-300/50 hover:text-brand-400 font-semibold transition-colors tracking-widest py-1"
-          >
-            Sports news
-          </NavLink>
-        )}
+        <NavLink
+          to="/tennis/news"
+          className="block w-full text-left text-xs text-slate-300/50 hover:text-brand-400 font-semibold transition-colors tracking-widest py-1"
+        >
+          Sports news
+        </NavLink>
         {isAdmin(user) && (
           <NavLink
             to="/admin/codes"

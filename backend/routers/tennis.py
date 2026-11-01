@@ -194,23 +194,26 @@ def live_points(_: User = Depends(owner)):
 
 @router.get("/news", response_model=dict)
 def news(source: str | None = None, sport: str | None = None, limit: int = 80,
-         db: Session = Depends(get_db), _: User = Depends(owner)):
-    """Tennis and football headlines, newest first, one per story
-    (tennis_news) - read again in the background when the last read is 10
-    minutes old."""
+         db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Sports headlines, newest first, one per story (tennis_news) - read
+    again in the background when the last read is 10 minutes old. Badminton
+    for everyone; tennis and football for the sports-section people."""
     import tennis_news
     tennis_news.maybe_refresh()
-    feeds = [f for f in tennis_news.FEEDS if not sport or f[0] == sport]
-    return {"items": tennis_news.latest(db, min(max(limit, 1), 200), source, sport),
-            "sports": list(tennis_news.SPORTS), "sources": list(dict.fromkeys(s for _sp, s, _u in feeds))}
+    mine = tennis_news.sports_for(caller)
+    if sport and sport not in mine:
+        raise HTTPException(404, "Not found")
+    feeds = [f for f in tennis_news.FEEDS if f[0] in mine and (not sport or f[0] == sport)]
+    return {"items": tennis_news.latest(db, min(max(limit, 1), 200), source, [sport] if sport else mine),
+            "sports": mine, "sources": list(dict.fromkeys(s for _sp, s, _u in feeds))}
 
 
 @router.get("/news/{news_id}", response_model=dict)
-def news_article(news_id: int, db: Session = Depends(get_db), _: User = Depends(owner)):
+def news_article(news_id: int, db: Session = Depends(get_db), caller: User = Depends(current_user)):
     """One story's text, to read in the app (tennis_news.article)."""
     import tennis_news
     got = tennis_news.article(db, news_id)
-    if not got:
+    if not got or got["sport"] not in tennis_news.sports_for(caller):
         raise HTTPException(404, "Story not found")
     return got
 

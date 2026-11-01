@@ -68,6 +68,7 @@ class User(Base):
     # Sports news pushes, by sport (tennis_news.py) - on unless turned off in Account
     news_tennis = Column(Boolean, nullable=False, default=True, server_default="true")
     news_football = Column(Boolean, nullable=False, default=True, server_default="true")
+    news_badminton = Column(Boolean, nullable=False, default=True, server_default="true")     # for everyone
     # Take-home pay and when it lands - for the spending analysis ("does
     # spending rise after payday?"). salary_day is "1".."31", "last" (the
     # month's last day) or "last_working" (its last weekday).

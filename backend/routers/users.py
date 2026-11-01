@@ -574,9 +574,11 @@ def set_my_daily_summary(payload: SetDailySummary, db: Session = Depends(get_db)
 @router.post("/me/news-alerts", response_model=UserMeOut)
 def set_my_news_alerts(payload: SetNewsAlerts, db: Session = Depends(get_db),
                        caller: User = Depends(current_user)):
-    """Turn tennis or football news notifications on or off (tennis_news)."""
-    if payload.sport not in ("tennis", "football"):
-        raise HTTPException(400, "Pick tennis or football")
+    """Turn a sport's news notifications on or off (tennis_news) - badminton
+    for anyone, tennis and football for the sports-section people."""
+    import tennis_news
+    if payload.sport not in tennis_news.sports_for(caller):
+        raise HTTPException(400, "No such news alerts")
     setattr(caller, f"news_{payload.sport}", payload.enabled)
     db.commit()
     db.refresh(caller)

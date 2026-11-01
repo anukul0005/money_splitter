@@ -69,7 +69,7 @@ export default function Account() {
 
   // ── Nightly summary of yesterday's spending ──
   const [summaryOn, setSummaryOn]       = useState(false)
-  const [news, setNews]                 = useState({ tennis: true, football: true })
+  const [news, setNews]                 = useState({ tennis: true, football: true, badminton: true })
   const [newsErr, setNewsErr]           = useState('')
   const [summaryBusy, setSummaryBusy]   = useState(false)
   const [summaryError, setSummaryError] = useState('')
@@ -117,7 +117,7 @@ export default function Account() {
         setBirthYear(r.data.birth_year ? String(r.data.birth_year) : '')
         setBdayYearInput(r.data.birth_year ? String(r.data.birth_year) : '')
         setSummaryOn(!!r.data.daily_summary)
-        setNews({ tennis: r.data.news_tennis !== false, football: r.data.news_football !== false })
+        setNews({ tennis: r.data.news_tennis !== false, football: r.data.news_football !== false, badminton: r.data.news_badminton !== false })
         setSalaryInput(r.data.monthly_salary ? String(r.data.monthly_salary) : '')
         setSalaryDay(r.data.salary_day || '')
         setSalarySaved(r.data.monthly_salary ? { amount: r.data.monthly_salary, day: r.data.salary_day } : null)
@@ -188,7 +188,7 @@ export default function Account() {
     setNews((n) => ({ ...n, [sport]: next }))         // flips at once; put back if the server says no
     try {
       const r = await setMyNewsAlerts(sport, next)
-      setNews({ tennis: r.data.news_tennis !== false, football: r.data.news_football !== false })
+      setNews({ tennis: r.data.news_tennis !== false, football: r.data.news_football !== false, badminton: r.data.news_badminton !== false })
     } catch (err) {
       setNews((n) => ({ ...n, [sport]: !next }))
       setNewsErr(err.response?.data?.detail || 'Could not change that.')
@@ -625,13 +625,13 @@ export default function Account() {
         </div>
 
         {/* ── Sports news notifications ── */}
-        {isAnalyticsUser(user) && (
+        {(
           <div className="card">
             <h2 className="text-sm font-bold text-gray-800">Sports news notifications</h2>
             <p className="text-xs text-gray-500 leading-relaxed mt-1 mb-2">
               A notification with the headline when a new story lands in Sports news.
             </p>
-            {[['tennis', '🎾 Tennis'], ['football', '⚽ Football']].map(([k, label]) => (
+            {[['badminton', '🏸 Badminton'], ...(isAnalyticsUser(user) ? [['tennis', '🎾 Tennis'], ['football', '⚽ Football']] : [])].map(([k, label]) => (
               <div key={k} className="flex items-center justify-between py-2 border-b border-amber-100 last:border-0">
                 <span className="text-sm font-semibold text-gray-800">{label}</span>
                 <button type="button" role="switch" aria-checked={news[k]} onClick={() => toggleNews(k)}

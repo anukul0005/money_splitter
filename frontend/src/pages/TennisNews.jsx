@@ -4,8 +4,8 @@ import { tennisNews } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 
 const SEEN_KEY = 'tennisNewsSeen'
-const SPORTS = [['', 'All'], ['tennis', '🎾 Tennis'], ['football', '⚽ Football']]
-const ICON = { tennis: '🎾', football: '⚽' }
+const LABEL = { tennis: '🎾 Tennis', football: '⚽ Football', badminton: '🏸 Badminton' }
+const ICON = { tennis: '🎾', football: '⚽', badminton: '🏸' }
 
 // "12m ago", "3h ago", "2d ago"
 function ago(iso) {
@@ -21,8 +21,9 @@ function readSeen() {
 }
 
 /**
- * /tennis/news - tennis headlines from the publishers' own feeds (Guardian,
- * BBC Sport, Sky Sports, ESPN, Tennis365), newest first, one card per
+ * /tennis/news - sports headlines from the publishers' own feeds, newest
+ * first (badminton for everyone; tennis and football for the sports-section
+ * people - the server sends only the sports this person gets), one card per
  * story with the other desks that ran it underneath. Each opens on the
  * opens in the app (TennisArticle). New stories since the last visit are marked.
  */
@@ -56,18 +57,20 @@ export default function TennisNews() {
       <div>
         <button onClick={() => nav(-1)} className="text-xs font-bold text-gray-400 hover:text-gray-600">← Back</button>
         <h1 className="text-2xl font-black text-gray-900 tracking-tight mt-1">Sports news</h1>
-        <p className="text-[11px] text-gray-400">Tennis and football headlines, newest first · updates every 10 minutes</p>
+        <p className="text-[11px] text-gray-400">
+          {(data.sports || []).map((s) => (LABEL[s] || s).split(' ')[1]).join(', ')} headlines, newest first · updates every 10 minutes
+        </p>
       </div>
 
-      <div className="flex bg-white border border-amber-200 rounded-lg p-0.5">
-        {SPORTS.map(([s, label]) => (
+      {(data.sports || []).length > 1 && <div className="flex bg-white border border-amber-200 rounded-lg p-0.5">
+        {[['', 'All'], ...data.sports.map((s) => [s, LABEL[s] || s])].map(([s, label]) => (
           <button key={s || 'all'} onClick={() => pickSport(s)}
             className={`flex-1 py-1.5 rounded-md text-xs font-black transition-colors ${
               sport === s ? 'bg-brand-500 text-white' : 'text-gray-500'}`}>
             {label}
           </button>
         ))}
-      </div>
+      </div>}
 
       <div className="flex gap-1.5 overflow-x-auto -mx-4 px-4 pb-1" style={{ scrollbarWidth: 'none' }}>
         {['', ...(data.sources || [])].map((s) => (
@@ -95,7 +98,7 @@ export default function TennisNews() {
               <div className="min-w-0 flex-1">
                 <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">
                   {isNew && <span className="text-brand-600 mr-1">● New</span>}
-                  {!sport && `${ICON[x.sport] || ''} `}{x.source} · {ago(x.published)}
+                  {!sport && (data.sports || []).length > 1 && `${ICON[x.sport] || ''} `}{x.source} · {ago(x.published)}
                 </p>
                 <p className="text-[13px] font-black text-gray-900 leading-snug mt-0.5">{x.headline}</p>
                 {x.summary && x.summary !== x.title && (

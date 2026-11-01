@@ -45,6 +45,7 @@ class UserMeOut(UserOut):
     # Sports news notifications, by sport - see models.User.
     news_tennis: bool = True
     news_football: bool = True
+    news_badminton: bool = True
     # The drinks side of the app - see models.User.full_access.
     has_full_access: bool = False
     # Pay and when it's credited - see models.User.
@@ -125,7 +126,7 @@ class SetDailySummary(BaseModel):
 
 
 class SetNewsAlerts(BaseModel):
-    sport: str          # "tennis" | "football"
+    sport: str          # "tennis" | "football" | "badminton"
     enabled: bool
 
 

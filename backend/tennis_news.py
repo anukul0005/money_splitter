@@ -1,7 +1,8 @@
-"""Sports news - tennis and football headlines, newest first.
+"""Sports news - tennis, football and badminton headlines, newest first.
 
 Read from the publishers' own RSS feeds (tennis: the Guardian, BBC Sport,
-Sky Sports, ESPN, Tennis365; football: the Guardian, ESPN), every
+Sky Sports, ESPN, Tennis365; football: the Guardian, ESPN; badminton:
+Sportstar, Indian Express, BBC Sport, Hindustan Times, the Guardian), every
 POLL_EVERY while the app is up and
 whenever the News page asks after that long. Each story links back to its
 publisher; only the headline, a line of summary and the thumbnail the feed
@@ -12,7 +13,7 @@ its words with one already on file in the last two days is filed under it
 (`story`) and shown as "also on ...", not as a new item.
 
 New stories are pushed (not emailed - that'd be a mail per headline) to the
-sports users, the headline cut to 20 words: a few one by one, the rest as a
+sports users - badminton (OPEN_SPORTS) to every app user - the headline cut to 20 words: a few one by one, the rest as a
 "+N more". The very first read files what's there without a push, so the
 first deploy doesn't fire a day's backlog.
 """
@@ -35,8 +36,24 @@ FEEDS = [
     ("tennis", "Tennis365", "https://www.tennis365.com/feed"),
     ("football", "The Guardian", "https://www.theguardian.com/football/rss"),
     ("football", "ESPN", "https://www.espn.com/espn/rss/soccer/news"),
+    ("badminton", "Sportstar", "https://sportstar.thehindu.com/badminton/feeder/default.rss"),
+    ("badminton", "Indian Express", "https://indianexpress.com/section/sports/badminton/feed/"),
+    ("badminton", "BBC Sport", "https://feeds.bbci.co.uk/sport/badminton/rss.xml"),
+    ("badminton", "Hindustan Times", "https://www.hindustantimes.com/feeds/rss/sports/badminton/rssfeed.xml"),
+    ("badminton", "The Guardian", "https://www.theguardian.com/sport/badminton/rss"),
 ]
-SPORTS = {"tennis": "🎾", "football": "⚽"}
+SPORTS = {"tennis": "🎾", "football": "⚽", "badminton": "🏸"}
+# Sports whose news - the page and the pushes - is for every app user, not
+# just the sports-section people (routers.tennis.ANALYTICS_USERS)
+OPEN_SPORTS = {"badminton"}
+
+
+def sports_for(user) -> list[str]:
+    """The sports whose news this person gets."""
+    from routers.tennis import ANALYTICS_USERS
+    if (getattr(user, "name", "") or "").lower() in ANALYTICS_USERS:
+        return list(SPORTS)
+    return [s for s in SPORTS if s in OPEN_SPORTS]
 MAX_AGE = timedelta(days=7)   # a feed's old items (the Guardian's football one goes back years) stay out
 POLL_EVERY = 600            # seconds
 PUSH_EACH = 3               # stories pushed one by one per read; the rest as "+N more"
@@ -44,7 +61,7 @@ FRESH = timedelta(hours=3)  # only stories this new are pushed
 HEADLINE_WORDS = 20
 _MEDIA = "{http://search.yahoo.com/mrss/}"
 _STOP = {"after", "with", "from", "that", "this", "have", "will", "into", "over", "about", "their", "says",
-         "said", "what", "when", "they", "been", "were", "more", "than", "tennis", "open"}
+         "said", "what", "when", "they", "been", "were", "more", "than", "tennis", "open", "badminton"}
 
 _lock = threading.Lock()
 _last = 0.0
@@ -136,6 +153,8 @@ def refresh() -> int:
         db = get_session_factory()()
         try:
             first = db.query(TennisNews.id).first() is None
+            # a sport read for the first time (one just added) is filed quietly too
+            had = {sp for (sp,) in db.query(TennisNews.sport).distinct()}
             known = {l for (l,) in db.query(TennisNews.link)}
             now = datetime.now(timezone.utc)
             recent = [(r.id, r.sport, _words(r.title)) for r in db.query(TennisNews)
@@ -147,7 +166,7 @@ def refresh() -> int:
                 known.add(it["link"])
                 w = _words(it["title"])
                 story = next((rid for rid, rs, rw in recent if rs == it["sport"] and _same_story(w, rw)), None)
-                row = TennisNews(**it, story=story, notified=first or story is not None)
+                row = TennisNews(**it, story=story, notified=first or story is not None or it["sport"] not in had)
                 if row.published is None or row.published > now:
                     row.published = now
                 db.add(row)
@@ -173,12 +192,21 @@ def _push(db, rows) -> None:
     from push import send_push_to_user
     from routers.tennis import ANALYTICS_USERS
     from models import User
+    everyone = None
     for sport, icon in SPORTS.items():
         these = [r for r in rows if r.sport == sport]
-        for name in ANALYTICS_USERS:
-            u = db.query(User).filter(User.name.ilike(name)).first()
-            if u is not None and not getattr(u, f"news_{sport}", True):
+        if not these:
+            continue
+        if sport in OPEN_SPORTS:
+            if everyone is None:
+                everyone = db.query(User).all()
+            people = everyone
+        else:
+            people = [u for u in (db.query(User).filter(User.name.ilike(n)).first() for n in ANALYTICS_USERS) if u]
+        for u in people:
+            if not getattr(u, f"news_{sport}", True):
                 continue        # turned off in Account
+            name = u.name
             for r in these[:PUSH_EACH]:
                 send_push_to_user(db, name, f"{icon} {r.source}", headline(r.title), url=f"/tennis/news/{r.id}")
             if len(these) > PUSH_EACH:
@@ -214,7 +242,7 @@ _BOX = re.compile(r"(article|story|content|body|post|entry|rich-?text)", re.I)
 _JUNK = re.compile(r"(sign up|subscribe|newsletter|follow us|cookie|advertis|download the|read more:|"
                    r"get sky sports|watch .* live on|click here|all rights reserved|^image:|^photo:|"
                    r"terms and conditions|privacy policy|share this|related:|^read next|^also read|^more:|"
-                   r"^want more from|preferred source)", re.I)
+                   r"^want more from|preferred source|^published on|^updated on)", re.I)
 # A box of links to other stories set in the article ("More ATP Tour News",
 # "Related", "Read more"): its heading and the headlines under it go
 _LINK_BOX = re.compile(r"^(more\b|related\b|read more|also read|latest\b|recommended|you may|you might|"
@@ -237,14 +265,11 @@ class _Reader(HTMLParser):
         self.stack: list[tuple[str, str | None]] = []   # (tag, box id if this element is a box)
         self.skip = 0
         self.block: tuple[str, list[str], str] | None = None
-        self.out: list[tuple[str, str, str]] = []        # (box, kind, text)
+        self.out: list[tuple[tuple, str, str]] = []      # (boxes it sits in, outermost first; kind; text)
         self.n = 0
 
-    def _box(self) -> str:
-        for tag, box in reversed(self.stack):
-            if box:
-                return box
-        return "page"
+    def _box(self) -> tuple:
+        return ("page",) + tuple(box for _t, box in self.stack if box)
 
     def handle_starttag(self, tag, attrs):
         if tag in _VOID:
@@ -286,26 +311,30 @@ class _Reader(HTMLParser):
 
 
 def extract(page: str) -> list[dict]:
-    """The story's text from an article page: the box with the most
-    paragraph text, its paragraphs and sub-headings in order, boilerplate out."""
+    """The story's text from an article page: its paragraphs and sub-headings
+    in order, boilerplate out. The story is the innermost box holding most
+    of the page's paragraph text - so a story the site splits over several
+    blocks (BBC, Indian Express) comes out whole, not just its longest block."""
     r = _Reader()
     try:
         r.feed(page)
     except Exception:
         pass
     by_box: dict[str, int] = {}
-    for box, kind, text in r.out:
+    depth: dict[str, int] = {}
+    for boxes, kind, text in r.out:
         if kind == "p" and len(text) >= 40:
-            by_box[box] = by_box.get(box, 0) + len(text)
+            for i, b in enumerate(boxes):
+                by_box[b] = by_box.get(b, 0) + len(text)
+                depth[b] = i
     if not by_box:
         return []
-    # an <article> wrapping the story's box counts the story's paragraphs too -
-    # the box with the most text is the story
-    best = max(by_box, key=by_box.get)
+    top = max(by_box.values())
+    best = max((b for b, n in by_box.items() if n >= 0.8 * top), key=lambda b: depth[b])
     out, seen = [], set()
     in_links = False
-    for box, kind, text in r.out:
-        if box != best or text in seen or _JUNK.search(text):
+    for boxes, kind, text in r.out:
+        if best not in boxes or text in seen or _JUNK.search(text):
             continue
         if kind == "h" and _LINK_BOX.search(text):
             in_links = True           # "More ATP Tour News" - out, with its links
@@ -353,13 +382,13 @@ def article(db, news_id: int) -> dict | None:
             "body": body, "also": also}
 
 
-def latest(db, limit: int = 80, source: str | None = None, sport: str | None = None) -> list[dict]:
+def latest(db, limit: int = 80, source: str | None = None, sports: list[str] | None = None) -> list[dict]:
     from models import TennisNews
     q = db.query(TennisNews).filter(TennisNews.story.is_(None))
     if source:
         q = q.filter(TennisNews.source == source)
-    if sport:
-        q = q.filter(TennisNews.sport == sport)
+    if sports:
+        q = q.filter(TennisNews.sport.in_(sports))
     rows = q.order_by(TennisNews.published.desc()).limit(limit).all()
     also: dict[int, list] = {}
     if rows:
