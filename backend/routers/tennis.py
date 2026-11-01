@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+import tennis_early_break
 import tennis_stats
 import tennis_sync
 from auth import current_user
@@ -160,6 +161,13 @@ def sets(db: Session = Depends(get_db), _: User = Depends(owner)):
     and filter from them - plus the tournaments for year-on-year."""
     d = tennis_stats.data(db)
     return {"rows": d["main"], "tournaments": d["tournaments"]}
+
+
+@router.get("/early-break", response_model=dict)
+def early_break(_: User = Depends(owner)):
+    """A break in a set's first 4 games -> the set closed under 8.5 games
+    (tennis_early_break: worked out once from the Match Charting Project)."""
+    return tennis_early_break.get()
 
 
 @router.get("/patterns", response_model=dict)

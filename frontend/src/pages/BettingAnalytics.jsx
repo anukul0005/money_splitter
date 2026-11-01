@@ -1,6 +1,6 @@
 import { Component, memo, useEffect, useRef, useState, useTransition } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { badmintonSummary, tennisDay, tennisLive, tennisLivePoints, tennisPatterns, tennisPlayer, tennisPlayers, tennisRankings, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
+import { badmintonSummary, tennisDay, tennisEarlyBreak, tennisLive, tennisLivePoints, tennisPatterns, tennisPlayer, tennisPlayers, tennisRankings, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
 import RankingList, { RankingSwitch } from '../components/RankingList'
 import Badminton, { B_TABS } from './Badminton'
 import DatePicker from '../components/DatePicker'
@@ -805,6 +805,121 @@ function TieBreakPattern({ rows }) {
   )
 }
 
+/* ---- Early break: a break in a set's first 4 games -> the set under 8.5 games (backend tennis_early_break) ---- */
+const useEarlyBreak = (on = true) => {
+  const [d, setD] = useState(null)
+  useEffect(() => { if (on) tennisEarlyBreak().then((r) => setD(r.data)).catch(() => {}) }, [on])
+  return d
+}
+const ebPct = (c) => (c?.n ? (100 * c.under) / c.n : null)
+// a set being played at this score (leader-trailer) can still end under 8.5, and it's past game 4
+const ebScore = (a, b) => {
+  const hi = Math.max(a, b), lo = Math.min(a, b)
+  return hi > lo && hi <= 5 && lo <= 2 && hi + lo >= 4 ? `${hi}-${lo}` : null
+}
+const EB_SCORES = ['2-0', '3-0', '3-1', '4-0', '4-1', '4-2', '5-0', '5-1', '5-2']
+
+function EarlyBreakPattern() {
+  const d = useEarlyBreak()
+  if (!d) return <p className="text-xs text-gray-400 text-center py-4">Loading the early-break pattern…</p>
+  const T = d.tours || {}
+  if (!T.ATP) return null
+  const row = (t, k) => T[t].rows.find((r) => r.key === k)
+  const Cell = ({ c, strong }) => {
+    const p = ebPct(c)
+    return (
+      <td className="px-1 py-1.5 text-center">
+        <p className={`tabular-nums ${strong ? 'text-[14px] font-black text-gray-900' : 'text-[13px] font-bold text-gray-800'}`}>{p == null ? '—' : `${p.toFixed(1)}%`}</p>
+        <p className="text-[9px] text-gray-500 tabular-nums">{c?.n ? `${fmtN(c.under)} of ${fmtN(c.n)}` : ''}</p>
+      </td>
+    )
+  }
+  const odds = (c) => { const p = ebPct(c); return p ? (100 / p).toFixed(2) : '—' }
+  return (
+    <div className="space-y-3">
+      <div className="card space-y-1">
+        <p className="text-sm font-black text-gray-900">Early break → set under 8.5</p>
+        <p className="text-[10px] text-gray-400">
+          A break of serve in a set's first 4 games, and how often that set then ended 6-0, 6-1 or 6-2 (8 games or
+          fewer). Point-by-point logs of {fmtN(T.ALL?.rows?.[0]?.n || 0)} sets from {d.from_year} on (the Match Charting
+          Project - it leans to the bigger matches).
+        </p>
+      </div>
+      <div className="card">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
+              <th className="py-1 text-left">Set under 8.5</th><th className="py-1">ATP</th><th className="py-1">WTA</th>
+            </tr>
+          </thead>
+          <tbody>
+            {T.ATP.rows.map((r) => {
+              const strong = r.key === '40' || r.key === 'early'
+              return (
+                <tr key={r.key} className={`border-t ${r.key === '40' ? 'border-gray-300 bg-amber-50' : 'border-gray-100'}`}>
+                  <td className={`py-1.5 ${['22', '31', '40', 'g12', 'g34'].includes(r.key) ? 'pl-3 text-gray-700' : 'font-bold text-gray-900'}`}>{r.label}</td>
+                  <Cell c={row('ATP', r.key)} strong={strong} />
+                  <Cell c={row('WTA', r.key)} strong={strong} />
+                </tr>
+              )
+            })}
+            <tr className="border-t border-gray-100">
+              <td className="py-1.5 text-gray-500">Early breaker (not broken back by game 4) wins the set</td>
+              {['ATP', 'WTA'].map((t) => {
+                const b = T[t].breaker_wins
+                return <td key={t} className="py-1.5 text-center text-[12px] font-bold text-gray-500 tabular-nums">{b.n ? `${((100 * b.won) / b.n).toFixed(1)}%` : '—'}</td>
+              })}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div className="card">
+        <p className="text-xs font-black text-gray-800 mb-1">From the score in the set</p>
+        <p className="text-[10px] text-gray-400 mb-1">
+          Every set that was ever at this score (either player ahead), how often it ended under 8.5 - and the
+          lowest odds the under is worth at.
+        </p>
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
+              <th className="py-1 text-left">Score</th><th className="py-1">ATP</th><th className="py-1">WTA</th><th className="py-1">Odds above</th>
+            </tr>
+          </thead>
+          <tbody>
+            {EB_SCORES.map((k) => (
+              <tr key={k} className="border-t border-gray-100">
+                <td className="py-1.5 font-bold text-gray-900 tabular-nums">{k}</td>
+                <Cell c={T.ATP.by_score[k]} />
+                <Cell c={T.WTA.by_score[k]} />
+                <td className="py-1.5 text-center text-[11px] font-bold text-gray-500 tabular-nums">{odds(T.ATP.by_score[k])} / {odds(T.WTA.by_score[k])}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="text-[10px] text-gray-400 mt-2">
+          How sets with an early break finished: {(T.ALL?.finals || []).map(([s, n]) => `${s} ${((100 * n) / T.ALL.early_n).toFixed(0)}%`).join(' · ')}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/** A live set past game 4 that can still end under 8.5: how often sets at this score did. */
+function EarlyBreakFlag({ m, eb }) {
+  const T = eb?.tours?.[m.tour]
+  const [a, b] = m.players.map((p) => p.games[p.games.length - 1] ?? 0)
+  const k = ebScore(a, b)
+  const c = k && T?.by_score?.[k]
+  const p = ebPct(c)
+  if (p == null || c.n < 100) return null
+  const lead = m.players[a > b ? 0 : 1].name.split(' ').slice(-1)[0]
+  return (
+    <p className={`mt-1 text-[10px] font-bold ${p >= 70 ? 'text-green-700' : p >= 45 ? 'text-amber-700' : 'text-gray-400'}`}>
+      {lead} {k} → set under 8.5 in {p.toFixed(0)}% of {fmtN(c.n)} sets · worth it above {(100 / p).toFixed(2)}
+    </p>
+  )
+}
+
 /* ---- Pattern explorer: any condition on set 1 -> outcome for set 2 (backend tennis_stats pairs) ---- */
 const SET_SCORES = [[6, '6-0'], [7, '6-1'], [8, '6-2'], [9, '6-3'], [10, '6-4'], [12, '7-5'], [13, '7-6'], [14, 'Long (8-6+)']]
 const COND_LINES = [[8.5, 'Over 8.5 (6-3 or closer)'], [9.5, 'Over 9.5 (6-4 or closer)'], [10.5, 'Over 10.5 (7-5 / 7-6)'],
@@ -960,6 +1075,7 @@ function Patterns() {
   if (!rows) return <p className="text-xs text-gray-400 text-center py-6">Working out every match since 2016…</p>
   return (
     <div className="space-y-6">
+      <EarlyBreakPattern />
       <TieBreakPattern rows={rows} />
       <div>
         <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2">Pattern explorer</p>
@@ -1027,7 +1143,7 @@ function Flash({ v, className = '', children }) {
 }
 
 /** One live / upcoming match: the players with their games so far, the set or the start time. */
-export function LiveRow({ m, onOpen, plain }) {
+export function LiveRow({ m, onOpen, plain, eb }) {
   const live = m.state === 'live'
   return (
     <button onClick={() => onOpen(m)} className="w-full text-left py-2 border-t border-gray-100 first:border-t-0 hover:bg-amber-50/50 active:bg-amber-50 -mx-2 px-2 rounded block">
@@ -1073,6 +1189,7 @@ export function LiveRow({ m, onOpen, plain }) {
           </div>
         )
       })}
+      {live && eb && <EarlyBreakFlag m={m} eb={eb} />}
     </button>
   )
 }
@@ -1090,6 +1207,7 @@ function Live({ tour, onOpen, active = true }) {
     return () => { alive = false; clearInterval(t) }
   }, [tour, active])
   const pts = useLivePoints(active && !!d?.matches?.some((m) => m.tour === 'WTA' && m.state === 'live'))
+  const eb = useEarlyBreak(active)
   if (!d && !err) return <p className="text-xs text-gray-400 text-center py-6">Loading live matches…</p>
   if (!d) return <p className="text-sm text-red-600 text-center py-6">Couldn't reach the live scores - try again in a minute.</p>
   const groups = (state) => {
@@ -1116,7 +1234,7 @@ function Live({ tour, onOpen, active = true }) {
               <p className="text-sm font-bold flex-1 min-w-0 truncate">{g.name}</p>
               {g.surface && <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${SURFACE[g.surface] || 'bg-gray-100 text-gray-700'}`}>{g.surface}</span>}
             </div>
-            <div className="px-4 pb-1">{g.matches.map((m) => <LiveRow key={m.espn} m={withPoints(m, pts)} onOpen={onOpen} />)}</div>
+            <div className="px-4 pb-1">{g.matches.map((m) => <LiveRow key={m.espn} m={withPoints(m, pts)} onOpen={onOpen} eb={eb} />)}</div>
           </div>
         ))}
       </div>
