@@ -254,6 +254,17 @@ function remembered(url, params, ttl) {
 }
 
 export const tennisSummary  = ()                 => remembered('/tennis/summary', null, 5 * MIN)
+// Badminton - BWF live scores, results from 2018, players, stats (backend routers/badminton.py)
+export const badmintonSummary     = ()               => remembered('/badminton/summary', null, MIN)
+export const badmintonLive        = ()               => api.get('/badminton/live')
+export const badmintonTournaments = (year)           => remembered('/badminton/tournaments', { year }, 5 * MIN)
+export const badmintonTournament  = (id)             => remembered(`/badminton/tournament/${id}`, null, 2 * MIN)
+export const badmintonMatch       = (tid, code, finished) => remembered(`/badminton/match/${tid}/${code}`, { finished }, finished ? 60 * MIN : 15_000)
+export const badmintonPlayers     = (q)              => remembered('/badminton/players', { q }, 5 * MIN)
+export const badmintonPlayer      = (id)             => remembered(`/badminton/player/${id}`, null, 5 * MIN)
+export const badmintonH2H         = (a, b)           => remembered('/badminton/h2h', { a, b }, 5 * MIN)
+export const badmintonRankings    = (event)          => remembered('/badminton/rankings', { event }, 60 * MIN)
+export const badmintonStats       = (event, since)   => remembered('/badminton/stats', { event, since }, 10 * MIN)
 export const tennisNews     = (source, sport)    => api.get('/tennis/news', { params: { source, sport } })
 export const tennisArticle  = (id)               => remembered(`/tennis/news/${id}`, null, 30 * MIN)
 export const tennisDay      = (date, tour)       => remembered('/tennis/day', { date, tour }, 2 * MIN)

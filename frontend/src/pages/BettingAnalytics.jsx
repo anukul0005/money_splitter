@@ -1,6 +1,7 @@
 import { Component, memo, useEffect, useRef, useState, useTransition } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { tennisDay, tennisLive, tennisLivePoints, tennisPatterns, tennisPlayer, tennisPlayers, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
+import { badmintonSummary, tennisDay, tennisLive, tennisLivePoints, tennisPatterns, tennisPlayer, tennisPlayers, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
+import Badminton, { B_TABS } from './Badminton'
 import DatePicker from '../components/DatePicker'
 
 /**
@@ -1120,7 +1121,11 @@ export default function BettingAnalytics() {
   const nav = useNavigate()
   // the tab and the open player live in the address, so Back from a match page returns to them
   const [params, setParams] = useSearchParams()
+  // 🎾 tennis or 🏸 badminton (pages/Badminton.jsx), each with its own tabs
+  const sport = params.get('sport') === 'badminton' ? 'badminton' : 'tennis'
   const tab = params.get('tab') || 'results'
+  const btab = params.get('btab') || 'live'
+  const bp = params.get('bp') ? +params.get('bp') : null
   const pl = params.get('player')
   const sel = pl && pl.includes(':') ? { tour: pl.split(':')[0], id: +pl.split(':')[1] } : null
   const go = (next) => setParams((p) => {
@@ -1132,6 +1137,19 @@ export default function BettingAnalytics() {
   const [, startTransition] = useTransition()
   const setTab = (t) => startTransition(() => go({ tab: t }))
   const setSel = (x) => go({ player: x ? `${x.tour}:${x.id}` : null })
+  const setSport = (k) => startTransition(() => go({ sport: k === 'badminton' ? k : null }))
+  const setBtab = (t) => startTransition(() => go({ btab: t }))
+  const setBp = (id) => go({ btab: id ? 'players' : btab, bp: id || null })
+  const [bOpened, setBOpened] = useState(() => new Set([btab]))
+  useEffect(() => { setBOpened((s) => (s.has(btab) ? s : new Set([...s, btab]))) }, [btab])
+  const [bsum, setBsum] = useState(null)
+  useEffect(() => {
+    if (sport !== 'badminton') return undefined
+    const load = () => badmintonSummary().then((r) => setBsum(r.data)).catch(() => {})
+    load()
+    const t = setInterval(load, 60000)        // the archive read-in's progress
+    return () => clearInterval(t)
+  }, [sport])
   const [tour, setTour] = useState('all')
   const [opened, setOpened] = useState(() => new Set([tab]))
   useEffect(() => { setOpened((s) => (s.has(tab) ? s : new Set([...s, tab]))) }, [tab])
@@ -1162,11 +1180,34 @@ export default function BettingAnalytics() {
       <div className="px-5 pt-10 md:pt-6 pb-3 bg-cream sticky top-0 z-10 border-b border-amber-100/60">
         <button onClick={() => nav(-1)} className="text-xs font-bold text-gray-400 mb-2">← Back</button>
         <div className="flex items-center gap-2">
-          <h1 className="text-xl font-black tracking-tight flex-1">Betting analytics</h1>
+          <h1 className="text-xl font-black tracking-tight flex-1">{sport === 'badminton' ? 'Badminton' : 'Betting analytics'}</h1>
+          <div className="flex rounded-md border border-amber-300 overflow-hidden">
+            {[['tennis', '🎾'], ['badminton', '🏸']].map(([k, l]) => (
+              <button key={k} onClick={() => setSport(k)} aria-label={k} title={k === 'tennis' ? 'Tennis' : 'Badminton'}
+                className={`px-2.5 py-1 text-sm ${sport === k ? 'bg-field-950' : 'bg-white'}`}>{l}</button>
+            ))}
+          </div>
           <button onClick={() => nav('/my-bets')} className="px-2.5 py-1 rounded-md border border-amber-300 bg-white text-[11px] font-bold text-brand-600">
             My bets ›
           </button>
         </div>
+        {sport === 'badminton' ? (
+          <>
+            <p className="mt-1 text-[11px] leading-snug text-gray-400">
+              {bsum?.matches ? `${Number(bsum.matches).toLocaleString('en-IN')} BWF matches · ${fmtShort(bsum.first)} – ${fmtShort(bsum.last)}` : 'BWF World Tour, Worlds & Olympics from 2018'}
+              <br />
+              {bsum?.sync?.running ? `reading BWF's archive - ${bsum.sync.done} of ${bsum.sync.todo} tournaments` : 'live scores from bwfbadminton.com'}
+            </p>
+            <div className="grid grid-cols-4 mt-2.5 rounded-md border border-amber-300 overflow-hidden">
+              {B_TABS.map(([k, l]) => (
+                <button key={k} onClick={() => setBtab(k)}
+                  className={`py-1.5 text-[11px] font-bold ${btab === k ? 'bg-brand-400 text-white' : 'bg-white text-gray-600'}`}>
+                  {k === 'live' && <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 mr-1 align-middle" />}{l}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (<>
         <div className="flex items-center gap-2 mt-1">
           <p className="flex-1 min-w-0 text-[11px] leading-snug text-gray-400">
             {sum ? `${Number(sum.n).toLocaleString('en-IN')} matches · 2000 – ${fmtShort(sum.last)}` : 'ATP & WTA tour results'}
@@ -1190,11 +1231,19 @@ export default function BettingAnalytics() {
             </button>
           ))}
         </div>
+        </>)}
       </div>
       <div className="px-5 mt-4 max-w-2xl">
+        {sport === 'badminton' && [...bOpened].map((k) => (
+          <Pane key={`b-${k}`} hidden={k !== btab} deps={`${k === btab}|${k === 'players' ? bp : ''}|${k === 'results' ? bsum?.matches : ''}`}>
+            <Safe what="this tab">
+              <Badminton tab={k} active={k === btab} player={bp} setPlayer={setBp} sum={bsum} />
+            </Safe>
+          </Pane>
+        ))}
         {/* A tab once opened stays mounted, just hidden - going back to it
             is instant, with its scroll, filters and data as they were */}
-        {[...opened].map((k) => (
+        {sport === 'tennis' && [...opened].map((k) => (
           <Pane key={k} hidden={k !== tab}
             deps={`${tour}|${k === 'live' ? tab === 'live' : ''}|${k === 'results' ? fresh : ''}|${k === 'players' ? pl : ''}`}>
             <Safe what="this tab">

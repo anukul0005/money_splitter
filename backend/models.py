@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    Column, Integer, String, Float, Boolean, Text, ForeignKey, DateTime, UniqueConstraint,
+    Column, Integer, String, Float, Boolean, Text, ForeignKey, DateTime, Date, UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -1033,6 +1033,68 @@ class TennisNews(Base):
     story = Column(Integer, nullable=True, index=True)
     notified = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class BadmintonTournament(Base):
+    """A BWF tournament - Olympics / World Championships, World Tour Finals,
+    Super 1000 to Super 100 - from 2018, as bwfbadminton.com lists it (see
+    badminton.py). `synced` once every day of it has been read after it ended."""
+
+    __tablename__ = "badminton_tournaments"
+
+    id = Column(Integer, primary_key=True, autoincrement=False)      # BWF's id
+    code = Column(String(40), nullable=False, unique=True)
+    name = Column(String(200), nullable=False)
+    category = Column(String(80), nullable=True)
+    level = Column(Integer, nullable=False, default=9, index=True)    # 0 Olympics/Worlds, 1 Tour Finals, 2-6 Super 1000..100
+    start_date = Column(Date, nullable=False, index=True)
+    end_date = Column(Date, nullable=False)
+    location = Column(String(120), nullable=True)
+    country = Column(String(60), nullable=True)
+    logo = Column(String(300), nullable=True)
+    synced = Column(Boolean, nullable=False, default=False, server_default="false")
+    synced_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class BadmintonPlayer(Base):
+    """A player seen in a BWF match (badminton.py)."""
+
+    __tablename__ = "badminton_players"
+
+    id = Column(Integer, primary_key=True, autoincrement=False)      # BWF's id
+    name = Column(String(120), nullable=False, index=True)
+    country = Column(String(3), nullable=True)
+    slug = Column(String(120), nullable=True)
+    avatar = Column(String(300), nullable=True)
+
+
+class BadmintonResult(Base):
+    """One BWF match, singles or doubles (badminton.py). The score is from
+    side 1's view - "21-8 19-21 26-28"; winner 1 or 2, 0 while not decided."""
+
+    __tablename__ = "badminton_results"
+
+    id = Column(Integer, primary_key=True, autoincrement=False)      # BWF's match id
+    tournament_id = Column(Integer, nullable=False, index=True)
+    code = Column(String(20), nullable=False)                        # the match's code within the tournament
+    event = Column(String(4), nullable=False, index=True)            # MS WS MD WD XD
+    round = Column(String(20), nullable=True)
+    day = Column(Date, nullable=True, index=True)                    # local date it was (to be) played
+    time_utc = Column(DateTime, nullable=True)
+    status = Column(String(2), nullable=True)                        # N not started, F finished, else live
+    winner = Column(Integer, nullable=False, default=0)
+    score_status = Column(Integer, nullable=False, default=0)        # 0 normal, 1 walkover, 2 retired, 3 disqualified
+    p1a = Column(Integer, nullable=True, index=True)
+    p1b = Column(Integer, nullable=True, index=True)
+    p2a = Column(Integer, nullable=True, index=True)
+    p2b = Column(Integer, nullable=True, index=True)
+    c1 = Column(String(3), nullable=True)
+    c2 = Column(String(3), nullable=True)
+    seed1 = Column(String(6), nullable=True)
+    seed2 = Column(String(6), nullable=True)
+    score = Column(String(40), nullable=True)
+    minutes = Column(Integer, nullable=True)
+    court = Column(String(40), nullable=True)
 
 
 class DrinkBottle(Base):
