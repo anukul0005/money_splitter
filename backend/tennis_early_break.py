@@ -11,7 +11,9 @@ so the figures are worked out once, here, and kept in JSON_FILE:
     python tennis_early_break.py <folder with the charting-*.csv files>
 
 The Patterns tab shows the table; the Live tab marks a set being played
-with its chance of ending under 8.5 from the score it's at (`by_score`).
+with its chance of ending under 8.5 from the score it's at (`by_score`); a
+player's page shows the same pattern from their side (PLAYERS_FILE: when
+they break early, when they're broken early) next to the tour's average.
 """
 from __future__ import annotations
 
@@ -21,8 +23,12 @@ import os
 import sys
 from collections import defaultdict
 
+import tennis_kb as kb
+
 FROM_YEAR = 2017
 JSON_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tennis_early_break.json")
+PLAYERS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tennis_early_break_players.json")
+MIN_SETS = 10      # a player with fewer charted sets is left out
 UNDER = 8          # games in the set, at most
 
 
@@ -53,6 +59,10 @@ def _sets_of(points: list) -> list:
 def build(folder: str) -> dict:
     csv.field_size_limit(10 ** 8)
     sets = {"ATP": [], "WTA": []}
+    names = {}                                        # match id -> (player 1, player 2), as in tennis_kb.norm
+    for t in "mw":
+        for r in csv.DictReader(open(os.path.join(folder, f"charting-{t}-matches.csv"), encoding="utf8", errors="replace")):
+            names[r["match_id"]] = (kb.norm(r["Player 1"]), kb.norm(r["Player 2"]))
     for t, tour in (("m", "ATP"), ("w", "WTA")):
         for dec in ("2010s", "2020s"):
             cur, pts = None, []
@@ -60,7 +70,7 @@ def build(folder: str) -> dict:
             for r in csv.DictReader(open(path, encoding="utf8", errors="replace")):
                 if r["match_id"] != cur:
                     if cur and int(cur[:4]) >= FROM_YEAR:
-                        sets[tour].extend(_sets_of(pts))
+                        sets[tour].extend({**x, "mid": cur, "names": names.get(cur)} for x in _sets_of(pts))
                     cur, pts = r["match_id"], []
                 try:
                     pts.append((int(r["Set1"]) + int(r["Set2"]), int(r["Gm1"]), int(r["Gm2"]),
@@ -68,7 +78,7 @@ def build(folder: str) -> dict:
                 except ValueError:
                     pass
             if cur and int(cur[:4]) >= FROM_YEAR:
-                sets[tour].extend(_sets_of(pts))
+                sets[tour].extend({**x, "mid": cur, "names": names.get(cur)} for x in _sets_of(pts))
     sets["ALL"] = sets["ATP"] + sets["WTA"]
 
     def cell(rows):
@@ -109,10 +119,67 @@ def build(folder: str) -> dict:
             "early_n": len(E),
             "by_score": {k: {"n": v[0], "under": v[1]} for k, v in sorted(by_score.items())},
         }
+    return out, _players(sets)
+
+
+# A player's sets, from their side: (key, test on (lead after the early breaks, score after 4 as theirs-opponent's))
+SIDES = [
+    ("all", lambda lead, a4: True),
+    ("none", lambda lead, a4: lead is None),
+    ("broke", lambda lead, a4: lead is not None and lead > 0),
+    ("broken", lambda lead, a4: lead is not None and lead < 0),
+    ("level", lambda lead, a4: lead == 0),
+    ("up40", lambda lead, a4: a4 == (4, 0)),
+    ("up31", lambda lead, a4: lead is not None and lead > 0 and a4 == (3, 1)),
+    ("down13", lambda lead, a4: lead is not None and lead < 0 and a4 == (1, 3)),
+    ("down04", lambda lead, a4: a4 == (0, 4)),
+]
+
+
+def _players(sets: dict) -> dict:
+    """{tour: {player name: {key: [sets, under 8.5, won by them, won by them under 8.5]}, ...}},
+    with "_avg" - every player's side of every set - for the tour's average."""
+    out = {}
+    for tour in ("ATP", "WTA"):
+        by = defaultdict(lambda: {k: [0, 0, 0, 0] for k, _ in SIDES})
+        matches = defaultdict(set)
+        for s in sets[tour]:
+            if not s.get("names"):
+                continue
+            under = sum(s["final"]) <= UNDER
+            net = sum(1 if w == 1 else -1 for _, w in s["early"]) if s["early"] else None
+            for side in (1, 2):
+                name = s["names"][side - 1]
+                lead = None if net is None else (net if side == 1 else -net)
+                a4 = s["after4"] if side == 1 else s["after4"][::-1]
+                won = (s["final"][0] > s["final"][1]) == (side == 1)
+                for who in (name, "_avg"):
+                    for k, test in SIDES:
+                        if test(lead, a4):
+                            c = by[who][k]
+                            c[0] += 1; c[1] += under; c[2] += won; c[3] += won and under
+                matches[name].add(s["mid"])
+        out[tour] = {n: {**v, "matches": len(matches[n])} for n, v in by.items()
+                     if n == "_avg" or v["all"][0] >= MIN_SETS}
     return out
 
 
 _held = None
+_players_held = None
+
+
+def player(tour: str, name: str) -> dict | None:
+    """One player's early-break sets and the tour's average, or None when too few are charted."""
+    global _players_held
+    if _players_held is None:
+        try:
+            with open(PLAYERS_FILE, encoding="utf8") as f:
+                _players_held = json.load(f)
+        except OSError:
+            _players_held = {}
+    t = _players_held.get(tour.upper()) or {}
+    me = t.get(kb.norm(name))
+    return {"from_year": FROM_YEAR, "player": me, "avg": t.get("_avg")} if me else None
 
 
 def get() -> dict:
@@ -127,8 +194,11 @@ def get() -> dict:
 
 
 if __name__ == "__main__":
-    data = build(sys.argv[1])
+    data, players = build(sys.argv[1])
     with open(JSON_FILE, "w", encoding="utf8") as f:
         json.dump(data, f, separators=(",", ":"))
+    with open(PLAYERS_FILE, "w", encoding="utf8") as f:
+        json.dump(players, f, separators=(",", ":"))
+    print({t: len(v) - 1 for t, v in players.items()}, "players")
     for t, d in data["tours"].items():
         print(t, [(r["key"], r["n"], round(100 * r["under"] / max(1, r["n"]), 1)) for r in d["rows"]])

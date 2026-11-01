@@ -219,6 +219,7 @@ function PlayerView({ sel, onPlayer, onOpen }) {
           {Object.entries(p.by_surface).map(([s, r]) => <Record key={s} label={s} r={r} />)}
         </div>
       </div>
+      {p.early_break && <Safe what="the early-break pattern"><PlayerEarlyBreak d={p.early_break} name={info.name} /></Safe>}
       {p.sets?.length > 0 && p.sets[0].length === 5 && (
         <Safe what="set statistics"><PlayerSets rows={p.sets} vs={p.sets_vs} name={info.name} /></Safe>
       )}
@@ -719,92 +720,6 @@ function PlayerSets({ rows, vs, name }) {
   )
 }
 
-/* ---- Patterns: set 1 tie-break -> set 2 under 8.5 (backend tennis_stats pairs, 2016 on) ---- */
-const TB_GAMES = 13                            // a 7-6 set
-const SET2_UNDER = [[6, '6-0'], [7, '6-1'], [8, '6-2']]
-
-function TieBreakPattern({ rows }) {
-  const [surface, setSurface] = useState('all')
-  const [bo, setBo] = useState('all')
-
-  // row: [tour, surface, best_of, first set, set 1 games, set 2 games, same player won both, matches]
-  const base = rows.filter((r) => r[3] === 1 && (surface === 'all' || r[1] === surface) && (bo === 'all' || String(r[2]) === bo))
-  const count = (tour, keep) => base.reduce((s, r) => s + (r[0] === tour && keep(r) ? r[7] : 0), 0)
-  const tb = (r) => r[4] === TB_GAMES
-  const total = { ATP: count('ATP', tb), WTA: count('WTA', tb) }
-  const cell = (tour, keep) => {
-    const n = count(tour, (r) => tb(r) && keep(r))
-    return { n, pct: total[tour] ? (100 * n) / total[tour] : null }
-  }
-  // the usual rate, every match whatever set 1 was
-  const usual = (tour) => {
-    const all = count(tour, () => true)
-    return all ? (100 * count(tour, (r) => r[5] < 8.5)) / all : null
-  }
-  const lines = [
-    ['head', 'Set 2 won by the set 1 tie-break winner'],
-    ...SET2_UNDER.map(([g, l]) => ['row', l, (r) => r[6] === 1 && r[5] === g]),
-    ['sub', 'Tie-break winner, set 2 under 8.5', (r) => r[6] === 1 && r[5] < 8.5],
-    ['head', 'Set 2 won by the set 1 tie-break loser'],
-    ...SET2_UNDER.map(([g, l]) => ['row', l, (r) => r[6] === 0 && r[5] === g]),
-    ['sub', 'Tie-break loser, set 2 under 8.5', (r) => r[6] === 0 && r[5] < 8.5],
-    ['total', 'Set 2 under 8.5 - either player', (r) => r[5] < 8.5],
-    ['rest', 'Set 2 over 8.5 (6-3 or closer)', (r) => r[5] > 8.5],
-    ['all', 'All matches with a set 1 tie-break', () => true],
-  ]
-  const Cell = ({ t, strong }) => (
-    <td className="px-1 py-1.5 text-center">
-      <p className={`tabular-nums ${strong ? 'text-[14px] font-black text-gray-900' : 'text-[13px] font-bold text-gray-800'}`}>
-        {t.pct == null ? '—' : `${t.pct.toFixed(1)}%`}</p>
-      <p className="text-[9px] text-gray-500 tabular-nums">{fmtN(t.n)}</p>
-    </td>
-  )
-
-  return (
-    <div className="space-y-3">
-      <div className="card space-y-2">
-        <p className="text-sm font-black text-gray-900">Set 1 tie-break → Set 2 under 8.5</p>
-        <p className="text-[10px] text-gray-400">
-          Matches whose first set went to a tie-break (7-6), and how set 2 of the same match went. Every
-          percentage is out of all those matches, so the lines add up to 100%. Matches from 2016 on.
-        </p>
-        <div className="flex items-center gap-2 flex-wrap">
-          <Seg value={surface} onChange={setSurface} options={[['all', 'All'], ['Hard', 'Hard'], ['Clay', 'Clay'], ['Grass', 'Grass']]} />
-          <Seg value={bo} onChange={setBo} options={[['all', 'All'], ['3', 'Bo3'], ['5', 'Bo5']]} />
-        </div>
-      </div>
-
-      <div className="card">
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
-              <th className="py-1 text-left">Set 2</th><th className="py-1">ATP</th><th className="py-1">WTA</th>
-            </tr>
-          </thead>
-          <tbody>
-            {lines.map(([kind, label, keep]) => kind === 'head' ? (
-              <tr key={label}><td colSpan={3} className="pt-3 pb-1 text-[10px] font-black text-gray-500 uppercase tracking-widest">{label}</td></tr>
-            ) : (
-              <tr key={label} className={`border-t ${kind === 'total' ? 'border-gray-300 bg-amber-50' : kind === 'all' ? 'border-gray-300' : 'border-gray-100'}`}>
-                <td className={`py-1.5 ${kind === 'row' ? 'pl-3 text-gray-700' : 'font-bold text-gray-900'}`}>{label}</td>
-                <Cell t={cell('ATP', keep)} strong={kind === 'total' || kind === 'sub'} />
-                <Cell t={cell('WTA', keep)} strong={kind === 'total' || kind === 'sub'} />
-              </tr>
-            ))}
-            <tr className="border-t border-gray-100">
-              <td className="py-1.5 text-gray-500">For comparison: set 2 under 8.5 in every match</td>
-              {['ATP', 'WTA'].map((t) => (
-                <td key={t} className="py-1.5 text-center text-[12px] font-bold text-gray-500 tabular-nums">
-                  {usual(t) == null ? '—' : `${usual(t).toFixed(1)}%`}</td>
-              ))}
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
-
 /* ---- Early break: a break in a set's first 4 games -> the set under 8.5 games (backend tennis_early_break) ---- */
 const useEarlyBreak = (on = true) => {
   const [d, setD] = useState(null)
@@ -900,6 +815,67 @@ function EarlyBreakPattern() {
           How sets with an early break finished: {(T.ALL?.finals || []).map(([s, n]) => `${s} ${((100 * n) / T.ALL.early_n).toFixed(0)}%`).join(' · ')}
         </p>
       </div>
+    </div>
+  )
+}
+
+/** A player's early-break pattern from their side, next to the tour's average (backend tennis_early_break.player). */
+const PEB_ROWS = [
+  ['head', 'When they break early (not broken back by game 4)'],
+  ['broke', 1, 'Set ends under 8.5'],
+  ['broke', 2, 'They win the set'],
+  ['broke', 3, 'They close it 6-2 or better'],
+  ['up40', 1, 'Up 4-0 after 4 → under 8.5'],
+  ['up31', 1, 'Up 3-1 after 4 → under 8.5'],
+  ['head', 'When they are broken early'],
+  ['broken', 1, 'Set ends under 8.5'],
+  ['broken', 2, 'They still win the set'],
+  ['down13', 1, 'Down 1-3 after 4 → under 8.5'],
+  ['head', 'Other sets'],
+  ['level', 1, 'Early break, level by game 4 → under 8.5'],
+  ['none', 1, 'No break in games 1-4 → under 8.5'],
+  ['all', 1, 'Every set → under 8.5'],
+]
+function PlayerEarlyBreak({ d, name }) {
+  const me = d.player, avg = d.avg || {}
+  const pct = (c, i) => (c?.[0] ? (100 * c[i]) / c[0] : null)
+  return (
+    <div className="card">
+      <p className="text-sm font-black text-gray-900">Early break → set under 8.5</p>
+      <p className="text-[10px] text-gray-400 mb-1">
+        {name}'s sets from {d.from_year} on with a break in the first 4 games - {fmtN(me.all[0])} charted sets from {fmtN(me.matches)} matches
+        (Match Charting Project), against every player on the tour.
+      </p>
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
+            <th className="py-1 text-left" /><th className="py-1">{name.split(' ').slice(-1)[0]}</th><th className="py-1">Tour</th><th className="py-1">±</th>
+          </tr>
+        </thead>
+        <tbody>
+          {PEB_ROWS.map((r) => {
+            if (r[0] === 'head') return <tr key={r[1]}><td colSpan={4} className="pt-3 pb-1 text-[10px] font-black text-gray-500 uppercase tracking-widest">{r[1]}</td></tr>
+            const [k, i, label] = r
+            const c = me[k], p = pct(c, i), t = pct(avg[k], i)
+            const few = !c?.[0] || c[0] < 5
+            const diff = p != null && t != null && !few ? p - t : null
+            return (
+              <tr key={`${k}${i}`} className="border-t border-gray-100">
+                <td className="py-1.5 pl-1 text-gray-700">{label}</td>
+                <td className="px-1 py-1.5 text-center">
+                  <p className={`text-[13px] font-black tabular-nums ${few ? 'text-gray-300' : 'text-gray-900'}`}>{p == null ? '—' : `${p.toFixed(0)}%`}</p>
+                  <p className="text-[9px] text-gray-500 tabular-nums">{c?.[0] ? `${c[i]} of ${c[0]}` : ''}</p>
+                </td>
+                <td className="px-1 py-1.5 text-center text-[12px] font-bold text-gray-500 tabular-nums">{t == null ? '—' : `${t.toFixed(0)}%`}</td>
+                <td className={`px-1 py-1.5 text-center text-[11px] font-black tabular-nums ${diff == null ? 'text-gray-300' : diff >= 5 ? 'text-green-600' : diff <= -5 ? 'text-red-500' : 'text-gray-400'}`}>
+                  {diff == null ? '' : `${diff > 0 ? '+' : ''}${diff.toFixed(0)}`}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+      <p className="text-[10px] text-gray-400 mt-2">± is percentage points against the tour; fewer than 5 sets is greyed out.</p>
     </div>
   )
 }
@@ -1076,7 +1052,6 @@ function Patterns() {
   return (
     <div className="space-y-6">
       <EarlyBreakPattern />
-      <TieBreakPattern rows={rows} />
       <div>
         <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2">Pattern explorer</p>
         <PatternExplorer rows={rows} />

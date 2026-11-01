@@ -151,6 +151,7 @@ def player(tour: str, player_id: int, db: Session = Depends(get_db), _: User = D
             "titles": sum(1 for r in rows if r["round"] == "F" and r["winner_id"] == player_id),
             "sets": tennis_stats.player_sets(rows, recent_cut, player_id),
             "sets_vs": tennis_stats.player_sets_vs(rows, recent_cut, player_id),
+            "early_break": tennis_early_break.player(tour, p["name"]),
             "matches": [_match(r) for r in rows[:40]]}
 
 
