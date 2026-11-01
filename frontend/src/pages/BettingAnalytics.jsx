@@ -768,11 +768,12 @@ function EarlyBreakPattern() {
             </tr>
           </thead>
           <tbody>
-            {T.ATP.rows.map((r) => {
-              const strong = r.key === '40' || r.key === 'early'
+            {/* 4-0 left out: a double break is under 8.5 almost by itself, it tells nothing */}
+            {T.ATP.rows.filter((r) => r.key !== '40').map((r) => {
+              const strong = r.key === 'early'
               return (
-                <tr key={r.key} className={`border-t ${r.key === '40' ? 'border-gray-300 bg-amber-50' : 'border-gray-100'}`}>
-                  <td className={`py-1.5 ${['22', '31', '40', 'g12', 'g34'].includes(r.key) ? 'pl-3 text-gray-700' : 'font-bold text-gray-900'}`}>{r.label}</td>
+                <tr key={r.key} className={`border-t ${strong ? 'border-gray-300 bg-amber-50' : 'border-gray-100'}`}>
+                  <td className={`py-1.5 ${['22', '31', 'g12', 'g34'].includes(r.key) ? 'pl-3 text-gray-700' : 'font-bold text-gray-900'}`}>{r.label}</td>
                   <Cell c={row('ATP', r.key)} strong={strong} />
                   <Cell c={row('WTA', r.key)} strong={strong} />
                 </tr>
@@ -791,13 +792,14 @@ function EarlyBreakPattern() {
       <div className="card">
         <p className="text-xs font-black text-gray-800 mb-1">From the score in the set</p>
         <p className="text-[10px] text-gray-400 mb-1">
-          Every set that was ever at this score (either player ahead), how often it ended under 8.5 - and the
-          lowest odds the under is worth at.
+          Every set that was ever at this score (either player ahead), how often it ended under 8.5. Break-even
+          odds are worked out from that rate (100 ÷ the %), not taken from a bookmaker: a price above them
+          pays over the long run if the rate holds, below them it loses.
         </p>
         <table className="w-full text-xs">
           <thead>
             <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
-              <th className="py-1 text-left">Score</th><th className="py-1">ATP</th><th className="py-1">WTA</th><th className="py-1">Odds above</th>
+              <th className="py-1 text-left">Score</th><th className="py-1">ATP</th><th className="py-1">WTA</th><th className="py-1">Break-even odds</th>
             </tr>
           </thead>
           <tbody>
@@ -891,7 +893,7 @@ function EarlyBreakFlag({ m, eb }) {
   const lead = m.players[a > b ? 0 : 1].name.split(' ').slice(-1)[0]
   return (
     <p className={`mt-1 text-[10px] font-bold ${p >= 70 ? 'text-green-700' : p >= 45 ? 'text-amber-700' : 'text-gray-400'}`}>
-      {lead} {k} → set under 8.5 in {p.toFixed(0)}% of {fmtN(c.n)} sets · worth it above {(100 / p).toFixed(2)}
+      {lead} {k} → set under 8.5 in {p.toFixed(0)}% of {fmtN(c.n)} sets · break-even odds {(100 / p).toFixed(2)}
     </p>
   )
 }
