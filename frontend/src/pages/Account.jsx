@@ -4,7 +4,7 @@ import {
   changePassword, setRecovery, getRecoveryQuestion, getMe, setMyEmail, setMyBirthday,
   setMyDailySummary, setMyNewsAlerts, setMySalary, listMyUpiIds, addUpiId, deleteUpiId,
 } from '../api'
-import { useUser, isAdmin, hasFullAccess, isAnalyticsUser } from '../UserContext'
+import { useUser, isAdmin, hasFullAccess } from '../UserContext'
 import UnlockAccess from '../components/UnlockAccess'
 import FullNameCard from '../components/FullNameCard'
 import { ALL_QUESTIONS, RECOVERY_QUESTIONS, KEY_QUESTION, generateKey } from '../utils/security'
@@ -631,7 +631,7 @@ export default function Account() {
             <p className="text-xs text-gray-500 leading-relaxed mt-1 mb-2">
               A notification with the headline when a new story lands in Sports news.
             </p>
-            {[['badminton', '🏸 Badminton'], ...(isAnalyticsUser(user) ? [['tennis', '🎾 Tennis'], ['football', '⚽ Football']] : [])].map(([k, label]) => (
+            {[['tennis', '🎾 Tennis'], ['football', '⚽ Football'], ['badminton', '🏸 Badminton']].map(([k, label]) => (
               <div key={k} className="flex items-center justify-between py-2 border-b border-amber-100 last:border-0">
                 <span className="text-sm font-semibold text-gray-800">{label}</span>
                 <button type="button" role="switch" aria-checked={news[k]} onClick={() => toggleNews(k)}

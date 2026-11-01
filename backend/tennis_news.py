@@ -13,7 +13,7 @@ its words with one already on file in the last two days is filed under it
 (`story`) and shown as "also on ...", not as a new item.
 
 New stories are pushed (not emailed - that'd be a mail per headline) to the
-sports users - badminton (OPEN_SPORTS) to every app user - the headline cut to 20 words: a few one by one, the rest as a
+app users (OPEN_SPORTS), each for the sports switched on in Account - the headline cut to 20 words: a few one by one, the rest as a
 "+N more". The very first read files what's there without a push, so the
 first deploy doesn't fire a day's backlog.
 """
@@ -44,8 +44,9 @@ FEEDS = [
 ]
 SPORTS = {"tennis": "🎾", "football": "⚽", "badminton": "🏸"}
 # Sports whose news - the page and the pushes - is for every app user, not
-# just the sports-section people (routers.tennis.ANALYTICS_USERS)
-OPEN_SPORTS = {"badminton"}
+# just the sports-section people (routers.tennis.ANALYTICS_USERS): all of them;
+# each person picks theirs with the switches in Account
+OPEN_SPORTS = set(SPORTS)
 
 
 def sports_for(user) -> list[str]:
