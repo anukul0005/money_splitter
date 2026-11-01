@@ -51,8 +51,15 @@ def _sets_of(points: list) -> list:
         if not (hi >= 6 and (hi - lo >= 2 or (hi == 7 and lo == 6))):
             continue                                  # unfinished (a retirement) or a chart that stops short
         early = [(i + 1, games[k][1]) for i, k in enumerate(seq[:4]) if games[k][0] != games[k][1]]
+        # breaks player 1 is up (minus down) at each score in seq + the final
+        net, nets = 0, [0]
+        for k in seq:
+            svr, w = games[k]
+            if k != (6, 6) and svr != w:
+                net += 1 if w == 1 else -1
+            nets.append(net)
         out.append({"set": s + 1, "final": (fa, fb), "early": early,
-                    "after4": seq[4] if len(seq) > 4 else (fa, fb), "seq": seq + [(fa, fb)]})
+                    "after4": seq[4] if len(seq) > 4 else (fa, fb), "seq": seq + [(fa, fb)], "nets": nets})
     return out
 
 
@@ -96,13 +103,19 @@ def build(folder: str) -> dict:
         finals = defaultdict(int)
         for s in E:
             finals[f"{max(s['final'])}-{min(s['final'])}"] += 1
-        # every score a set passed through (leader-trailer, not level) -> how often it then ended under
+        # every score a set passed through (leader-trailer, not level) -> how often it then ended under;
+        # "3-0/1" is the same, the leader just one break up then
         by_score = defaultdict(lambda: [0, 0])
         for s in S:
             u = sum(s["final"]) <= UNDER
-            for a, b in {(max(k), min(k)) for k in s["seq"][1:-1] if k[0] != k[1]}:
-                by_score[f"{a}-{b}"][0] += 1
-                by_score[f"{a}-{b}"][1] += u
+            keys = set()
+            for k, n in zip(s["seq"][1:-1], s["nets"][1:-1]):
+                if k[0] != k[1]:
+                    a, b = max(k), min(k)
+                    keys |= {f"{a}-{b}", f"{a}-{b}/{abs(n)}"}
+            for key in keys:
+                by_score[key][0] += 1
+                by_score[key][1] += u
         out["tours"][tour] = {
             "rows": [
                 {"key": "all", "label": "Every set", **cell(S)},

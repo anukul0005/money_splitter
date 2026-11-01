@@ -727,12 +727,14 @@ const useEarlyBreak = (on = true) => {
   return d
 }
 const ebPct = (c) => (c?.n ? (100 * c.under) / c.n : null)
-// a set being played at this score (leader-trailer) can still end under 8.5, and it's past game 4
+// The scores worth a look: still open, the under not a near-certainty (4-0, 5-0, 5-1 and 3-0 two
+// breaks up are left out); 3-0 only with the leader one break up ("/1")
+const EB_SCORES = [['2-0', '2-0'], ['3-0/1', '3-0 (1 break)'], ['3-1', '3-1'], ['4-1', '4-1'], ['4-2', '4-2'], ['5-2', '5-2']]
+// a set being played at one of them, past game 4
 const ebScore = (a, b) => {
-  const hi = Math.max(a, b), lo = Math.min(a, b)
-  return hi > lo && hi <= 5 && lo <= 2 && hi + lo >= 4 ? `${hi}-${lo}` : null
+  const k = `${Math.max(a, b)}-${Math.min(a, b)}`
+  return a + b >= 4 && EB_SCORES.some(([s]) => s === k) ? k : null
 }
-const EB_SCORES = ['2-0', '3-0', '3-1', '4-0', '4-1', '4-2', '5-0', '5-1', '5-2']
 
 function EarlyBreakPattern() {
   const d = useEarlyBreak()
@@ -803,9 +805,9 @@ function EarlyBreakPattern() {
             </tr>
           </thead>
           <tbody>
-            {EB_SCORES.map((k) => (
+            {EB_SCORES.map(([k, label]) => (
               <tr key={k} className="border-t border-gray-100">
-                <td className="py-1.5 font-bold text-gray-900 tabular-nums">{k}</td>
+                <td className="py-1.5 font-bold text-gray-900 tabular-nums">{label}</td>
                 <Cell c={T.ATP.by_score[k]} />
                 <Cell c={T.WTA.by_score[k]} />
                 <td className="py-1.5 text-center text-[11px] font-bold text-gray-500 tabular-nums">{odds(T.ATP.by_score[k])} / {odds(T.WTA.by_score[k])}</td>
