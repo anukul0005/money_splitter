@@ -16,10 +16,10 @@ New stories are pushed (not emailed - that'd be a mail per headline) to the
 app users (OPEN_SPORTS), each for the sports switched on in Account - the headline cut to 20 words: a few one by one, the rest as a
 "+N more". The very first read files what's there without a push, so the
 first deploy doesn't fire a day's backlog. A story naming the same people or
-event as one already notified in the last REPEAT_WINDOW (`_repeats`: "PV
-Sindhu wins Hylo Open" / "Sindhu beats Kjaersfelt to clinch ... Hylo Open
-final") is filed but not pushed again - bar the first with the result in it
-after a preview or a live blog.
+event as one already notified in the last REPEAT_WINDOW, and the same kind
+of story (`_repeats`: "PV Sindhu wins Hylo Open" / "Sindhu beats Kjaersfelt
+to clinch ... Hylo Open final" - both results), is filed but not pushed
+again; the preview, the result and the reaction are each an alert.
 """
 from __future__ import annotations
 
@@ -138,20 +138,52 @@ def _alike(a: str, b: str) -> bool:
     return a == b or (min(len(a), len(b)) >= 5 and difflib.SequenceMatcher(None, a, b).ratio() >= 0.85)
 
 
-def _repeats(a: list[set[str]], b: list[set[str]]) -> bool:
-    """Two headlines about the same thing: two or more of the names in one are in the other."""
-    hit = sum(1 for x in a if any(_alike(u, v) for y in b for u in x for v in y))
-    return hit >= 2
+# What a headline is: the first kind that fits. Two headlines on the same
+# names are one story only when they're the same kind - the result and the
+# loser's reaction to it are two alerts, two match reports are one.
+_KINDS = [
+    ("injury", r"\b(injur\w*|withdraw\w*|pulls? out|pulled out|retire[sd]?|retirement|ruled out|surgery|fitness|illness)\b"),
+    ("preview", r"\b(live|vs?\.?|preview|prediction|predictions|to face|faces|facing|eyes?|aims?|targets?|hopes?|"
+                r"set to|head[- ]to[- ]head|h2h|where to watch|how to watch|schedule|order of play|draw)\b"),
+    ("ranking", r"\b(rankings?|world no\.?|number one|no\. ?1|top 10|top ten|race to)\b"),
+    ("result", r"\b(wins?|won|beats?|beaten|clinch\w*|crowned|champion|lifts?|stuns?|knocks? out|knocked out|"
+               r"defeats?|defeated|downs?|edges?|thrash\w*|routs?|triumphs?|retains?|claims?|takes? the title|"
+               r"loses|lost|falls?|crash\w* out|exits?|ousted|upset|advances?|reach\w*|into the|through to|storms?|"
+               r"sails?|cruises?|survives?|saves?)\b"),
+    ("quote", r"\b(says?|said|reveals?|admits?|opens? up|speaks?|message|interview|reacts?|believes?|insists?|"
+              r"feels?|explains?|praises?|slams?|hits? back|responds?|reflects?)\b|[\"“]"),
+]
+_KIND_RE = [(k, re.compile(x, re.I)) for k, x in _KINDS]
 
 
-_RESULT = re.compile(r"\b(wins?|won|beats?|beaten|clinch\w*|crowned|champion|lifts?|stuns?|knocks? out|"
-                     r"defeats?|downs?|edges?|thrash\w*|routs?|triumphs?|retains?|claims?|takes? the title)\b", re.I)
-_NOT_RESULT = re.compile(r"\b(live|vs?\.?|preview|prediction|eyes?|to face|faces|aims?|targets?|hopes?|can|will)\b", re.I)
+def _kind(title: str) -> str:
+    return next((k for k, x in _KIND_RE if x.search(title or "")), "other")
 
 
-def _result(title: str) -> bool:
-    """A headline with the outcome in it ("Sindhu wins Hylo Open"), not a preview or a live blog."""
-    return bool(_RESULT.search(title or "")) and not _NOT_RESULT.search(title or "")
+def _repeats(a: tuple, b: tuple) -> bool:
+    """Two headlines ((names, kind, words), as _story makes them) telling the
+    same story: the same kind, and two of the names in common - or one, when
+    a headline has only the one name ("Sindhu triumphs again") or most of
+    the other words match too."""
+    (na, ka, wa), (nb, kb, wb) = a, b
+    if ka != kb:
+        return False
+    match = lambda x, other: any(_alike(u, v) for y in other for u in x for v in y)
+    hit = sum(1 for x in na if match(x, nb))
+    # a result or a preview naming someone the other doesn't, both ways: two
+    # matches (the semi and the final, the same day), not one told twice
+    if ka in ("result", "preview") and any(not match(x, nb) for x in na) and any(not match(y, na) for y in nb):
+        return False
+    if hit >= 2:
+        return True
+    if hit == 1 and (min(len(na), len(nb)) == 1 and ka != "other" or _same_story(wa, wb)):
+        return True
+    return False
+
+
+def _story(title: str) -> tuple:
+    words = {_norm_word(w) for w in _words(title)}
+    return _names(title), _kind(title), words
 
 
 def _when(s: str | None) -> datetime | None:
@@ -260,19 +292,17 @@ def _not_repeats(db, rows, now) -> list:
     if not rows:
         return rows
     ids = {r.id for r in rows}
-    seen: dict[str, list] = {}               # sport -> [(names, was a result)]
+    seen: dict[str, list] = {}               # sport -> [_story of each]
     for old in db.query(TennisNews).filter(TennisNews.notified.is_(True),
                                           TennisNews.published >= now - REPEAT_WINDOW).all():
         if old.id not in ids:
-            seen.setdefault(old.sport, []).append((_names(old.title), _result(old.title)))
+            seen.setdefault(old.sport, []).append(_story(old.title))
     keep = []
     for r in sorted(rows, key=lambda r: r.published):
-        n, res = _names(r.title), _result(r.title)
-        same = [was for o, was in seen.get(r.sport, []) if _repeats(n, o)]
-        # the same names again: skipped - unless it's the outcome after a preview or a live blog
-        if same and not (res and not any(same)):
+        st = _story(r.title)
+        if any(_repeats(st, o) for o in seen.get(r.sport, [])):
             continue
-        seen.setdefault(r.sport, []).append((n, res))
+        seen.setdefault(r.sport, []).append(st)
         keep.append(r)
     return keep
 
