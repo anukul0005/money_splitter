@@ -172,9 +172,23 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
     ...(payments || []).map((p) => ({ kind: 'payment', key: `p${p.id}`,
                                       at: (p.date || p.recorded_at || '').slice(0, 10), data: p })),
   ].sort((a, b) => (a.at === b.at ? (a.kind === 'group' ? -1 : 1) : a.at > b.at ? 1 : -1))
-  // What each group came to from its expenses alone - against what's left
-  // now, the part already paid in it.
-  const originally = Object.fromEntries((row.groups || []).map((g) => [g.group_id, g.net]))
+  // What the figure is made of: payments and the other-way groups clear the
+  // oldest groups first, so only the newest groups make up what's owed now -
+  // walk back from the newest until the loans/bills plus these reach the
+  // card's figure. The oldest one kept may be only partly owed.
+  const dir = owing ? -1 : 1
+  const fromLoans = row.loanItems.reduce((s, it) => s + (it.positive ? it.amount : -it.amount) * dir, 0)
+  let left = Math.max(0, Math.abs(row.net) - fromLoans)
+  const owedNow = []
+  for (const g of [...same_].reverse()) {
+    if (left < 1) break
+    const full = Math.abs(g.net)
+    const part = Math.min(full, left)
+    owedNow.unshift({ g, part, full })
+    left -= part
+  }
+  const cleared = same_.length - owedNow.length
+  const [history, setHistory] = useState(false)
 
   return (
     <div className={`card ${loanOnly ? 'border-l-4 border-l-orange-400' : ''}`}>
@@ -284,12 +298,39 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
           <p className="text-[9.85px] font-bold text-gray-400 uppercase tracking-widest">
             What makes up {INR(Math.abs(row.net))}
           </p>
-          {/* In the order a payment pays them: bills, then groups oldest
-              first, then loans. Loans & bills are a different kind of debt
-              (no group, no expense split) - a dashed orange outline keeps
-              them apart from the group rows. */}
+          {/* Only what's still owed - these add up to the figure. Bills,
+              then groups oldest first, then loans; loans & bills keep their
+              dashed orange outline. */}
           {row.loanItems.filter((it) => it.tag === 'Bill').map((it) => <LoanItem key={it.key} it={it} nav={nav} />)}
-          {timeline.map((row2) => {
+          {owedNow.map(({ g, part, full }) => (
+            <button key={g.group_id} onClick={() => nav(`/groups/${g.group_id}`)}
+              className={`w-full text-left rounded-md px-3 py-2 border transition-colors ${
+                owing ? 'bg-red-50 border-red-100 hover:bg-red-100' : 'bg-green-50 border-green-200 hover:bg-green-100'
+              }`}>
+              <span className="flex items-center gap-2">
+                <span className="text-[0.739rem] font-semibold text-gray-700 flex-1 min-w-0 truncate">{g.name}</span>
+                <span className={`text-[0.739rem] font-black flex-shrink-0 ${owing ? 'text-red-700' : 'text-green-700'}`}>
+                  {INR(part)}
+                </span>
+              </span>
+              {full - part >= 1 && (
+                <span className="block text-[9.85px] text-gray-500 mt-0.5">
+                  {INR(part)} of {INR(full)} still owed - the rest is cleared
+                </span>
+              )}
+            </button>
+          ))}
+          {row.loanItems.filter((it) => it.tag !== 'Bill').map((it) => <LoanItem key={it.key} it={it} nav={nav} />)}
+
+          {(cleared > 0 || opposite.length > 0 || payments?.length > 0) && (
+            <button onClick={() => setHistory((h) => !h)}
+              className="w-full text-left text-[10.84px] text-gray-500 pt-2">
+              {cleared > 0 && <>{cleared} older group{cleared > 1 ? 's' : ''} already cleared · </>}
+              <span className="font-bold text-brand-600">{history ? 'Hide' : 'Show'} payments & history</span>
+            </button>
+          )}
+          {payments === null && history && <p className="text-[10.84px] text-gray-300 pt-2">Loading payment history…</p>}
+          {history && timeline.map((row2) => {
             if (row2.kind === 'payment') {
               const p = row2.data
               // A thin rule rather than a boxed row: money that moved,
@@ -308,34 +349,17 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
                 </div>
               )
             }
-            const now = Math.abs(row2.data.net)
-            const signed = originally[row2.data.group_id]
-            // Same direction as it started, and less of it: part-paid. (A
-            // group that flipped the other way isn't "owed minus paid".)
-            const was = signed != null && Math.sign(signed) === Math.sign(row2.data.net) ? Math.abs(signed) : null
-            const partPaid = was != null && was - now >= 1
+            // History: grey, so it doesn't read as part of the figure.
             return (
               <button key={row2.key} onClick={() => nav(`/groups/${row2.data.group_id}`)}
-                className={`w-full text-left rounded-md px-3 py-2 border transition-colors ${
-                  owing ? 'bg-red-50 border-red-100 hover:bg-red-100' : 'bg-green-50 border-green-200 hover:bg-green-100'
-                }`}>
-                <span className="flex items-center gap-2">
-                  <span className="text-[0.739rem] font-semibold text-gray-700 flex-1 min-w-0 truncate">{row2.data.name}</span>
-                  <span className={`text-[0.739rem] font-black flex-shrink-0 ${owing ? 'text-red-700' : 'text-green-700'}`}>
-                    {INR(now)}
-                  </span>
-                </span>
-                {partPaid && (
-                  <span className="block text-[9.85px] text-gray-500 mt-0.5">
-                    {INR(was)} owed − {INR(was - now)} paid = {INR(now)} now
-                  </span>
-                )}
+                className="w-full text-left flex items-center gap-2 rounded-md px-3 py-1.5 border border-gray-200 bg-gray-50 hover:bg-gray-100 transition-colors">
+                <span className="text-[0.739rem] text-gray-500 flex-1 min-w-0 truncate">{row2.data.name}</span>
+                <span className="text-[0.739rem] font-semibold text-gray-500 flex-shrink-0">{INR(Math.abs(row2.data.net))}</span>
               </button>
             )
           })}
-          {row.loanItems.filter((it) => it.tag !== 'Bill').map((it) => <LoanItem key={it.key} it={it} nav={nav} />)}
 
-          {opposite.length > 0 && (
+          {history && opposite.length > 0 && (
             <>
               <p className="text-[9.85px] font-bold text-gray-400 uppercase tracking-widest pt-2">Cancelled out by</p>
               {opposite.map((g) => (
@@ -348,9 +372,7 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
             </>
           )}
 
-          {payments === null && <p className="text-[10.84px] text-gray-300 pt-2">Loading payment history…</p>}
-
-          {timeline.length === 0 && opposite.length === 0 && row.loanItems.length === 0 && payments?.length === 0 && (
+          {owedNow.length === 0 && same_.length === 0 && opposite.length === 0 && row.loanItems.length === 0 && payments?.length === 0 && (
             <p className="text-[0.739rem] text-gray-400 text-center py-2">No shared groups — only Loans & bills</p>
           )}
         </div>
