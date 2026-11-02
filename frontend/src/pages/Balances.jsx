@@ -164,14 +164,15 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
   const byDate = (a, b) => (since(a) > since(b) ? 1 : -1)
   const same_ = groups.filter((g) => (owing ? g.net < 0 : g.net > 0)).sort(byDate)
   const opposite = groups.filter((g) => (owing ? g.net > 0 : g.net < 0)).sort(byDate)
-  // One dated timeline, oldest first: each group by when it began, each
-  // payment on the day it was paid - so a payment sits among the groups it
-  // came after, not in a list of its own.
+  // One dated timeline, newest first: each group by when it began (the
+  // other-way ones too, as minus rows), each payment on the day it was paid -
+  // so payments sit among the groups they came after, not in lists of their own.
   const timeline = [
     ...same_.map((g) => ({ kind: 'group', key: `g${g.group_id}`, at: since(g), data: g })),
+    ...opposite.map((g) => ({ kind: 'offset', key: `o${g.group_id}`, at: since(g), data: g })),
     ...(payments || []).map((p) => ({ kind: 'payment', key: `p${p.id}`,
                                       at: (p.date || p.recorded_at || '').slice(0, 10), data: p })),
-  ].sort((a, b) => (a.at === b.at ? (a.kind === 'group' ? -1 : 1) : a.at > b.at ? 1 : -1))
+  ].sort((a, b) => (a.at === b.at ? (a.kind === 'payment' ? -1 : b.kind === 'payment' ? 1 : 0) : a.at < b.at ? 1 : -1))
   // What the figure is made of: payments and the other-way groups clear the
   // oldest groups first, so only the newest groups make up what's owed now -
   // walk back from the newest until the loans/bills plus these reach the
@@ -349,28 +350,20 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
                 </div>
               )
             }
-            // History: grey, so it doesn't read as part of the figure.
+            // History: grey, so it doesn't read as part of the figure; a
+            // group the other way (cancelling some out) in amber, as a minus.
+            const off = row2.kind === 'offset'
             return (
               <button key={row2.key} onClick={() => nav(`/groups/${row2.data.group_id}`)}
-                className="w-full text-left flex items-center gap-2 rounded-md px-3 py-1.5 border border-gray-200 bg-gray-50 hover:bg-gray-100 transition-colors">
+                className={`w-full text-left flex items-center gap-2 rounded-md px-3 py-1.5 border transition-colors ${
+                  off ? 'border-amber-200 bg-amber-50 hover:bg-amber-100' : 'border-gray-200 bg-gray-50 hover:bg-gray-100'
+                }`}>
                 <span className="text-[0.739rem] text-gray-500 flex-1 min-w-0 truncate">{row2.data.name}</span>
-                <span className="text-[0.739rem] font-semibold text-gray-500 flex-shrink-0">{INR(Math.abs(row2.data.net))}</span>
+                {off && <span className="text-[9px] text-amber-700 flex-shrink-0">{owing ? 'they owe you' : 'you owe'}</span>}
+                <span className="text-[0.739rem] font-semibold text-gray-500 flex-shrink-0">{off ? '−' : ''}{INR(Math.abs(row2.data.net))}</span>
               </button>
             )
           })}
-
-          {history && opposite.length > 0 && (
-            <>
-              <p className="text-[9.85px] font-bold text-gray-400 uppercase tracking-widest pt-2">Cancelled out by</p>
-              {opposite.map((g) => (
-                <button key={g.group_id} onClick={() => nav(`/groups/${g.group_id}`)}
-                  className="w-full text-left flex items-center gap-2 rounded-md px-3 py-2 border border-amber-200 bg-amber-50 hover:bg-amber-100 transition-colors">
-                  <span className="text-[0.739rem] font-semibold text-gray-600 flex-1 min-w-0 truncate">{g.name}</span>
-                  <span className="text-[0.739rem] font-bold text-gray-500 flex-shrink-0">−{INR(Math.abs(g.net))}</span>
-                </button>
-              ))}
-            </>
-          )}
 
           {owedNow.length === 0 && same_.length === 0 && opposite.length === 0 && row.loanItems.length === 0 && payments?.length === 0 && (
             <p className="text-[0.739rem] text-gray-400 text-center py-2">No shared groups — only Loans & bills</p>
