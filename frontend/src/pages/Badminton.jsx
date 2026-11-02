@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import RankingList, { RankingSwitch } from '../components/RankingList'
 import {
   badmintonH2H, badmintonLive, badmintonMatch, badmintonPlayer, badmintonPlayers, badmintonRankings,
@@ -8,15 +9,15 @@ import {
 /**
  * Badminton in the sports section (Betting analytics' 🏸 switch): BWF live
  * scores, results from 2018, players and stats (backend routers/badminton.py,
- * read from bwfbadminton.com). A match opens in place - its point flow and
- * numbers - rather than on a page of its own.
+ * read from bwfbadminton.com). A match opens on a page of its own, as in
+ * tennis (pages/BadmintonMatch.jsx).
  */
 export const B_TABS = [['live', 'Live'], ['results', 'Results'], ['players', 'Players'], ['stats', 'Stats']]
 const EVENTS = [['MS', "Men's singles"], ['WS', "Women's singles"], ['MD', "Men's doubles"], ['WD', "Women's doubles"], ['XD', 'Mixed']]
-const EVENT = Object.fromEntries(EVENTS)
-const ROUND = { Final: 'Final', SF: 'Semifinals', QF: 'Quarterfinals', R16: 'Round of 16', R32: 'Round of 32', R64: 'Round of 64' }
+export const EVENT = Object.fromEntries(EVENTS)
+export const ROUND = { Final: 'Final', SF: 'Semifinals', QF: 'Quarterfinals', R16: 'Round of 16', R32: 'Round of 32', R64: 'Round of 64' }
 const ENDING = { 1: 'W/O', 2: 'Ret.', 3: 'DQ' }
-const fmtDate = (iso) => (iso ? new Date(`${iso.slice(0, 10)}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' }) : '')
+export const fmtDate = (iso) => (iso ? new Date(`${iso.slice(0, 10)}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' }) : '')
 const fmtUtc = (s) => {
   if (!s) return ''
   const d = new Date(`${s.replace(' ', 'T')}Z`)
@@ -41,7 +42,7 @@ function Seg({ value, onChange, options }) {
   )
 }
 
-function Side({ side, no, m, onPlayer }) {
+export function Side({ side, no, m, onPlayer }) {
   const live = m.state === 'live'
   const won = m.winner === no
   const lost = m.winner && !won
@@ -98,7 +99,7 @@ const STAT_NAME = { rallies_won: 'Rallies won', consecutive_points: 'Most points
   smash_winner: 'Smash winners', net_winner: 'Net winners', clear_winner: 'Clear winners',
   challenge_used: 'Challenges', challenge_won: 'Challenges won' }
 
-function Detail({ m }) {
+export function Detail({ m }) {
   const [d, setD] = useState(null)
   const [err, setErr] = useState(false)
   useEffect(() => {
@@ -132,12 +133,17 @@ function Detail({ m }) {
   )
 }
 
-/** A match: tap to open its point flow and numbers in place; tap a name for that player. */
-function Match({ m, onPlayer, showWhen, showEvent }) {
+/** The match page for a match: /betting/badminton-match?t=...&code=... */
+export const bMatchLink = (m) => `/betting/badminton-match?t=${m.tournament_id}&code=${encodeURIComponent(m.code)}`
+
+/** A match: tap to open its own page (point flow, numbers, head-to-head, form); tap a name for that player. */
+export function Match({ m, onPlayer, showWhen, showEvent, inline }) {
+  const nav = useNavigate()
   const [open, setOpen] = useState(false)
   const live = m.state === 'live'
+  const canOpen = m.tournament_id && m.code
   return (
-    <div onClick={() => m.state !== 'upcoming' && setOpen((o) => !o)}
+    <div onClick={() => (inline ? m.state !== 'upcoming' && setOpen((o) => !o) : canOpen && nav(bMatchLink(m)))}
       className="py-2 border-t border-gray-100 first:border-t-0 cursor-pointer hover:bg-amber-50/50 -mx-2 px-2 rounded">
       <div className="flex items-center gap-2 mb-0.5 text-[10px]">
         {live && <span className="font-black text-red-600 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-red-600 animate-pulse" />LIVE</span>}
@@ -149,7 +155,8 @@ function Match({ m, onPlayer, showWhen, showEvent }) {
         <span className="ml-auto flex items-center gap-2 text-gray-400">
           {ENDING[m.score_status] && <span className="font-bold text-amber-600">{ENDING[m.score_status]}</span>}
           {m.minutes ? <span>{m.minutes}m</span> : null}
-          {m.state !== 'upcoming' && <span className="font-bold text-brand-600">{open ? '▴' : '▾'}</span>}
+          {inline ? m.state !== 'upcoming' && <span className="font-bold text-brand-600">{open ? '▴' : '▾'}</span>
+            : canOpen && <span className="font-bold text-brand-600">›</span>}
         </span>
       </div>
       <Side side={m.side1} no={1} m={m} onPlayer={onPlayer} />
@@ -159,7 +166,7 @@ function Match({ m, onPlayer, showWhen, showEvent }) {
   )
 }
 
-function CardHead({ title, sub, logo }) {
+export function CardHead({ title, sub, logo }) {
   return (
     <div className="px-4 py-2.5 bg-field-950 text-white flex items-center gap-2">
       {logo && <img src={logo} alt="" className="w-6 h-6 rounded bg-white object-contain" onError={(e) => { e.currentTarget.style.display = 'none' }} />}
@@ -242,11 +249,36 @@ function Tournament({ id, onBack, onPlayer }) {
 function Results({ onPlayer, sum }) {
   const [year, setYear] = useState(0)
   const [d, setD] = useState(null)
-  const [open, setOpen] = useState(null)
+  // the open tournament lives in the address, so Back from a match page returns to it
+  const [params, setParams] = useSearchParams()
+  const open = params.get('bt') ? +params.get('bt') : null
+  const setOpen = (id) => setParams((p) => { const q = new URLSearchParams(p); id ? q.set('bt', id) : q.delete('bt'); return q }, { replace: true })
   useEffect(() => { setD(null); badmintonTournaments(year).then((r) => setD(r.data)).catch(() => setD({ tournaments: [], years: [] })) }, [year])
   if (open) return <Tournament id={open} onBack={() => setOpen(null)} onPlayer={onPlayer} />
+  const today = new Date(new Date().toDateString())
+  const inDays = (iso) => Math.round((new Date(`${iso}T00:00:00`) - today) / 86400000)
   return (
     <div className="space-y-3">
+      {d?.upcoming?.length > 0 && (
+        <div className="card p-0 overflow-hidden">
+          <CardHead title="Coming up" sub={`${d.upcoming.length}`} />
+          {d.upcoming.map((t) => {
+            const n = inDays(t.start)
+            return (
+              <div key={t.id} className="px-4 py-2 border-t border-gray-100 first:border-t-0 flex items-center gap-2">
+                {t.logo ? <img src={t.logo} alt="" className="w-7 h-7 object-contain" onError={(e) => { e.currentTarget.style.display = 'none' }} /> : <span className="w-7" />}
+                <div className="flex-1 min-w-0">
+                  <p className="text-[13px] font-bold text-gray-900 truncate">{t.name}</p>
+                  <p className="text-[10px] text-gray-400 truncate">
+                    {fmtDate(t.start)} – {fmtDate(t.end)} · {t.category?.replace('HSBC BWF World Tour ', '')}{t.location ? ` · ${t.location}` : ''}
+                  </p>
+                </div>
+                <span className="text-[10px] font-bold text-brand-600 whitespace-nowrap">{n <= 1 ? (n === 1 ? 'tomorrow' : 'today') : `in ${n} days`}</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
       <div className="flex items-center gap-2">
         <select value={d?.year || year} onChange={(e) => setYear(+e.target.value)}
           className="rounded-md border border-amber-300 bg-white px-2 py-1.5 text-sm font-bold">
@@ -283,7 +315,7 @@ function Results({ onPlayer, sum }) {
 
 // ── Players ─────────────────────────────────────────────────────────────────
 
-function Tile({ label, value, sub }) {
+export function Tile({ label, value, sub }) {
   return (
     <div className="flex-1 min-w-[90px] rounded-md bg-white border border-amber-100 px-3 py-2">
       <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">{label}</p>

@@ -260,6 +260,7 @@ export const badmintonLive        = ()               => api.get('/badminton/live
 export const badmintonTournaments = (year)           => remembered('/badminton/tournaments', { year }, 5 * MIN)
 export const badmintonTournament  = (id)             => remembered(`/badminton/tournament/${id}`, null, 2 * MIN)
 export const badmintonMatch       = (tid, code, finished) => remembered(`/badminton/match/${tid}/${code}`, { finished }, finished ? 60 * MIN : 15_000)
+export const badmintonGame        = (tid, code) => remembered(`/badminton/game/${tid}/${code}`, {}, 15_000)
 export const badmintonPlayers     = (q)              => remembered('/badminton/players', { q }, 5 * MIN)
 export const badmintonPlayer      = (id)             => remembered(`/badminton/player/${id}`, null, 5 * MIN)
 export const badmintonH2H         = (a, b)           => remembered('/badminton/h2h', { a, b }, 5 * MIN)

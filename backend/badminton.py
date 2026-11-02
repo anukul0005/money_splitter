@@ -203,7 +203,7 @@ def sync_all() -> None:
     try:
         _state["running"] = True
         today = datetime.now(timezone.utc).date()
-        for y in range(FIRST_YEAR, today.year + 1):
+        for y in range(FIRST_YEAR, today.year + 2):          # next year too, for what's coming up
             try:
                 calendar(db, y)
             except Exception as e:

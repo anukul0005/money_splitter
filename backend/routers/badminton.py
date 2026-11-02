@@ -10,7 +10,7 @@ from collections import Counter, defaultdict
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 import badminton as bwf
@@ -101,6 +101,51 @@ def match(tournament_id: int, code: str, finished: bool = True, _: User = Depend
         raise HTTPException(502, "BWF doesn't have the numbers for this match")
 
 
+def _same_side(*ids):
+    """Matches with all of `ids` on one side (a player, or a pair together)."""
+    ids = [i for i in ids if i]
+    return or_(*[and_(*[or_(a == i, b == i) for i in ids])
+                 for a, b in ((BadmintonResult.p1a, BadmintonResult.p1b), (BadmintonResult.p2a, BadmintonResult.p2b))])
+
+
+@router.get("/game/{tournament_id}/{code}", response_model=dict)
+def game(tournament_id: int, code: str, db: Session = Depends(get_db), _: User = Depends(owner)):
+    """One match for its own page: the match, the two sides' head-to-head and their form going in."""
+    r = (db.query(BadmintonResult)
+         .filter(BadmintonResult.tournament_id == tournament_id, BadmintonResult.code == code).first())
+    if r is None:
+        raise HTTPException(404, "No such match on file")
+    t = db.get(BadmintonTournament, tournament_id)
+    tmap = {t.id: t} if t else {}
+    s1, s2 = [i for i in (r.p1a, r.p1b) if i], [i for i in (r.p2a, r.p2b) if i]
+    before = [BadmintonResult.winner > 0, BadmintonResult.id != r.id]
+    if r.day:
+        before.append(BadmintonResult.day <= r.day)
+    h2h, form = [], [[], []]
+    if s1 and s2:
+        h2h = (db.query(BadmintonResult).filter(_same_side(*s1), _same_side(*s2), *before)
+               .order_by(BadmintonResult.day.desc()).limit(20).all())
+        h2h = [x for x in h2h if _side_of(x, s1[0]) != _side_of(x, s2[0])]
+    for k, side in enumerate((s1, s2)):
+        if side:
+            form[k] = (db.query(BadmintonResult).filter(_same_side(*side), BadmintonResult.event == r.event, *before)
+                       .order_by(BadmintonResult.day.desc(), BadmintonResult.id.desc()).limit(10).all())
+    rows = [r, *h2h, *form[0], *form[1]]
+    people = _people(db, rows)
+    more = {x.tournament_id for x in rows} - set(tmap)
+    if more:
+        tmap.update({x.id: x for x in db.query(BadmintonTournament).filter(BadmintonTournament.id.in_(more)).all()})
+
+    def won_by(x, side):
+        return x.winner == (1 if side[0] in (x.p1a, x.p1b) else 2)
+    return {"match": _match(r, people, tmap), "tournament": _tournament(t) if t else None,
+            "h2h": {"wins": [sum(won_by(x, s1) for x in h2h), sum(won_by(x, s2) for x in h2h)],
+                    "matches": [_match(x, people, tmap) for x in h2h]},
+            "form": [{"w": sum(won_by(x, side) for x in f), "l": sum(not won_by(x, side) for x in f),
+                      "results": ["W" if won_by(x, side) else "L" for x in f],
+                      "matches": [_match(x, people, tmap) for x in f]} for f, side in zip(form, (s1, s2))]}
+
+
 # ── Results ─────────────────────────────────────────────────────────────────
 
 @router.get("/tournaments", response_model=dict)
@@ -122,7 +167,10 @@ def tournaments(year: int = 0, db: Session = Depends(get_db), _: User = Depends(
     for r in finals:
         side = (r.p1a, r.p1b) if r.winner == 1 else (r.p2a, r.p2b)
         champs[r.tournament_id][r.event] = [x for x in (_p(people, i) for i in side) if x]
-    return {"year": year, "years": years,
+    # Tournaments still to start (from the calendars), soonest first - whatever year is picked
+    upcoming = (db.query(BadmintonTournament).filter(BadmintonTournament.start_date > date.today())
+                .order_by(BadmintonTournament.start_date, BadmintonTournament.level).limit(12).all())
+    return {"year": year, "years": years, "upcoming": [_tournament(t) for t in upcoming],
             "tournaments": [{**_tournament(t), "matches": counts.get(t.id, 0),
                              "champions": {e: champs[t.id][e] for e in bwf.EVENTS if e in champs[t.id]}} for t in ts]}
 
