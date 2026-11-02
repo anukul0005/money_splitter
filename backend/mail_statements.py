@@ -26,7 +26,9 @@ def find(connection, days: int) -> tuple[object, list[str]]:
     """(Gmail service, ids of the statement emails), newest first."""
     from statement_sync import _gmail_service
     service = _gmail_service(connection)
-    resp = service.users().messages().list(userId="me", q=query(days), maxResults=MAX_MESSAGES).execute()
+    # A short look-back is the everyday sync; "all" (a year) may hold more.
+    cap = MAX_MESSAGES if days <= 120 else 100
+    resp = service.users().messages().list(userId="me", q=query(days), maxResults=cap).execute()
     return service, [m["id"] for m in resp.get("messages", [])]
 
 

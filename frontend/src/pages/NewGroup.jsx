@@ -346,7 +346,7 @@ export default function NewGroup() {
                   🏦 Bank statement
                 </button>
                 <MailSyncWide className="col-span-2" busy={statement.busy}
-                  onSync={() => statement.mailSync()} onConnect={statement.connectGmail} />
+                  onSync={(d) => statement.mailSync('', false, d)} onConnect={statement.connectGmail} />
               </div>
               <p className="text-[10px] text-gray-500 mt-1.5">Any bank's PDF statement (HDFC, SBI, ICICI, …) or a PhonePe, Google Pay or Paytm one: each payment is read and filed into its month's personal expenses by itself. Gmail sync finds PhonePe, Paytm and Google Pay statement emails (PDF, CSV or Excel, password-protected too) and imports them the same way.</p>
               {statement.input}

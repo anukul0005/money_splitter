@@ -188,7 +188,7 @@ export default function MasterGroupDetail() {
               this master - see onAdd / addToday. */}
           {isMonthly ? (
             <div className="flex items-center gap-1.5 flex-shrink-0">
-              <MailSyncButton busy={upload.busy} onSync={upload.mailSync} onConnect={upload.connectGmail} />
+              <MailSyncButton busy={upload.busy} onSync={(d) => upload.mailSync('', false, d)}onConnect={upload.connectGmail} />
               <StatementUploadButton busy={upload.busy} onPick={upload.pick} />
             </div>
           ) : (

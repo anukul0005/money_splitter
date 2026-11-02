@@ -101,10 +101,11 @@ export const startImportJob     = (file, password, onUploadProgress, signal, rem
 }
 export const cancelImportJob    = (jobId)    => api.post(`/expenses/import-jobs/${jobId}/cancel`)
 // Payment-app statements found in Gmail, imported the same way - polled with getImportJob.
-export const startMailSync      = (password, remember = false) => {
+export const startMailSync      = (password, remember = false, days = 4) => {
   const fd = new FormData()
   if (password) fd.append('password', password)
   if (password && remember) fd.append('remember', 'true')
+  if (days) fd.append('days', String(days))
   return api.post('/expenses/mail-sync-jobs', fd)
 }
 // The statement sync's Gmail: inbox, last sync, and whether access has expired.

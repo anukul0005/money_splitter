@@ -224,6 +224,25 @@ function MailStatusLine({ st }) {
   )
 }
 
+// How far back the sync looks: a few days by default - quick, and the
+// everyday case; older statements only when asked for.
+const LOOK_BACK = [[4, '4 days'], [14, '2 weeks'], [30, '1 month'], [365, 'All']]
+
+function LookBack({ days, onChange }) {
+  return (
+    <div className="flex items-center gap-1 flex-wrap">
+      <span className="text-[10px] font-bold text-gray-400 mr-0.5">Look back</span>
+      {LOOK_BACK.map(([d, label]) => (
+        <button key={d} type="button" onClick={() => onChange(d)}
+          className={`px-2 py-0.5 rounded-full text-[11px] font-bold border transition-colors ${
+            days === d ? 'bg-brand-400 border-brand-400 text-white' : 'bg-white border-amber-200 text-gray-600 hover:bg-amber-50'}`}>
+          {label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 const SyncIcon = () => (
   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.3} viewBox="0 0 24 24">
     <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h5M20 20v-5h-5M5.6 15A7 7 0 0018 17.4M18.4 9A7 7 0 006 6.6" />
@@ -237,6 +256,7 @@ const SyncIcon = () => (
  */
 export function MailSyncButton({ busy, onSync, onConnect }) {
   const [open, setOpen] = useState(false)
+  const [days, setDays] = useState(4)
   const st = useMailStatus(open && !busy)
   const reconnect = st?.connected && st.expired
   return (
@@ -258,13 +278,16 @@ export function MailSyncButton({ busy, onSync, onConnect }) {
           <div role="menu" className="absolute right-0 mt-1 w-72 max-w-[calc(100vw-2rem)] bg-white border border-amber-200 rounded-md shadow-lg z-30 py-2 px-3">
             <p className="text-[10px] font-black text-gray-400 tracking-widest">STATEMENTS FROM GMAIL</p>
             <p className="text-[11px] mt-1 leading-snug"><MailStatusLine st={st} /></p>
+            <div className="mt-2"><LookBack days={days} onChange={setDays} /></div>
             <button
-              onClick={() => { setOpen(false); reconnect ? onConnect() : onSync() }}
+              onClick={() => { setOpen(false); reconnect ? onConnect() : onSync(days) }}
               className="btn-primary text-xs w-full mt-2 py-2"
             >
               {reconnect ? 'Reconnect Gmail' : st && !st.error && !st.connected ? 'Connect Gmail & sync' : 'Sync now'}
             </button>
-            <p className="text-[10px] text-gray-400 mt-1">PhonePe, Paytm and Google Pay statement emails from the last 4 months.</p>
+            <p className="text-[10px] text-gray-400 mt-1">
+              PhonePe, Paytm and Google Pay statement emails{days >= 365 ? ' from the last year' : ` from the last ${LOOK_BACK.find(([d]) => d === days)[1]}`}.
+            </p>
             <div className="border-t border-amber-100 mt-2 pt-1.5">
               <SavedPasswords />
             </div>
@@ -283,10 +306,12 @@ export function MailSyncButton({ busy, onSync, onConnect }) {
 export function MailSyncWide({ busy, onSync, onConnect, className = '' }) {
   const st = useMailStatus(!busy)
   const [pw, setPw] = useState(false)
+  const [days, setDays] = useState(4)
   const reconnect = st?.connected && st.expired
   return (
     <div className={className}>
-      <button type="button" disabled={busy} onClick={() => (reconnect ? onConnect() : onSync())}
+      {!reconnect && <div className="mb-1.5"><LookBack days={days} onChange={setDays} /></div>}
+      <button type="button" disabled={busy} onClick={() => (reconnect ? onConnect() : onSync(days))}
         className="w-full py-2.5 text-xs font-bold text-gray-700 bg-white border border-amber-300 rounded-md hover:bg-amber-100 active:scale-[0.98] transition-all disabled:opacity-50">
         📧 {reconnect ? 'Reconnect Gmail to sync statements' : 'Sync statements from Gmail'}
       </button>
@@ -317,7 +342,12 @@ function MailSummary({ mail }) {
       {mail.locked.length > 0 && <p className="text-amber-700">🔒 {mail.locked.length} still locked - sync again with its password</p>}
       {mail.unreadable > 0 && <p className="text-gray-400">{mail.unreadable} email{mail.unreadable > 1 ? 's' : ''} had no statement the app could read</p>}
       {mail.password_saved && <p className="text-gray-500">🔒 Password saved for next time</p>}
-      {mail.emails === 0 && <p className="text-gray-500">Nothing from PhonePe, Paytm or Google Pay in the last 4 months.</p>}
+      {mail.emails === 0 && (
+        <p className="text-gray-500">
+          No PhonePe, Paytm or Google Pay statement emails in the last {mail.days || 4} day{mail.days === 1 ? '' : 's'}
+          {(mail.days || 4) < 365 && ' - pick a longer look-back for older ones'}.
+        </p>
+      )}
     </div>
   )
 }
@@ -509,13 +539,15 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
 
   // PhonePe / Paytm / Google Pay statements in Gmail, imported like uploads
   // (the backend's mail-sync job); a password only when one is still locked.
-  const mailSync = async (pw = '', keep = false) => {
+  const daysRef = useRef(4)        // the look-back picked - a password retry reuses it
+  const mailSync = async (pw = '', keep = false, days) => {
     if (busy) return
+    if (days) daysRef.current = days
     if (!pw) { reset(); setFile(null) }
     setFromMail(true); setApp({ label: 'mail' }); setError(''); setResult(null); setNotice(''); setActivity(null)
     setProgress({ stage: 'Searching your mail', fraction: 0.02 })
     try {
-      const { data } = await startMailSync(pw, keep)
+      const { data } = await startMailSync(pw, keep, daysRef.current)
       jobRef.current = data.job_id
       poll(data.job_id)
     } catch (err) {

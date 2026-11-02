@@ -425,7 +425,7 @@ export default function AddExpense() {
                   📄 Upload statement (.csv / .pdf / .xlsx)
                 </button>
                 <MailSyncWide className="mt-2" busy={statement.busy}
-                  onSync={() => statement.mailSync()} onConnect={statement.connectGmail} />
+                  onSync={(d) => statement.mailSync('', false, d)} onConnect={statement.connectGmail} />
                 <p className="text-[11px] text-gray-500 mt-1">PhonePe (.csv / .pdf), Google Pay, Paytm, or any bank's PDF statement - password-protected PDFs work too</p>
                 {statement.input}
                 {statement.panel}

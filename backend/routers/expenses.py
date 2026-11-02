@@ -1029,7 +1029,8 @@ def _run_mail_job(job_id: str, user_id: int, password: str | None, remember: boo
     try:
         caller = db.get(User, user_id)
         conn = db.query(GmailConnection).filter(GmailConnection.user_id == user_id).first()
-        _job_update(job_id, stage=f"Searching {conn.gmail_address or 'your Gmail'} for statement emails", progress=0.02)
+        _job_update(job_id, stage=f"Searching {conn.gmail_address or 'your Gmail'} for statement emails "
+                                  f"from the last {days} day{'' if days == 1 else 's'}", progress=0.02)
         service, ids = mail_statements.find(conn, days)
         done = {m for (m,) in db.query(MailStatement.gmail_message_id).filter(MailStatement.user_id == user_id).all()}
         todo = [m for m in ids if m not in done]
@@ -1040,7 +1041,7 @@ def _run_mail_job(job_id: str, user_id: int, password: str | None, remember: boo
                                  db.query(BankPassword).filter(BankPassword.user_id == user_id).all()) if pw)]
         total = {"source": "", "used_saved_password": False}
         mail = {"emails": len(ids), "already": len(ids) - len(todo), "imported": [], "locked": [], "unreadable": 0,
-                "password_saved": False}
+                "password_saved": False, "days": days}
         apps = []
         for n, mid in enumerate(todo):
             head = f"Email {n + 1} of {len(todo)}"
@@ -1177,7 +1178,7 @@ def _decrypt(s):
 
 
 @router.post("/mail-sync-jobs", response_model=dict)
-def start_mail_sync(password: str = Form(""), remember: bool = Form(False), days: int = Form(120),
+def start_mail_sync(password: str = Form(""), remember: bool = Form(False), days: int = Form(4),
                     db: Session = Depends(get_db), caller: User = Depends(current_user)):
     """Look through the caller's Gmail for payment-app statements and import
     them; poll GET /expenses/import-jobs/{job_id} like an upload."""
@@ -1193,7 +1194,9 @@ def start_mail_sync(password: str = Form(""), remember: bool = Form(False), days
             raise HTTPException(409, "A mail sync is already running.")
         _jobs[job_id] = {"user_id": caller.id, "status": "running", "stage": "Starting",
                          "progress": 0.0, "touched": now, "mail": True}
-    threading.Thread(target=_run_mail_job, args=(job_id, caller.id, password or None, remember, max(7, min(days, 400))),
+    # days: how far back to look - a few days by default (fast); the person
+    # picks a longer look-back when they want older statements.
+    threading.Thread(target=_run_mail_job, args=(job_id, caller.id, password or None, remember, max(1, min(days, 400))),
                      daemon=True).start()
     return {"job_id": job_id}
 
