@@ -1183,6 +1183,25 @@ class StatementSkip(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class ManualInvestment(Base):
+    """An investment the statements don't show - a SIP straight from the
+    bank account, EPF/PPF, an FD, a policy premium - entered by hand for the
+    salary dashboard (routers/salary.py). `recurring` repeats it every month
+    from `month` to `end_month` (open-ended while that is empty)."""
+
+    __tablename__ = "manual_investments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    month = Column(String(7), nullable=False)              # "YYYY-MM" - the first month it counts in
+    end_month = Column(String(7), nullable=True)           # recurring: the last month, or open-ended
+    recurring = Column(Boolean, nullable=False, default=False)
+    amount = Column(Float, nullable=False)
+    kind = Column(String(40), nullable=False)              # see salary.KINDS
+    note = Column(String(200), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class LedgerHint(Base):
     """What a person has taught the notebook-page reader (ledger_reader.py),
     fed back into its prompt next time:

@@ -213,6 +213,11 @@ export const markActivitySeen = (name)   => api.post('/activity/seen')
 export const getGroupStats      = (groupId) => api.get(`/stats/${groupId}`)
 // Combined stats across a master group's set of groups
 export const getHistory         = ()        => api.get('/stats/history')
+// Salary dashboard: pay vs spent / invested, month by month; hand-entered investments.
+export const getSalaryDashboard = (months = 12) => api.get('/salary/dashboard', { params: { months } })
+export const addInvestment      = (data)    => api.post('/salary/investments', data)
+export const editInvestment     = (id, data) => api.put(`/salary/investments/${id}`, data)
+export const deleteInvestment   = (id)      => api.delete(`/salary/investments/${id}`)
 export const getPatterns        = ()        => api.get('/stats/patterns')
 export const getMLAnalysis      = ()        => api.get('/stats/ml-analysis')
 export const getPredictions     = (force = false) => api.get('/stats/predictions', { params: force ? { force } : {} })

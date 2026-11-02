@@ -1,0 +1,285 @@
+"""The salary dashboard (GET /salary/dashboard): each month's pay set
+against where it went - spent, invested, or still there.
+
+  spent = monthly expenses (the caller's own monthly groups)
+        + the caller's share in shared groups
+        + credit card spends not already in the app: a card line the
+          caller also entered as a credit-card expense, or passed on to
+          someone as a loan, isn't counted twice
+        + recurring bills (the caller's share)
+        + loan repayments the caller made
+  invested = investments the statement imports set aside (StatementSkip,
+             kind "investment") + ones entered by hand (ManualInvestment -
+             what the PhonePe statement can't see: SIPs from the bank, EPF...)
+  left = salary - spent - invested
+
+Only for someone who has entered their salary (Account page); the same
+salary is used for every month shown.
+"""
+from __future__ import annotations
+
+import json
+import re
+from collections import defaultdict
+from datetime import date
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from auth import caller_groups, current_user
+from database import get_db
+from models import (CreditCardStatement, Expense, Loan, ManualInvestment, RecurringBill, RecurringCharge,
+                    StatementSkip, User)
+
+router = APIRouter(prefix="/salary", tags=["salary"])
+
+KINDS = ["Mutual funds / SIP", "Stocks", "FD / RD", "PPF / EPF", "NPS", "Gold", "Insurance", "Crypto", "Other"]
+
+# What a statement's investment payee is, by name.
+_KIND_WORDS = [
+    ("NPS", r"\bnps\b|pension"),
+    ("PPF / EPF", r"\bppf\b|\bepf\b|provident"),
+    ("Insurance", r"\blic\b|insurance|policy|premium"),
+    ("Gold", r"gold|mmtc|augmont"),
+    ("Crypto", r"crypto|coindcx|wazirx|coinswitch|bitcoin"),
+    ("FD / RD", r"fixed deposit|\bfd\b|recurring deposit|\brd\b"),
+    ("Mutual funds / SIP", r"\bsip\b|mutual|\bmf\b|\bamc\b|fund|clearing corp|iccl|bse star|cams|kfin"),
+    ("Stocks", r"zerodha|upstox|angel|dhan|kite|stock|securities|broking|groww|indmoney|smallcase"),
+]
+
+# The 50/30/20 split: what has to be paid, and what is chosen.
+NEEDS = {"Groceries", "Transport", "Housing", "Bills & Utilities", "Health", "Education", "Loan repayments"}
+
+
+def _kind_of(name: str) -> str:
+    low = (name or "").lower()
+    return next((k for k, rx in _KIND_WORDS if re.search(rx, low)), "Other")
+
+
+def _ym_range(end: str, n: int) -> list[str]:
+    y, m = map(int, end.split("-"))
+    out = []
+    for i in range(n - 1, -1, -1):
+        t = y * 12 + (m - 1) - i
+        out.append(f"{t // 12}-{t % 12 + 1:02d}")
+    return out
+
+
+def _manual_out(r: ManualInvestment) -> dict:
+    return {"id": r.id, "month": r.month, "end_month": r.end_month, "recurring": bool(r.recurring),
+            "amount": r.amount, "kind": r.kind, "note": r.note}
+
+
+def _manual_in_month(r: ManualInvestment, ym: str) -> bool:
+    if r.recurring:
+        return r.month <= ym and (not r.end_month or ym <= r.end_month)
+    return r.month == ym
+
+
+@router.get("/dashboard", response_model=dict)
+def dashboard(months: int = 12, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    if not caller.monthly_salary:
+        raise HTTPException(400, {"code": "no_salary", "message": "Enter your monthly salary on the Account page first."})
+    from routers.stats import _history_category, get_history
+    from spend_categories import categorize
+
+    today = date.today()
+    cur = f"{today.year}-{today.month:02d}"
+    yms = _ym_range(cur, max(3, min(months, 36)))
+    want = set(yms)
+    me = caller.name.lower()
+
+    blank = lambda: {"monthly": 0.0, "groups": 0.0, "cards": 0.0, "recurring": 0.0, "repayments": 0.0}
+    spend = {ym: blank() for ym in yms}
+    cats = {ym: defaultdict(float) for ym in yms}
+    top_groups = {ym: defaultdict(float) for ym in yms}
+
+    # ── expenses: the History page's own rows (group, month, category, total, share) ──
+    hist = get_history(db=db, caller=caller)
+    gmeta = {g["id"]: g for g in hist["groups"]}
+    for gid, ym, cat, total, share, *_ in hist["rows"]:
+        if ym not in want or not share:
+            continue
+        g = gmeta.get(gid, {})
+        solo = len(g.get("members", [])) <= 1
+        spend[ym]["monthly" if solo else "groups"] += share
+        cats[ym][cat] += share
+        if not solo:
+            top_groups[ym][gid] += share
+
+    # ── credit cards: each bill's lines by the month they were spent ──
+    card_gross = defaultdict(float)
+    card_cats = {ym: defaultdict(float) for ym in yms}
+    unbroken = defaultdict(int)          # bills with no breakup: counted at their total
+    for s in db.query(CreditCardStatement).filter(CreditCardStatement.user_id == caller.id):
+        details = None
+        if s.details_json:
+            try:
+                details = json.loads(s.details_json)
+            except ValueError:
+                details = None
+        lines = (details or {}).get("transactions") or []
+        if lines:
+            for t in lines:
+                if t.get("excluded") or t.get("type") != "debit" or not t.get("date"):
+                    continue
+                ym = t["date"][:7]
+                if ym in want:
+                    card_gross[ym] += float(t.get("amount") or 0)
+                    card_cats[ym][t.get("category") or "Other"] += float(t.get("amount") or 0)
+        else:
+            ym = s.period or (s.statement_date or "")[:7]
+            if ym in want and s.total_due:
+                card_gross[ym] += s.total_due
+                card_cats[ym]["Card bill (no breakup)"] += s.total_due
+                unbroken[ym] += 1
+    # Already counted elsewhere: card-paid expenses the caller paid (the whole
+    # bill went on the card; their share is counted above, the rest is owed
+    # back), and card lines passed on to someone as a loan.
+    overlap = defaultdict(float)
+    overlap_cats = {ym: defaultdict(float) for ym in yms}
+    gids = [g["id"] for g in hist["groups"]]
+    if gids:
+        for d, amount, cat in (db.query(Expense.date, Expense.amount, Expense.category)
+                               .filter(Expense.group_id.in_(gids), Expense.payment_mode == "credit_card")
+                               .filter(Expense.paid_by.ilike(caller.name))):
+            if d and d[:7] in want:
+                overlap[d[:7]] += amount or 0
+                overlap_cats[d[:7]][_history_category(cat)] += amount or 0
+    passed = defaultdict(float)
+    for ln in db.query(Loan).filter(Loan.card_ref.isnot(None), Loan.lender.ilike(caller.name)):
+        if ln.start_date[:7] in want:
+            passed[ln.start_date[:7]] += ln.principal
+    for ym in yms:
+        gross = card_gross[ym]
+        net = max(0.0, gross - overlap[ym] - passed[ym])
+        spend[ym]["cards"] = net
+        if gross:
+            # The entered expenses come off their own category first; what
+            # still doesn't match is taken off every category evenly.
+            left = defaultdict(float)
+            for c, v in card_cats[ym].items():
+                left[c if c in ("Card fees & interest", "Card bill (no breakup)") else _history_category(c)] += v
+            for c, v in overlap_cats[ym].items():
+                left[c] = max(0.0, left.get(c, 0.0) - v) if c in left else 0.0
+            rest = sum(left.values())
+            f = net / rest if rest else 0
+            for c, v in left.items():
+                cats[ym][c] += v * f
+
+    # ── recurring bills: the caller's share, as payer or as a member ──
+    for ch in db.query(RecurringCharge).filter(RecurringCharge.member.ilike(caller.name)):
+        if ch.period in want:
+            spend[ch.period]["recurring"] += ch.share
+            cats[ch.period][_history_category(categorize(ch.bill.title, ch.share)[0])] += ch.share
+    for bill in db.query(RecurringBill).filter(RecurringBill.payer.ilike(caller.name)):
+        members = [m for m in bill.members.split(",") if m]
+        own = round(bill.amount / max(len(members), 1), 2)
+        for period in {c.period for c in bill.charges}:
+            if period in want:
+                spend[period]["recurring"] += own
+                cats[period][_history_category(categorize(bill.title, own)[0])] += own
+
+    # ── loan repayments the caller made ──
+    for ln in db.query(Loan).filter(Loan.borrower.ilike(caller.name)):
+        for p in ln.payments:
+            if p.date[:7] in want:
+                spend[p.date[:7]]["repayments"] += p.amount
+                cats[p.date[:7]]["Loan repayments"] += p.amount
+
+    # ── investments ──
+    auto = []
+    for s in (db.query(StatementSkip)
+              .filter(StatementSkip.user_name.ilike(caller.name), StatementSkip.kind == "investment")
+              .order_by(StatementSkip.date.desc())):
+        if s.date[:7] in want:
+            auto.append({"id": s.id, "date": s.date, "merchant": s.merchant, "amount": s.amount,
+                         "kind": _kind_of(s.merchant), "source": s.source})
+    manual = db.query(ManualInvestment).filter(ManualInvestment.user_id == caller.id) \
+        .order_by(ManualInvestment.month.desc(), ManualInvestment.id.desc()).all()
+
+    out = {}
+    for ym in yms:
+        sp = {k: round(v, 2) for k, v in spend[ym].items()}
+        a = [x for x in auto if x["date"][:7] == ym]
+        m = [r for r in manual if _manual_in_month(r, ym)]
+        by_kind = defaultdict(float)
+        for x in a:
+            by_kind[x["kind"]] += x["amount"]
+        for r in m:
+            by_kind[r.kind] += r.amount
+        c = {k: round(v, 2) for k, v in sorted(cats[ym].items(), key=lambda kv: -kv[1]) if v >= 1}
+        out[ym] = {
+            "spend": sp,
+            "spent": round(sum(sp.values()), 2),
+            "invest": {"auto": round(sum(x["amount"] for x in a), 2),
+                       "manual": round(sum(r.amount for r in m), 2),
+                       "by_kind": {k: round(v, 2) for k, v in sorted(by_kind.items(), key=lambda kv: -kv[1])}},
+            "cats": c,
+            "needs": round(sum(v for k, v in c.items() if k in NEEDS), 2),
+            "cards": {"gross": round(card_gross[ym], 2), "already_entered": round(overlap[ym], 2),
+                      "passed_on": round(passed[ym], 2), "bills_without_breakup": unbroken[ym]},
+            "groups": [{"id": gid, "name": gmeta[gid]["name"], "emoji": gmeta[gid]["emoji"], "value": round(v, 2)}
+                       for gid, v in sorted(top_groups[ym].items(), key=lambda kv: -kv[1])[:5] if gid in gmeta],
+        }
+        out[ym]["invested"] = round(out[ym]["invest"]["auto"] + out[ym]["invest"]["manual"], 2)
+
+    return {
+        "salary": caller.monthly_salary, "salary_day": caller.salary_day, "today": today.isoformat(),
+        "months": yms, "by_month": out, "kinds": KINDS,
+        "investments": {"auto": auto, "manual": [_manual_out(r) for r in manual]},
+    }
+
+
+class ManualInvestmentIn(BaseModel):
+    month: str
+    amount: float
+    kind: str
+    recurring: bool = False
+    end_month: str | None = None
+    note: str | None = None
+
+
+def _check(p: ManualInvestmentIn) -> None:
+    ym = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+    if not ym.match(p.month) or (p.end_month and not ym.match(p.end_month)):
+        raise HTTPException(400, "Pick a month")
+    if p.end_month and p.end_month < p.month:
+        raise HTTPException(400, "The last month can't be before the first")
+    if not (0 < p.amount < 1e9):
+        raise HTTPException(400, "Enter an amount")
+    if p.kind not in KINDS:
+        raise HTTPException(400, "Pick what kind of investment it is")
+
+
+@router.post("/investments", response_model=dict, status_code=201)
+def add_investment(payload: ManualInvestmentIn, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    _check(payload)
+    r = ManualInvestment(user_id=caller.id, month=payload.month, amount=round(payload.amount, 2),
+                         kind=payload.kind, recurring=payload.recurring,
+                         end_month=payload.end_month if payload.recurring else None,
+                         note=(payload.note or "").strip()[:200] or None)
+    db.add(r)
+    db.commit()
+    return _manual_out(r)
+
+
+@router.put("/investments/{inv_id}", response_model=dict)
+def edit_investment(inv_id: int, payload: ManualInvestmentIn, db: Session = Depends(get_db),
+                    caller: User = Depends(current_user)):
+    _check(payload)
+    r = db.query(ManualInvestment).filter(ManualInvestment.id == inv_id, ManualInvestment.user_id == caller.id).first()
+    if not r:
+        raise HTTPException(404, "No such investment")
+    r.month, r.amount, r.kind, r.recurring = payload.month, round(payload.amount, 2), payload.kind, payload.recurring
+    r.end_month = payload.end_month if payload.recurring else None
+    r.note = (payload.note or "").strip()[:200] or None
+    db.commit()
+    return _manual_out(r)
+
+
+@router.delete("/investments/{inv_id}", status_code=204)
+def delete_investment(inv_id: int, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    db.query(ManualInvestment).filter(ManualInvestment.id == inv_id, ManualInvestment.user_id == caller.id).delete()
+    db.commit()

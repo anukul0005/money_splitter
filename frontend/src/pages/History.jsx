@@ -541,6 +541,21 @@ export default function History() {
               {focus && <> · {focus.label}</>}
             </p>
           </div>
+          <div className="flex items-center gap-2 shrink-0">
+          {/* Salary dashboard - only for someone who has entered their pay */}
+          {user?.monthly_salary > 0 && (
+            <button
+              onClick={() => nav('/salary')}
+              title="Salary dashboard"
+              aria-label="Salary dashboard"
+              className="w-7 h-7 flex items-center justify-center border border-field-700 text-brand-400 hover:text-white hover:border-brand-400 transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <rect x="3" y="6" width="18" height="13" rx="2" />
+                <path strokeLinecap="round" d="M16 12.5h2M3 10h18M7 3.5h10" />
+              </svg>
+            </button>
+          )}
           <div className="flex shrink-0 border border-field-700">
             {[['share', 'My share'], ['total', 'Group totals']].map(([v, lbl]) => (
               <button
@@ -553,6 +568,7 @@ export default function History() {
                 {lbl}
               </button>
             ))}
+          </div>
           </div>
         </div>
 
