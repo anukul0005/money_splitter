@@ -569,10 +569,13 @@ CSV_FORMATS: list[tuple[str, Callable[[bytes], list[StatementTxn]]]] = [
 
 def parse_statement(raw: bytes, password: str | None = None,
                     progress: Callable[[int, int], None] | None = None,
+                    bank_llm: bool | Callable[[list[str]], bool] = True,
                     ) -> tuple[str, list[StatementTxn]]:
     """(app name, transactions) for a statement file of any known type.
     Raises StatementLocked for a locked PDF without its password (see
-    pdf_lines), ValueError for anything it can't read."""
+    pdf_lines), ValueError for anything it can't read. `bank_llm` says
+    whether a PDF of no known layout goes to the (slow) AI bank-statement
+    reader - or, as a function of its text lines, whether this one does."""
     if raw.startswith(_OLE):
         raw = _unlock_office(raw, password)
     if raw.startswith(b"PK\x03\x04"):                 # an Excel (.xlsx) statement
@@ -598,7 +601,7 @@ def parse_statement(raw: bytes, password: str | None = None,
             return name or txns[0].source, txns
         except ValueError:
             continue
-    if raw.startswith(b"%PDF"):
+    if raw.startswith(b"%PDF") and (bank_llm(lines) if callable(bank_llm) else bank_llm):
         # Not a payment app's: any bank's account statement, read by the LLM
         # (bank_statement_llm) - the reading then shows as the bar's progress.
         import bank_statement_llm

@@ -340,6 +340,47 @@ function ProgressBar({ stage, fraction }) {
   )
 }
 
+const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
+
+/**
+ * The import's activity log, from the server: each step as it started
+ * (minutes into the import), the current one with how long it has been
+ * running - so a slow AI step reads as working, not frozen.
+ */
+function ActivityLog({ activity, live }) {
+  const log = activity?.log || []
+  if (!log.length) return null
+  const now = (Date.now() + activity.skew) / 1000      // the server's clock
+  const start = log[0].at
+  const lines = live ? log.slice(-6) : log
+  const current = lines[lines.length - 1]
+  const stuckFor = live ? now - current.at : 0
+  return (
+    <div className="mt-2">
+      <ul className="space-y-0.5 text-[11px]">
+        {lines.map((l, i) => {
+          const isNow = live && i === lines.length - 1
+          return (
+            <li key={`${l.at}-${i}`} className={`flex gap-2 ${isNow ? 'text-gray-800 font-semibold' : 'text-gray-400'}`}>
+              <span className="w-8 flex-shrink-0 tabular-nums">{clock(l.at - start)}</span>
+              <span className="min-w-0 break-words">
+                {isNow && <span className="inline-block w-2 h-2 mr-1.5 rounded-full bg-brand-400 animate-pulse align-middle" />}
+                {l.text}
+                {isNow && <span className="font-normal text-gray-400"> · {Math.max(0, Math.round(stuckFor))}s</span>}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+      {stuckFor > 25 && (
+        <p className="text-[11px] text-amber-700 mt-1.5">
+          Still working on this step - the AI and long statements can take a minute or two. It carries on on the server even if you leave this page.
+        </p>
+      )}
+    </div>
+  )
+}
+
 /**
  * Everything behind a statement upload: the hidden file input, the import
  * job with its progress bar, a password box when the PDF is locked, and
@@ -366,11 +407,20 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
   const [fromMail, setFromMail] = useState(false)   // this run is the mail sync, not a picked file
   const [noGmail, setNoGmail]   = useState(false)   // the mail sync needs Gmail connected first
   const [mailLocked, setMailLocked] = useState(null) // the locked statements the mail sync found
+  const [activity, setActivity] = useState(null)     // { log, skew } - the server's step-by-step log
+  const [, setTick] = useState(0)
 
   useEffect(() => () => clearTimeout(pollRef.current), [])
   const busy = progress !== null
+  // A once-a-second redraw while importing, for the current step's timer.
+  useEffect(() => {
+    if (!busy) return
+    const id = setInterval(() => setTick((t) => t + 1), 1000)
+    return () => clearInterval(id)
+  }, [busy])
+  const track = (data) => data.log && setActivity({ log: data.log, skew: data.now * 1000 - Date.now() })
 
-  const reset = () => { setNotice(''); setError(''); setResult(null); setLocked(false); setPassword(''); setShowPassword(false); setNoGmail(false); setMailLocked(null) }
+  const reset = () => { setNotice(''); setError(''); setResult(null); setLocked(false); setPassword(''); setShowPassword(false); setNoGmail(false); setMailLocked(null); setActivity(null) }
 
   const pick = (a) => {
     setApp(a); reset(); setFile(null); setFromMail(false)
@@ -412,6 +462,7 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
     pollRef.current = setTimeout(async () => {
       try {
         const { data } = await getImportJob(jobId)
+        track(data)
         if (data.status === 'done') {
           finish(); setResult(data.result); setLocked(false); setPassword('')
           // some mail statements imported, some still locked: ask for the password too
@@ -435,7 +486,7 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
 
   const upload = async (f, pw = '', keep = false) => {
     if (!f) return
-    setFile(f); setError(''); setResult(null); setNotice('')
+    setFile(f); setError(''); setResult(null); setNotice(''); setActivity(null)
     setProgress({ stage: 'Uploading', fraction: 0 })
     abortRef.current = new AbortController()
     try {
@@ -461,7 +512,7 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
   const mailSync = async (pw = '', keep = false) => {
     if (busy) return
     if (!pw) { reset(); setFile(null) }
-    setFromMail(true); setApp({ label: 'mail' }); setError(''); setResult(null); setNotice('')
+    setFromMail(true); setApp({ label: 'mail' }); setError(''); setResult(null); setNotice(''); setActivity(null)
     setProgress({ stage: 'Searching your mail', fraction: 0.02 })
     try {
       const { data } = await startMailSync(pw, keep)
@@ -491,7 +542,10 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
           ✕
         </button>
       )}
-      {busy && <ProgressBar stage={progress.stage} fraction={progress.fraction} />}
+      {/* With the log listing the steps, the bar just says what's running. */}
+      {busy && <ProgressBar fraction={progress.fraction}
+        stage={activity?.log?.length ? (fromMail ? 'Syncing statements' : 'Importing') : progress.stage} />}
+      {busy && <ActivityLog activity={activity} live />}
       {busy && (
         <div className="flex items-center justify-between gap-3 mt-1.5">
           <p className="text-[11px] text-gray-400">
@@ -591,6 +645,14 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
       {error && !busy && !locked && <p className="text-xs text-red-600 pr-5 mt-1">{error}</p>}
       {result?.mail && !busy && <MailSummary mail={result.mail} />}
       {result && !busy && (!result.mail || result.mail.imported.length > 0) && <StatementImportResult result={result} />}
+      {!busy && activity?.log?.length > 1 && (result || error || locked) && (
+        <details className="mt-2">
+          <summary className="text-[11px] font-bold text-gray-500 cursor-pointer">
+            What happened ({clock(activity.log[activity.log.length - 1].at - activity.log[0].at)})
+          </summary>
+          <ActivityLog activity={activity} />
+        </details>
+      )}
     </div>
   )
 

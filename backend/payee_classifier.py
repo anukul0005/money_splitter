@@ -98,6 +98,8 @@ def _chat(user_content: str) -> dict:
                 last_error = e
                 wait = float(e.headers.get("retry-after") or 0) if e.code == 429 else 0
                 if 0 < wait <= 60 and attempt < 2:
+                    import job_notes
+                    job_notes.note(f"AI is rate-limited - waiting {wait:.0f}s, then retrying")
                     time.sleep(wait + 0.5)
                     continue
                 break           # bad key, or a long wait: next provider

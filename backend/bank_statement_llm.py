@@ -62,6 +62,8 @@ def _ask(text: str) -> dict:
         except urllib.error.HTTPError as e:
             if e.code == 429 and attempt < 3:            # the free tier's per-minute limit: wait it out
                 wait = float(e.headers.get("retry-after") or 20)
+                import job_notes
+                job_notes.note(f"AI is rate-limited - waiting {min(wait, 60):.0f}s, then retrying")
                 time.sleep(min(wait, 60))
                 continue
             raise RuntimeError(f"Groq rejected the request ({e.code}): {e.read().decode(errors='replace')[:300]}") from e

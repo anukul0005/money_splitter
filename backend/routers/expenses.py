@@ -464,7 +464,8 @@ def import_statement(background_tasks: BackgroundTasks,
 
 
 def run_import(db: Session, caller: User, raw: bytes, password: str | None = None,
-               progress=None, saved_passwords: list[str] | None = None) -> tuple[dict, list[int]]:
+               progress=None, saved_passwords: list[str] | None = None,
+               bank_llm=True) -> tuple[dict, list[int]]:
     """Fill the caller's month-wise "MONTHLY EXPENSES <MON> <YEAR>" groups
     from a payment-app statement - PhonePe CSV, Google Pay PDF, or any
     other type statement_import knows. Returns (summary, ids of the
@@ -513,7 +514,7 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
     tries = [password] if password else [None, *(saved_passwords or [])]
     for i, pw in enumerate(tries):
         try:
-            source, txns = parse_statement(raw, pw, read)
+            source, txns = parse_statement(raw, pw, read, bank_llm=bank_llm)
             break
         except StatementLocked:
             if i == len(tries) - 1:
@@ -521,7 +522,7 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
                 # included) -> ask for it.
                 raise StatementLocked(wrong=bool(password)) from None
     used_saved = not password and i > 0
-    step("Matching with your entries", 0.30)
+    step(f"Matching {len(txns)} {source} payments with your entries", 0.30)
 
     mine = caller_groups(db, caller)
     existing_refs = {r for g in mine for e in g.expenses for r in _refs(e.txn_ref)}
@@ -612,7 +613,7 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
     ordered = sorted(txns, key=lambda x: (x.date, x.time or ""))
     for n, t in enumerate(ordered, 1):
         if n % 25 == 0:
-            step("Matching with your entries", 0.30 + 0.20 * n / len(ordered))
+            step(f"Matching {len(txns)} {source} payments with your entries", 0.30 + 0.20 * n / len(ordered))
         if t.kind != "Debit":
             credits += 1
             continue
@@ -689,10 +690,12 @@ def run_import(db: Session, caller: User, raw: bytes, password: str | None = Non
     llm = {"asked": len(unknown), "answered": 0, "error": None}
     if unknown and payee_classifier.available():
         try:
-            step("Categorising payees with AI", 0.50)
+            batches = -(-len(unknown) // payee_classifier.BATCH)
+            ai = lambda done: f"Categorising {len(unknown)} new payees with AI (batch {min(done + 1, batches)} of {batches})"
+            step(ai(0), 0.50)
             answers = payee_classifier.classify(
                 [_payee_facts(k, ts) for k, ts in unknown.items()],
-                progress=lambda done, total: step("Categorising payees with AI", 0.50 + 0.40 * done / total))
+                progress=lambda done, total: step(ai(done), 0.50 + 0.40 * done / total))
         except Exception as e:  # the LLM is a help, never a reason an import fails
             answers, llm["error"] = {}, str(e)[:200]
         for key, a in answers.items():
@@ -898,11 +901,28 @@ class _Cancelled(Exception):
     pass
 
 
+_LOG_LINES = 40
+
+
+def _job_log(job_id: str, message: str) -> None:
+    """A line in the job's activity log - what the progress panel lists, so
+    a slow step reads as working rather than stuck."""
+    with _jobs_lock:
+        log = _jobs[job_id].setdefault("log", [])
+        log.append({"at": time.time(), "text": message})
+        del log[:-_LOG_LINES]
+
+
 def _job_update(job_id: str, **fields) -> None:
     with _jobs_lock:
         job = _jobs[job_id]
         if job.get("cancel"):
             raise _Cancelled()
+        if fields.get("stage") and fields["stage"] != job.get("logged_stage"):
+            job["logged_stage"] = fields["stage"]
+            log = job.setdefault("log", [])
+            log.append({"at": time.time(), "text": fields["stage"]})
+            del log[:-_LOG_LINES]
         job.update(fields)
 
 
@@ -913,8 +933,10 @@ def _job_finish(job_id: str, error: dict) -> None:
 
 def _run_job(job_id: str, user_id: int, raw: bytes, password: str | None,
              remember: bool = False) -> None:
+    import job_notes
     from database import get_session_factory
     db = get_session_factory()()
+    job_notes.listen(lambda m: _job_log(job_id, m))
     try:
         caller = db.get(User, user_id)
         result, created_ids = run_import(
@@ -948,6 +970,7 @@ def _run_job(job_id: str, user_id: int, raw: bytes, password: str | None,
         _job_finish(job_id, error={"code": "failed", "message": "The import failed - please try again."})
         return
     finally:
+        job_notes.listen(None)
         db.close()
     if created_ids:
         _index_many_bg(created_ids)
@@ -996,18 +1019,22 @@ def _add_results(total: dict, r: dict) -> None:
 
 
 def _run_mail_job(job_id: str, user_id: int, password: str | None, remember: bool, days: int) -> None:
+    import job_notes
     import mail_statements
     from database import get_session_factory
     from models import GmailConnection, MailStatement
     db = get_session_factory()()
+    job_notes.listen(lambda m: _job_log(job_id, m))
     created_all = []
     try:
         caller = db.get(User, user_id)
         conn = db.query(GmailConnection).filter(GmailConnection.user_id == user_id).first()
-        _job_update(job_id, stage="Searching your mail", progress=0.02)
+        _job_update(job_id, stage=f"Searching {conn.gmail_address or 'your Gmail'} for statement emails", progress=0.02)
         service, ids = mail_statements.find(conn, days)
         done = {m for (m,) in db.query(MailStatement.gmail_message_id).filter(MailStatement.user_id == user_id).all()}
         todo = [m for m in ids if m not in done]
+        _job_log(job_id, f"Found {len(ids)} statement email{'' if len(ids) == 1 else 's'}"
+                         + (f" - {len(ids) - len(todo)} already imported, {len(todo)} to read" if len(todo) < len(ids) else ""))
         saved = [*_statement_passwords(db, user_id),
                  *(pw for pw in (_decrypt(r.password_encrypted) for r in
                                  db.query(BankPassword).filter(BankPassword.user_id == user_id).all()) if pw)]
@@ -1016,18 +1043,26 @@ def _run_mail_job(job_id: str, user_id: int, password: str | None, remember: boo
                 "password_saved": False}
         apps = []
         for n, mid in enumerate(todo):
-            share = lambda stage, f, n=n: _job_update(job_id, stage=stage, progress=round(0.05 + 0.95 * (n + f) / len(todo), 3))
-            share(f"Reading statement {n + 1} of {len(todo)}", 0)
+            head = f"Email {n + 1} of {len(todo)}"
+            share = lambda stage, f, n=n, head=head: _job_update(
+                job_id, stage=f"{head} · {stage}", progress=round(0.05 + 0.95 * (n + f) / len(todo), 3))
+            share("downloading", 0)
             subject, files = mail_statements.attachments(service, mid)
+            _job_log(job_id, f"📧 {head}: {subject or '(no subject)'}"
+                             + (f" - {len(files)} file{'s' if len(files) > 1 else ''}" if files else " - no statement file"))
             status, source = "unreadable", None
             for name, raw in files:
                 try:
                     try:
-                        result, created = run_import(db, caller, raw, None, share, saved_passwords=saved)
+                        # A PDF of no known layout goes to the slow AI bank reader
+                        # only if it is one of these apps' at all - not every PDF
+                        # these senders mail is a statement.
+                        result, created = run_import(db, caller, raw, None, share, saved_passwords=saved,
+                                                     bank_llm=_mentions_app)
                     except StatementLocked:
                         if not password:
                             raise
-                        result, created = run_import(db, caller, raw, password, share)
+                        result, created = run_import(db, caller, raw, password, share, bank_llm=_mentions_app)
                         if remember:
                             _remember_statement_password(db, user_id, result["source"], password)
                             mail["password_saved"] = True
@@ -1035,8 +1070,18 @@ def _run_mail_job(job_id: str, user_id: int, password: str | None, remember: boo
                 except StatementLocked:
                     status = "locked"
                     mail["locked"].append({"subject": subject or name, "file": name})
+                    _job_log(job_id, f"🔒 {name} is locked - none of the saved passwords open it")
                     continue
                 except ValueError:
+                    _job_log(job_id, f"✗ {name}: not a statement the app can read - skipped")
+                    continue
+                except _Cancelled:
+                    raise
+                except Exception as e:         # the AI down, say: try this email again next sync
+                    print(f"[mail-sync] {name} failed: {e!r}")
+                    db.rollback()
+                    status = "retry" if status != "imported" else status
+                    _job_log(job_id, f"⚠ {name} couldn't be read just now - it'll be tried again next sync")
                     continue
                 status, source = "imported", result["source"]
                 created_all += created
@@ -1044,9 +1089,11 @@ def _run_mail_job(job_id: str, user_id: int, password: str | None, remember: boo
                 total["used_saved_password"] |= bool(result.get("used_saved_password"))
                 mail["imported"].append({"subject": subject or name, "file": name, "source": source,
                                          "created": result.get("created", 0)})
+                _job_log(job_id, f"✓ {source} statement: {result.get('created', 0)} new expense"
+                                 f"{'' if result.get('created', 0) == 1 else 's'} added")
                 if source not in apps:
                     apps.append(source)
-            if status != "locked":           # a locked one is tried again next time
+            if status not in ("locked", "retry"):   # those are tried again next time
                 db.add(MailStatement(user_id=user_id, gmail_message_id=mid, status=status, source=source))
                 db.commit()
             if status == "unreadable":
@@ -1076,9 +1123,15 @@ def _run_mail_job(job_id: str, user_id: int, password: str | None, remember: boo
         else:
             _job_finish(job_id, error={"code": "failed", "message": "Couldn't read your mail - try again, or reconnect Gmail."})
     finally:
+        job_notes.listen(None)
         db.close()
     if created_all:
         _index_many_bg(created_all)
+
+
+def _mentions_app(lines: list[str]) -> bool:
+    text = " ".join(lines[:80]).lower()
+    return any(w in text for w in ("phonepe", "paytm", "google pay", "gpay"))
 
 
 def _gmail_expired(e: Exception) -> bool:
@@ -1167,4 +1220,7 @@ def import_job_status(job_id: str, caller: User = Depends(current_user)):
         if job is None or job["user_id"] != caller.id:
             raise HTTPException(404, "No such import - it may have finished over an hour ago.")
         job["touched"] = time.time()
-        return {k: v for k, v in job.items() if k not in ("user_id", "touched", "cancel", "mail")}
+        out = {k: v for k, v in job.items() if k not in ("user_id", "touched", "cancel", "mail", "logged_stage")}
+        out["log"] = list(job.get("log", []))
+        out["now"] = time.time()          # so the app can say "for 40s" whatever the phone's clock says
+        return out
