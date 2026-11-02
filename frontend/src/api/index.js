@@ -100,6 +100,13 @@ export const startImportJob     = (file, password, onUploadProgress, signal, rem
   return api.post('/expenses/import-jobs', fd, { onUploadProgress, signal })
 }
 export const cancelImportJob    = (jobId)    => api.post(`/expenses/import-jobs/${jobId}/cancel`)
+// Payment-app statements found in Gmail, imported the same way - polled with getImportJob.
+export const startMailSync      = (password, remember = false) => {
+  const fd = new FormData()
+  if (password) fd.append('password', password)
+  if (password && remember) fd.append('remember', 'true')
+  return api.post('/expenses/mail-sync-jobs', fd)
+}
 // Remembered statement passwords - app names only ever come back, never the passwords.
 export const listStatementPasswords  = ()    => api.get('/expenses/statement-passwords')
 export const forgetStatementPassword = (app) => api.delete(`/expenses/statement-passwords/${encodeURIComponent(app)}`)
@@ -134,7 +141,7 @@ export const stopBillMember    = (id, member) => api.post(`/loans/bills/${id}/st
 
 // ── Credit Cards (Gmail-connected statement scanning) ──────────────────────────
 export const getGmailStatus     = ()          => api.get('/gmail/status')
-export const getGmailConnectUrl = ()          => api.get('/gmail/connect')
+export const getGmailConnectUrl = (purpose)   => api.get('/gmail/connect', { params: purpose ? { purpose } : {} })
 export const disconnectGmail    = ()          => api.delete('/gmail/disconnect')
 export const listCardBanks      = ()          => api.get('/credit-cards/banks')
 export const setCardBankPassword = (data)     => api.post('/credit-cards/banks', data)

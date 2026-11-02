@@ -5,6 +5,7 @@ import time
 import uuid
 import statistics
 from collections import defaultdict
+from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -944,6 +945,137 @@ def start_import_job(file: UploadFile = File(...), password: str = Form(""),
     return {"job_id": job_id}
 
 
+# ── mail sync: the same import, for statements found in Gmail ─────────────
+# PhonePe / Paytm / Google Pay statement emails (mail_statements.py), each
+# attachment imported as if uploaded - saved passwords tried first; a
+# statement still locked is reported, and the next sync with a password
+# typed in opens it (and remembers it, if asked). Its result is the
+# imports' results added together, plus what the sync found ("mail").
+
+def _add_results(total: dict, r: dict) -> None:
+    for k, v in r.items():
+        if isinstance(v, bool) or k == "source":
+            continue
+        if isinstance(v, (int, float)):
+            total[k] = total.get(k, 0) + v
+        elif isinstance(v, list):
+            total.setdefault(k, []).extend(v)
+        elif k == "llm" and isinstance(v, dict):
+            t = total.setdefault("llm", {})
+            t["asked"] = t.get("asked", 0) + (v.get("asked") or 0)
+            if v.get("error"):
+                t["error"] = v["error"]
+
+
+def _run_mail_job(job_id: str, user_id: int, password: str | None, remember: bool, days: int) -> None:
+    import mail_statements
+    from database import get_session_factory
+    from models import GmailConnection, MailStatement
+    db = get_session_factory()()
+    created_all = []
+    try:
+        caller = db.get(User, user_id)
+        conn = db.query(GmailConnection).filter(GmailConnection.user_id == user_id).first()
+        _job_update(job_id, stage="Searching your mail", progress=0.02)
+        service, ids = mail_statements.find(conn, days)
+        done = {m for (m,) in db.query(MailStatement.gmail_message_id).filter(MailStatement.user_id == user_id).all()}
+        todo = [m for m in ids if m not in done]
+        saved = [*_statement_passwords(db, user_id),
+                 *(pw for pw in (_decrypt(r.password_encrypted) for r in
+                                 db.query(BankPassword).filter(BankPassword.user_id == user_id).all()) if pw)]
+        total = {"source": "", "used_saved_password": False}
+        mail = {"emails": len(ids), "already": len(ids) - len(todo), "imported": [], "locked": [], "unreadable": 0,
+                "password_saved": False}
+        apps = []
+        for n, mid in enumerate(todo):
+            share = lambda stage, f, n=n: _job_update(job_id, stage=stage, progress=round(0.05 + 0.95 * (n + f) / len(todo), 3))
+            share(f"Reading statement {n + 1} of {len(todo)}", 0)
+            subject, files = mail_statements.attachments(service, mid)
+            status, source = "unreadable", None
+            for name, raw in files:
+                try:
+                    try:
+                        result, created = run_import(db, caller, raw, None, share, saved_passwords=saved)
+                    except StatementLocked:
+                        if not password:
+                            raise
+                        result, created = run_import(db, caller, raw, password, share)
+                        if remember:
+                            _remember_statement_password(db, user_id, result["source"], password)
+                            mail["password_saved"] = True
+                        saved.append(password)
+                except StatementLocked:
+                    status = "locked"
+                    mail["locked"].append({"subject": subject or name, "file": name})
+                    continue
+                except ValueError:
+                    continue
+                status, source = "imported", result["source"]
+                created_all += created
+                _add_results(total, result)
+                total["used_saved_password"] |= bool(result.get("used_saved_password"))
+                mail["imported"].append({"subject": subject or name, "file": name, "source": source,
+                                         "created": result.get("created", 0)})
+                if source not in apps:
+                    apps.append(source)
+            if status != "locked":           # a locked one is tried again next time
+                db.add(MailStatement(user_id=user_id, gmail_message_id=mid, status=status, source=source))
+                db.commit()
+            if status == "unreadable":
+                mail["unreadable"] += 1
+        total["source"] = " + ".join(apps)
+        total["mail"] = mail
+        conn.last_synced_at = datetime.now(timezone.utc)
+        db.commit()
+        if mail["locked"] and not mail["imported"]:
+            _job_finish(job_id, error={"code": "password_wrong" if password else "password_required",
+                                       "message": (f"{len(mail['locked'])} statement{'s' if len(mail['locked']) > 1 else ''} "
+                                                   f"in your mail need{'' if len(mail['locked']) > 1 else 's'} a password"
+                                                   + (" - that one didn't open it." if password else ".")),
+                                       "mail": mail})
+            return
+        with _jobs_lock:
+            _jobs[job_id].update(status="done", stage="Done", progress=1.0, result=total)
+    except _Cancelled:
+        db.rollback()
+        with _jobs_lock:
+            _jobs[job_id].update(status="cancelled", stage="Cancelled")
+    except Exception as e:
+        print(f"[mail-sync] job {job_id} failed: {e!r}")
+        _job_finish(job_id, error={"code": "failed", "message": "Couldn't read your mail - try again, or reconnect Gmail."})
+    finally:
+        db.close()
+    if created_all:
+        _index_many_bg(created_all)
+
+
+def _decrypt(s):
+    from secret_box import decrypt
+    return decrypt(s)
+
+
+@router.post("/mail-sync-jobs", response_model=dict)
+def start_mail_sync(password: str = Form(""), remember: bool = Form(False), days: int = Form(120),
+                    db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Look through the caller's Gmail for payment-app statements and import
+    them; poll GET /expenses/import-jobs/{job_id} like an upload."""
+    from models import GmailConnection
+    if not db.query(GmailConnection).filter(GmailConnection.user_id == caller.id).first():
+        raise HTTPException(400, {"code": "gmail_not_connected", "message": "Connect your Gmail first."})
+    job_id = uuid.uuid4().hex
+    now = time.time()
+    with _jobs_lock:
+        for k in [k for k, j in _jobs.items() if now - j["touched"] > 3600]:
+            del _jobs[k]
+        if any(j["user_id"] == caller.id and j["status"] == "running" and j.get("mail") for j in _jobs.values()):
+            raise HTTPException(409, "A mail sync is already running.")
+        _jobs[job_id] = {"user_id": caller.id, "status": "running", "stage": "Starting",
+                         "progress": 0.0, "touched": now, "mail": True}
+    threading.Thread(target=_run_mail_job, args=(job_id, caller.id, password or None, remember, max(7, min(days, 400))),
+                     daemon=True).start()
+    return {"job_id": job_id}
+
+
 @router.post("/import-jobs/{job_id}/cancel", response_model=dict)
 def cancel_import_job(job_id: str, caller: User = Depends(current_user)):
     """Stop an import that's still running. It stops at its next progress
@@ -966,4 +1098,4 @@ def import_job_status(job_id: str, caller: User = Depends(current_user)):
         if job is None or job["user_id"] != caller.id:
             raise HTTPException(404, "No such import - it may have finished over an hour ago.")
         job["touched"] = time.time()
-        return {k: v for k, v in job.items() if k not in ("user_id", "touched", "cancel")}
+        return {k: v for k, v in job.items() if k not in ("user_id", "touched", "cancel", "mail")}

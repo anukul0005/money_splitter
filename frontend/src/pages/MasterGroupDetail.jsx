@@ -7,7 +7,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import StatsPanel from '../components/StatsPanel'
 import { buildMasterGroups } from '../utils/masterGroups'
 import Dropdown from '../components/Dropdown'
-import { StatementUploadButton, useStatementUpload } from '../components/StatementUpload'
+import { MailSyncButton, StatementUploadButton, useStatementUpload } from '../components/StatementUpload'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 
@@ -187,7 +187,10 @@ export default function MasterGroupDetail() {
               month-wise groups. Otherwise "+ Add" creates today's group in
               this master - see onAdd / addToday. */}
           {isMonthly ? (
-            <StatementUploadButton busy={upload.busy} onPick={upload.pick} />
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              <MailSyncButton busy={upload.busy} onSync={upload.mailSync} />
+              <StatementUploadButton busy={upload.busy} onPick={upload.pick} />
+            </div>
           ) : (
             <button
               onClick={onAdd}

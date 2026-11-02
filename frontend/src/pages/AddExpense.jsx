@@ -422,7 +422,15 @@ export default function AddExpense() {
                   onClick={() => statement.pick(ANY_STATEMENT)}
                   className="w-full mt-2 py-2.5 text-xs font-bold text-gray-700 bg-white border border-amber-300 rounded-md hover:bg-amber-100 active:scale-[0.98] transition-all disabled:opacity-50"
                 >
-                  📄 Upload statement (.csv / .pdf)
+                  📄 Upload statement (.csv / .pdf / .xlsx)
+                </button>
+                <button
+                  type="button"
+                  disabled={statement.busy}
+                  onClick={() => statement.mailSync()}
+                  className="w-full mt-2 py-2.5 text-xs font-bold text-gray-700 bg-white border border-amber-300 rounded-md hover:bg-amber-100 active:scale-[0.98] transition-all disabled:opacity-50"
+                >
+                  📧 Sync statements from Gmail
                 </button>
                 <p className="text-[11px] text-gray-500 mt-1">PhonePe (.csv / .pdf), Google Pay, Paytm, or any bank's PDF statement - password-protected PDFs work too</p>
                 {statement.input}

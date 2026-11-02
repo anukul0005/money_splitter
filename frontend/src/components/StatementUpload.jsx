@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { startImportJob, getImportJob, cancelImportJob, listStatementPasswords, forgetStatementPassword } from '../api'
+import { startImportJob, getImportJob, cancelImportJob, listStatementPasswords, forgetStatementPassword,
+  startMailSync, getGmailConnectUrl } from '../api'
 import StatementImportResult from './StatementImportResult'
 
 // The payment apps (and banks) a statement can come from, and the file types each
@@ -8,12 +9,12 @@ import StatementImportResult from './StatementImportResult'
 const APPS = [
   { key: 'gpay',    label: 'Google Pay', hint: 'PDF statement',       accept: '.pdf,application/pdf' },
   { key: 'phonepe', label: 'PhonePe',    hint: 'CSV or PDF statement', accept: '.csv,text/csv,.pdf,application/pdf' },
-  { key: 'paytm',   label: 'Paytm',      hint: 'PDF statement',       accept: '.pdf,application/pdf' },
+  { key: 'paytm',   label: 'Paytm',      hint: 'PDF or Excel statement', accept: '.pdf,application/pdf,.xlsx,.csv,text/csv' },
   // Any bank's account statement (HDFC, SBI, ICICI, ...) - read by AI on the server
   { key: 'bank',    label: 'Bank',       hint: "Any bank's PDF statement", accept: '.pdf,application/pdf' },
 ]
 // For a single "upload a statement" button with no app picker.
-export const ANY_STATEMENT = { key: 'any', label: 'statement', accept: '.csv,text/csv,.pdf,application/pdf' }
+export const ANY_STATEMENT = { key: 'any', label: 'statement', accept: '.csv,text/csv,.pdf,application/pdf,.xlsx' }
 
 // Sending the file is the first slice of the bar; the server's own
 // progress (reading pages, matching, AI, saving) fills the rest.
@@ -92,6 +93,40 @@ export function StatementUploadButton({ busy, onPick }) {
   )
 }
 
+/** The monthly page's small "Sync" button - statements from Gmail. */
+export function MailSyncButton({ busy, onSync }) {
+  return (
+    <button
+      onClick={() => onSync()}
+      disabled={busy}
+      title="Import PhonePe, Paytm and Google Pay statements from your Gmail"
+      className="flex-shrink-0 flex items-center gap-1 bg-cream border border-amber-200 text-gray-500 hover:bg-amber-50 rounded-md px-2.5 py-1.5 text-xs font-bold active:scale-95 transition-all shadow-sm disabled:opacity-50"
+    >
+      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.3} viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h5M20 20v-5h-5M5.6 15A7 7 0 0018 17.4M18.4 9A7 7 0 006 6.6" />
+      </svg>
+      Sync
+    </button>
+  )
+}
+
+/** What the mail sync found, above the usual import result. */
+function MailSummary({ mail }) {
+  return (
+    <div className="text-xs text-gray-700 pr-5 mb-2 space-y-0.5">
+      <p className="font-bold">📧 {mail.emails} statement email{mail.emails === 1 ? '' : 's'} in your Gmail</p>
+      {mail.imported.map((x, i) => (
+        <p key={i} className="text-gray-500 truncate">✓ {x.source}: {x.subject} · {x.created} new</p>
+      ))}
+      {mail.already > 0 && <p className="text-gray-400">{mail.already} already imported before</p>}
+      {mail.locked.length > 0 && <p className="text-amber-700">🔒 {mail.locked.length} still locked - sync again with its password</p>}
+      {mail.unreadable > 0 && <p className="text-gray-400">{mail.unreadable} email{mail.unreadable > 1 ? 's' : ''} had no statement the app could read</p>}
+      {mail.password_saved && <p className="text-gray-500">🔒 Password saved for next time</p>}
+      {mail.emails === 0 && <p className="text-gray-500">Nothing from PhonePe, Paytm or Google Pay in the last 4 months.</p>}
+    </div>
+  )
+}
+
 function ProgressBar({ stage, fraction }) {
   const pct = Math.max(2, Math.min(100, Math.round(fraction * 100)))
   return (
@@ -133,14 +168,17 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
   const [result, setResult]     = useState(null)
   const [cancelling, setCancelling] = useState(false)
   const [notice, setNotice]     = useState('')
+  const [fromMail, setFromMail] = useState(false)   // this run is the mail sync, not a picked file
+  const [noGmail, setNoGmail]   = useState(false)   // the mail sync needs Gmail connected first
+  const [mailLocked, setMailLocked] = useState(null) // the locked statements the mail sync found
 
   useEffect(() => () => clearTimeout(pollRef.current), [])
   const busy = progress !== null
 
-  const reset = () => { setNotice(''); setError(''); setResult(null); setLocked(false); setPassword(''); setShowPassword(false) }
+  const reset = () => { setNotice(''); setError(''); setResult(null); setLocked(false); setPassword(''); setShowPassword(false); setNoGmail(false); setMailLocked(null) }
 
   const pick = (a) => {
-    setApp(a); reset(); setFile(null)
+    setApp(a); reset(); setFile(null); setFromMail(false)
     // The input's accept list has to be in place before the chooser opens.
     if (inputRef.current) {
       inputRef.current.accept = a.accept
@@ -164,8 +202,11 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
 
   const fail = (detail) => {
     finish()
-    if (detail?.code === 'password_required' || detail?.code === 'password_wrong') {
+    if (detail?.code === 'gmail_not_connected') {
+      setNoGmail(true)
+    } else if (detail?.code === 'password_required' || detail?.code === 'password_wrong') {
       setLocked(true)
+      if (detail.mail) setMailLocked(detail.mail.locked)
       setError(detail.code === 'password_wrong' ? detail.message : '')
     } else {
       setError((typeof detail === 'string' ? detail : detail?.message) || 'Could not import that file.')
@@ -178,6 +219,8 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
         const { data } = await getImportJob(jobId)
         if (data.status === 'done') {
           finish(); setResult(data.result); setLocked(false); setPassword('')
+          // some mail statements imported, some still locked: ask for the password too
+          if (data.result?.mail?.locked?.length) { setLocked(true); setMailLocked(data.result.mail.locked) }
           onImported?.()
         } else if (data.status === 'cancelled') {
           finish(); setNotice('Import cancelled - nothing from that statement was saved.')
@@ -218,11 +261,31 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
     }
   }
 
+  // PhonePe / Paytm / Google Pay statements in Gmail, imported like uploads
+  // (the backend's mail-sync job); a password only when one is still locked.
+  const mailSync = async (pw = '', keep = false) => {
+    if (busy) return
+    if (!pw) { reset(); setFile(null) }
+    setFromMail(true); setApp({ label: 'mail' }); setError(''); setResult(null); setNotice('')
+    setProgress({ stage: 'Searching your mail', fraction: 0.02 })
+    try {
+      const { data } = await startMailSync(pw, keep)
+      jobRef.current = data.job_id
+      poll(data.job_id)
+    } catch (err) {
+      fail(err.response?.data?.detail)
+    }
+  }
+  const connectGmail = async () => {
+    try { window.location.href = (await getGmailConnectUrl('expenses')).data.url }
+    catch (err) { setError(err.response?.data?.detail || "Couldn't start connecting Gmail.") }
+  }
+
   const input = (
     <input ref={inputRef} type="file" className="hidden" onChange={(e) => upload(e.target.files?.[0])} />
   )
 
-  const panel = (busy || error || result || locked || notice) && (
+  const panel = (busy || error || result || locked || notice || noGmail) && (
     <div className={`${panelClassName} card px-4 py-3 relative`}>
       {!busy && (
         <button
@@ -236,7 +299,9 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
       {busy && <ProgressBar stage={progress.stage} fraction={progress.fraction} />}
       {busy && (
         <div className="flex items-center justify-between gap-3 mt-1.5">
-          <p className="text-[11px] text-gray-400">Your {app?.label} statement - this can take a minute.</p>
+          <p className="text-[11px] text-gray-400">
+            {fromMail ? 'PhonePe, Paytm and Google Pay statements in your Gmail' : `Your ${app?.label} statement`} - this can take a minute.
+          </p>
           <button
             onClick={cancel}
             disabled={cancelling}
@@ -247,8 +312,18 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
         </div>
       )}
       {notice && !busy && <p className="text-xs text-gray-600 pr-5">{notice}</p>}
+      {noGmail && !busy && (
+        <div className="pr-6">
+          <p className="text-sm font-bold text-gray-800">Connect Gmail to sync statements</p>
+          <p className="text-[11px] text-gray-500 mt-0.5">
+            Read-only: the app looks for PhonePe, Paytm and Google Pay statement emails and imports their PDF, CSV or Excel files.
+            The same connection as Credit Cards.
+          </p>
+          <button onClick={connectGmail} className="btn-primary text-sm mt-3">Connect Gmail</button>
+        </div>
+      )}
       {locked && !busy && (
-        <form onSubmit={(e) => { e.preventDefault(); if (password) upload(file, password, remember) }}>
+        <form onSubmit={(e) => { e.preventDefault(); if (password) (fromMail ? mailSync(password, remember) : upload(file, password, remember)) }}>
           <div className="flex items-center gap-3 pr-6">
             <span className="flex-shrink-0 w-9 h-9 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
@@ -258,7 +333,9 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
             </span>
             <div className="min-w-0">
               <p className="text-sm font-bold text-gray-800">Password needed</p>
-              <p className="text-[11px] text-gray-500 truncate">{file?.name}</p>
+              <p className="text-[11px] text-gray-500 truncate">
+                {fromMail ? (mailLocked || []).map((x) => x.subject).join(' · ') || 'A statement in your mail' : file?.name}
+              </p>
             </div>
           </div>
 
@@ -312,9 +389,10 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
         </form>
       )}
       {error && !busy && !locked && <p className="text-xs text-red-600 pr-5 mt-1">{error}</p>}
-      {result && !busy && <StatementImportResult result={result} />}
+      {result?.mail && !busy && <MailSummary mail={result.mail} />}
+      {result && !busy && (!result.mail || result.mail.imported.length > 0) && <StatementImportResult result={result} />}
     </div>
   )
 
-  return { busy, pick, input, panel }
+  return { busy, pick, mailSync, input, panel }
 }

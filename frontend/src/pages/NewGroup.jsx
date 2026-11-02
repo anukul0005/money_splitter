@@ -64,6 +64,14 @@ export default function NewGroup() {
   const [picked, setPicked]       = useState('')        // a previous group with these people, chosen to add to ('' = today's)
   const [payMode, setPayMode]     = useState(() => { try { return localStorage.getItem(PAYMENT_KEY) || 'upi' } catch { return 'upi' } })
   const statement = useStatementUpload(null, { panelClassName: 'mt-2' })
+  // Back from connecting Gmail for the sync: start it straight away
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search)
+    if (q.get('gmail') === 'connected') {
+      window.history.replaceState(null, '', window.location.pathname)
+      statement.mailSync()
+    }
+  }, [])
 
   // The expense
   const [amount, setAmount]       = useState('')
@@ -337,8 +345,12 @@ export default function NewGroup() {
                   className="py-2.5 text-xs font-bold text-gray-700 bg-white border border-amber-300 rounded-md hover:bg-amber-100 active:scale-[0.98] transition-all disabled:opacity-50">
                   🏦 Bank statement
                 </button>
+                <button type="button" disabled={statement.busy} onClick={() => statement.mailSync()}
+                  className="col-span-2 py-2.5 text-xs font-bold text-gray-700 bg-white border border-amber-300 rounded-md hover:bg-amber-100 active:scale-[0.98] transition-all disabled:opacity-50">
+                  📧 Sync statements from Gmail
+                </button>
               </div>
-              <p className="text-[10px] text-gray-500 mt-1.5">Any bank's PDF statement (HDFC, SBI, ICICI, …) or a PhonePe, Google Pay or Paytm one: each payment is read and filed into its month's personal expenses by itself.</p>
+              <p className="text-[10px] text-gray-500 mt-1.5">Any bank's PDF statement (HDFC, SBI, ICICI, …) or a PhonePe, Google Pay or Paytm one: each payment is read and filed into its month's personal expenses by itself. Gmail sync finds PhonePe, Paytm and Google Pay statement emails (PDF, CSV or Excel, password-protected too) and imports them the same way.</p>
               {statement.input}
               {statement.panel}
               <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden"

@@ -901,6 +901,23 @@ class BankPassword(Base):
     __table_args__ = (UniqueConstraint("user_id", "bank", name="uq_bank_password_user_bank"),)
 
 
+class MailStatement(Base):
+    """A payment-app statement email the mail sync has dealt with, so the
+    next sync doesn't download and read it again. Not kept for one still
+    locked (it's tried again once a password is given)."""
+
+    __tablename__ = "mail_statements"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    gmail_message_id = Column(String(64), nullable=False)
+    status = Column(String(20), nullable=False)       # imported | unreadable
+    source = Column(String(40), nullable=True)        # PhonePe / Paytm / Google Pay
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("user_id", "gmail_message_id", name="uq_mail_statement_user_msg"),)
+
+
 class UpiId(Base):
     """A UPI ID (VPA) this user can be paid at. Not a secret - a UPI ID is
     exactly the thing you hand out so someone can pay you, so unlike
