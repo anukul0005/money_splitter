@@ -228,6 +228,7 @@ def dashboard(months: int = 12, db: Session = Depends(get_db), caller: User = De
     return {
         "salary": caller.monthly_salary, "salary_day": caller.salary_day, "today": today.isoformat(),
         "months": yms, "by_month": out, "kinds": KINDS,
+        "needs_categories": sorted(NEEDS),     # everything else in "cats" is a want
         "investments": {"auto": auto, "manual": [_manual_out(r) for r in manual]},
     }
 
