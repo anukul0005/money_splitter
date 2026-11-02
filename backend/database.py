@@ -229,6 +229,7 @@ _ADDED_COLUMNS = [
     ("payments", "settlement_amount", "DOUBLE PRECISION"),
     ("loan_payments", "settlement_ref", "VARCHAR(32)"),
     ("recurring_charges", "settlement_ref", "VARCHAR(32)"),
+    ("gmail_connections", "mail_synced_at", "TIMESTAMP WITH TIME ZONE"),
 ]
 
 # (index name, statement)

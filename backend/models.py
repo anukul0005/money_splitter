@@ -789,6 +789,9 @@ class GmailConnection(Base):
     refresh_token_encrypted = Column(Text, nullable=False)
     connected_at = Column(DateTime(timezone=True), server_default=func.now())
     last_synced_at = Column(DateTime(timezone=True), nullable=True)
+    # The monthly expenses' statement sync (routers/expenses.py), kept apart
+    # from the card statements' last_synced_at above.
+    mail_synced_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class BettingGmailConnection(Base):

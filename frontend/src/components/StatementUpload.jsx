@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { startImportJob, getImportJob, cancelImportJob, listStatementPasswords, forgetStatementPassword,
-  startMailSync, getGmailConnectUrl } from '../api'
+  revealStatementPassword, setStatementPassword, getMailSyncStatus, startMailSync, getGmailConnectUrl } from '../api'
 import StatementImportResult from './StatementImportResult'
 
 // The payment apps (and banks) a statement can come from, and the file types each
@@ -36,15 +36,6 @@ function UploadIcon() {
  */
 export function StatementUploadButton({ busy, onPick }) {
   const [open, setOpen]   = useState(false)
-  const [saved, setSaved] = useState([])   // apps with a remembered password
-  useEffect(() => {
-    if (open) listStatementPasswords().then((r) => setSaved(r.data)).catch(() => setSaved([]))
-  }, [open])
-  const forget = async (app) => {
-    if (!confirm(`Forget your saved ${app} statement password?`)) return
-    await forgetStatementPassword(app).catch(() => {})
-    setSaved((s) => s.filter((a) => a !== app))
-  }
   return (
     <div className="relative flex-shrink-0">
       <button
@@ -61,7 +52,7 @@ export function StatementUploadButton({ busy, onPick }) {
       {open && (
         <>
           <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
-          <div role="menu" className="absolute right-0 mt-1 w-52 bg-white border border-amber-200 rounded-md shadow-lg z-30 py-1">
+          <div role="menu" className="absolute right-0 mt-1 w-64 bg-white border border-amber-200 rounded-md shadow-lg z-30 py-1">
             <p className="px-3 pt-1 pb-1.5 text-[10px] font-black text-gray-400 tracking-widest">STATEMENT FROM</p>
             {APPS.map((a) => (
               <button
@@ -75,17 +66,9 @@ export function StatementUploadButton({ busy, onPick }) {
                 <span className="block text-[11px] text-gray-400">{a.hint}</span>
               </button>
             ))}
-            {saved.length > 0 && (
-              <div className="border-t border-amber-100 mt-1 pt-1.5 pb-1 px-3">
-                <p className="text-[10px] font-black text-gray-400 tracking-widest">SAVED PASSWORDS</p>
-                {saved.map((app) => (
-                  <div key={app} className="flex items-center justify-between py-1">
-                    <span className="text-xs text-gray-700">🔒 {app}</span>
-                    <button onClick={() => forget(app)} className="text-[11px] font-bold text-red-600">Forget</button>
-                  </div>
-                ))}
-              </div>
-            )}
+            <div className="border-t border-amber-100 mt-1 pt-1.5 pb-1 px-3">
+              <SavedPasswords />
+            </div>
           </div>
         </>
       )}
@@ -93,20 +76,232 @@ export function StatementUploadButton({ busy, onPick }) {
   )
 }
 
-/** The monthly page's small "Sync" button - statements from Gmail. */
-export function MailSyncButton({ busy, onSync }) {
+const PASSWORD_APPS = ['PhonePe', 'Paytm', 'Google Pay']
+
+/**
+ * The remembered statement passwords (one per app): Show reveals one,
+ * Edit changes it, Forget deletes it, and "+ Add" saves one ahead of the
+ * first locked statement. Used in the Upload and Sync menus.
+ */
+export function SavedPasswords() {
+  const [rows, setRows]       = useState(null)
+  const [shown, setShown]     = useState({})     // app -> its revealed password
+  const [editing, setEditing] = useState(null)   // the app being edited, or '' while adding one
+  const [draftApp, setDraftApp] = useState('')
+  const [draft, setDraft]     = useState('')
+  const [showDraft, setShowDraft] = useState(false)
+  const [err, setErr]         = useState('')
+  const [saving, setSaving]   = useState(false)
+
+  const load = () => listStatementPasswords().then((r) => setRows(r.data)).catch(() => setRows([]))
+  useEffect(() => { load() }, [])
+
+  const reveal = async (app) => {
+    const { data } = await revealStatementPassword(app)
+    setShown((s) => ({ ...s, [app]: data.password }))
+    return data.password
+  }
+  const toggleShow = async (app) => {
+    setErr('')
+    if (app in shown) { setShown(({ [app]: _, ...rest }) => rest); return }
+    try { await reveal(app) } catch { setErr("Couldn't load that password.") }
+  }
+  const startEdit = async (app) => {
+    setErr(''); setShowDraft(false); setEditing(app)
+    setDraftApp(app || PASSWORD_APPS.find((a) => !rows?.some((r) => r.app === a)) || PASSWORD_APPS[0])
+    setDraft('')
+    if (app) { try { setDraft(app in shown ? shown[app] : await reveal(app)) } catch { /* type a new one */ } }
+  }
+  const save = async (e) => {
+    e.preventDefault()
+    if (!draft || !draftApp.trim()) return
+    setSaving(true); setErr('')
+    try {
+      await setStatementPassword(draftApp.trim(), draft)
+      setShown(({ [draftApp.trim()]: _, ...rest }) => rest)
+      setEditing(null); await load()
+    } catch (e2) {
+      setErr(e2.response?.data?.detail || "Couldn't save it.")
+    } finally { setSaving(false) }
+  }
+  const forget = async (app) => {
+    if (!confirm(`Forget your saved ${app} statement password?`)) return
+    await forgetStatementPassword(app).catch(() => {})
+    setRows((rs) => rs.filter((r) => r.app !== app))
+  }
+
+  const form = (
+    <form onSubmit={save} className="mt-1 mb-1.5 space-y-1.5">
+      {editing === '' && (
+        <select value={draftApp} onChange={(e) => setDraftApp(e.target.value)} className="input text-xs py-1.5">
+          {PASSWORD_APPS.map((a) => <option key={a} value={a}>{a}</option>)}
+        </select>
+      )}
+      <div className="relative">
+        <input
+          type={showDraft ? 'text' : 'password'} value={draft} onChange={(e) => setDraft(e.target.value)}
+          placeholder={`${draftApp} statement password`} autoFocus autoComplete="off" autoCapitalize="none"
+          autoCorrect="off" spellCheck={false} className="input text-xs py-1.5 pr-12"
+        />
+        <button type="button" onClick={() => setShowDraft((v) => !v)}
+          className="absolute inset-y-0 right-0 px-2 text-[10px] font-bold text-brand-600">
+          {showDraft ? 'Hide' : 'Show'}
+        </button>
+      </div>
+      <div className="flex gap-3">
+        <button type="submit" disabled={!draft || saving} className="text-[11px] font-bold text-brand-600 disabled:opacity-50">
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+        <button type="button" onClick={() => setEditing(null)} className="text-[11px] font-bold text-gray-400">Cancel</button>
+      </div>
+    </form>
+  )
+
   return (
-    <button
-      onClick={() => onSync()}
-      disabled={busy}
-      title="Import PhonePe, Paytm and Google Pay statements from your Gmail"
-      className="flex-shrink-0 flex items-center gap-1 bg-cream border border-amber-200 text-gray-500 hover:bg-amber-50 rounded-md px-2.5 py-1.5 text-xs font-bold active:scale-95 transition-all shadow-sm disabled:opacity-50"
-    >
-      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.3} viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h5M20 20v-5h-5M5.6 15A7 7 0 0018 17.4M18.4 9A7 7 0 006 6.6" />
-      </svg>
-      Sync
-    </button>
+    <div>
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] font-black text-gray-400 tracking-widest">SAVED PASSWORDS</p>
+        {editing === null && rows && (
+          <button onClick={() => startEdit('')} className="text-[11px] font-bold text-brand-600">+ Add</button>
+        )}
+      </div>
+      {rows === null && <p className="text-[11px] text-gray-400 py-1">Loading…</p>}
+      {rows?.length === 0 && editing === null && (
+        <p className="text-[11px] text-gray-400 py-1">None yet - saved when a locked statement opens, or add one.</p>
+      )}
+      {rows?.map(({ app }) => (
+        <div key={app} className="py-1">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-700 flex-1 min-w-0 truncate">
+              🔒 {app}
+              {app in shown && <span className="ml-1.5 font-mono text-gray-900 select-all">{shown[app]}</span>}
+            </span>
+            {editing !== app && <>
+              <button onClick={() => toggleShow(app)} className="text-[11px] font-bold text-gray-500">{app in shown ? 'Hide' : 'Show'}</button>
+              <button onClick={() => startEdit(app)} className="text-[11px] font-bold text-brand-600">Edit</button>
+              <button onClick={() => forget(app)} className="text-[11px] font-bold text-red-600">Forget</button>
+            </>}
+          </div>
+          {editing === app && form}
+        </div>
+      ))}
+      {editing === '' && form}
+      {err && <p className="text-[11px] text-red-600">{err}</p>}
+    </div>
+  )
+}
+
+const ago = (t) => {
+  if (!t) return null
+  const s = (Date.now() - new Date(t).getTime()) / 1000
+  if (s < 60) return 'just now'
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`
+  const d = Math.floor(s / 86400)
+  if (d < 7) return `${d} day${d > 1 ? 's' : ''} ago`
+  return `on ${new Date(t).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`
+}
+
+/** The sync's Gmail - fetched (and its access checked) whenever `active` turns on. */
+function useMailStatus(active) {
+  const [st, setSt] = useState(null)
+  useEffect(() => {
+    if (active) getMailSyncStatus().then((r) => setSt(r.data)).catch(() => setSt({ error: true }))
+  }, [active])
+  return st
+}
+
+function MailStatusLine({ st }) {
+  if (!st) return <span className="text-gray-400">Checking Gmail…</span>
+  if (st.error) return <span className="text-gray-400">Couldn't check Gmail</span>
+  if (!st.connected) return <span className="text-gray-500">Gmail not connected yet</span>
+  if (st.expired) return <span className="text-red-600 font-semibold">Gmail access expired - reconnect to sync</span>
+  return (
+    <span className="text-gray-500">
+      {st.mail_synced_at ? `Last synced ${ago(st.mail_synced_at)}` : 'Not synced yet'}
+      <span className="text-gray-400"> · {st.gmail_address}</span>
+    </span>
+  )
+}
+
+const SyncIcon = () => (
+  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.3} viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h5M20 20v-5h-5M5.6 15A7 7 0 0018 17.4M18.4 9A7 7 0 006 6.6" />
+  </svg>
+)
+
+/**
+ * The monthly page's small "Sync" button - statements from Gmail. It opens
+ * a menu: the inbox and its last sync (or that access has expired, with
+ * Reconnect), Sync now, and the saved statement passwords.
+ */
+export function MailSyncButton({ busy, onSync, onConnect }) {
+  const [open, setOpen] = useState(false)
+  const st = useMailStatus(open && !busy)
+  const reconnect = st?.connected && st.expired
+  return (
+    <div className="relative flex-shrink-0">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        disabled={busy}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Import PhonePe, Paytm and Google Pay statements from your Gmail"
+        className="flex items-center gap-1 bg-cream border border-amber-200 text-gray-500 hover:bg-amber-50 rounded-md px-2.5 py-1.5 text-xs font-bold active:scale-95 transition-all shadow-sm disabled:opacity-50"
+      >
+        <SyncIcon />
+        {busy ? 'Syncing…' : 'Sync'}
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
+          <div role="menu" className="absolute right-0 mt-1 w-72 max-w-[calc(100vw-2rem)] bg-white border border-amber-200 rounded-md shadow-lg z-30 py-2 px-3">
+            <p className="text-[10px] font-black text-gray-400 tracking-widest">STATEMENTS FROM GMAIL</p>
+            <p className="text-[11px] mt-1 leading-snug"><MailStatusLine st={st} /></p>
+            <button
+              onClick={() => { setOpen(false); reconnect ? onConnect() : onSync() }}
+              className="btn-primary text-xs w-full mt-2 py-2"
+            >
+              {reconnect ? 'Reconnect Gmail' : st && !st.error && !st.connected ? 'Connect Gmail & sync' : 'Sync now'}
+            </button>
+            <p className="text-[10px] text-gray-400 mt-1">PhonePe, Paytm and Google Pay statement emails from the last 4 months.</p>
+            <div className="border-t border-amber-100 mt-2 pt-1.5">
+              <SavedPasswords />
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The full-width "Sync statements from Gmail" button (New expense, Add
+ * expense's monthly section), with the last sync under it and the saved
+ * passwords one tap away.
+ */
+export function MailSyncWide({ busy, onSync, onConnect, className = '' }) {
+  const st = useMailStatus(!busy)
+  const [pw, setPw] = useState(false)
+  const reconnect = st?.connected && st.expired
+  return (
+    <div className={className}>
+      <button type="button" disabled={busy} onClick={() => (reconnect ? onConnect() : onSync())}
+        className="w-full py-2.5 text-xs font-bold text-gray-700 bg-white border border-amber-300 rounded-md hover:bg-amber-100 active:scale-[0.98] transition-all disabled:opacity-50">
+        📧 {reconnect ? 'Reconnect Gmail to sync statements' : 'Sync statements from Gmail'}
+      </button>
+      <div className="flex items-start justify-between gap-2 mt-1 text-[11px]">
+        <span className="min-w-0 truncate"><MailStatusLine st={st} /></span>
+        <button type="button" onClick={() => setPw((v) => !v)} className="flex-shrink-0 font-bold text-brand-600">
+          🔒 Passwords {pw ? '▴' : '▾'}
+        </button>
+      </div>
+      {pw && (
+        <div className="mt-1.5 bg-white border border-amber-200 rounded-md px-3 py-2">
+          <SavedPasswords />
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -202,8 +397,8 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
 
   const fail = (detail) => {
     finish()
-    if (detail?.code === 'gmail_not_connected') {
-      setNoGmail(true)
+    if (detail?.code === 'gmail_not_connected' || detail?.code === 'gmail_expired') {
+      setNoGmail(detail.code === 'gmail_expired' ? 'expired' : true)
     } else if (detail?.code === 'password_required' || detail?.code === 'password_wrong') {
       setLocked(true)
       if (detail.mail) setMailLocked(detail.mail.locked)
@@ -314,12 +509,17 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
       {notice && !busy && <p className="text-xs text-gray-600 pr-5">{notice}</p>}
       {noGmail && !busy && (
         <div className="pr-6">
-          <p className="text-sm font-bold text-gray-800">Connect Gmail to sync statements</p>
-          <p className="text-[11px] text-gray-500 mt-0.5">
-            Read-only: the app looks for PhonePe, Paytm and Google Pay statement emails and imports their PDF, CSV or Excel files.
-            The same connection as Credit Cards.
+          <p className="text-sm font-bold text-gray-800">
+            {noGmail === 'expired' ? 'Gmail access has expired' : 'Connect Gmail to sync statements'}
           </p>
-          <button onClick={connectGmail} className="btn-primary text-sm mt-3">Connect Gmail</button>
+          <p className="text-[11px] text-gray-500 mt-0.5">
+            {noGmail === 'expired'
+              ? "Google stopped accepting the app's access to your inbox (it lapses after a while, or was revoked). Connect again and the sync carries on from where it left off."
+              : 'Read-only: the app looks for PhonePe, Paytm and Google Pay statement emails and imports their PDF, CSV or Excel files. The same connection as Credit Cards.'}
+          </p>
+          <button onClick={connectGmail} className="btn-primary text-sm mt-3">
+            {noGmail === 'expired' ? 'Reconnect Gmail' : 'Connect Gmail'}
+          </button>
         </div>
       )}
       {locked && !busy && (
@@ -378,7 +578,7 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
               Remember this password
               <span className="block text-[11px] text-gray-400">
                 {remember
-                  ? 'Saved encrypted, so your next statement opens on its own. Forget it any time from the Upload menu.'
+                  ? 'Saved encrypted, so your next statement opens on its own. View, change or forget it from the Upload or Sync menu.'
                   : 'Only used to open this file - not saved.'}
               </span>
             </span>
@@ -394,5 +594,5 @@ export function useStatementUpload(onImported, { panelClassName = 'mx-5 mt-3' } 
     </div>
   )
 
-  return { busy, pick, mailSync, input, panel }
+  return { busy, pick, mailSync, connectGmail, input, panel }
 }

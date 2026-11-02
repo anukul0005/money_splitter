@@ -107,8 +107,12 @@ export const startMailSync      = (password, remember = false) => {
   if (password && remember) fd.append('remember', 'true')
   return api.post('/expenses/mail-sync-jobs', fd)
 }
-// Remembered statement passwords - app names only ever come back, never the passwords.
+// The statement sync's Gmail: inbox, last sync, and whether access has expired.
+export const getMailSyncStatus  = ()         => api.get('/expenses/mail-sync-status')
+// Remembered statement passwords - names in the list; a password only when Show is tapped.
 export const listStatementPasswords  = ()    => api.get('/expenses/statement-passwords')
+export const revealStatementPassword = (app) => api.get(`/expenses/statement-passwords/${encodeURIComponent(app)}/password`)
+export const setStatementPassword    = (app, password) => api.put(`/expenses/statement-passwords/${encodeURIComponent(app)}`, { password })
 export const forgetStatementPassword = (app) => api.delete(`/expenses/statement-passwords/${encodeURIComponent(app)}`)
 export const getImportJob       = (jobId)    => api.get(`/expenses/import-jobs/${jobId}`)
 export const getMe              = ()         => api.get('/users/me')

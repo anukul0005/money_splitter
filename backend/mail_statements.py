@@ -30,6 +30,12 @@ def find(connection, days: int) -> tuple[object, list[str]]:
     return service, [m["id"] for m in resp.get("messages", [])]
 
 
+def check(connection) -> None:
+    """Raises if Google no longer accepts the saved access."""
+    from statement_sync import _gmail_service
+    _gmail_service(connection).users().getProfile(userId="me").execute()
+
+
 def _parts(part: dict):
     yield part
     for sub in part.get("parts", []) or []:

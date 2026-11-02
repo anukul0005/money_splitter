@@ -7,6 +7,7 @@ import statistics
 from collections import defaultdict
 from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from auth import caller_groups, current_user, is_member, member_group
@@ -841,11 +842,38 @@ def _remember_statement_password(db: Session, user_id: int, app: str, password: 
 
 @router.get("/statement-passwords", response_model=list)
 def list_statement_passwords(db: Session = Depends(get_db), caller: User = Depends(current_user)):
-    """Which apps' statement passwords are remembered - names only."""
+    """Which apps' statement passwords are remembered - names only; the
+    password itself only through .../password, when they tap Show."""
     rows = (db.query(BankPassword)
             .filter(BankPassword.user_id == caller.id,
                     BankPassword.bank.like(f"{_STATEMENT_PREFIX}%")).all())
-    return sorted(r.bank[len(_STATEMENT_PREFIX):] for r in rows)
+    return sorted(({"app": r.bank[len(_STATEMENT_PREFIX):], "updated_at": r.updated_at} for r in rows),
+                  key=lambda r: r["app"].lower())
+
+
+@router.get("/statement-passwords/{app}/password", response_model=dict)
+def reveal_statement_password(app: str, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    from secret_box import decrypt
+    row = (db.query(BankPassword)
+           .filter(BankPassword.user_id == caller.id, BankPassword.bank == f"{_STATEMENT_PREFIX}{app}").first())
+    if not row:
+        raise HTTPException(404, "No saved password for that app")
+    return {"app": app, "password": decrypt(row.password_encrypted) or ""}
+
+
+class StatementPasswordIn(BaseModel):
+    password: str
+
+
+@router.put("/statement-passwords/{app}", response_model=dict)
+def set_statement_password(app: str, payload: StatementPasswordIn, db: Session = Depends(get_db),
+                           caller: User = Depends(current_user)):
+    """Add or change an app's statement password by hand."""
+    app = app.strip()
+    if not app or len(app) > 40 or not payload.password:
+        raise HTTPException(400, "App and password are required")
+    _remember_statement_password(db, caller.id, app, payload.password)
+    return {"app": app, "saved": True}
 
 
 @router.delete("/statement-passwords/{app}", response_model=dict)
@@ -1025,7 +1053,7 @@ def _run_mail_job(job_id: str, user_id: int, password: str | None, remember: boo
                 mail["unreadable"] += 1
         total["source"] = " + ".join(apps)
         total["mail"] = mail
-        conn.last_synced_at = datetime.now(timezone.utc)
+        conn.mail_synced_at = datetime.now(timezone.utc)
         db.commit()
         if mail["locked"] and not mail["imported"]:
             _job_finish(job_id, error={"code": "password_wrong" if password else "password_required",
@@ -1042,11 +1070,52 @@ def _run_mail_job(job_id: str, user_id: int, password: str | None, remember: boo
             _jobs[job_id].update(status="cancelled", stage="Cancelled")
     except Exception as e:
         print(f"[mail-sync] job {job_id} failed: {e!r}")
-        _job_finish(job_id, error={"code": "failed", "message": "Couldn't read your mail - try again, or reconnect Gmail."})
+        if _gmail_expired(e):
+            _job_finish(job_id, error={"code": "gmail_expired",
+                                       "message": "Gmail access has expired - connect Gmail again to sync."})
+        else:
+            _job_finish(job_id, error={"code": "failed", "message": "Couldn't read your mail - try again, or reconnect Gmail."})
     finally:
         db.close()
     if created_all:
         _index_many_bg(created_all)
+
+
+def _gmail_expired(e: Exception) -> bool:
+    """Google refused the saved access (revoked, or lapsed - an unverified
+    app's access lasts a week), or it can't be read: only connecting Gmail
+    again fixes it."""
+    try:
+        from google.auth.exceptions import RefreshError
+        if isinstance(e, RefreshError):
+            return True
+    except ImportError:
+        pass
+    text = str(e).lower()
+    return "invalid_grant" in text or "unreadable" in text or "unauthorized" in text
+
+
+@router.get("/mail-sync-status", response_model=dict)
+def mail_sync_status(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """The Gmail behind the statement sync: which inbox, when it last
+    synced, and whether Google still accepts the saved access (checked
+    live - access lapses, and only a reconnect brings it back)."""
+    import mail_statements
+    from models import GmailConnection
+    conn = db.query(GmailConnection).filter(GmailConnection.user_id == caller.id).first()
+    if not conn:
+        return {"connected": False}
+    expired = None                     # None: couldn't tell (Google unreachable)
+    try:
+        mail_statements.check(conn)
+        expired = False
+    except Exception as e:
+        if _gmail_expired(e):
+            expired = True
+        else:
+            print(f"[mail-sync] status check failed: {e!r}")
+    return {"connected": True, "gmail_address": conn.gmail_address, "expired": expired,
+            "mail_synced_at": conn.mail_synced_at, "connected_at": conn.connected_at}
 
 
 def _decrypt(s):

@@ -7,7 +7,7 @@ import { compressImage } from '../utils/compressImage'
 import { dn } from '../utils/displayName'
 import ReceiptCropper from '../components/ReceiptCropper'
 import DatePicker from '../components/DatePicker'
-import { useStatementUpload, ANY_STATEMENT } from '../components/StatementUpload'
+import { useStatementUpload, ANY_STATEMENT, MailSyncWide } from '../components/StatementUpload'
 import Dropdown from '../components/Dropdown'
 
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
@@ -345,10 +345,8 @@ export default function NewGroup() {
                   className="py-2.5 text-xs font-bold text-gray-700 bg-white border border-amber-300 rounded-md hover:bg-amber-100 active:scale-[0.98] transition-all disabled:opacity-50">
                   🏦 Bank statement
                 </button>
-                <button type="button" disabled={statement.busy} onClick={() => statement.mailSync()}
-                  className="col-span-2 py-2.5 text-xs font-bold text-gray-700 bg-white border border-amber-300 rounded-md hover:bg-amber-100 active:scale-[0.98] transition-all disabled:opacity-50">
-                  📧 Sync statements from Gmail
-                </button>
+                <MailSyncWide className="col-span-2" busy={statement.busy}
+                  onSync={() => statement.mailSync()} onConnect={statement.connectGmail} />
               </div>
               <p className="text-[10px] text-gray-500 mt-1.5">Any bank's PDF statement (HDFC, SBI, ICICI, …) or a PhonePe, Google Pay or Paytm one: each payment is read and filed into its month's personal expenses by itself. Gmail sync finds PhonePe, Paytm and Google Pay statement emails (PDF, CSV or Excel, password-protected too) and imports them the same way.</p>
               {statement.input}

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { getGroups, createExpense, scanReceipt } from '../api'
-import { useStatementUpload, ANY_STATEMENT } from '../components/StatementUpload'
+import { useStatementUpload, ANY_STATEMENT, MailSyncWide } from '../components/StatementUpload'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ReceiptCropper from '../components/ReceiptCropper'
 import { useUser } from '../UserContext'
@@ -424,14 +424,8 @@ export default function AddExpense() {
                 >
                   📄 Upload statement (.csv / .pdf / .xlsx)
                 </button>
-                <button
-                  type="button"
-                  disabled={statement.busy}
-                  onClick={() => statement.mailSync()}
-                  className="w-full mt-2 py-2.5 text-xs font-bold text-gray-700 bg-white border border-amber-300 rounded-md hover:bg-amber-100 active:scale-[0.98] transition-all disabled:opacity-50"
-                >
-                  📧 Sync statements from Gmail
-                </button>
+                <MailSyncWide className="mt-2" busy={statement.busy}
+                  onSync={() => statement.mailSync()} onConnect={statement.connectGmail} />
                 <p className="text-[11px] text-gray-500 mt-1">PhonePe (.csv / .pdf), Google Pay, Paytm, or any bank's PDF statement - password-protected PDFs work too</p>
                 {statement.input}
                 {statement.panel}
