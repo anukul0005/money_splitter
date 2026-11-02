@@ -175,6 +175,39 @@ def tournaments(year: int = 0, db: Session = Depends(get_db), _: User = Depends(
                              "champions": {e: champs[t.id][e] for e in bwf.EVENTS if e in champs[t.id]}} for t in ts]}
 
 
+@router.get("/day", response_model=dict)
+def day(on: str = "", db: Session = Depends(get_db), _: User = Depends(owner)):
+    """Every match on file for one day (the latest day with results when none is given), by
+    tournament then event, with the nearest days either side that have matches."""
+    has = db.query(BadmintonResult.day).filter(BadmintonResult.day.isnot(None))
+    try:
+        d = date.fromisoformat(on) if on else None
+    except ValueError:
+        raise HTTPException(400, "A date as YYYY-MM-DD")
+    if d is None:
+        d = (has.filter(BadmintonResult.winner > 0, BadmintonResult.day <= date.today())
+             .order_by(BadmintonResult.day.desc()).limit(1).scalar())
+    if d is None:
+        return {"date": None, "prev": None, "next": None, "count": 0, "tournaments": []}
+    prev = has.filter(BadmintonResult.day < d).order_by(BadmintonResult.day.desc()).limit(1).scalar()
+    nxt = has.filter(BadmintonResult.day > d).order_by(BadmintonResult.day).limit(1).scalar()
+    rows = db.query(BadmintonResult).filter(BadmintonResult.day == d).all()
+    people = _people(db, rows)
+    tmap = {t.id: t for t in db.query(BadmintonTournament)
+            .filter(BadmintonTournament.id.in_({r.tournament_id for r in rows})).all()} if rows else {}
+    by = defaultdict(lambda: defaultdict(list))
+    for r in rows:
+        by[r.tournament_id][r.event].append(r)
+    order = sorted(by, key=lambda i: (tmap[i].level if i in tmap and tmap[i].level is not None else 9,
+                                      tmap[i].name if i in tmap else ""))
+    return {"date": d.isoformat(), "prev": prev.isoformat() if prev else None,
+            "next": nxt.isoformat() if nxt else None, "count": len(rows),
+            "tournaments": [{**(_tournament(tmap[i]) if i in tmap else {"id": i, "name": "?"}),
+                             "events": [{"event": e, "matches": [_match(r, people, tmap) for r in
+                                                                 sorted(by[i][e], key=lambda r: (_round_key(r.round), r.code))]}
+                                        for e in bwf.EVENTS if by[i].get(e)]} for i in order]}
+
+
 @router.get("/tournament/{tournament_id}", response_model=dict)
 def tournament(tournament_id: int, db: Session = Depends(get_db), _: User = Depends(owner)):
     t = db.get(BadmintonTournament, tournament_id)

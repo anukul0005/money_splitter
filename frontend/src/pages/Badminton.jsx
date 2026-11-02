@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import RankingList, { RankingSwitch } from '../components/RankingList'
+import DatePicker from '../components/DatePicker'
 import {
-  badmintonH2H, badmintonLive, badmintonMatch, badmintonPlayer, badmintonPlayers, badmintonRankings,
+  badmintonDay, badmintonH2H, badmintonLive, badmintonMatch, badmintonPlayer, badmintonPlayers, badmintonRankings,
   badmintonStats, badmintonTournament, badmintonTournaments,
 } from '../api'
 
@@ -246,6 +247,80 @@ function Tournament({ id, onBack, onPlayer }) {
   )
 }
 
+/** Tournaments still to start, soonest first. */
+function ComingUp({ list }) {
+  if (!list?.length) return null
+  const today = new Date(new Date().toDateString())
+  const inDays = (iso) => Math.round((new Date(`${iso}T00:00:00`) - today) / 86400000)
+  return (
+    <div className="card p-0 overflow-hidden">
+      <CardHead title="Coming up" sub={`${list.length}`} />
+      {list.map((t) => {
+        const n = inDays(t.start)
+        return (
+          <div key={t.id} className="px-4 py-2 border-t border-gray-100 first:border-t-0 flex items-center gap-2">
+            {t.logo ? <img src={t.logo} alt="" className="w-7 h-7 object-contain" onError={(e) => { e.currentTarget.style.display = 'none' }} /> : <span className="w-7" />}
+            <div className="flex-1 min-w-0">
+              <p className="text-[13px] font-bold text-gray-900 truncate">{t.name}</p>
+              <p className="text-[10px] text-gray-400 truncate">
+                {fmtDate(t.start)} – {fmtDate(t.end)} · {t.category?.replace('HSBC BWF World Tour ', '')}{t.location ? ` · ${t.location}` : ''}
+              </p>
+            </div>
+            <span className="text-[10px] font-bold text-brand-600 whitespace-nowrap">{n <= 1 ? (n === 1 ? 'tomorrow' : 'today') : `in ${n} days`}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+const fmtDay = (iso) => (iso ? new Date(`${iso}T00:00:00`).toLocaleDateString('en-IN',
+  { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : '')
+
+/** One day's matches, as tennis's Results: ‹ date › to step between days with matches. */
+function ByDate({ onPlayer, onTournament }) {
+  const [params, setParams] = useSearchParams()
+  const date = params.get('bd') || ''
+  const setDate = (v) => setParams((p) => { const q = new URLSearchParams(p); v ? q.set('bd', v) : q.delete('bd'); return q }, { replace: true })
+  const [day, setDay] = useState(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    setBusy(true)
+    badmintonDay(date).then((r) => setDay(r.data)).catch(() => setDay({ tournaments: [] })).finally(() => setBusy(false))
+  }, [date])
+  const shown = date || day?.date || ''
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <button disabled={!day?.prev} onClick={() => setDate(day.prev)}
+          className="px-3 py-2 rounded-md border border-amber-300 bg-white text-sm font-black disabled:opacity-30">‹</button>
+        <DatePicker value={shown} onChange={(v) => v && setDate(v)} className="flex-1" />
+        <button disabled={!day?.next} onClick={() => setDate(day.next)}
+          className="px-3 py-2 rounded-md border border-amber-300 bg-white text-sm font-black disabled:opacity-30">›</button>
+      </div>
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-bold text-gray-500">{day?.date ? fmtDay(day.date) : ''}{day?.count ? ` · ${day.count} matches` : ''}</p>
+        <button onClick={() => setDate('')} className="text-[11px] font-bold text-brand-600">Latest ›</button>
+      </div>
+      {busy && <p className="text-xs text-gray-400 text-center py-6">Loading…</p>}
+      {!busy && day && day.tournaments.length === 0 && (
+        <p className="text-sm text-gray-400 text-center py-10">No matches on this day - use ‹ › to jump to the nearest day with matches.</p>
+      )}
+      {!busy && day?.tournaments.map((t) => (
+        <div key={t.id} className="card p-0 overflow-hidden">
+          <button onClick={() => onTournament(t.id)} className="w-full text-left"><CardHead title={`${t.name} ›`} sub={t.category?.replace('HSBC BWF World Tour ', '')} logo={t.logo} /></button>
+          {t.events.map((e) => (
+            <div key={e.event} className="px-4 pb-2 mt-2">
+              <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">{EVENT[e.event]} · {e.matches.length}</p>
+              {e.matches.map((m) => <Match key={m.id} m={m} onPlayer={onPlayer} />)}
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function Results({ onPlayer, sum }) {
   const [year, setYear] = useState(0)
   const [d, setD] = useState(null)
@@ -254,31 +329,23 @@ function Results({ onPlayer, sum }) {
   const open = params.get('bt') ? +params.get('bt') : null
   const setOpen = (id) => setParams((p) => { const q = new URLSearchParams(p); id ? q.set('bt', id) : q.delete('bt'); return q }, { replace: true })
   useEffect(() => { setD(null); badmintonTournaments(year).then((r) => setD(r.data)).catch(() => setD({ tournaments: [], years: [] })) }, [year])
+  // By date (as tennis) or by tournament - also in the address
+  const view = params.get('bv') || 'day'
+  const setView = (v) => setParams((p) => { const q = new URLSearchParams(p); q.set('bv', v); return q }, { replace: true })
   if (open) return <Tournament id={open} onBack={() => setOpen(null)} onPlayer={onPlayer} />
-  const today = new Date(new Date().toDateString())
-  const inDays = (iso) => Math.round((new Date(`${iso}T00:00:00`) - today) / 86400000)
+  const toggle = <Seg value={view} onChange={setView} options={[['day', 'By date'], ['tournaments', 'Tournaments']]} />
+  if (view === 'day') {
+    return (
+      <div className="space-y-3">
+        {toggle}
+        <ByDate onPlayer={onPlayer} onTournament={setOpen} />
+        <ComingUp list={d?.upcoming} />
+      </div>
+    )
+  }
   return (
     <div className="space-y-3">
-      {d?.upcoming?.length > 0 && (
-        <div className="card p-0 overflow-hidden">
-          <CardHead title="Coming up" sub={`${d.upcoming.length}`} />
-          {d.upcoming.map((t) => {
-            const n = inDays(t.start)
-            return (
-              <div key={t.id} className="px-4 py-2 border-t border-gray-100 first:border-t-0 flex items-center gap-2">
-                {t.logo ? <img src={t.logo} alt="" className="w-7 h-7 object-contain" onError={(e) => { e.currentTarget.style.display = 'none' }} /> : <span className="w-7" />}
-                <div className="flex-1 min-w-0">
-                  <p className="text-[13px] font-bold text-gray-900 truncate">{t.name}</p>
-                  <p className="text-[10px] text-gray-400 truncate">
-                    {fmtDate(t.start)} – {fmtDate(t.end)} · {t.category?.replace('HSBC BWF World Tour ', '')}{t.location ? ` · ${t.location}` : ''}
-                  </p>
-                </div>
-                <span className="text-[10px] font-bold text-brand-600 whitespace-nowrap">{n <= 1 ? (n === 1 ? 'tomorrow' : 'today') : `in ${n} days`}</span>
-              </div>
-            )
-          })}
-        </div>
-      )}
+      {toggle}
       <div className="flex items-center gap-2">
         <select value={d?.year || year} onChange={(e) => setYear(+e.target.value)}
           className="rounded-md border border-amber-300 bg-white px-2 py-1.5 text-sm font-bold">
