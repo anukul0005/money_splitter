@@ -981,9 +981,11 @@ Given the requirements and every quote (vendor, the fields noted, notes, who got
 - "best_value": which quote looks best for the stated requirements and why (one line), or "" if it can't be told.
 - "cheapest": the vendor with the lowest main price, or "".
 - "per_quote": for each quote (keep its id number, given as [#id]), one line of pros/cons against the
-  requirements, what is still missing to compare it fairly (e.g. "no capacity given"), and "opinions": one short
-  line on what the members said about it in its notes and opinions and how they reacted (likes / dislikes) - who
-  likes it, who has doubts and why; "" when nobody has said anything.
+  requirements, what is still missing to compare it fairly (e.g. "no capacity given"), and "opinions": what the
+  members said about it in its notes and opinions and how they reacted (likes / dislikes) - who likes it, who has
+  doubts and why. Keep EVERY distinct point anyone wrote (e.g. "liked by papa", "mom doesn't like it - no open
+  space", "a hotel, not a wedding venue" are three points: all three must be there); shorten the wording, never
+  drop a point. One to three short sentences; "" when nobody has said anything.
 
 Rules: use only the numbers given - never invent or estimate prices. Amounts in Rs as written.
 Respond with ONLY a JSON object:

@@ -1031,14 +1031,20 @@ function Quotes({ d, name, tasks, onChanged, quoteFor, clearQuoteFor }) {
                       const per = d.summary?.data?.quotes?.per_quote || []
                       const ai = per.find((x) => Number(x.id) === q.id) || per.find((x) => (x.vendor || '').toLowerCase() === q.vendor.toLowerCase())
                       const has = q.note || (q.opinions || []).length || Object.values(q.reactions || {}).some((v) => v.length)
-                      return ai?.opinions && has ? (
-                        <div className="bg-brand-50/60 border border-brand-100 px-2 py-1.5 mb-1.5">
-                          <p className="text-[9px] font-black text-brand-600 uppercase tracking-widest">✨ AI summary{d.summary.stale ? ' · updating soon' : ''}</p>
-                          <p className="text-[11px] text-gray-700 mt-0.5"><Rich text={ai.opinions} /></p>
-                        </div>
-                      ) : null
+                      const line = ai?.opinions && has ? ai.opinions : null
+                      return (
+                        <>
+                          {line && (
+                            <div className="bg-brand-50/60 border border-brand-100 px-2 py-1.5 mb-1.5">
+                              <p className="text-[9px] font-black text-brand-600 uppercase tracking-widest">✨ AI summary{d.summary.stale ? ' · updating…' : ''}</p>
+                              <p className="text-[11px] text-gray-700 mt-0.5"><Rich text={line} /></p>
+                            </div>
+                          )}
+                          {/* with the AI's line shown, what was written stays folded */}
+                          <QuoteNotes q={q} d={d} name={name} onChanged={onChanged} folded={!!line} />
+                        </>
+                      )
                     })()}
-                    <QuoteNotes q={q} d={d} name={name} onChanged={onChanged} />
                   </div>
 
                   {q.entered_by.toLowerCase() === d.me.toLowerCase() && (
@@ -1069,17 +1075,21 @@ function QuotesSummary({ d, onChanged }) {
   const [open, setOpen] = useState(true)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
-  // Missing, or older than the latest quote / opinion / reaction: written again once, on its own
-  const auto = useRef(false)
+  // Missing, or older than the latest quote / opinion / reaction: written again on its own a few
+  // seconds after the last change (so a run of edits costs one AI call), and only while this tab is open
+  const running = useRef(false)
+  const sm0 = d.summary
+  const due = d.ai && d.quotes.length > 0 && (!sm0 || sm0.stale || !sm0.data?.quotes)
   useEffect(() => {
-    if (auto.current || !d.ai || !d.quotes.length) return
-    const sm = d.summary
-    if (!sm || sm.stale || !sm.data?.quotes) {
-      auto.current = true
+    if (!due || running.current) return undefined
+    const t = setTimeout(() => {
+      running.current = true
       setBusy(true)
-      summariseDiscussion(d.id).then(onChanged).catch(() => {}).finally(() => setBusy(false))
-    }
-  }, [d.id])
+      summariseDiscussion(d.id).then(onChanged).catch(() => {})
+        .finally(() => { running.current = false; setBusy(false) })
+    }, 4000)
+    return () => clearTimeout(t)
+  }, [d.id, due, sm0?.at, d.quotes.length])
   const s = d.summary
   const q = s?.data?.quotes
   if (!d.ai || d.quotes.length === 0) return null
@@ -1188,8 +1198,10 @@ function Reactions({ target, id, r, d, name, onChanged, small }) {
  * opinion (with who and when). Everyone can add theirs, edit it, or tidy it
  * with the AI first.
  */
-function QuoteNotes({ q, d, name, onChanged }) {
+function QuoteNotes({ q, d, name, onChanged, folded }) {
   const me = d.me.toLowerCase()
+  const [show, setShow] = useState(false)
+  const written = (q.note ? 1 : 0) + (q.opinions || []).length
   const mine = (q.opinions || []).find((o) => o.author.toLowerCase() === me)
   const [editing, setEditing] = useState(false)
   const [text, setText] = useState('')
@@ -1208,14 +1220,21 @@ function QuoteNotes({ q, d, name, onChanged }) {
     try { await setQuoteOpinion(d.id, q.id, value, polished); setEditing(false); await onChanged() }
     catch (e) { setErr(errText(e, "Couldn't save it.")) } finally { setBusy('') }
   }
+  const hidden = folded && !show && !editing
   return (
     <div className="space-y-1.5 whitespace-normal">
-      {q.note && (
+      {folded && written > 0 && (
+        <button onClick={() => setShow((v) => !v)} aria-expanded={!hidden}
+          className="text-[10px] font-bold text-gray-500 hover:text-gray-800">
+          {hidden ? '▸' : '▾'} {hidden ? 'Show' : 'Hide'} what was written ({written})
+        </button>
+      )}
+      {!hidden && q.note && (
         <p className="text-[11px] text-gray-700 whitespace-pre-line">
           <span className="font-bold">{q.entered_by.toLowerCase() === me ? 'You' : name(q.entered_by)}:</span> <Rich text={q.note} />
         </p>
       )}
-      {(q.opinions || []).map((o) => (o.author.toLowerCase() === me && editing ? null : (
+      {!hidden && (q.opinions || []).map((o) => (o.author.toLowerCase() === me && editing ? null : (
         <div key={o.author}>
           <p className="text-[11px] text-gray-700 whitespace-pre-line">
             <span className="font-bold">{o.author.toLowerCase() === me ? 'You' : name(o.author)}:</span> <Rich text={o.text} />
