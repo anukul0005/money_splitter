@@ -432,6 +432,7 @@ function SourceRow({ s, v, salary, ym, onOpen, onChanged }) {
   const [err, setErr] = useState('')
   const [all, setAll] = useState(false)
   const [busyKey, setBusyKey] = useState('')
+  const [order, setOrder] = useState('date')        // 'date' (newest first) | 'amount' (biggest first)
   const fetchItems = () => getSalaryItems(ym, s.key).then((r) => setData(r.data)).catch(() => setErr("Couldn't load them."))
   const toggle = () => {
     const next = !open
@@ -446,7 +447,10 @@ function SourceRow({ s, v, salary, ym, onOpen, onChanged }) {
     try { await setCardSkip(key, counted); await Promise.all([fetchItems(), onChanged?.()]) }
     catch { setErr("Couldn't change that.") } finally { setBusyKey('') }
   }
-  const list = data ? (all ? data.items : data.items.slice(0, 15)) : []
+  const byDate = (a, b) => String(b.date || '').localeCompare(String(a.date || '')) || b.amount - a.amount
+  const byAmount = (a, b) => b.amount - a.amount || String(b.date || '').localeCompare(String(a.date || ''))
+  const sorted = data ? [...data.items].sort(order === 'date' ? byDate : byAmount) : []
+  const list = all ? sorted : sorted.slice(0, 15)
   const day = (d) => (d && d.length >= 10 ? `${+d.slice(8, 10)} ${MON[+d.slice(5, 7) - 1]}` : '')
   return (
     <div className="border-b border-amber-100 last:border-0">
@@ -466,6 +470,16 @@ function SourceRow({ s, v, salary, ym, onOpen, onChanged }) {
           {!data && !err && <p className="text-[11px] text-gray-400">Loading…</p>}
           {err && <p className="text-[11px] text-red-600">{err}</p>}
           {data && data.items.length === 0 && <p className="text-[11px] text-gray-400">Nothing this month.</p>}
+          {data && data.items.length > 1 && (
+            <div className="flex justify-end mb-1">
+              <div className="flex border border-amber-200 bg-white">
+                {[['date', 'By date'], ['amount', 'Biggest first']].map(([k, label]) => (
+                  <button key={k} onClick={() => setOrder(k)}
+                    className={`px-2 py-0.5 text-[10px] font-bold ${order === k ? 'bg-gray-800 text-white' : 'text-gray-500'}`}>{label}</button>
+                ))}
+              </div>
+            </div>
+          )}
           {s.key === 'cards' && data?.items.length > 0 && (
             <p className="text-[10px] text-gray-400 mb-1">Tap <b>Already counted</b> on a spend you've put into a group (or elsewhere) - it's left out of the totals.</p>
           )}
@@ -499,7 +513,7 @@ function SourceRow({ s, v, salary, ym, onOpen, onChanged }) {
                 <span>Card spends</span><span className="tabular-nums">{INR(data.gross)}</span>
               </div>
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1.5">Taken off - not counted twice</p>
-              {data.less.map((x, i) => (
+              {[...data.less].sort(byDate).map((x, i) => (
                 <div key={`l${i}`} className="flex items-baseline gap-2 py-1">
                   <span className="text-[10px] text-gray-400 w-11 shrink-0 tabular-nums">{day(x.date)}</span>
                   <span className="flex-1 min-w-0">
