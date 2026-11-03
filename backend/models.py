@@ -1259,6 +1259,22 @@ class DiscussionQuote(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class DiscussionQuoteNote(Base):
+    """One member's opinion on one quote ("food is great, parking is small") -
+    one each, which they can edit; shown in the quote's Notes."""
+
+    __tablename__ = "discussion_quote_notes"
+    __table_args__ = (UniqueConstraint("quote_id", "author", name="ux_discussion_quote_note"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    quote_id = Column(Integer, ForeignKey("discussion_quotes.id", ondelete="CASCADE"), nullable=False, index=True)
+    author = Column(String(100), nullable=False)
+    text = Column(Text, nullable=False)
+    polished = Column(Boolean, nullable=False, default=False)
+    edited_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class DiscussionInvite(Base):
     """An email invite to someone not on the app: opening its link once
     signed in puts them in the discussion's group."""

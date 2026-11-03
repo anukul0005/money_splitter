@@ -28,7 +28,7 @@ from activity import record_activity
 from auth import caller_groups, current_user, member_group
 from database import get_db
 from models import (Activity, Discussion, DiscussionInvite, DiscussionMessage, DiscussionPoll, DiscussionQuote,
-                    DiscussionPref, DiscussionTask, DiscussionVote, Group, Member, User)
+                    DiscussionPref, DiscussionQuoteNote, DiscussionTask, DiscussionVote, Group, Member, User)
 
 router = APIRouter(prefix="/discussions", tags=["discussions"])
 
@@ -251,9 +251,20 @@ def _task_out(t: DiscussionTask) -> dict:
             "done_at": t.done_at, "created_at": t.created_at}
 
 
-def _quote_out(q: DiscussionQuote) -> dict:
+def _quote_out(q: DiscussionQuote, opinions: list | None = None) -> dict:
     return {"id": q.id, "task_id": q.task_id, "entered_by": q.entered_by, "vendor": q.vendor,
-            "values": _loads(q.values_json, {}), "note": q.note, "created_at": q.created_at}
+            "values": _loads(q.values_json, {}), "note": q.note, "created_at": q.created_at,
+            "opinions": [{"author": o.author, "text": o.text, "polished": o.polished,
+                          "at": o.edited_at or o.created_at, "edited": bool(o.edited_at)} for o in (opinions or [])]}
+
+
+def _opinions(db: Session, quote_ids: list[int]) -> dict[int, list]:
+    out: dict[int, list] = {}
+    if quote_ids:
+        for o in (db.query(DiscussionQuoteNote).filter(DiscussionQuoteNote.quote_id.in_(quote_ids))
+                  .order_by(DiscussionQuoteNote.id)):
+            out.setdefault(o.quote_id, []).append(o)
+    return out
 
 
 @router.get("/{discussion_id}", response_model=dict)
@@ -265,6 +276,7 @@ def get_discussion(discussion_id: int, db: Session = Depends(get_db), caller: Us
     quotes = db.query(DiscussionQuote).filter(DiscussionQuote.discussion_id == d.id) \
         .order_by(DiscussionQuote.id.desc()).all()
     invites = db.query(DiscussionInvite).filter(DiscussionInvite.discussion_id == d.id).all()
+    ops = _opinions(db, [q.id for q in quotes])
     by_msg: dict[int, list] = {}
     for t in tasks:
         by_msg.setdefault(t.message_id, []).append(_task_out(t))
@@ -280,7 +292,7 @@ def get_discussion(discussion_id: int, db: Session = Depends(get_db), caller: Us
             "tasks": by_msg.get(m.id, []), "created_at": m.created_at, "edited_at": m.edited_at,
             "attachment": _loads(m.attachment_json, None),
         } for m in msgs],
-        "quotes": [_quote_out(q) for q in quotes],
+        "quotes": [_quote_out(q, ops.get(q.id)) for q in quotes],
         "invites": [{"email": i.email, "invited_by": i.invited_by, "accepted_by": i.accepted_by,
                      "created_at": i.created_at} for i in invites],
         "polls": _polls_out(db, d, group, caller),
@@ -976,12 +988,15 @@ def _summary_context(db: Session, d: Discussion, group: Group, caller: User) -> 
     if not quotes:
         return talk[:24000], None
     qlines = []
+    ops = _opinions(db, [q.id for q in quotes])
     for q in quotes:
         vals = _loads(q.values_json, {})
         fields = "; ".join(f"{p['label']}{' (' + p['unit'] + ')' if p.get('unit') else ''}: {vals[p['key']]}"
                            for p in params if vals.get(p["key"]))
+        views = "; ".join(f"{o.author}: {o.text[:300]}" for o in ops.get(q.id, []))
         qlines.append(f"- {q.vendor} (noted by {q.entered_by}): {fields or 'no fields filled'}"
-                      + (f". Notes: {q.note[:600]}" if q.note else ""))
+                      + (f". Notes: {q.note[:600]}" if q.note else "")
+                      + (f". Members' opinions - {views}" if views else ""))
     quotes_text = "\n".join(head[:2]) + "\n\nQuotes:\n" + "\n".join(qlines)
     return talk[:24000], quotes_text[:16000]
 
@@ -1042,6 +1057,7 @@ class PolishIn(BaseModel):
     text: str
     discussion_id: int | None = None
     assignees: list[str] = []
+    quote_id: int | None = None        # an opinion on this quote, not a chat message
 
 
 _POLISH = """You help a group of friends or family in India plan things together (a wedding, a trip, an event)
@@ -1075,8 +1091,17 @@ def polish(payload: PolishIn, db: Session = Depends(get_db), caller: User = Depe
                                                          for p in params))
     if payload.assignees:
         context.append("Directed to: " + ", ".join(payload.assignees))
+    system = _POLISH
+    if payload.quote_id and payload.discussion_id:
+        q = db.query(DiscussionQuote).filter(DiscussionQuote.id == payload.quote_id,
+                                             DiscussionQuote.discussion_id == payload.discussion_id).first()
+        if q:
+            vals = _loads(q.values_json, {})
+            context.append(f"The quote: {q.vendor} - " + "; ".join(f"{k}: {v}" for k, v in vals.items())
+                           + (f". Notes: {q.note[:500]}" if q.note else ""))
+            system = _POLISH_OPINION
     try:
-        out = ai_text.chat_json(_POLISH, "\n".join(context) + "\n\nDraft:\n" + draft[:4000])
+        out = ai_text.chat_json(system, "\n".join(context) + "\n\nDraft:\n" + draft[:4000])
     except Exception as e:
         print(f"[discussions] polish failed: {e!r}")
         raise HTTPException(503, "The AI couldn't be reached just now - send it as written, or try again.")
@@ -1084,6 +1109,73 @@ def polish(payload: PolishIn, db: Session = Depends(get_db), caller: User = Depe
     if not text:
         raise HTTPException(503, "The AI didn't come back with a version - try again.")
     return {"text": text}
+
+
+_POLISH_OPINION = """You help a member of a group in India give their opinion on one vendor's quote (a venue,
+caterer, hotel...) while the group plans. Rewrite their draft opinion so it is clear and short (1-3 sentences or
+a few "- " points): what they like, what worries them, and their verdict if they gave one.
+
+Rules: keep their views, facts, numbers and tone exactly - never add opinions or facts they didn't give.
+Same language as the draft (Hinglish stays Hinglish). Plain text, no headings.
+Respond with ONLY a JSON object: {"text": "<the rewritten opinion>"}"""
+
+
+class OpinionIn(BaseModel):
+    text: str
+    polished: bool = False
+
+
+@router.put("/{discussion_id}/quotes/{quote_id}/opinion", response_model=dict)
+def set_opinion(discussion_id: int, quote_id: int, payload: OpinionIn, bg: BackgroundTasks,
+                db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """The caller's own opinion on a quote - added, changed, or (empty) removed."""
+    d, group = _discussion(db, discussion_id, caller)
+    q = db.query(DiscussionQuote).filter(DiscussionQuote.id == quote_id, DiscussionQuote.discussion_id == d.id).first()
+    if not q:
+        raise HTTPException(404, "No such quote")
+    row = db.query(DiscussionQuoteNote).filter(DiscussionQuoteNote.quote_id == q.id,
+                                               DiscussionQuoteNote.author.ilike(caller.name)).first()
+    text = payload.text.strip()[:2000]
+    if not text:
+        if row:
+            db.delete(row)
+            _touch(d)
+            db.commit()
+        return {"removed": True}
+    new = row is None
+    if new:
+        row = DiscussionQuoteNote(quote_id=q.id, author=caller.name, text=text, polished=payload.polished)
+        db.add(row)
+        _feed(db, group, caller.name, "gave an opinion on a quote", d, q.vendor)
+    elif row.text != text:
+        row.text, row.polished, row.edited_at = text, payload.polished, _now()
+    _touch(d)
+    db.commit()
+    if new:
+        bg.add_task(_notify_opinion, d.id, caller.name, q.vendor, q.entered_by, text)
+    return {"removed": False}
+
+
+def _notify_opinion(discussion_id: int, author: str, vendor: str, quote_by: str, text: str) -> None:
+    import push as _push
+    from database import get_session_factory
+    db = get_session_factory()()
+    try:
+        d = db.get(Discussion, discussion_id)
+        if not d:
+            return
+        for m in db.get(Group, d.group_id).members:
+            if m.name.lower() == author.lower():
+                continue
+            # Whoever noted the quote hears of it even on "only when I'm asked"
+            if _wants(db, d.id, m.name, direct=m.name.lower() == quote_by.lower()):
+                try:
+                    _push.send_push_to_user(db, m.name, f"{author} on {vendor}"[:120], text[:120],
+                                            url=f"/discuss/{d.id}?tab=quotes")
+                except Exception as e:
+                    print(f"[discussions] opinion push failed: {e}")
+    finally:
+        db.close()
 
 
 class SuggestIn(BaseModel):

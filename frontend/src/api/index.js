@@ -373,3 +373,4 @@ export const attachDiscussionFile = (id, file, caption = '') => {
   if (caption) fd.append('caption', caption)
   return api.post(`/discussions/${id}/attachments`, fd, { timeout: 180000 })
 }
+export const setQuoteOpinion = (id, qid, text, polished = false) => api.put(`/discussions/${id}/quotes/${qid}/opinion`, { text, polished })

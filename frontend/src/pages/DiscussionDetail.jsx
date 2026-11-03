@@ -4,7 +4,7 @@ import {
   getDiscussion, postDiscussionMessage, deleteDiscussionMessage, setDiscussionTask, addDiscussionQuote,
   editDiscussionQuote, deleteDiscussionQuote, acceptDiscussionInvite, polishMessage, editDiscussion,
   deleteDiscussion, suggestQuoteFields, createDiscussionPoll, voteDiscussionPoll, setDiscussionPollState,
-  deleteDiscussionPoll, getDiscussionActivity, addDiscussionPeople, summariseDiscussion, setDiscussionNotify, editDiscussionMessage, attachDiscussionFile,
+  deleteDiscussionPoll, getDiscussionActivity, addDiscussionPeople, summariseDiscussion, setDiscussionNotify, editDiscussionMessage, attachDiscussionFile, setQuoteOpinion,
 } from '../api/index.js'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PeoplePicker from '../components/PeoplePicker'
@@ -948,7 +948,7 @@ function Quotes({ d, name, tasks, onChanged, quoteFor, clearQuoteFor }) {
                     </th>
                   ))}
                   <th className="px-3 py-2 font-black text-gray-600">Noted by</th>
-                  <th className="px-3 py-2 font-black text-gray-600">Notes</th>
+                  <th className="px-3 py-2 font-black text-gray-600">Notes &amp; opinions</th>
                   <th />
                 </tr>
               </thead>
@@ -969,7 +969,7 @@ function Quotes({ d, name, tasks, onChanged, quoteFor, clearQuoteFor }) {
                       {name(q.entered_by)}
                       <span className="block text-[10px] text-gray-400">{ago(q.created_at)} {taskLabel(q.task_id)}</span>
                     </td>
-                    <td className="px-3 py-2 text-gray-600 min-w-[10rem] whitespace-pre-line">{q.note}</td>
+                    <td className="px-3 py-2 text-gray-600 min-w-[14rem] max-w-[22rem]"><QuoteNotes q={q} d={d} name={name} onChanged={onChanged} /></td>
                     <td className="px-3 py-2 whitespace-nowrap">
                       {q.entered_by.toLowerCase() === d.me.toLowerCase() && (
                         <span className="flex gap-2">
@@ -986,6 +986,83 @@ function Quotes({ d, name, tasks, onChanged, quoteFor, clearQuoteFor }) {
           </div>
           {Object.keys(best).length > 0 && <p className="text-[10px] text-gray-400">★ the lowest in a price column</p>}
         </>
+      )}
+    </div>
+  )
+}
+
+/**
+ * A quote's Notes: what whoever noted it wrote, then each member's own
+ * opinion (with who and when). Everyone can add theirs, edit it, or tidy it
+ * with the AI first.
+ */
+function QuoteNotes({ q, d, name, onChanged }) {
+  const me = d.me.toLowerCase()
+  const mine = (q.opinions || []).find((o) => o.author.toLowerCase() === me)
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState('')
+  const [polished, setPolished] = useState(false)
+  const [suggestion, setSuggestion] = useState(null)
+  const [busy, setBusy] = useState('')
+  const [err, setErr] = useState('')
+  const start = () => { setText(mine?.text || ''); setPolished(!!mine?.polished); setSuggestion(null); setErr(''); setEditing(true) }
+  const improve = async () => {
+    setBusy('ai'); setErr('')
+    try { setSuggestion((await polishMessage({ text, discussion_id: d.id, quote_id: q.id })).data.text) }
+    catch (e) { setErr(errText(e, "The AI couldn't help just now.")) } finally { setBusy('') }
+  }
+  const save = async (value = text) => {
+    setBusy('save'); setErr('')
+    try { await setQuoteOpinion(d.id, q.id, value, polished); setEditing(false); await onChanged() }
+    catch (e) { setErr(errText(e, "Couldn't save it.")) } finally { setBusy('') }
+  }
+  return (
+    <div className="space-y-1.5 whitespace-normal">
+      {q.note && (
+        <p className="text-[11px] text-gray-700 whitespace-pre-line">
+          <span className="font-bold">{q.entered_by.toLowerCase() === me ? 'You' : name(q.entered_by)}:</span> <Rich text={q.note} />
+        </p>
+      )}
+      {(q.opinions || []).map((o) => (o.author.toLowerCase() === me && editing ? null : (
+        <p key={o.author} className="text-[11px] text-gray-700 whitespace-pre-line">
+          <span className="font-bold">{o.author.toLowerCase() === me ? 'You' : name(o.author)}:</span> <Rich text={o.text} />
+          <span className="text-[9px] text-gray-400"> · {ago(o.at)}{o.edited ? ' · edited' : ''}{o.polished ? ' · ✨' : ''}</span>
+        </p>
+      )))}
+      {!editing && (
+        <button onClick={start} className="text-[10px] font-bold text-brand-600">{mine ? '✎ Edit your opinion' : '+ Your opinion'}</button>
+      )}
+      {editing && (
+        <div className="bg-amber-50 border border-amber-200 p-2 space-y-1.5">
+          {suggestion && (
+            <div className="bg-white border border-brand-200 px-2 py-1.5">
+              <p className="text-[9px] font-black text-brand-600 uppercase tracking-widest">✨ AI version</p>
+              <p className="text-[11px] text-gray-800 whitespace-pre-line mt-0.5">{suggestion}</p>
+              <div className="flex gap-3 mt-1">
+                <button onClick={() => { setText(suggestion); setPolished(true); setSuggestion(null) }} className="text-[10px] font-bold text-brand-600">Use this</button>
+                <button onClick={() => setSuggestion(null)} className="text-[10px] font-bold text-gray-500">Keep mine</button>
+              </div>
+            </div>
+          )}
+          <textarea value={text} onChange={(e) => { setText(e.target.value); setPolished(false) }} rows={3} autoFocus
+            className="input text-xs" placeholder={`What do you think of ${q.vendor}? Food, location, price, how they were to deal with…`} />
+          {err && <p className="text-[10px] text-red-600">{err}</p>}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <button onClick={() => save()} disabled={!!busy || !text.trim()} className="btn-primary text-[11px] py-1 px-3 disabled:opacity-50">
+              {busy === 'save' ? 'Saving…' : 'Save'}
+            </button>
+            {d.ai && (
+              <button onClick={improve} disabled={!!busy || !text.trim()} className="text-[10px] font-bold text-gray-500 disabled:opacity-40">
+                {busy === 'ai' ? 'Improving…' : '✨ Improve with AI'}
+              </button>
+            )}
+            <button onClick={() => { setEditing(false); setErr('') }} className="text-[10px] font-bold text-gray-500">Cancel</button>
+            {mine && (
+              <button onClick={() => { if (confirm('Remove your opinion on this quote?')) save('') }} disabled={!!busy}
+                className="text-[10px] font-bold text-red-600 ml-auto">Remove</button>
+            )}
+          </div>
+        </div>
       )}
     </div>
   )
