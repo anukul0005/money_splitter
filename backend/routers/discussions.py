@@ -1011,6 +1011,36 @@ def _summary_context(db: Session, d: Discussion, group: Group, caller: User) -> 
     return talk[:24000], quotes_text[:16000]
 
 
+_SUM_ENQUIRIES = """You track the enquiries a group in India handed out while planning (who was asked to call
+which venues, caterers, hotels...). From each enquiry - who asked, who was asked, what, its status, and any quotes
+that came back - write:
+- "overview": 1-2 sentences: how many are open vs done, and where things stand.
+- "people": for each member who was asked something, what they were asked and where they are with it
+  (done / still pending, quotes they brought back). Use their names exactly.
+- "pending": the enquiries still open, each as "<who> - <what>".
+- "done": what has been found out from finished ones.
+
+Rules: only facts given - never invent. Short, plain language.
+Respond with ONLY a JSON object:
+{"overview": "...", "people": [{"name": "...", "summary": "..."}], "pending": ["..."], "done": ["..."]}"""
+
+
+def _enquiries_context(db: Session, d: Discussion) -> str | None:
+    """Every enquiry as text for the prompt, or None when there are none."""
+    tasks = db.query(DiscussionTask).filter(DiscussionTask.discussion_id == d.id).order_by(DiscussionTask.id).all()
+    if not tasks:
+        return None
+    msgs = {m.id: m for m in db.query(DiscussionMessage).filter(DiscussionMessage.discussion_id == d.id)}
+    quotes = db.query(DiscussionQuote).filter(DiscussionQuote.discussion_id == d.id).all()
+    lines = []
+    for t in tasks:
+        m = msgs.get(t.message_id)
+        got = [q.vendor + (f" ({q.price})" if q.price else "") for q in quotes if q.task_id == t.id]
+        lines.append(f"- {m.author if m else '?'} asked {t.assignee} [{t.status}]: {(m.text if m else '')[:800]}"
+                     + (f" -> quotes back: {', '.join(got)}" if got else ""))
+    return (f"Topic: {d.title}\nDetails: {d.description or '-'}\n\nEnquiries:\n" + "\n".join(lines))[:16000]
+
+
 @router.post("/{discussion_id}/summary", response_model=dict)
 def summarise(discussion_id: int, db: Session = Depends(get_db), caller: User = Depends(current_user)):
     """The AI's summary, made fresh: the talk on one key and the quotes on the
@@ -1018,18 +1048,22 @@ def summarise(discussion_id: int, db: Session = Depends(get_db), caller: User = 
     import ai_text
     d, group = _discussion(db, discussion_id, caller)
     talk, quotes = _summary_context(db, d, group, caller)
-    jobs = [(_SUM_TALK, talk)] + ([(_SUM_QUOTES, quotes)] if quotes else [])
-    results = ai_text.chat_json_tandem(jobs)
-    if isinstance(results[0], Exception):
-        print(f"[discussions] summary failed: {results[0]!r}")
+    enquiries = _enquiries_context(db, d)
+    # Each part on its own key at once: the talk, the quotes, the enquiries
+    jobs = [("talk", _SUM_TALK, talk)] + ([("quotes", _SUM_QUOTES, quotes)] if quotes else []) \
+        + ([("enquiries", _SUM_ENQUIRIES, enquiries)] if enquiries else [])
+    results = dict(zip([j[0] for j in jobs], ai_text.chat_json_tandem([(j[1], j[2]) for j in jobs])))
+    if isinstance(results["talk"], Exception):
+        print(f"[discussions] summary failed: {results['talk']!r}")
         raise HTTPException(503, "The AI couldn't be reached just now - try again in a minute.")
-    data = {"talk": results[0]}
-    if quotes:
-        if isinstance(results[1], Exception):
-            print(f"[discussions] quote summary failed: {results[1]!r}")
-            data["quotes_error"] = True
-        else:
-            data["quotes"] = results[1]
+    data = {"talk": results["talk"]}
+    for part in ("quotes", "enquiries"):
+        if part in results:
+            if isinstance(results[part], Exception):
+                print(f"[discussions] {part} summary failed: {results[part]!r}")
+                data[f"{part}_error"] = True
+            else:
+                data[part] = results[part]
     d.summary_json = json.dumps(data)
     d.summary_basis = d.updated_at           # not _touch: a summary isn't new activity
     d.summary_at = _now()

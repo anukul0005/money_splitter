@@ -194,6 +194,9 @@ export default function DiscussionDetail() {
         ))}
       </div>
 
+      {tab === 'chat' && d.ai && (
+        <div className="px-4 pt-3 max-w-2xl w-full"><Summary d={d} onChanged={load} /></div>
+      )}
       {tab === 'chat' && (
         <Chat d={d} name={name} onChanged={load}
           onQuote={(t) => { setQuoteFor(t); setTab('quotes') }} />
@@ -233,7 +236,6 @@ function Header({ d, name, onChanged, onDeleted }) {
       </p>
       {adding && <AddPeople d={d} onDone={() => { setAdding(false); onChanged() }} />}
       <DetailsBlock d={d} onChanged={onChanged} />
-      {d.ai && <Summary d={d} onChanged={onChanged} />}
       {!editing && d.params.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-2">
           {d.params.map((p) => (
@@ -1261,6 +1263,77 @@ function QuoteForm({ d, tasks, name, initial, onCancel, onSaved }) {
 
 // ── enquiries: who's been asked what ───────────────────────────────────────
 
+/** The AI on the enquiries: who was asked what, what's done, what's still pending. */
+function EnquiriesSummary({ d, onChanged }) {
+  const [open, setOpen] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const s = d.summary
+  const e = s?.data?.enquiries
+  if (!d.ai) return null
+  const run = async () => {
+    setBusy(true); setErr('')
+    try { await summariseDiscussion(d.id); await onChanged() }
+    catch (x) { setErr(errText(x, "The AI couldn't summarise them just now.")) } finally { setBusy(false) }
+  }
+  if (!e) return (
+    <div className="card !p-3">
+      <p className="text-[10px] font-black text-brand-600 uppercase tracking-widest">✨ AI on the enquiries</p>
+      <p className="text-xs text-gray-500 mt-1">{s?.data?.enquiries_error ? "Couldn't be summarised last time." : 'Not summarised yet.'}</p>
+      <button onClick={run} disabled={busy} className="text-[11px] font-bold text-brand-600 mt-1.5 disabled:opacity-50">
+        {busy ? 'Summarising…' : '✨ Summarise the enquiries'}
+      </button>
+      {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
+    </div>
+  )
+  const List = ({ title, items, tone }) => (items?.length ? (
+    <div className="mt-2">
+      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{title}</p>
+      <ul className="mt-0.5 space-y-0.5">
+        {items.map((x, i) => <li key={i} className={`text-xs ${tone} pl-3 relative`}><span className="absolute left-0">·</span><Rich text={x} /></li>)}
+      </ul>
+    </div>
+  ) : null)
+  const copyText = ['Enquiries:', e.overview, ...(e.pending?.length ? ['Pending:', ...e.pending.map((x) => `- ${x}`)] : []),
+    ...(e.done?.length ? ['Found out:', ...e.done.map((x) => `- ${x}`)] : [])].filter(Boolean).join('\n')
+  return (
+    <div className="card !p-0 border-brand-200">
+      <button onClick={() => setOpen((v) => !v)} className="w-full text-left px-3 py-2">
+        <span className="flex items-center justify-between gap-2">
+          <span className="text-[10px] font-black text-brand-600 uppercase tracking-widest">✨ AI on the enquiries</span>
+          <span className="text-[10px] text-gray-400">
+            {busy ? <span className="text-brand-600 font-bold">updating… · </span>
+              : s.stale ? <span className="text-amber-600 font-bold">new activity since · </span> : null}{ago(s.at)} {open ? '▴' : '▾'}
+          </span>
+        </span>
+        <span className={`block text-xs text-gray-700 mt-1 ${open ? '' : 'line-clamp-2'}`}><Rich text={e.overview} /></span>
+      </button>
+      {open && (
+        <div className="px-3 pb-3">
+          {e.people?.length > 0 && (
+            <div className="mt-1">
+              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Who's on what</p>
+              {e.people.map((p, i) => (
+                <p key={i} className="text-xs text-gray-700 mt-0.5"><span className="font-bold">{p.name}:</span> <Rich text={p.summary} /></p>
+              ))}
+            </div>
+          )}
+          <List title="Still pending" items={e.pending} tone="text-amber-700" />
+          <List title="Found out" items={e.done} tone="text-green-700" />
+          <div className="flex items-center gap-3 mt-3">
+            <button onClick={run} disabled={busy} className="text-[11px] font-bold text-brand-600 disabled:opacity-50">
+              {busy ? 'Summarising…' : s.stale ? '↻ Update with the latest' : '↻ Refresh'}
+            </button>
+            <CopyButton text={copyText} />
+            <span className="text-[10px] text-gray-400 ml-auto">AI-written - check before deciding</span>
+          </div>
+          {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Asks({ d, name, tasks, onChanged, onQuote }) {
   const me = d.me.toLowerCase()
   if (!tasks.length) return (
@@ -1273,6 +1346,7 @@ function Asks({ d, name, tasks, onChanged, onQuote }) {
   const open = tasks.filter((t) => t.status === 'open').length
   return (
     <div className="px-4 py-3 space-y-2 max-w-2xl w-full">
+      <EnquiriesSummary d={d} onChanged={onChanged} />
       <p className="text-[11px] text-gray-500">{open} open · {tasks.length - open} done</p>
       {sorted.map((t) => (
         <div key={t.id} className={`card !py-2.5 ${t.assignee.toLowerCase() === me && t.status === 'open' ? 'border-red-200 bg-red-50/40' : ''}`}>
@@ -1374,7 +1448,7 @@ function Summary({ d, onChanged }) {
   }, [d.id])
 
   if (!s) return (
-    <div className="mt-3">
+    <div>
       {busy && (
         <div className="bg-white text-gray-800 border border-brand-200 px-3 py-3 mb-1">
           <p className="text-[10px] font-black text-brand-600 uppercase tracking-widest">✨ AI summary</p>
@@ -1385,11 +1459,11 @@ function Summary({ d, onChanged }) {
         </div>
       )}
       {!busy && <button onClick={run} disabled={busy}
-        className="text-[11px] font-bold border border-brand-400/60 text-brand-300 px-2.5 py-1 hover:bg-brand-400/10 disabled:opacity-50">
+        className="text-[11px] font-bold border border-brand-300 text-brand-600 bg-white px-2.5 py-1 hover:bg-brand-50 disabled:opacity-50">
         ✨ Summarise with AI
       </button>}
-      {!busy && <span className="text-[10px] text-slate-300/50 ml-2">the details, everyone's thoughts and the quotes, in one read</span>}
-      {err && <p className="text-[11px] text-red-300 mt-1">{err}</p>}
+      {!busy && <span className="text-[10px] text-gray-400 ml-2">the details and everyone's thoughts, in one read</span>}
+      {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
     </div>
   )
 
@@ -1410,7 +1484,7 @@ function Summary({ d, onChanged }) {
   ].filter(Boolean).join('\n')
 
   return (
-    <div className="mt-3 bg-white text-gray-800 border border-brand-200">
+    <div className="bg-white text-gray-800 border border-brand-200">
       <button onClick={() => setOpen((v) => !v)} className="w-full text-left px-3 py-2">
         <span className="flex items-center justify-between gap-2">
           <span className="text-[10px] font-black text-brand-600 uppercase tracking-widest">✨ AI summary</span>
