@@ -5,7 +5,7 @@ import {
   CategoryScale, LinearScale, Tooltip,
 } from 'chart.js'
 import { Bar } from 'react-chartjs-2'
-import { getSalaryDashboard, addInvestment, editInvestment, deleteInvestment, getSalaryItems, setCardSkip } from '../api/index.js'
+import { getSalaryDashboard, addInvestment, editInvestment, deleteInvestment, getSalaryItems, setCardSkip, moveMonthlyExpense, moveMonthlyBack } from '../api/index.js'
 import LoadingSpinner from '../components/LoadingSpinner'
 
 Chart.register(BarElement, BarController, LineElement, LineController, PointElement, CategoryScale, LinearScale, Tooltip)
@@ -433,6 +433,23 @@ function SourceRow({ s, v, salary, ym, onOpen, onChanged }) {
   const [all, setAll] = useState(false)
   const [busyKey, setBusyKey] = useState('')
   const [order, setOrder] = useState('date')        // 'date' (newest first) | 'amount' (biggest first)
+  // Monthly expenses only: move one that was really money to a person / an investment
+  const [moving, setMoving] = useState(null)        // the item whose "move to" choices are open
+  const [remember, setRemember] = useState(true)
+  const [moved, setMoved] = useState(null)          // the last move, for Undo
+  const move = async (x, kind) => {
+    setBusyKey(`m${x.id}`); setErr('')
+    try {
+      const { data: r } = await moveMonthlyExpense(x.id, kind, remember)
+      setMoved({ ...r, title: x.title, amount: x.amount }); setMoving(null)
+      await Promise.all([fetchItems(), onChanged?.()])
+    } catch (e) { setErr(e.response?.data?.detail || "Couldn't move it.") } finally { setBusyKey('') }
+  }
+  const undoMove = async () => {
+    setBusyKey('undo'); setErr('')
+    try { await moveMonthlyBack(moved.skip_id, moved.undo); setMoved(null); await Promise.all([fetchItems(), onChanged?.()]) }
+    catch { setErr("Couldn't undo that.") } finally { setBusyKey('') }
+  }
   const fetchItems = () => getSalaryItems(ym, s.key).then((r) => setData(r.data)).catch(() => setErr("Couldn't load them."))
   const toggle = () => {
     const next = !open
@@ -480,6 +497,20 @@ function SourceRow({ s, v, salary, ym, onOpen, onChanged }) {
               </div>
             </div>
           )}
+          {moved && (
+            <div className="flex items-center gap-2 bg-green-50 border border-green-200 px-2 py-1.5 mb-1.5 text-[11px]">
+              <span className="flex-1 min-w-0 text-green-900">
+                Moved <b>{moved.title}</b> ({INR(moved.amount)}) to {moved.kind === 'people' ? 'P2P - to people' : 'investments'}
+                {moved.remembered ? ' - later imports will do the same' : ''}.
+              </span>
+              <button onClick={undoMove} disabled={busyKey === 'undo'} className="font-bold text-brand-600 shrink-0 disabled:opacity-50">
+                {busyKey === 'undo' ? 'Undoing…' : 'Undo'}
+              </button>
+            </div>
+          )}
+          {s.key === 'monthly' && data?.items.length > 0 && (
+            <p className="text-[10px] text-gray-400 mb-1">Not spending? <b>Move to…</b> P2P (money to a person) or investments - it leaves this total.</p>
+          )}
           {s.key === 'cards' && data?.items.length > 0 && (
             <p className="text-[10px] text-gray-400 mb-1">Tap <b>Already counted</b> on a spend you've put into a group (or elsewhere) - it's left out of the totals.</p>
           )}
@@ -491,6 +522,29 @@ function SourceRow({ s, v, salary, ym, onOpen, onChanged }) {
                 <span className="flex-1 min-w-0">
                   <span className={`block text-[11px] font-semibold text-gray-800 truncate ${off ? 'line-through' : ''}`}>{x.title}</span>
                   {x.detail && <span className="block text-[10px] text-gray-400 truncate">{x.detail}</span>}
+                  {x.id && moving !== x.id && (
+                    <button onClick={() => { setMoving(x.id); setRemember(true) }} className="text-[10px] font-bold mt-0.5 text-gray-500 hover:text-brand-600">
+                      Move to…
+                    </button>
+                  )}
+                  {x.id && moving === x.id && (
+                    <span className="block mt-1 bg-white border border-amber-200 px-2 py-1.5">
+                      <span className="flex flex-wrap gap-1.5">
+                        <button onClick={() => move(x, 'people')} disabled={!!busyKey}
+                          className="text-[10px] font-bold border border-amber-300 px-2 py-0.5 hover:bg-amber-50 disabled:opacity-50">P2P - sent to a person</button>
+                        <button onClick={() => move(x, 'investment')} disabled={!!busyKey}
+                          className="text-[10px] font-bold border border-amber-300 px-2 py-0.5 hover:bg-amber-50 disabled:opacity-50">Investment</button>
+                        <button onClick={() => setMoving(null)} className="text-[10px] font-bold text-gray-400 px-1">Cancel</button>
+                      </span>
+                      {x.payee && (
+                        <label className="flex items-center gap-1.5 mt-1.5 text-[10px] text-gray-600">
+                          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="w-3 h-3 accent-brand-400" />
+                          Do the same for {x.payee} in later imports
+                        </label>
+                      )}
+                      {busyKey === `m${x.id}` && <span className="block text-[10px] text-gray-400 mt-1">Moving…</span>}
+                    </span>
+                  )}
                   {x.key && (
                     <button onClick={() => mark(x.key, !off)} disabled={busyKey === x.key}
                       className={`text-[10px] font-bold mt-0.5 disabled:opacity-50 ${off ? 'text-brand-600' : 'text-gray-500 hover:text-red-600'}`}>

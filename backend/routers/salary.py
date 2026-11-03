@@ -339,8 +339,10 @@ def items(month: str, source: str, db: Session = Depends(get_db), caller: User =
             detail = [x for x in (e.category, None if solo else f"{g['emoji'] or ''} {g['name']}".strip()) if x]
             if not solo and abs(share - (e.amount or 0)) >= 0.5:
                 detail.append(f"your share of Rs {e.amount:,.0f}")
-            out.append({"date": (e.date or "")[:10], "title": title, "detail": " · ".join(detail),
-                        "amount": round(share, 2)})
+            row = {"date": (e.date or "")[:10], "title": title, "detail": " · ".join(detail), "amount": round(share, 2)}
+            if solo:
+                row.update(id=e.id, payee=e.merchant or e.title or "")    # can be moved to P2P / investments
+            out.append(row)
 
     elif source == "cards":
         from card_bills import card_name
@@ -428,4 +430,95 @@ def card_skip(payload: CardSkipIn, db: Session = Depends(get_db), caller: User =
         db.delete(row)
     db.commit()
     return {"key": key, "counted": payload.counted}
+
+
+# ── moving a monthly expense out: it was money to a person, or an investment ──
+# What the statement rules missed: the expense leaves the monthly group and
+# joins that month's "to people" / investments (StatementSkip) - the same
+# place an import puts what it recognises. With `remember`, the payee is
+# labelled so later imports skip it on their own (PayeeLabel, source "user").
+
+class MoveIn(BaseModel):
+    expense_id: int
+    kind: str                 # "people" (P2P) | "investment"
+    remember: bool = False
+
+
+def _own_solo_expense(db: Session, caller: User, expense_id: int) -> Expense:
+    from models import Group
+    e = db.get(Expense, expense_id)
+    g = db.get(Group, e.group_id) if e else None
+    if not e or not g or len(g.members) != 1 or g.members[0].name.lower() != caller.name.lower():
+        raise HTTPException(404, "Only your own monthly expenses can be moved")
+    return e
+
+
+@router.post("/move", response_model=dict)
+def move_expense(payload: MoveIn, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    from models import PayeeLabel
+    from routers.expenses import _norm
+    if payload.kind not in ("people", "investment"):
+        raise HTTPException(400, "P2P or investment")
+    e = _own_solo_expense(db, caller, payload.expense_id)
+    payee = (e.merchant or e.title or "Payment")[:200]
+    undo = {"group_id": e.group_id, "date": e.date, "title": e.title, "merchant": e.merchant, "amount": e.amount,
+            "category": e.category, "subcategory": e.subcategory, "txn_time": e.txn_time, "txn_ref": e.txn_ref,
+            "payment_mode": e.payment_mode, "notes": e.notes}
+    skip = StatementSkip(user_name=caller.name, kind=payload.kind, date=(e.date or "")[:10], time=e.txn_time,
+                         merchant=payee, amount=e.amount, txn_id=e.txn_ref,
+                         reason="moved here by you from monthly expenses", source="manual")
+    db.add(skip)
+    db.delete(e)
+    label = None
+    key = _norm(payee)
+    if payload.remember and key:
+        decision = "p2p" if payload.kind == "people" else "investment"
+        label = db.query(PayeeLabel).filter(PayeeLabel.user_name.ilike(caller.name), PayeeLabel.payee_key == key).first()
+        if label:
+            undo["label_was"] = {"decision": label.decision, "category": label.category,
+                                 "subcategory": label.subcategory, "source": label.source}
+            label.decision, label.category, label.subcategory, label.source = decision, None, None, "user"
+        else:
+            label = PayeeLabel(user_name=caller.name, payee_key=key, payee=payee, decision=decision, source="user",
+                               note="moved from monthly expenses")
+            db.add(label)
+            undo["label_new"] = True
+    db.commit()
+    return {"skip_id": skip.id, "kind": payload.kind, "remembered": bool(label), "undo": undo}
+
+
+class MoveBackIn(BaseModel):
+    skip_id: int
+    undo: dict
+
+
+@router.post("/move-back", response_model=dict)
+def move_back(payload: MoveBackIn, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Undo a move: the expense is back in its monthly group, the payee label as it was."""
+    from models import Group, PayeeLabel
+    from routers.expenses import _norm
+    skip = db.get(StatementSkip, payload.skip_id)
+    if not skip or skip.user_name.lower() != caller.name.lower():
+        raise HTTPException(404, "Nothing to undo")
+    u = payload.undo or {}
+    g = db.get(Group, int(u.get("group_id") or 0))
+    if not g or len(g.members) != 1 or g.members[0].name.lower() != caller.name.lower():
+        raise HTTPException(404, "That monthly group is gone")
+    e = Expense(group_id=g.id, date=u.get("date") or skip.date, title=u.get("title"), merchant=u.get("merchant"),
+                amount=skip.amount, paid_by=caller.name, participants=None, divider=1, individual_amount=skip.amount,
+                category=u.get("category"), subcategory=u.get("subcategory"), category_source="user",
+                txn_time=u.get("txn_time"), txn_ref=u.get("txn_ref"), payment_mode=u.get("payment_mode"),
+                notes=u.get("notes"))
+    db.add(e)
+    db.delete(skip)
+    key = _norm(skip.merchant)
+    label = db.query(PayeeLabel).filter(PayeeLabel.user_name.ilike(caller.name), PayeeLabel.payee_key == key).first()
+    if label and u.get("label_new"):
+        db.delete(label)
+    elif label and u.get("label_was"):
+        w = u["label_was"]
+        label.decision, label.category, label.subcategory, label.source = (w.get("decision"), w.get("category"),
+                                                                          w.get("subcategory"), w.get("source"))
+    db.commit()
+    return {"ok": True, "expense_id": e.id}
 
