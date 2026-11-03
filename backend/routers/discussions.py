@@ -24,10 +24,11 @@ from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from activity import record_activity
 from auth import caller_groups, current_user, member_group
 from database import get_db
-from models import (Discussion, DiscussionInvite, DiscussionMessage, DiscussionQuote, DiscussionTask,
-                    Group, Member, User)
+from models import (Activity, Discussion, DiscussionInvite, DiscussionMessage, DiscussionPoll, DiscussionQuote,
+                    DiscussionTask, DiscussionVote, Group, Member, User)
 
 router = APIRouter(prefix="/discussions", tags=["discussions"])
 
@@ -78,6 +79,12 @@ def _touch(d: Discussion) -> None:
     d.updated_at = _now()
 
 
+def _feed(db: Session, group: Group, actor: str, verb: str, d: Discussion, detail: str = "") -> None:
+    """The group's activity feed (the bell, and the Activity tab's whole-group
+    view) hears the discussion's milestones - not every chat line or vote."""
+    record_activity(db, group, actor, verb, f"💬 {d.title}" + (f" · {detail}" if detail else ""))
+
+
 # ── list / create ──────────────────────────────────────────────────────────
 
 @router.get("", response_model=list)
@@ -121,13 +128,14 @@ class DiscussionIn(BaseModel):
 
 @router.post("", response_model=dict, status_code=201)
 def create_discussion(payload: DiscussionIn, db: Session = Depends(get_db), caller: User = Depends(current_user)):
-    member_group(payload.group_id, caller, db, with_history=False)
+    group = member_group(payload.group_id, caller, db, with_history=False)
     title = payload.title.strip()[:200]
     if not title:
         raise HTTPException(400, "Give the discussion a title")
     d = Discussion(group_id=payload.group_id, title=title, description=(payload.description or "").strip() or None,
                    params_json=json.dumps(_clean_params(payload.params)), created_by=caller.name)
     db.add(d)
+    _feed(db, group, caller.name, "started a discussion", d)
     db.commit()
     return {"id": d.id}
 
@@ -200,8 +208,33 @@ def get_discussion(discussion_id: int, db: Session = Depends(get_db), caller: Us
         "quotes": [_quote_out(q) for q in quotes],
         "invites": [{"email": i.email, "invited_by": i.invited_by, "accepted_by": i.accepted_by,
                      "created_at": i.created_at} for i in invites],
+        "polls": _polls_out(db, d, group, caller),
         "ai": _ai_available(),
     }
+
+
+def _polls_out(db: Session, d: Discussion, group: Group, caller: User) -> list[dict]:
+    polls = db.query(DiscussionPoll).filter(DiscussionPoll.discussion_id == d.id).order_by(DiscussionPoll.id).all()
+    if not polls:
+        return []
+    votes = db.query(DiscussionVote).filter(DiscussionVote.poll_id.in_([p.id for p in polls])).all()
+    members = [m.name for m in group.members]
+    out = []
+    for p in polls:
+        options = _loads(p.options_json, [])
+        vs = [v for v in votes if v.poll_id == p.id]
+        voters = sorted({v.voter for v in vs}, key=str.lower)
+        voted = {v.lower() for v in voters}
+        out.append({
+            "id": p.id, "author": p.author, "question": p.question, "multi": p.multi, "closed": p.closed,
+            "created_at": p.created_at,
+            "options": [{"text": o, "voters": sorted({v.voter for v in vs if v.option_index == i}, key=str.lower)}
+                        for i, o in enumerate(options)],
+            "voters": voters,
+            "mine": sorted(v.option_index for v in vs if v.voter.lower() == caller.name.lower()),
+            "waiting": [m for m in members if m.lower() not in voted],
+        })
+    return out
 
 
 def _ai_available() -> bool:
@@ -259,6 +292,10 @@ def post_message(discussion_id: int, payload: MessageIn, bg: BackgroundTasks,
         tok = secrets.token_urlsafe(24)
         db.add(DiscussionInvite(discussion_id=d.id, email=e, token=tok, invited_by=caller.name))
         tokens.append((e, tok))
+    if assignees:
+        _feed(db, group, caller.name, f"asked {', '.join(assignees)} to enquire", d, text[:120])
+    if emails:
+        _feed(db, group, caller.name, f"invited {len(emails)} by email", d, ", ".join(emails))
     _touch(d)
     db.commit()
     bg.add_task(_notify_message, d.id, m.id, tokens)
@@ -336,7 +373,7 @@ class TaskStatus(BaseModel):
 @router.post("/{discussion_id}/tasks/{task_id}", response_model=dict)
 def set_task(discussion_id: int, task_id: int, payload: TaskStatus, db: Session = Depends(get_db),
              caller: User = Depends(current_user)):
-    d, _ = _discussion(db, discussion_id, caller)
+    d, group = _discussion(db, discussion_id, caller)
     t = db.query(DiscussionTask).filter(DiscussionTask.id == task_id, DiscussionTask.discussion_id == d.id).first()
     if not t:
         raise HTTPException(404, "No such task")
@@ -345,6 +382,9 @@ def set_task(discussion_id: int, task_id: int, payload: TaskStatus, db: Session 
         raise HTTPException(403, "Only the person asked, or who asked, can change this")
     if payload.status not in ("open", "done"):
         raise HTTPException(400, "open or done")
+    if payload.status == "done" and t.status != "done":
+        _feed(db, group, caller.name, "finished an enquiry", d,
+              "" if t.assignee.lower() == caller.name.lower() else f"for {t.assignee}")
     t.status = payload.status
     t.done_at = _now() if payload.status == "done" else None
     _touch(d)
@@ -367,7 +407,7 @@ def _clean_values(d: Discussion, values: dict) -> dict:
 @router.post("/{discussion_id}/quotes", response_model=dict, status_code=201)
 def add_quote(discussion_id: int, payload: QuoteIn, db: Session = Depends(get_db),
               caller: User = Depends(current_user)):
-    d, _ = _discussion(db, discussion_id, caller)
+    d, group = _discussion(db, discussion_id, caller)
     vendor = payload.vendor.strip()[:200]
     if not vendor:
         raise HTTPException(400, "Who is the quote from?")
@@ -383,6 +423,7 @@ def add_quote(discussion_id: int, payload: QuoteIn, db: Session = Depends(get_db
     db.add(q)
     if task and task.assignee.lower() == caller.name.lower() and task.status == "open":
         task.status, task.done_at = "done", _now()       # a quote answers the enquiry
+    _feed(db, group, caller.name, "added a quote", d, vendor)
     _touch(d)
     db.commit()
     return _quote_out(q)
@@ -419,6 +460,171 @@ def delete_quote(discussion_id: int, quote_id: int, db: Session = Depends(get_db
         db.commit()
 
 
+# ── polls ──────────────────────────────────────────────────────────────────
+
+class PollIn(BaseModel):
+    question: str
+    options: list[str]
+    multi: bool = False
+
+
+@router.post("/{discussion_id}/polls", response_model=dict, status_code=201)
+def create_poll(discussion_id: int, payload: PollIn, bg: BackgroundTasks, db: Session = Depends(get_db),
+                caller: User = Depends(current_user)):
+    d, group = _discussion(db, discussion_id, caller)
+    question = payload.question.strip()[:300]
+    options = []
+    for o in payload.options:
+        o = (o or "").strip()[:120]
+        if o and o.lower() not in (x.lower() for x in options):
+            options.append(o)
+    if not question:
+        raise HTTPException(400, "Write the question")
+    if not 2 <= len(options) <= 10:
+        raise HTTPException(400, "Give 2 to 10 different options")
+    p = DiscussionPoll(discussion_id=d.id, author=caller.name, question=question,
+                       options_json=json.dumps(options), multi=payload.multi)
+    db.add(p)
+    _feed(db, group, caller.name, "started a poll", d, question)
+    _touch(d)
+    db.commit()
+    bg.add_task(_notify_poll, d.id, p.id)
+    return {"id": p.id}
+
+
+class VoteIn(BaseModel):
+    choices: list[int]
+
+
+@router.post("/{discussion_id}/polls/{poll_id}/vote", response_model=dict)
+def vote(discussion_id: int, poll_id: int, payload: VoteIn, db: Session = Depends(get_db),
+         caller: User = Depends(current_user)):
+    """The caller's picks, replacing any earlier ones; an empty list takes the vote back."""
+    d, _ = _discussion(db, discussion_id, caller)
+    p = db.query(DiscussionPoll).filter(DiscussionPoll.id == poll_id, DiscussionPoll.discussion_id == d.id).first()
+    if not p:
+        raise HTTPException(404, "No such poll")
+    if p.closed:
+        raise HTTPException(409, "This poll is closed")
+    n = len(_loads(p.options_json, []))
+    picks = sorted({c for c in payload.choices if isinstance(c, int) and 0 <= c < n})
+    if len(picks) > 1 and not p.multi:
+        raise HTTPException(400, "Pick one option")
+    db.query(DiscussionVote).filter(DiscussionVote.poll_id == p.id,
+                                    DiscussionVote.voter.ilike(caller.name)).delete(synchronize_session=False)
+    for c in picks:
+        db.add(DiscussionVote(poll_id=p.id, voter=caller.name, option_index=c))
+    _touch(d)
+    db.commit()
+    return {"ok": True}
+
+
+class PollState(BaseModel):
+    closed: bool
+
+
+@router.post("/{discussion_id}/polls/{poll_id}/state", response_model=dict)
+def set_poll_state(discussion_id: int, poll_id: int, payload: PollState, db: Session = Depends(get_db),
+                   caller: User = Depends(current_user)):
+    d, group = _discussion(db, discussion_id, caller)
+    p = db.query(DiscussionPoll).filter(DiscussionPoll.id == poll_id, DiscussionPoll.discussion_id == d.id).first()
+    if not p:
+        raise HTTPException(404, "No such poll")
+    if p.author.lower() != caller.name.lower():
+        raise HTTPException(403, "Only whoever asked can close or reopen the poll")
+    if payload.closed and not p.closed:
+        _feed(db, group, caller.name, "closed a poll", d, p.question)
+    p.closed = payload.closed
+    _touch(d)
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/{discussion_id}/polls/{poll_id}", status_code=204)
+def delete_poll(discussion_id: int, poll_id: int, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    d, _ = _discussion(db, discussion_id, caller)
+    p = db.query(DiscussionPoll).filter(DiscussionPoll.id == poll_id, DiscussionPoll.discussion_id == d.id).first()
+    if p and p.author.lower() != caller.name.lower():
+        raise HTTPException(403, "Only whoever asked can delete the poll")
+    if p:
+        db.delete(p)
+        db.commit()
+
+
+def _notify_poll(discussion_id: int, poll_id: int) -> None:
+    """Everyone else in the group: a push asking them to vote."""
+    import push as _push
+    from database import get_session_factory
+    db = get_session_factory()()
+    try:
+        d, p = db.get(Discussion, discussion_id), db.get(DiscussionPoll, poll_id)
+        if not d or not p:
+            return
+        for m in db.get(Group, d.group_id).members:
+            if m.name.lower() != p.author.lower():
+                try:
+                    _push.send_push_to_user(db, m.name, f"{p.author} asks: {p.question}"[:120],
+                                            f"Vote in \"{d.title}\"", url=f"/discuss/{d.id}")
+                except Exception as e:
+                    print(f"[discussions] poll push failed: {e}")
+    finally:
+        db.close()
+
+
+# ── activity: everything that happened ─────────────────────────────────────
+
+@router.get("/{discussion_id}/activity", response_model=dict)
+def activity(discussion_id: int, scope: str = "discussion", db: Session = Depends(get_db),
+             caller: User = Depends(current_user)):
+    """scope=discussion: this discussion's own history, put together from its
+    records (every message, enquiry, quote, poll and vote). scope=group: the
+    whole group's activity feed - expenses, payments, and its discussions'
+    milestones - newest first."""
+    d, group = _discussion(db, discussion_id, caller)
+    if scope == "group":
+        rows = (db.query(Activity).filter(Activity.group_id == group.id)
+                .order_by(Activity.created_at.desc(), Activity.id.desc()).limit(300).all())
+        return {"scope": "group", "items": [{"at": a.created_at, "actor": a.actor, "kind": "group",
+                                             "text": a.verb, "detail": a.summary} for a in rows]}
+    items = [{"at": d.created_at, "actor": d.created_by, "kind": "start", "text": "started the discussion",
+              "detail": d.title}]
+    msgs = db.query(DiscussionMessage).filter(DiscussionMessage.discussion_id == d.id).all()
+    for m in msgs:
+        who = _loads(m.assignees_json, [])
+        items.append({"at": m.created_at, "actor": m.author, "kind": "enquiry" if who else "message",
+                      "text": f"asked {', '.join(who)} to enquire" if who else "wrote a message",
+                      "detail": m.text[:160]})
+        invites = _loads(m.invites_json, [])
+        if invites:
+            items.append({"at": m.created_at, "actor": m.author, "kind": "invite",
+                          "text": f"invited {', '.join(invites)} by email", "detail": ""})
+    for t in db.query(DiscussionTask).filter(DiscussionTask.discussion_id == d.id, DiscussionTask.done_at.isnot(None)):
+        items.append({"at": t.done_at, "actor": t.assignee, "kind": "done", "text": "finished an enquiry", "detail": ""})
+    for q in db.query(DiscussionQuote).filter(DiscussionQuote.discussion_id == d.id):
+        items.append({"at": q.created_at, "actor": q.entered_by, "kind": "quote", "text": "added a quote",
+                      "detail": q.vendor})
+    polls = db.query(DiscussionPoll).filter(DiscussionPoll.discussion_id == d.id).all()
+    for p in polls:
+        items.append({"at": p.created_at, "actor": p.author, "kind": "poll", "text": "started a poll",
+                      "detail": p.question})
+    if polls:
+        opts = {p.id: (p.question, _loads(p.options_json, [])) for p in polls}
+        seen = set()
+        for v in db.query(DiscussionVote).filter(DiscussionVote.poll_id.in_(list(opts))).order_by(DiscussionVote.id):
+            key = (v.poll_id, v.voter.lower())
+            if key in seen:
+                continue                     # one line per voter per poll
+            seen.add(key)
+            items.append({"at": v.created_at, "actor": v.voter, "kind": "vote", "text": "voted",
+                          "detail": opts[v.poll_id][0]})
+    for i in db.query(DiscussionInvite).filter(DiscussionInvite.discussion_id == d.id,
+                                               DiscussionInvite.accepted_by.isnot(None)):
+        items.append({"at": i.accepted_at or i.created_at, "actor": i.accepted_by, "kind": "join",
+                      "text": f"joined from {i.invited_by}'s invite", "detail": ""})
+    items.sort(key=lambda x: str(x["at"] or ""), reverse=True)
+    return {"scope": "discussion", "items": items}
+
+
 # ── invites ────────────────────────────────────────────────────────────────
 
 @router.post("/invites/{token}/accept", response_model=dict)
@@ -434,6 +640,9 @@ def accept_invite(token: str, db: Session = Depends(get_db), caller: User = Depe
     group = db.get(Group, d.group_id)
     if not any(m.name.lower() == caller.name.lower() for m in group.members):
         db.add(Member(group_id=group.id, name=caller.name))
+    if not inv.accepted_by:
+        inv.accepted_at = _now()
+        _feed(db, group, caller.name, f"joined from {inv.invited_by}'s invite", d)
     inv.accepted_by = caller.name
     _touch(d)
     db.commit()

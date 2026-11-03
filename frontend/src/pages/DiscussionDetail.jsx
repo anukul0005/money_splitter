@@ -3,7 +3,8 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   getDiscussion, postDiscussionMessage, deleteDiscussionMessage, setDiscussionTask, addDiscussionQuote,
   editDiscussionQuote, deleteDiscussionQuote, acceptDiscussionInvite, polishMessage, editDiscussion,
-  deleteDiscussion, suggestQuoteFields,
+  deleteDiscussion, suggestQuoteFields, createDiscussionPoll, voteDiscussionPoll, setDiscussionPollState,
+  deleteDiscussionPoll, getDiscussionActivity,
 } from '../api/index.js'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { dn } from '../utils/displayName'
@@ -20,6 +21,34 @@ const num = (v) => {
 const errText = (e, fallback) => {
   const d = e?.response?.data?.detail
   return typeof d === 'string' ? d : fallback
+}
+
+/** A small copy-to-clipboard icon that says "Copied" for a moment. */
+function CopyButton({ text, className = '' }) {
+  const [done, setDone] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      // Older browsers / no permission: the textarea trick
+      const ta = document.createElement('textarea')
+      ta.value = text; document.body.appendChild(ta); ta.select()
+      try { document.execCommand('copy') } catch { /* nothing more to try */ }
+      ta.remove()
+    }
+    setDone(true)
+    setTimeout(() => setDone(false), 1500)
+  }
+  return (
+    <button onClick={copy} title="Copy" aria-label="Copy" className={`text-gray-300 hover:text-brand-600 inline-flex items-center gap-0.5 ${className}`}>
+      {done ? <span className="text-[10px] font-bold text-green-600">Copied</span> : (
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+          <rect x="9" y="9" width="11" height="11" rx="2" />
+          <path strokeLinecap="round" d="M5 15V6a2 2 0 012-2h9" />
+        </svg>
+      )}
+    </button>
+  )
 }
 
 /**
@@ -81,6 +110,7 @@ export default function DiscussionDetail() {
   const me = d.me.toLowerCase()
   const tasks = d.messages.flatMap((m) => m.tasks.map((t) => ({ ...t, message: m })))
   const mineOpen = tasks.filter((t) => t.assignee.toLowerCase() === me && t.status === 'open')
+  const pollsWaiting = d.polls.filter((p) => !p.closed && p.mine.length === 0).length
   const name = (n) => dn(n, d.members)
 
   return (
@@ -89,12 +119,14 @@ export default function DiscussionDetail() {
 
       {notice && <p className="mx-4 mt-3 text-xs bg-green-50 border border-green-200 text-green-800 px-3 py-2">{notice}</p>}
 
-      <div className="flex border-b border-amber-200 px-4 mt-2 sticky top-0 bg-cream z-10">
-        {[['chat', 'Chat', d.messages.length], ['quotes', 'Quotes', d.quotes.length], ['asks', 'Enquiries', tasks.length]].map(([k, label, n]) => (
+      <div className="flex border-b border-amber-200 px-4 mt-2 sticky top-0 bg-cream z-10 overflow-x-auto">
+        {[['chat', 'Chat', d.messages.length + d.polls.length], ['quotes', 'Quotes', d.quotes.length],
+          ['asks', 'Enquiries', tasks.length], ['activity', 'Activity', null]].map(([k, label, n]) => (
           <button key={k} onClick={() => setTab(k)}
-            className={`px-3 py-2.5 text-xs font-bold border-b-2 -mb-px ${tab === k ? 'border-brand-400 text-gray-900' : 'border-transparent text-gray-400'}`}>
-            {label} <span className="text-[10px] text-gray-400">{n}</span>
+            className={`px-2.5 py-2.5 text-xs font-bold border-b-2 -mb-px whitespace-nowrap ${tab === k ? 'border-brand-400 text-gray-900' : 'border-transparent text-gray-400'}`}>
+            {label} {n != null && <span className="text-[10px] text-gray-400">{n}</span>}
             {k === 'asks' && mineOpen.length > 0 && <span className="ml-1 text-[9px] font-black bg-red-500 text-white px-1">{mineOpen.length}</span>}
+            {k === 'chat' && pollsWaiting > 0 && <span className="ml-1 text-[9px] font-black bg-brand-400 text-white px-1">{pollsWaiting} 📊</span>}
           </button>
         ))}
       </div>
@@ -109,6 +141,7 @@ export default function DiscussionDetail() {
       {tab === 'asks' && (
         <Asks d={d} name={name} tasks={tasks} onChanged={load} onQuote={(t) => { setQuoteFor(t); setTab('quotes') }} />
       )}
+      {tab === 'activity' && <ActivityTab d={d} name={name} />}
     </div>
   )
 }
@@ -208,9 +241,14 @@ function EditDiscussion({ d, onSaved, onDeleted }) {
 
 function Chat({ d, name, onChanged, onQuote }) {
   const endRef = useRef(null)
-  const count = d.messages.length
+  const count = d.messages.length + d.polls.length
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }) }, [count])
   const me = d.me.toLowerCase()
+  // Messages and polls in one timeline, oldest first
+  const items = [
+    ...d.messages.map((m) => ({ kind: 'm', at: m.created_at, id: m.id, m })),
+    ...d.polls.map((p) => ({ kind: 'p', at: p.created_at, id: p.id, p })),
+  ].sort((a, b) => String(a.at).localeCompare(String(b.at)) || a.id - b.id)
 
   return (
     <>
@@ -218,17 +256,22 @@ function Chat({ d, name, onChanged, onQuote }) {
         {count === 0 && (
           <div className="text-center py-8">
             <p className="text-sm font-bold text-gray-700">Start the discussion</p>
-            <p className="text-xs text-gray-500 mt-1">Write what you're looking for. Direct it to members to have them enquire, or invite others by email.</p>
+            <p className="text-xs text-gray-500 mt-1">Write what you're looking for. Direct it to members to have them enquire, invite others by email, or ask everyone with a 📊 poll.</p>
           </div>
         )}
-        {d.messages.map((m) => {
+        {items.map((it) => {
+          if (it.kind === 'p') return <PollCard key={`p${it.id}`} p={it.p} d={d} name={name} onChanged={onChanged} />
+          const m = it.m
           const mine = m.author.toLowerCase() === me
           return (
             <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[88%] px-3 py-2 border ${mine ? 'bg-brand-50 border-brand-200' : 'bg-white border-amber-200'}`}>
                 <div className="flex items-baseline justify-between gap-3">
                   <span className="text-[11px] font-black text-gray-700">{mine ? 'You' : name(m.author)}</span>
-                  <span className="text-[10px] text-gray-400">{ago(m.created_at)}{m.polished ? ' · ✨' : ''}</span>
+                  <span className="flex items-center gap-2">
+                    <span className="text-[10px] text-gray-400">{ago(m.created_at)}{m.polished ? ' · ✨' : ''}</span>
+                    <CopyButton text={m.text} />
+                  </span>
                 </div>
                 {m.assignees.length > 0 && (
                   <p className="text-[10px] font-bold text-brand-700 mt-0.5">→ {m.assignees.map((a) => (a.toLowerCase() === me ? 'you' : name(a))).join(', ')}</p>
@@ -260,6 +303,129 @@ function Chat({ d, name, onChanged, onQuote }) {
   )
 }
 
+/**
+ * A poll in the chat: tap an option to vote (again to take it back; a
+ * multi-choice poll takes several), results live for everyone - counts,
+ * share of voters, who picked what, who hasn't voted yet.
+ */
+function PollCard({ p, d, name, onChanged }) {
+  const me = d.me.toLowerCase()
+  const mineAuthor = p.author.toLowerCase() === me
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const total = p.voters.length
+  const top = Math.max(0, ...p.options.map((o) => o.voters.length))
+
+  const pick = async (i) => {
+    if (p.closed || busy) return
+    const had = p.mine.includes(i)
+    const choices = p.multi ? (had ? p.mine.filter((x) => x !== i) : [...p.mine, i]) : (had ? [] : [i])
+    setBusy(true); setErr('')
+    try { await voteDiscussionPoll(d.id, p.id, choices); await onChanged() }
+    catch (e) { setErr(errText(e, "Couldn't record the vote.")) } finally { setBusy(false) }
+  }
+  const resultsText = `📊 ${p.question}\n` + p.options.map((o) =>
+    `- ${o.text}: ${o.voters.length} vote${o.voters.length === 1 ? '' : 's'}${o.voters.length ? ` (${o.voters.map(name).join(', ')})` : ''}`).join('\n')
+
+  return (
+    <div className="border border-brand-200 bg-white px-3 py-2.5">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-[10px] font-black text-brand-600 uppercase tracking-widest">
+          📊 Poll · {mineAuthor ? 'you asked' : `${name(p.author)} asks`}{p.closed ? ' · closed' : ''}
+        </span>
+        <span className="flex items-center gap-2">
+          <span className="text-[10px] text-gray-400">{ago(p.created_at)}</span>
+          <CopyButton text={resultsText} />
+        </span>
+      </div>
+      <p className="text-sm font-bold text-gray-900 mt-1">{p.question}</p>
+      <p className="text-[10px] text-gray-400">{p.multi ? 'Pick any that suit' : 'Pick one'} · {total} of {total + p.waiting.length} voted</p>
+      <div className="mt-2 space-y-1.5">
+        {p.options.map((o, i) => {
+          const n = o.voters.length
+          const pct = total ? Math.round((n / total) * 100) : 0
+          const chosen = p.mine.includes(i)
+          const leading = n > 0 && n === top
+          return (
+            <button key={i} onClick={() => pick(i)} disabled={p.closed || busy}
+              className={`relative w-full text-left border px-2.5 py-1.5 overflow-hidden ${chosen ? 'border-brand-400' : 'border-amber-200'} ${p.closed ? 'cursor-default' : 'hover:border-brand-300'}`}>
+              <span className={`absolute inset-y-0 left-0 ${leading ? 'bg-brand-100' : 'bg-amber-50'}`} style={{ width: `${pct}%` }} />
+              <span className="relative flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-gray-800">
+                  {p.multi ? (chosen ? '☑' : '☐') : (chosen ? '◉' : '○')} {o.text}
+                </span>
+                <span className="text-xs font-black text-gray-900 shrink-0">{n} <span className="text-[10px] font-bold text-gray-400">{pct}%</span></span>
+              </span>
+              {n > 0 && <span className="relative block text-[10px] text-gray-500 mt-0.5 truncate">{o.voters.map((v) => (v.toLowerCase() === me ? 'you' : name(v))).join(', ')}</span>}
+            </button>
+          )
+        })}
+      </div>
+      {p.waiting.length > 0 && !p.closed && (
+        <p className="text-[10px] text-gray-400 mt-1.5">Waiting on {p.waiting.map((v) => (v.toLowerCase() === me ? 'you' : name(v))).join(', ')}</p>
+      )}
+      {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
+      {mineAuthor && (
+        <div className="flex gap-3 mt-2">
+          <button onClick={async () => { await setDiscussionPollState(d.id, p.id, !p.closed).catch(() => {}); onChanged() }}
+            className="text-[10px] font-bold text-gray-500">{p.closed ? 'Reopen voting' : 'Close voting'}</button>
+          <button onClick={async () => { if (confirm('Delete this poll and its votes?')) { await deleteDiscussionPoll(d.id, p.id).catch(() => {}); onChanged() } }}
+            className="text-[10px] font-bold text-red-600">Delete</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Asking the whole group: a question and its options. */
+function PollForm({ d, onDone, onCancel }) {
+  const [question, setQuestion] = useState('')
+  const [options, setOptions] = useState(['', ''])
+  const [multi, setMulti] = useState(false)
+  const [err, setErr] = useState('')
+  const [saving, setSaving] = useState(false)
+  const filled = options.map((o) => o.trim()).filter(Boolean)
+  const save = async () => {
+    setSaving(true); setErr('')
+    try { await createDiscussionPoll(d.id, { question, options: filled, multi }); onDone() }
+    catch (e) { setErr(errText(e, "Couldn't create the poll.")); setSaving(false) }
+  }
+  return (
+    <div className="mb-2 bg-white border border-brand-200 px-3 py-2.5 space-y-1.5">
+      <p className="text-[10px] font-black text-brand-600 uppercase tracking-widest">📊 New poll - everyone in {d.group.name} can vote</p>
+      <input value={question} onChange={(e) => setQuestion(e.target.value)} maxLength={300} autoFocus
+        className="input text-sm" placeholder="e.g. Which venue should we book?" />
+      {options.map((o, i) => (
+        <div key={i} className="flex gap-2">
+          <input value={o} maxLength={120} onChange={(e) => setOptions((os) => os.map((x, j) => (j === i ? e.target.value : x)))}
+            className="input text-xs py-1.5 flex-1" placeholder={`Option ${i + 1}`} />
+          {options.length > 2 && (
+            <button onClick={() => setOptions((os) => os.filter((_, j) => j !== i))} className="text-gray-400 hover:text-red-600 px-1" aria-label="Remove option">✕</button>
+          )}
+        </div>
+      ))}
+      <div className="flex flex-wrap items-center gap-3">
+        {options.length < 10 && <button onClick={() => setOptions((os) => [...os, ''])} className="text-[11px] font-bold text-brand-600">+ Option</button>}
+        {d.quotes.length > 1 && (
+          <button onClick={() => setOptions([...new Set(d.quotes.map((q) => q.vendor))].slice(0, 10))}
+            className="text-[11px] font-bold text-brand-600">Use the quotes as options</button>
+        )}
+        <label className="flex items-center gap-1.5 text-[11px] text-gray-600">
+          <input type="checkbox" checked={multi} onChange={(e) => setMulti(e.target.checked)} className="w-3.5 h-3.5 accent-brand-400" />
+          Allow more than one pick
+        </label>
+      </div>
+      {err && <p className="text-[11px] text-red-600">{err}</p>}
+      <div className="flex gap-3">
+        <button onClick={save} disabled={!question.trim() || filled.length < 2 || saving} className="btn-primary text-xs py-1.5 px-4 disabled:opacity-50">
+          {saving ? 'Creating…' : 'Ask everyone'}
+        </button>
+        <button onClick={onCancel} className="text-xs font-bold text-gray-500">Cancel</button>
+      </div>
+    </div>
+  )
+}
+
 /** Writing a message: direct it at members, invite emails, let the AI tidy it. */
 function Composer({ d, name, onSent }) {
   const [text, setText] = useState('')
@@ -269,6 +435,7 @@ function Composer({ d, name, onSent }) {
   const [emails, setEmails] = useState([])
   const [emailDraft, setEmailDraft] = useState('')
   const [showDirect, setShowDirect] = useState(false)
+  const [polling, setPolling] = useState(false)
   const [busy, setBusy] = useState('')
   const [err, setErr] = useState('')
   const others = d.members.filter((m) => m.toLowerCase() !== d.me.toLowerCase())
@@ -302,6 +469,7 @@ function Composer({ d, name, onSent }) {
 
   return (
     <div className="sticky bottom-16 md:bottom-0 bg-cream border-t border-amber-200 px-4 py-3 max-w-2xl w-full">
+      {polling && <PollForm d={d} onCancel={() => setPolling(false)} onDone={() => { setPolling(false); onSent() }} />}
       {suggestion && (
         <div className="mb-2 bg-white border border-brand-200 px-3 py-2">
           <p className="text-[10px] font-black text-brand-600 uppercase tracking-widest">✨ AI version</p>
@@ -341,9 +509,12 @@ function Composer({ d, name, onSent }) {
       <textarea value={text} onChange={(e) => setText(e.target.value)} rows={text.split('\n').length > 2 ? 5 : 2}
         placeholder={to.length ? `Ask ${to.map(name).join(', ')}…` : 'Write a message…'} className="input text-sm" />
       {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
-      <div className="flex items-center gap-3 mt-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mt-2">
         <button onClick={() => setShowDirect((v) => !v)} className={`text-[11px] font-bold ${showDirect || to.length ? 'text-brand-600' : 'text-gray-500'}`}>
           👥 Direct / invite{to.length + emails.length ? ` (${to.length + emails.length})` : ''}
+        </button>
+        <button onClick={() => setPolling((v) => !v)} className={`text-[11px] font-bold ${polling ? 'text-brand-600' : 'text-gray-500'}`}>
+          📊 Poll
         </button>
         {d.ai && (
           <button onClick={polish} disabled={!text.trim() || !!busy} className="text-[11px] font-bold text-gray-500 disabled:opacity-40">
@@ -590,6 +761,69 @@ function Asks({ d, name, tasks, onChanged, onQuote }) {
         <div key={t.id} className={`card !py-2.5 ${t.assignee.toLowerCase() === me && t.status === 'open' ? 'border-red-200 bg-red-50/40' : ''}`}>
           <TaskLine t={t} d={d} name={name} onChanged={onChanged} onQuote={onQuote} />
           <p className="text-xs text-gray-700 mt-1 line-clamp-3 whitespace-pre-line">{t.message.text}</p>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── activity: everything that happened ─────────────────────────────────────
+
+const ACT_ICON = { start: '🆕', message: '💬', enquiry: '📨', invite: '✉️', done: '✅', quote: '🧾', poll: '📊', vote: '🗳️', join: '👋', group: '•' }
+
+/**
+ * This discussion's history (every message, enquiry, quote, poll, vote,
+ * join), or the whole group's activity feed - expenses and payments too.
+ */
+function ActivityTab({ d, name }) {
+  const [scope, setScope] = useState('discussion')
+  const [rows, setRows] = useState(null)
+  const [err, setErr] = useState('')
+  const me = d.me.toLowerCase()
+  useEffect(() => {
+    setRows(null); setErr('')
+    getDiscussionActivity(d.id, scope).then((r) => setRows(r.data.items)).catch(() => setErr("Couldn't load the activity."))
+  }, [scope, d.id, d.messages.length, d.quotes.length, d.polls.length])
+
+  // One heading per day
+  const days = []
+  ;(rows || []).forEach((r) => {
+    const day = r.at ? new Date(r.at).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }) : ''
+    if (!days.length || days[days.length - 1].day !== day) days.push({ day, items: [] })
+    days[days.length - 1].items.push(r)
+  })
+
+  return (
+    <div className="px-4 py-3 max-w-2xl w-full">
+      <div className="flex border border-amber-200 w-fit mb-3">
+        {[['discussion', 'This discussion'], ['group', `All of ${d.group.name}`]].map(([k, label]) => (
+          <button key={k} onClick={() => setScope(k)}
+            className={`px-3 py-1.5 text-[11px] font-bold ${scope === k ? 'bg-gray-800 text-white' : 'text-gray-500 bg-white'}`}>{label}</button>
+        ))}
+      </div>
+      {scope === 'group' && <p className="text-[10px] text-gray-400 -mt-1.5 mb-2">Expenses, payments and settle-ups in the group, and its discussions' milestones.</p>}
+      {err && <p className="text-xs text-red-600">{err}</p>}
+      {!rows && !err && <p className="text-xs text-gray-400">Loading…</p>}
+      {rows?.length === 0 && <p className="text-xs text-gray-500">Nothing yet.</p>}
+      {days.map((g) => (
+        <div key={g.day} className="mb-3">
+          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">{g.day}</p>
+          <div className="card !p-0">
+            {g.items.map((r, i) => (
+              <div key={i} className="flex gap-2.5 px-3 py-2 border-b border-amber-100 last:border-0">
+                <span className="text-sm leading-5 w-5 text-center shrink-0">{ACT_ICON[r.kind] || '•'}</span>
+                <span className="flex-1 min-w-0">
+                  <span className="block text-xs text-gray-800">
+                    <span className="font-bold">{r.actor ? (r.actor.toLowerCase() === me ? 'You' : name(r.actor)) : 'Someone'}</span> {r.text}
+                  </span>
+                  {r.detail && <span className="block text-[11px] text-gray-500 truncate">{r.detail}</span>}
+                </span>
+                <span className="text-[10px] text-gray-400 shrink-0">
+                  {r.at ? new Date(r.at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }) : ''}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       ))}
     </div>

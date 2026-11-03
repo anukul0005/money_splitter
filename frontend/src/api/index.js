@@ -357,3 +357,8 @@ export const deleteDiscussionQuote = (id, qid) => api.delete(`/discussions/${id}
 export const acceptDiscussionInvite = (token)  => api.post(`/discussions/invites/${encodeURIComponent(token)}/accept`)
 export const polishMessage      = (data)       => api.post('/discussions/polish', data)
 export const suggestQuoteFields = (data)       => api.post('/discussions/suggest-params', data)
+export const createDiscussionPoll = (id, data)  => api.post(`/discussions/${id}/polls`, data)
+export const voteDiscussionPoll   = (id, pid, choices) => api.post(`/discussions/${id}/polls/${pid}/vote`, { choices })
+export const setDiscussionPollState = (id, pid, closed) => api.post(`/discussions/${id}/polls/${pid}/state`, { closed })
+export const deleteDiscussionPoll = (id, pid)   => api.delete(`/discussions/${id}/polls/${pid}`)
+export const getDiscussionActivity = (id, scope = 'discussion') => api.get(`/discussions/${id}/activity`, { params: { scope } })

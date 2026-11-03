@@ -1262,6 +1262,36 @@ class DiscussionInvite(Base):
     token = Column(String(64), nullable=False, unique=True, index=True)
     invited_by = Column(String(100), nullable=False)
     accepted_by = Column(String(100), nullable=True)
+    accepted_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class DiscussionPoll(Base):
+    """A question put to the whole group, with options to pick from
+    (`options_json`: [text]); `multi` lets a voter pick more than one."""
+
+    __tablename__ = "discussion_polls"
+
+    id = Column(Integer, primary_key=True, index=True)
+    discussion_id = Column(Integer, ForeignKey("discussions.id", ondelete="CASCADE"), nullable=False, index=True)
+    author = Column(String(100), nullable=False)
+    question = Column(String(300), nullable=False)
+    options_json = Column(Text, nullable=False)
+    multi = Column(Boolean, nullable=False, default=False)
+    closed = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class DiscussionVote(Base):
+    """One voter's pick on a poll - one row per option picked."""
+
+    __tablename__ = "discussion_votes"
+    __table_args__ = (UniqueConstraint("poll_id", "voter", "option_index", name="ux_discussion_vote"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    poll_id = Column(Integer, ForeignKey("discussion_polls.id", ondelete="CASCADE"), nullable=False, index=True)
+    voter = Column(String(100), nullable=False)
+    option_index = Column(Integer, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
