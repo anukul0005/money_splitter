@@ -1334,6 +1334,8 @@ class DiscussionVote(Base):
     poll_id = Column(Integer, ForeignKey("discussion_polls.id", ondelete="CASCADE"), nullable=False, index=True)
     voter = Column(String(100), nullable=False)
     option_index = Column(Integer, nullable=False)
+    # What the voter wrote with their pick ("Udaipur - cheaper flights"), seen by everyone
+    note = Column(String(300), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

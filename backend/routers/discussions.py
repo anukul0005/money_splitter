@@ -336,6 +336,8 @@ def _polls_out(db: Session, d: Discussion, group: Group, caller: User) -> list[d
                         for i, o in enumerate(options)],
             "voters": voters,
             "mine": sorted(v.option_index for v in vs if v.voter.lower() == caller.name.lower()),
+            # voter -> what they wrote with their vote
+            "notes": {v.voter: v.note for v in vs if v.note},
             "waiting": [m for m in members if m.lower() not in voted],
         })
     return out
@@ -795,6 +797,7 @@ def create_poll(discussion_id: int, payload: PollIn, bg: BackgroundTasks, db: Se
 
 class VoteIn(BaseModel):
     choices: list[int]
+    note: str | None = None          # written with the vote, shown to everyone
 
 
 @router.post("/{discussion_id}/polls/{poll_id}/vote", response_model=dict)
@@ -813,8 +816,9 @@ def vote(discussion_id: int, poll_id: int, payload: VoteIn, db: Session = Depend
         raise HTTPException(400, "Pick one option")
     db.query(DiscussionVote).filter(DiscussionVote.poll_id == p.id,
                                     DiscussionVote.voter.ilike(caller.name)).delete(synchronize_session=False)
+    note = (payload.note or "").strip()[:300] or None
     for c in picks:
-        db.add(DiscussionVote(poll_id=p.id, voter=caller.name, option_index=c))
+        db.add(DiscussionVote(poll_id=p.id, voter=caller.name, option_index=c, note=note))
     _touch(d)
     db.commit()
     return {"ok": True}
@@ -981,7 +985,9 @@ def _summary_context(db: Session, d: Discussion, group: Group, caller: User) -> 
         lines.append(f"[{str(m.created_at)[:16]}] {m.author}" + (f" (asked {', '.join(who)} to enquire)" if who else "")
                      + f": {m.text[:1500]}" + (f"  [enquiry status - {'; '.join(status)}]" if status else ""))
     for p in _polls_out(db, d, group, caller):
-        res = "; ".join(f"{o['text']}: {len(o['voters'])} ({', '.join(o['voters']) or 'none'})" for o in p["options"])
+        res = "; ".join(f"{o['text']}: {len(o['voters'])} ("
+                        + (", ".join(f"{v}" + (f" - \"{p['notes'][v]}\"" if p["notes"].get(v) else "") for v in o["voters"])
+                           or "none") + ")" for o in p["options"])
         lines.append(f"POLL by {p['author']}{' (closed)' if p['closed'] else ''}: {p['question']} -> {res}"
                      + (f"; not voted: {', '.join(p['waiting'])}" if p["waiting"] else ""))
     quotes = db.query(DiscussionQuote).filter(DiscussionQuote.discussion_id == d.id).order_by(DiscussionQuote.id).all()

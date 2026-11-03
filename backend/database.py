@@ -238,6 +238,7 @@ _ADDED_COLUMNS = [
     ("discussion_polls", "mandatory", "BOOLEAN NOT NULL DEFAULT FALSE"),
     ("discussion_messages", "attachment_json", "TEXT"),
     ("discussion_quotes", "price", "VARCHAR(100)"),
+    ("discussion_votes", "note", "VARCHAR(300)"),
 ]
 
 # (index name, statement)

@@ -594,17 +594,30 @@ function PollCard({ p, d, name, onChanged }) {
   const [err, setErr] = useState('')
   const total = p.voters.length
   const top = Math.max(0, ...p.options.map((o) => o.voters.length))
+  const notes = p.notes || {}
+  const noteOf = (v) => notes[v] || Object.entries(notes).find(([k]) => k.toLowerCase() === v.toLowerCase())?.[1] || ''
+  const myNote = noteOf(d.me)
+  const [writing, setWriting] = useState(false)
+  const [note, setNote] = useState(myNote)
+  useEffect(() => { if (!writing) setNote(myNote) }, [myNote])
+  // "Any other", "write in", "specify"... - an option that wants words
+  const wantsWords = (i) => /other|write|specify|suggest|comment|else/i.test(p.options[i]?.text || '')
 
+  const send = async (choices, withNote) => {
+    setBusy(true); setErr('')
+    try { await voteDiscussionPoll(d.id, p.id, choices, choices.length ? withNote : ''); await onChanged(); return true }
+    catch (e) { setErr(errText(e, "Couldn't record the vote.")); return false } finally { setBusy(false) }
+  }
   const pick = async (i) => {
     if (p.closed || busy) return
     const had = p.mine.includes(i)
     const choices = p.multi ? (had ? p.mine.filter((x) => x !== i) : [...p.mine, i]) : (had ? [] : [i])
-    setBusy(true); setErr('')
-    try { await voteDiscussionPoll(d.id, p.id, choices); await onChanged() }
-    catch (e) { setErr(errText(e, "Couldn't record the vote.")) } finally { setBusy(false) }
+    if (await send(choices, myNote) && choices.includes(i) && wantsWords(i) && !myNote) setWriting(true)
   }
+  const saveNote = async () => { if (await send(p.mine, note.trim())) setWriting(false) }
   const resultsText = `📊 ${p.question}\n` + p.options.map((o) =>
-    `- ${o.text}: ${o.voters.length} vote${o.voters.length === 1 ? '' : 's'}${o.voters.length ? ` (${o.voters.map(name).join(', ')})` : ''}`).join('\n')
+    `- ${o.text}: ${o.voters.length} vote${o.voters.length === 1 ? '' : 's'}${o.voters.length
+      ? ` (${o.voters.map((v) => name(v) + (noteOf(v) ? ` - "${noteOf(v)}"` : '')).join(', ')})` : ''}`).join('\n')
 
   return (
     <div className="border border-brand-200 bg-white px-3 py-2.5">
@@ -636,11 +649,39 @@ function PollCard({ p, d, name, onChanged }) {
                 </span>
                 <span className="text-xs font-black text-gray-900 shrink-0">{n} <span className="text-[10px] font-bold text-gray-400">{pct}%</span></span>
               </span>
-              {n > 0 && <span className="relative block text-[10px] text-gray-500 mt-0.5 truncate">{o.voters.map((v) => (v.toLowerCase() === me ? 'you' : name(v))).join(', ')}</span>}
+              {n > 0 && (
+                <span className="relative block text-[10px] text-gray-500 mt-0.5">
+                  {o.voters.filter((v) => !noteOf(v)).map((v) => (v.toLowerCase() === me ? 'you' : name(v))).join(', ')}
+                  {o.voters.filter((v) => noteOf(v)).map((v) => (
+                    <span key={v} className="block text-[11px] text-gray-700 whitespace-pre-line break-words">
+                      <span className="font-bold">{v.toLowerCase() === me ? 'You' : name(v)}:</span> “<Rich text={noteOf(v)} />”
+                    </span>
+                  ))}
+                </span>
+              )}
             </button>
           )
         })}
       </div>
+      {p.mine.length > 0 && !p.closed && !writing && (
+        <button onClick={() => { setNote(myNote); setWriting(true) }} className="text-[10px] font-bold text-brand-600 mt-1.5">
+          {myNote ? '✎ Edit what you wrote' : '✎ Write something with your vote'}
+        </button>
+      )}
+      {writing && !p.closed && (
+        <div className="mt-1.5 bg-amber-50 border border-amber-200 p-2">
+          <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={300} autoFocus
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveNote() } }}
+            className="input text-xs py-1.5" placeholder="e.g. Udaipur - lakes, and flights are cheaper" />
+          <p className="text-[10px] text-gray-400 mt-1">Everyone in the group sees this next to your vote.</p>
+          <div className="flex gap-3 mt-1.5">
+            <button onClick={saveNote} disabled={busy} className="text-[11px] font-bold text-brand-600 disabled:opacity-50">{busy ? 'Saving…' : 'Save'}</button>
+            <button onClick={() => { setWriting(false); setNote(myNote) }} className="text-[11px] font-bold text-gray-500">Cancel</button>
+            {myNote && <button onClick={async () => { setNote(''); if (await send(p.mine, '')) setWriting(false) }}
+              className="text-[11px] font-bold text-red-600 ml-auto">Remove</button>}
+          </div>
+        </div>
+      )}
       {p.waiting.length > 0 && !p.closed && (
         <p className="text-[10px] text-gray-400 mt-1.5">Waiting on {p.waiting.map((v) => (v.toLowerCase() === me ? 'you' : name(v))).join(', ')}</p>
       )}
