@@ -252,7 +252,7 @@ def _task_out(t: DiscussionTask) -> dict:
 
 
 def _quote_out(q: DiscussionQuote, opinions: list | None = None) -> dict:
-    return {"id": q.id, "task_id": q.task_id, "entered_by": q.entered_by, "vendor": q.vendor,
+    return {"id": q.id, "task_id": q.task_id, "entered_by": q.entered_by, "vendor": q.vendor, "price": q.price,
             "values": _loads(q.values_json, {}), "note": q.note, "created_at": q.created_at,
             "opinions": [{"author": o.author, "text": o.text, "polished": o.polished,
                           "at": o.edited_at or o.created_at, "edited": bool(o.edited_at)} for o in (opinions or [])]}
@@ -604,6 +604,7 @@ def set_task(discussion_id: int, task_id: int, payload: TaskStatus, db: Session 
 
 class QuoteIn(BaseModel):
     vendor: str
+    price: str | None = None
     values: dict = {}
     note: str | None = None
     task_id: int | None = None
@@ -628,6 +629,7 @@ def add_quote(discussion_id: int, payload: QuoteIn, bg: BackgroundTasks, db: Ses
         if not task:
             raise HTTPException(404, "No such enquiry")
     q = DiscussionQuote(discussion_id=d.id, task_id=task.id if task else None, entered_by=caller.name, vendor=vendor,
+                        price=(payload.price or "").strip()[:100] or None,
                         values_json=json.dumps(_clean_values(d, payload.values)),
                         note=(payload.note or "").strip()[:2000] or None)
     db.add(q)
@@ -676,6 +678,7 @@ def edit_quote(discussion_id: int, quote_id: int, payload: QuoteIn, db: Session 
     if not payload.vendor.strip():
         raise HTTPException(400, "Who is the quote from?")
     q.vendor = payload.vendor.strip()[:200]
+    q.price = (payload.price or "").strip()[:100] or None
     q.values_json = json.dumps(_clean_values(d, payload.values))
     q.note = (payload.note or "").strip()[:2000] or None
     _touch(d)
@@ -994,7 +997,8 @@ def _summary_context(db: Session, d: Discussion, group: Group, caller: User) -> 
         fields = "; ".join(f"{p['label']}{' (' + p['unit'] + ')' if p.get('unit') else ''}: {vals[p['key']]}"
                            for p in params if vals.get(p["key"]))
         views = "; ".join(f"{o.author}: {o.text[:300]}" for o in ops.get(q.id, []))
-        qlines.append(f"- {q.vendor} (noted by {q.entered_by}): {fields or 'no fields filled'}"
+        qlines.append(f"- {q.vendor} (noted by {q.entered_by})" + (f", price {q.price}" if q.price else "")
+                      + f": {fields or 'no fields filled'}"
                       + (f". Notes: {q.note[:600]}" if q.note else "")
                       + (f". Members' opinions - {views}" if views else ""))
     quotes_text = "\n".join(head[:2]) + "\n\nQuotes:\n" + "\n".join(qlines)

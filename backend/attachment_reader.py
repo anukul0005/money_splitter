@@ -41,11 +41,13 @@ in double asterisks, e.g. **Rs 1,450 per plate**, **Rs 2.5 lakh**. Use only what
 
 Also pull out, when the document states them:
 - "vendor": the business it's from ("" if not shown)
+- "price": the headline price as written, with its unit (e.g. "Rs 1,350 per plate", "Rs 4.5 lakh package"),
+  or "" if none
 - "values": these fields, as short text exactly as written (leave a field out when it isn't given):
 {fields or '  (no fields set)'}
 - "kind": one of quote, menu, package, brochure, invoice, other
 
-Respond with ONLY a JSON object: {{"summary": "...", "vendor": "...", "values": {{}}, "kind": "..."}}
+Respond with ONLY a JSON object: {{"summary": "...", "vendor": "...", "price": "...", "values": {{}}, "kind": "..."}}
 If the document is unreadable or blank, return {{"summary": "", "vendor": "", "values": {{}}, "kind": "other"}}."""
 
 
@@ -156,6 +158,7 @@ def _clean(out: dict, params: list[dict]) -> dict:
     return {
         "summary": str(out.get("summary") or "").strip()[:3000],
         "vendor": str(out.get("vendor") or "").strip()[:200],
+        "price": str(out.get("price") or "").strip()[:100],
         "values": {k: str(v).strip()[:200] for k, v in values.items() if k in keys and str(v or "").strip()},
         "kind": str(out.get("kind") or "other")[:20],
     }

@@ -237,6 +237,7 @@ _ADDED_COLUMNS = [
     ("discussion_messages", "edited_at", "TIMESTAMP WITH TIME ZONE"),
     ("discussion_polls", "mandatory", "BOOLEAN NOT NULL DEFAULT FALSE"),
     ("discussion_messages", "attachment_json", "TEXT"),
+    ("discussion_quotes", "price", "VARCHAR(100)"),
 ]
 
 # (index name, statement)

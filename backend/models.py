@@ -1254,6 +1254,7 @@ class DiscussionQuote(Base):
     task_id = Column(Integer, ForeignKey("discussion_tasks.id", ondelete="SET NULL"), nullable=True)
     entered_by = Column(String(100), nullable=False)
     vendor = Column(String(200), nullable=False)
+    price = Column(String(100), nullable=True)            # the headline price, as written ("Rs 1,350 per plate")
     values_json = Column(Text, nullable=True)
     note = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

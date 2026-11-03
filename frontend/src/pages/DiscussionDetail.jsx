@@ -61,7 +61,9 @@ function AttachmentCard({ a, caption, d, onQuote }) {
             <CopyButton text={(a.vendor ? `${a.vendor}\n` : '') + plain} />
           </span>
         </div>
-        {a.vendor && <p className="text-xs font-bold text-gray-900 mt-1">{a.vendor}</p>}
+        {(a.vendor || a.price) && (
+          <p className="text-xs font-bold text-gray-900 mt-1">{a.vendor}{a.vendor && a.price ? ' · ' : ''}{a.price && <Rich text={a.price} />}</p>
+        )}
         <p className="text-xs text-gray-700 whitespace-pre-line mt-1 break-words"><Rich text={a.summary} /></p>
         {fields.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1.5">
@@ -74,7 +76,7 @@ function AttachmentCard({ a, caption, d, onQuote }) {
         )}
         <div className="flex items-center gap-3 mt-2">
           {onQuote && (a.vendor || fields.length > 0) && (
-            <button onClick={() => onQuote({ prefill: { vendor: a.vendor || '', values: a.values || {}, note: plain } })}
+            <button onClick={() => onQuote({ prefill: { vendor: a.vendor || '', price: a.price || '', values: a.values || {}, note: plain } })}
               className="text-[11px] font-bold text-brand-600">+ Add as quote</button>
           )}
           <span className="text-[9px] text-gray-400 ml-auto">file not kept - only this summary{a.pages > 1 ? ` · ${a.pages} pages` : ''}</span>
@@ -881,8 +883,9 @@ function Quotes({ d, name, tasks, onChanged, quoteFor, clearQuoteFor }) {
   const shown = useMemo(() => {
     let qs = who ? d.quotes.filter((q) => q.entered_by === who) : [...d.quotes]
     if (sortKey) {
+      const pick = (q) => num(sortKey === '__price' ? q.price : q.values[sortKey])
       qs.sort((a, b) => {
-        const x = num(a.values[sortKey]), y = num(b.values[sortKey])
+        const x = pick(a), y = pick(b)
         if (x == null && y == null) return 0
         if (x == null) return 1
         if (y == null) return -1
@@ -897,6 +900,8 @@ function Quotes({ d, name, tasks, onChanged, quoteFor, clearQuoteFor }) {
     const vals = shown.map((q) => num(q.values[p.key])).filter((v) => v != null)
     if (vals.length > 1) best[p.key] = Math.min(...vals)
   })
+  const prices = shown.map((q) => num(q.price)).filter((v) => v != null)
+  const bestPrice = prices.length > 1 ? Math.min(...prices) : null
   const taskLabel = (tid) => {
     const t = tasks.find((x) => x.id === tid)
     return t ? `for ${name(t.message.author)}'s enquiry` : ''
@@ -919,14 +924,13 @@ function Quotes({ d, name, tasks, onChanged, quoteFor, clearQuoteFor }) {
       {d.quotes.length > 0 && (
         <>
           <div className="flex flex-wrap items-center gap-2">
-            {d.params.length > 0 && (
-              <label className="text-[11px] font-bold text-gray-500">Sort by
-                <select value={sortKey} onChange={(e) => setSortKey(e.target.value)} className="ml-1.5 text-[11px] border border-amber-200 bg-white px-1.5 py-1">
-                  <option value="">Newest</option>
-                  {d.params.map((p) => <option key={p.key} value={p.key}>{p.label} (low → high)</option>)}
-                </select>
-              </label>
-            )}
+            <label className="text-[11px] font-bold text-gray-500">Sort by
+              <select value={sortKey} onChange={(e) => setSortKey(e.target.value)} className="ml-1.5 text-[11px] border border-amber-200 bg-white px-1.5 py-1">
+                <option value="">Newest</option>
+                <option value="__price">Price (low → high)</option>
+                {d.params.map((p) => <option key={p.key} value={p.key}>{p.label} (low → high)</option>)}
+              </select>
+            </label>
             {people.length > 1 && (
               <label className="text-[11px] font-bold text-gray-500">From
                 <select value={who} onChange={(e) => setWho(e.target.value)} className="ml-1.5 text-[11px] border border-amber-200 bg-white px-1.5 py-1">
@@ -937,54 +941,60 @@ function Quotes({ d, name, tasks, onChanged, quoteFor, clearQuoteFor }) {
             )}
           </div>
 
-          <div className="card !p-0 overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="bg-amber-50 text-left">
-                  <th className="px-3 py-2 font-black text-gray-600 whitespace-nowrap sticky left-0 bg-amber-50">Quote from</th>
-                  {d.params.map((p) => (
-                    <th key={p.key} className="px-3 py-2 font-black text-gray-600 whitespace-nowrap">
-                      {p.label}{p.unit ? <span className="font-normal text-gray-400"> ({p.unit})</span> : null}
-                    </th>
-                  ))}
-                  <th className="px-3 py-2 font-black text-gray-600">Noted by</th>
-                  <th className="px-3 py-2 font-black text-gray-600">Notes &amp; opinions</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {shown.map((q) => (
-                  <tr key={q.id} className="border-t border-amber-100 align-top">
-                    <td className="px-3 py-2 font-bold text-gray-900 sticky left-0 bg-white min-w-[8rem]">{q.vendor}</td>
-                    {d.params.map((p) => {
-                      const v = q.values[p.key]
-                      const isBest = best[p.key] != null && num(v) === best[p.key]
-                      return (
-                        <td key={p.key} className={`px-3 py-2 whitespace-nowrap ${isBest ? 'text-green-700 font-black' : 'text-gray-700'}`}>
-                          {v || <span className="text-gray-300">—</span>}{isBest ? ' ★' : ''}
-                        </td>
-                      )
-                    })}
-                    <td className="px-3 py-2 text-gray-500 whitespace-nowrap">
-                      {name(q.entered_by)}
-                      <span className="block text-[10px] text-gray-400">{ago(q.created_at)} {taskLabel(q.task_id)}</span>
-                    </td>
-                    <td className="px-3 py-2 text-gray-600 min-w-[14rem] max-w-[22rem]"><QuoteNotes q={q} d={d} name={name} onChanged={onChanged} /></td>
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      {q.entered_by.toLowerCase() === d.me.toLowerCase() && (
-                        <span className="flex gap-2">
-                          <button onClick={() => setForm(q)} className="text-[10px] font-bold text-brand-600">Edit</button>
-                          <button onClick={async () => { if (confirm(`Delete the quote from ${q.vendor}?`)) { await deleteDiscussionQuote(d.id, q.id).catch(() => {}); onChanged() } }}
-                            className="text-[10px] font-bold text-red-600">Delete</button>
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          {/* One card per quote, stacked - nothing to scroll sideways */}
+          <div className="space-y-3">
+            {shown.map((q) => {
+              const cheapest = bestPrice != null && num(q.price) === bestPrice
+              const filled = d.params.filter((p) => q.values[p.key])
+              return (
+                <div key={q.id} className={`card !p-3 ${cheapest ? 'border-green-300' : ''}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-black text-gray-900 break-words">{q.vendor}</p>
+                      <p className="text-[10px] text-gray-400 mt-0.5">
+                        noted by {q.entered_by.toLowerCase() === d.me.toLowerCase() ? 'you' : name(q.entered_by)} · {ago(q.created_at)} {taskLabel(q.task_id)}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0 max-w-[50%]">
+                      {q.price
+                        ? <p className={`text-sm font-black break-words ${cheapest ? 'text-green-700' : 'text-gray-900'}`}>{q.price}</p>
+                        : <p className="text-[11px] text-gray-300">no price yet</p>}
+                      {cheapest && <p className="text-[9px] font-black text-green-700 uppercase tracking-widest">★ lowest</p>}
+                    </div>
+                  </div>
+
+                  {filled.length > 0 && (
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 mt-2 pt-2 border-t border-amber-100">
+                      {filled.map((p) => {
+                        const v = q.values[p.key]
+                        const isBest = best[p.key] != null && num(v) === best[p.key]
+                        return (
+                          <div key={p.key} className="min-w-0">
+                            <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide truncate">{p.label}{p.unit ? ` (${p.unit})` : ''}</p>
+                            <p className={`text-xs break-words ${isBest ? 'text-green-700 font-black' : 'text-gray-800'}`}>{v}{isBest ? ' ★' : ''}</p>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  <div className="mt-2 pt-2 border-t border-amber-100">
+                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-1">Notes &amp; opinions</p>
+                    <QuoteNotes q={q} d={d} name={name} onChanged={onChanged} />
+                  </div>
+
+                  {q.entered_by.toLowerCase() === d.me.toLowerCase() && (
+                    <div className="flex gap-3 mt-2">
+                      <button onClick={() => setForm(q)} className="text-[10px] font-bold text-brand-600">Edit quote</button>
+                      <button onClick={async () => { if (confirm(`Delete the quote from ${q.vendor}?`)) { await deleteDiscussionQuote(d.id, q.id).catch(() => {}); onChanged() } }}
+                        className="text-[10px] font-bold text-red-600">Delete</button>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
-          {Object.keys(best).length > 0 && <p className="text-[10px] text-gray-400">★ the lowest in a price column</p>}
+          {(bestPrice != null || Object.keys(best).length > 0) && <p className="text-[10px] text-gray-400">★ the lowest price</p>}
         </>
       )}
     </div>
@@ -1070,6 +1080,7 @@ function QuoteNotes({ q, d, name, onChanged }) {
 
 function QuoteForm({ d, tasks, name, initial, onCancel, onSaved }) {
   const [vendor, setVendor] = useState(initial.vendor || '')
+  const [price, setPrice] = useState(initial.price || '')
   const [values, setValues] = useState(initial.values || {})
   const [note, setNote] = useState(initial.note || '')
   const [taskId, setTaskId] = useState(initial.task_id ? String(initial.task_id) : '')
@@ -1081,7 +1092,7 @@ function QuoteForm({ d, tasks, name, initial, onCancel, onSaved }) {
   const save = async (e) => {
     e.preventDefault()
     setSaving(true); setErr('')
-    const body = { vendor, values, note, task_id: taskId ? +taskId : null }
+    const body = { vendor, price, values, note, task_id: taskId ? +taskId : null }
     try {
       await (initial.id ? editDiscussionQuote(d.id, initial.id, body) : addDiscussionQuote(d.id, body))
       onSaved()
@@ -1090,9 +1101,14 @@ function QuoteForm({ d, tasks, name, initial, onCancel, onSaved }) {
   return (
     <form onSubmit={save} className="card space-y-2">
       <p className="text-xs font-black text-gray-500 uppercase tracking-widest">{initial.id ? 'Edit quote' : 'New quote'}</p>
-      <label className="block text-[11px] font-bold text-gray-600">Quote from
-        <input value={vendor} onChange={(e) => setVendor(e.target.value)} className="input text-sm mt-0.5" placeholder="e.g. Royal Orchid Banquet" autoFocus />
-      </label>
+      <div className="grid grid-cols-5 gap-2">
+        <label className="col-span-3 block text-[11px] font-bold text-gray-600">Quote from
+          <input value={vendor} onChange={(e) => setVendor(e.target.value)} className="input text-sm mt-0.5" placeholder="e.g. Royal Orchid Banquet" autoFocus />
+        </label>
+        <label className="col-span-2 block text-[11px] font-bold text-gray-600">Price
+          <input value={price} onChange={(e) => setPrice(e.target.value)} className="input text-sm mt-0.5" placeholder="Rs 1,350 / plate" />
+        </label>
+      </div>
       {d.params.length > 0 && (
         <div className="grid grid-cols-2 gap-2">
           {d.params.map((p) => (
