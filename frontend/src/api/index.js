@@ -221,6 +221,7 @@ export const getSalaryDashboard = (months = 12) => api.get('/salary/dashboard', 
 export const addInvestment      = (data)    => api.post('/salary/investments', data)
 export const editInvestment     = (id, data) => api.put(`/salary/investments/${id}`, data)
 export const deleteInvestment   = (id)      => api.delete(`/salary/investments/${id}`)
+export const getSalaryItems     = (month, source) => api.get('/salary/items', { params: { month, source } })
 export const getPatterns        = ()        => api.get('/stats/patterns')
 export const getMLAnalysis      = ()        => api.get('/stats/ml-analysis')
 export const getPredictions     = (force = false) => api.get('/stats/predictions', { params: force ? { force } : {} })

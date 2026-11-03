@@ -5,7 +5,7 @@ import {
   CategoryScale, LinearScale, Tooltip,
 } from 'chart.js'
 import { Bar } from 'react-chartjs-2'
-import { getSalaryDashboard, addInvestment, editInvestment, deleteInvestment } from '../api/index.js'
+import { getSalaryDashboard, addInvestment, editInvestment, deleteInvestment, getSalaryItems } from '../api/index.js'
 import LoadingSpinner from '../components/LoadingSpinner'
 
 Chart.register(BarElement, BarController, LineElement, LineController, PointElement, CategoryScale, LinearScale, Tooltip)
@@ -270,17 +270,7 @@ export default function SalaryDashboard() {
           {SOURCES.map((s) => {
             const v = mo.spend[s.key] || 0
             if (v < 1 && s.key !== 'monthly') return null
-            return (
-              <button key={s.key} onClick={() => nav(s.to)} className="w-full text-left py-2 border-b border-amber-100 last:border-0 hover:bg-amber-50 -mx-2 px-2">
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-xs font-bold text-gray-800">{s.label} <span className="text-[10px] font-normal text-gray-400">{s.note}</span></span>
-                  <span className="text-xs font-black text-gray-900 shrink-0">{INR(v)} <span className="text-[10px] font-bold text-gray-400">{pct(v, salary)}%</span> <span className="text-gray-300">›</span></span>
-                </div>
-                <div className="h-1.5 bg-amber-100 mt-1">
-                  <div className="h-full" style={{ width: `${Math.min(100, (v / salary) * 100)}%`, background: s.color }} />
-                </div>
-              </button>
-            )
+            return <SourceRow key={`${s.key}-${ym}`} s={s} v={v} salary={salary} ym={ym} onOpen={() => nav(s.to)} />
           })}
           <div className="flex justify-between pt-2 text-xs font-black">
             <span>Total utilised</span><span>{INR(mo.spent)} · {pct(mo.spent, salary)}%</span>
@@ -427,6 +417,89 @@ export default function SalaryDashboard() {
           Months are calendar months, and the salary you entered is used for each of them. Money sent to friends, transfers between your own accounts and credit card bill payments aren't counted as spending.
         </p>
       </div>
+    </div>
+  )
+}
+
+/**
+ * One "where the money went" line; tapped, it lists the expenses that make up
+ * its amount (fetched then - the same rules as the dashboard, so they add up),
+ * biggest first, with what was taken off for cards.
+ */
+function SourceRow({ s, v, salary, ym, onOpen }) {
+  const [open, setOpen] = useState(false)
+  const [data, setData] = useState(null)
+  const [err, setErr] = useState('')
+  const [all, setAll] = useState(false)
+  const toggle = () => {
+    const next = !open
+    setOpen(next)
+    if (next && !data) {
+      setErr('')
+      getSalaryItems(ym, s.key).then((r) => setData(r.data)).catch(() => setErr("Couldn't load them."))
+    }
+  }
+  const list = data ? (all ? data.items : data.items.slice(0, 15)) : []
+  const day = (d) => (d && d.length >= 10 ? `${+d.slice(8, 10)} ${MON[+d.slice(5, 7) - 1]}` : '')
+  return (
+    <div className="border-b border-amber-100 last:border-0">
+      <button onClick={toggle} aria-expanded={open} className="w-full text-left py-2 hover:bg-amber-50 -mx-2 px-2">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="text-xs font-bold text-gray-800">
+            <span className="inline-block w-3 text-gray-400">{open ? '▾' : '▸'}</span>{s.label} <span className="text-[10px] font-normal text-gray-400">{s.note}</span>
+          </span>
+          <span className="text-xs font-black text-gray-900 shrink-0">{INR(v)} <span className="text-[10px] font-bold text-gray-400">{pct(v, salary)}%</span></span>
+        </div>
+        <div className="h-1.5 bg-amber-100 mt-1 ml-3">
+          <div className="h-full" style={{ width: `${Math.min(100, (v / salary) * 100)}%`, background: s.color }} />
+        </div>
+      </button>
+      {open && (
+        <div className="ml-3 mb-2 bg-amber-50/50 border border-amber-100 px-3 py-2">
+          {!data && !err && <p className="text-[11px] text-gray-400">Loading…</p>}
+          {err && <p className="text-[11px] text-red-600">{err}</p>}
+          {data && data.items.length === 0 && <p className="text-[11px] text-gray-400">Nothing this month.</p>}
+          {list.map((x, i) => (
+            <div key={i} className="flex items-baseline gap-2 py-1 border-b border-amber-100/70 last:border-0">
+              <span className="text-[10px] text-gray-400 w-11 shrink-0 tabular-nums">{day(x.date)}</span>
+              <span className="flex-1 min-w-0">
+                <span className="block text-[11px] font-semibold text-gray-800 truncate">{x.title}</span>
+                {x.detail && <span className="block text-[10px] text-gray-400 truncate">{x.detail}</span>}
+              </span>
+              <span className="text-[11px] font-black text-gray-900 tabular-nums shrink-0">{INR(x.amount)}</span>
+            </div>
+          ))}
+          {data && data.items.length > 15 && (
+            <button onClick={() => setAll((a) => !a)} className="text-[10px] font-bold text-brand-600 mt-1">
+              {all ? 'Show fewer' : `Show all ${data.items.length}`}
+            </button>
+          )}
+          {data && data.less.length > 0 && (
+            <>
+              <div className="flex justify-between pt-1.5 mt-1 border-t border-amber-200 text-[11px] font-bold text-gray-700">
+                <span>Card spends</span><span className="tabular-nums">{INR(data.gross)}</span>
+              </div>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1.5">Taken off - not counted twice</p>
+              {data.less.map((x, i) => (
+                <div key={`l${i}`} className="flex items-baseline gap-2 py-1">
+                  <span className="text-[10px] text-gray-400 w-11 shrink-0 tabular-nums">{day(x.date)}</span>
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-[11px] text-gray-700 truncate">{x.title}</span>
+                    <span className="block text-[10px] text-gray-400 truncate">{x.detail}</span>
+                  </span>
+                  <span className="text-[11px] font-bold text-green-700 tabular-nums shrink-0">−{INR(x.amount)}</span>
+                </div>
+              ))}
+            </>
+          )}
+          {data && data.items.length > 0 && (
+            <div className="flex justify-between pt-1.5 mt-1 border-t border-amber-200 text-[11px] font-black text-gray-900">
+              <span>{data.items.length} item{data.items.length === 1 ? '' : 's'} · total</span><span className="tabular-nums">{INR(data.total)}</span>
+            </div>
+          )}
+          <button onClick={onOpen} className="text-[10px] font-bold text-brand-600 mt-1.5">Open {s.label.toLowerCase()} ›</button>
+        </div>
+      )}
     </div>
   )
 }

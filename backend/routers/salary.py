@@ -284,3 +284,97 @@ def edit_investment(inv_id: int, payload: ManualInvestmentIn, db: Session = Depe
 def delete_investment(inv_id: int, db: Session = Depends(get_db), caller: User = Depends(current_user)):
     db.query(ManualInvestment).filter(ManualInvestment.id == inv_id, ManualInvestment.user_id == caller.id).delete()
     db.commit()
+
+
+# ── what a "where the money went" line is made of ──────────────────────────
+
+SOURCES = ("monthly", "groups", "cards", "recurring", "repayments")
+
+
+@router.get("/items", response_model=dict)
+def items(month: str, source: str, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """The expenses behind one line of the dashboard for one month - the same
+    rules as /dashboard, so they add up to its figure: {items: [{date, title,
+    detail, amount}], less: [...things taken off (cards)], total}."""
+    if source not in SOURCES or not re.match(r"^\d{4}-(0[1-9]|1[0-2])$", month):
+        raise HTTPException(400, "Pick a month and a line")
+    from routers.stats import _member_share, get_history
+    me = caller.name.lower()
+    out, less = [], []
+
+    if source in ("monthly", "groups", "cards"):
+        hist = get_history(db=db, caller=caller)
+        groups = {g["id"]: g for g in hist["groups"]}
+        gids = list(groups)
+
+    if source in ("monthly", "groups") and gids:
+        solo = source == "monthly"
+        ids = [gid for gid, g in groups.items() if (len(g["members"]) <= 1) == solo]
+        for e in (db.query(Expense).filter(Expense.group_id.in_(ids or [-1]), Expense.date.like(f"{month}%"))
+                  .order_by(Expense.date.desc())):
+            share = float(e.amount or 0) if solo else (_member_share(e, me) or 0.0)
+            if share < 0.005:
+                continue
+            g = groups[e.group_id]
+            title = e.title or e.merchant or e.category or "Expense"
+            detail = [x for x in (e.category, None if solo else f"{g['emoji'] or ''} {g['name']}".strip()) if x]
+            if not solo and abs(share - (e.amount or 0)) >= 0.5:
+                detail.append(f"your share of Rs {e.amount:,.0f}")
+            out.append({"date": (e.date or "")[:10], "title": title, "detail": " · ".join(detail),
+                        "amount": round(share, 2)})
+
+    elif source == "cards":
+        from card_bills import card_name
+        from models import CreditCard
+        cards = {c.id: c for c in db.query(CreditCard).filter(CreditCard.user_id == caller.id)}
+        for s in db.query(CreditCardStatement).filter(CreditCardStatement.user_id == caller.id):
+            card = card_name(cards[s.card_id]) if s.card_id in cards else s.bank
+            try:
+                details = json.loads(s.details_json) if s.details_json else None
+            except ValueError:
+                details = None
+            lines = (details or {}).get("transactions") or []
+            if lines:
+                for t in lines:
+                    if t.get("excluded") or t.get("type") != "debit" or not (t.get("date") or "").startswith(month):
+                        continue
+                    out.append({"date": t["date"][:10], "title": t.get("description") or "Card spend",
+                                "detail": " · ".join(x for x in (card, t.get("category")) if x),
+                                "amount": round(float(t.get("amount") or 0), 2)})
+            elif (s.period or (s.statement_date or "")[:7]) == month and s.total_due:
+                out.append({"date": s.statement_date or "", "title": f"{card} bill", "detail": "not broken down yet - counted in full",
+                            "amount": round(s.total_due, 2)})
+        if gids:
+            for e in (db.query(Expense).filter(Expense.group_id.in_(gids), Expense.payment_mode == "credit_card",
+                                               Expense.paid_by.ilike(caller.name), Expense.date.like(f"{month}%"))):
+                less.append({"date": (e.date or "")[:10], "title": e.title or e.merchant or "Card expense",
+                             "detail": f"already counted in {groups[e.group_id]['name']}", "amount": round(e.amount or 0, 2)})
+        for ln in db.query(Loan).filter(Loan.card_ref.isnot(None), Loan.lender.ilike(caller.name),
+                                        Loan.start_date.like(f"{month}%")):
+            less.append({"date": ln.start_date, "title": ln.note or "Card spend passed on",
+                         "detail": f"passed on to {ln.borrower} as a loan", "amount": round(ln.principal, 2)})
+
+    elif source == "recurring":
+        for ch in db.query(RecurringCharge).filter(RecurringCharge.member.ilike(caller.name), RecurringCharge.period == month):
+            out.append({"date": month, "title": ch.bill.title, "detail": f"your share · {ch.bill.payer} pays it",
+                        "amount": round(ch.share, 2)})
+        for bill in db.query(RecurringBill).filter(RecurringBill.payer.ilike(caller.name)):
+            if any(c.period == month for c in bill.charges):
+                members = [m for m in bill.members.split(",") if m]
+                out.append({"date": month, "title": bill.title,
+                            "detail": f"your share of Rs {bill.amount:,.0f} · you pay it",
+                            "amount": round(bill.amount / max(len(members), 1), 2)})
+
+    elif source == "repayments":
+        for ln in db.query(Loan).filter(Loan.borrower.ilike(caller.name)):
+            for p in ln.payments:
+                if p.date.startswith(month):
+                    out.append({"date": p.date, "title": f"Repaid {ln.lender}", "detail": ln.note or "loan repayment",
+                                "amount": round(p.amount, 2)})
+
+    gross = round(sum(x["amount"] for x in out), 2)
+    taken = round(sum(x["amount"] for x in less), 2)
+    total = max(0.0, round(gross - taken, 2)) if source == "cards" else gross
+    out.sort(key=lambda x: (-x["amount"], x["date"]))
+    less.sort(key=lambda x: -x["amount"])
+    return {"month": month, "source": source, "items": out, "less": less, "gross": gross, "total": total}
