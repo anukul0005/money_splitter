@@ -374,3 +374,4 @@ export const attachDiscussionFile = (id, file, caption = '') => {
   return api.post(`/discussions/${id}/attachments`, fd, { timeout: 180000 })
 }
 export const setQuoteOpinion = (id, qid, text, polished = false) => api.put(`/discussions/${id}/quotes/${qid}/opinion`, { text, polished })
+export const reactInDiscussion = (id, target, targetId, kind) => api.post(`/discussions/${id}/reactions`, { target, target_id: targetId, kind })

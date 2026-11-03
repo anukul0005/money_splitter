@@ -1276,6 +1276,23 @@ class DiscussionQuoteNote(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class DiscussionReaction(Base):
+    """One member's reaction - like, dislike or neutral - to a quote or to
+    someone's opinion on one (`target` "quote" / "opinion", `target_id` its
+    id). One each per thing; tapping another replaces it."""
+
+    __tablename__ = "discussion_reactions"
+    __table_args__ = (UniqueConstraint("target", "target_id", "user_name", name="ux_discussion_reaction"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    discussion_id = Column(Integer, ForeignKey("discussions.id", ondelete="CASCADE"), nullable=False, index=True)
+    target = Column(String(10), nullable=False)
+    target_id = Column(Integer, nullable=False, index=True)
+    user_name = Column(String(100), nullable=False)
+    kind = Column(String(10), nullable=False)          # like | dislike | neutral
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class DiscussionInvite(Base):
     """An email invite to someone not on the app: opening its link once
     signed in puts them in the discussion's group."""

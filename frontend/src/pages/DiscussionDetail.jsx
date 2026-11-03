@@ -4,7 +4,7 @@ import {
   getDiscussion, postDiscussionMessage, deleteDiscussionMessage, setDiscussionTask, addDiscussionQuote,
   editDiscussionQuote, deleteDiscussionQuote, acceptDiscussionInvite, polishMessage, editDiscussion,
   deleteDiscussion, suggestQuoteFields, createDiscussionPoll, voteDiscussionPoll, setDiscussionPollState,
-  deleteDiscussionPoll, getDiscussionActivity, addDiscussionPeople, summariseDiscussion, setDiscussionNotify, editDiscussionMessage, attachDiscussionFile, setQuoteOpinion,
+  deleteDiscussionPoll, getDiscussionActivity, addDiscussionPeople, summariseDiscussion, setDiscussionNotify, editDiscussionMessage, attachDiscussionFile, setQuoteOpinion, reactInDiscussion,
 } from '../api/index.js'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PeoplePicker from '../components/PeoplePicker'
@@ -1007,6 +1007,8 @@ function Quotes({ d, name, tasks, onChanged, quoteFor, clearQuoteFor }) {
                     </div>
                   </div>
 
+                  <Reactions target="quote" id={q.id} r={q.reactions} d={d} name={name} onChanged={onChanged} />
+
                   {filled.length > 0 && (
                     <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 mt-2 pt-2 border-t border-amber-100">
                       {filled.map((p) => {
@@ -1116,6 +1118,48 @@ function QuotesSummary({ d, onChanged }) {
   )
 }
 
+const REACTS = [['like', '👍', 'Like'], ['dislike', '👎', 'Dislike'], ['neutral', '😐', 'Neutral']]
+
+/**
+ * Like / dislike / neutral on a quote or an opinion: one each, tap again to
+ * take it back; the counts and who reacted are there for everyone.
+ */
+function Reactions({ target, id, r, d, name, onChanged, small }) {
+  const me = d.me.toLowerCase()
+  const base = r || { like: [], dislike: [], neutral: [] }
+  const [local, setLocal] = useState(null)          // shown at once, before the reload confirms it
+  const cur = local || base
+  useEffect(() => { setLocal(null) }, [JSON.stringify(base)])
+  const mine = REACTS.find(([k]) => (cur[k] || []).some((n) => n.toLowerCase() === me))?.[0] || null
+  const tap = async (k) => {
+    const kind = mine === k ? null : k
+    const next = Object.fromEntries(REACTS.map(([x]) => [x, (cur[x] || []).filter((n) => n.toLowerCase() !== me)]))
+    if (kind) next[kind] = [...next[kind], d.me]
+    setLocal(next)
+    try { await reactInDiscussion(d.id, target, id, kind); await onChanged() } catch { setLocal(null) }
+  }
+  const who = REACTS.filter(([k]) => cur[k]?.length)
+    .map(([k, icon]) => `${icon} ${cur[k].map((n) => (n.toLowerCase() === me ? 'you' : name(n))).join(', ')}`).join('  ·  ')
+  return (
+    <div className={small ? 'mt-0.5 mb-1' : 'mt-2'}>
+      <div className="flex items-center gap-1.5">
+        {REACTS.map(([k, icon, label]) => {
+          const n = cur[k]?.length || 0
+          const on = mine === k
+          return (
+            <button key={k} onClick={() => tap(k)} title={label} aria-label={`${label}${n ? ` (${n})` : ''}`} aria-pressed={on}
+              className={`flex items-center gap-1 border rounded-full tabular-nums transition-colors ${small ? 'px-1.5 py-0 text-[10px]' : 'px-2 py-0.5 text-[11px]'} ${
+                on ? 'bg-brand-50 border-brand-400 text-brand-700 font-black' : 'bg-white border-amber-200 text-gray-600 hover:border-brand-300'}`}>
+              <span>{icon}</span>{n > 0 && <span className="font-bold">{n}</span>}
+            </button>
+          )
+        })}
+      </div>
+      {who && <p className={`${small ? 'text-[9px]' : 'text-[10px]'} text-gray-400 mt-0.5`}>{who}</p>}
+    </div>
+  )
+}
+
 /**
  * A quote's Notes: what whoever noted it wrote, then each member's own
  * opinion (with who and when). Everyone can add theirs, edit it, or tidy it
@@ -1149,10 +1193,13 @@ function QuoteNotes({ q, d, name, onChanged }) {
         </p>
       )}
       {(q.opinions || []).map((o) => (o.author.toLowerCase() === me && editing ? null : (
-        <p key={o.author} className="text-[11px] text-gray-700 whitespace-pre-line">
-          <span className="font-bold">{o.author.toLowerCase() === me ? 'You' : name(o.author)}:</span> <Rich text={o.text} />
-          <span className="text-[9px] text-gray-400"> · {ago(o.at)}{o.edited ? ' · edited' : ''}{o.polished ? ' · ✨' : ''}</span>
-        </p>
+        <div key={o.author}>
+          <p className="text-[11px] text-gray-700 whitespace-pre-line">
+            <span className="font-bold">{o.author.toLowerCase() === me ? 'You' : name(o.author)}:</span> <Rich text={o.text} />
+            <span className="text-[9px] text-gray-400"> · {ago(o.at)}{o.edited ? ' · edited' : ''}{o.polished ? ' · ✨' : ''}</span>
+          </p>
+          {o.id && <Reactions target="opinion" id={o.id} r={o.reactions} d={d} name={name} onChanged={onChanged} small />}
+        </div>
       )))}
       {!editing && (
         <button onClick={start} className="text-[10px] font-bold text-brand-600">{mine ? '✎ Edit your opinion' : '+ Your opinion'}</button>

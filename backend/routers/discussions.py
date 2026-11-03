@@ -28,7 +28,8 @@ from activity import record_activity
 from auth import caller_groups, current_user, member_group
 from database import get_db
 from models import (Activity, Discussion, DiscussionInvite, DiscussionMessage, DiscussionPoll, DiscussionQuote,
-                    DiscussionPref, DiscussionQuoteNote, DiscussionTask, DiscussionVote, Group, Member, User)
+                    DiscussionPref, DiscussionQuoteNote, DiscussionReaction, DiscussionTask, DiscussionVote, Group,
+                    Member, User)
 
 router = APIRouter(prefix="/discussions", tags=["discussions"])
 
@@ -251,11 +252,27 @@ def _task_out(t: DiscussionTask) -> dict:
             "done_at": t.done_at, "created_at": t.created_at}
 
 
-def _quote_out(q: DiscussionQuote, opinions: list | None = None) -> dict:
+REACTIONS = ("like", "dislike", "neutral")
+
+
+def _reactions(db: Session, discussion_id: int) -> dict[tuple, dict]:
+    """(target, id) -> {like: [names], dislike: [...], neutral: [...]}."""
+    out: dict[tuple, dict] = {}
+    for r in (db.query(DiscussionReaction).filter(DiscussionReaction.discussion_id == discussion_id)
+              .order_by(DiscussionReaction.id)):
+        out.setdefault((r.target, r.target_id), {k: [] for k in REACTIONS})[r.kind].append(r.user_name)
+    return out
+
+
+def _quote_out(q: DiscussionQuote, opinions: list | None = None, reacts: dict | None = None) -> dict:
+    empty = {k: [] for k in REACTIONS}
+    reacts = reacts or {}
     return {"id": q.id, "task_id": q.task_id, "entered_by": q.entered_by, "vendor": q.vendor, "price": q.price,
             "values": _loads(q.values_json, {}), "note": q.note, "created_at": q.created_at,
-            "opinions": [{"author": o.author, "text": o.text, "polished": o.polished,
-                          "at": o.edited_at or o.created_at, "edited": bool(o.edited_at)} for o in (opinions or [])]}
+            "reactions": reacts.get(("quote", q.id), empty),
+            "opinions": [{"id": o.id, "author": o.author, "text": o.text, "polished": o.polished,
+                          "at": o.edited_at or o.created_at, "edited": bool(o.edited_at),
+                          "reactions": reacts.get(("opinion", o.id), empty)} for o in (opinions or [])]}
 
 
 def _opinions(db: Session, quote_ids: list[int]) -> dict[int, list]:
@@ -277,6 +294,7 @@ def get_discussion(discussion_id: int, db: Session = Depends(get_db), caller: Us
         .order_by(DiscussionQuote.id.desc()).all()
     invites = db.query(DiscussionInvite).filter(DiscussionInvite.discussion_id == d.id).all()
     ops = _opinions(db, [q.id for q in quotes])
+    reacts = _reactions(db, d.id)
     by_msg: dict[int, list] = {}
     for t in tasks:
         by_msg.setdefault(t.message_id, []).append(_task_out(t))
@@ -292,7 +310,7 @@ def get_discussion(discussion_id: int, db: Session = Depends(get_db), caller: Us
             "tasks": by_msg.get(m.id, []), "created_at": m.created_at, "edited_at": m.edited_at,
             "attachment": _loads(m.attachment_json, None),
         } for m in msgs],
-        "quotes": [_quote_out(q, ops.get(q.id)) for q in quotes],
+        "quotes": [_quote_out(q, ops.get(q.id), reacts) for q in quotes],
         "invites": [{"email": i.email, "invited_by": i.invited_by, "accepted_by": i.accepted_by,
                      "created_at": i.created_at} for i in invites],
         "polls": _polls_out(db, d, group, caller),
@@ -998,11 +1016,16 @@ def _summary_context(db: Session, d: Discussion, group: Group, caller: User) -> 
         return talk[:24000], None
     qlines = []
     ops = _opinions(db, [q.id for q in quotes])
+    reacts = _reactions(db, d.id)
     for q in quotes:
         vals = _loads(q.values_json, {})
         fields = "; ".join(f"{p['label']}{' (' + p['unit'] + ')' if p.get('unit') else ''}: {vals[p['key']]}"
                            for p in params if vals.get(p["key"]))
         views = "; ".join(f"{o.author}: {o.text[:300]}" for o in ops.get(q.id, []))
+        rq = reacts.get(("quote", q.id))
+        if rq and any(rq.values()):
+            views = (views + "; " if views else "") + "reactions - " + ", ".join(
+                f"{k} by {', '.join(v)}" for k, v in rq.items() if v)
         qlines.append(f"- {q.vendor} (noted by {q.entered_by})" + (f", price {q.price}" if q.price else "")
                       + f": {fields or 'no fields filled'}"
                       + (f". Notes: {q.note[:600]}" if q.note else "")
@@ -1162,6 +1185,43 @@ a few "- " points): what they like, what worries them, and their verdict if they
 Rules: keep their views, facts, numbers and tone exactly - never add opinions or facts they didn't give.
 Same language as the draft (Hinglish stays Hinglish). Plain text, no headings.
 Respond with ONLY a JSON object: {"text": "<the rewritten opinion>"}"""
+
+
+class ReactionIn(BaseModel):
+    target: str               # quote | opinion
+    target_id: int
+    kind: str | None = None   # like | dislike | neutral; None takes it back
+
+
+@router.post("/{discussion_id}/reactions", response_model=dict)
+def react(discussion_id: int, payload: ReactionIn, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    d, _ = _discussion(db, discussion_id, caller)
+    if payload.target == "quote":
+        ok = db.query(DiscussionQuote.id).filter(DiscussionQuote.id == payload.target_id,
+                                                 DiscussionQuote.discussion_id == d.id).first()
+    elif payload.target == "opinion":
+        ok = (db.query(DiscussionQuoteNote.id).join(DiscussionQuote, DiscussionQuote.id == DiscussionQuoteNote.quote_id)
+              .filter(DiscussionQuoteNote.id == payload.target_id, DiscussionQuote.discussion_id == d.id).first())
+    else:
+        raise HTTPException(400, "quote or opinion")
+    if not ok:
+        raise HTTPException(404, "Not found")
+    if payload.kind is not None and payload.kind not in REACTIONS:
+        raise HTTPException(400, "like, dislike or neutral")
+    row = db.query(DiscussionReaction).filter(DiscussionReaction.target == payload.target,
+                                              DiscussionReaction.target_id == payload.target_id,
+                                              DiscussionReaction.user_name.ilike(caller.name)).first()
+    if payload.kind is None:
+        if row:
+            db.delete(row)
+    elif row:
+        row.kind = payload.kind
+    else:
+        db.add(DiscussionReaction(discussion_id=d.id, target=payload.target, target_id=payload.target_id,
+                                  user_name=caller.name, kind=payload.kind))
+    _touch(d)
+    db.commit()
+    return {"ok": True}
 
 
 class OpinionIn(BaseModel):
