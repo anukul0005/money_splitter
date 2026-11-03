@@ -1183,6 +1183,88 @@ class StatementSkip(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class Discussion(Base):
+    """A group's planning thread (routers/discussions.py): members talk,
+    direct enquiries at each other ("call these 3 banquets"), and note the
+    quotes they get against the fields set here (`params_json`: [{key, label,
+    unit}] - "Price per plate", "Capacity"...), so they line up side by side."""
+
+    __tablename__ = "discussions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    group_id = Column(Integer, ForeignKey("groups.id", ondelete="CASCADE"), nullable=False, index=True)
+    title = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+    params_json = Column(Text, nullable=True)
+    created_by = Column(String(100), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())   # last activity
+
+
+class DiscussionMessage(Base):
+    """One message. Directed at members (`assignees_json`, names) it is an
+    enquiry - each of them gets a DiscussionTask; `invites_json` lists people
+    asked by email who aren't on the app yet. `original_text` keeps what was
+    typed when the AI's rewrite was sent instead."""
+
+    __tablename__ = "discussion_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    discussion_id = Column(Integer, ForeignKey("discussions.id", ondelete="CASCADE"), nullable=False, index=True)
+    author = Column(String(100), nullable=False)
+    text = Column(Text, nullable=False)
+    original_text = Column(Text, nullable=True)
+    assignees_json = Column(Text, nullable=True)
+    invites_json = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class DiscussionTask(Base):
+    """One member's part of an enquiry: open until they mark it done (or add
+    a quote against it)."""
+
+    __tablename__ = "discussion_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    discussion_id = Column(Integer, ForeignKey("discussions.id", ondelete="CASCADE"), nullable=False, index=True)
+    message_id = Column(Integer, ForeignKey("discussion_messages.id", ondelete="CASCADE"), nullable=False, index=True)
+    assignee = Column(String(100), nullable=False, index=True)
+    status = Column(String(10), nullable=False, default="open")     # open | done
+    done_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class DiscussionQuote(Base):
+    """A quote someone got: who from (`vendor`), the discussion's fields
+    filled in (`values_json` {param key: value}), and the enquiry it answers."""
+
+    __tablename__ = "discussion_quotes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    discussion_id = Column(Integer, ForeignKey("discussions.id", ondelete="CASCADE"), nullable=False, index=True)
+    task_id = Column(Integer, ForeignKey("discussion_tasks.id", ondelete="SET NULL"), nullable=True)
+    entered_by = Column(String(100), nullable=False)
+    vendor = Column(String(200), nullable=False)
+    values_json = Column(Text, nullable=True)
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class DiscussionInvite(Base):
+    """An email invite to someone not on the app: opening its link once
+    signed in puts them in the discussion's group."""
+
+    __tablename__ = "discussion_invites"
+
+    id = Column(Integer, primary_key=True, index=True)
+    discussion_id = Column(Integer, ForeignKey("discussions.id", ondelete="CASCADE"), nullable=False, index=True)
+    email = Column(String(200), nullable=False)
+    token = Column(String(64), nullable=False, unique=True, index=True)
+    invited_by = Column(String(100), nullable=False)
+    accepted_by = Column(String(100), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class ManualInvestment(Base):
     """An investment the statements don't show - a SIP straight from the
     bank account, EPF/PPF, an FD, a policy premium - entered by hand for the

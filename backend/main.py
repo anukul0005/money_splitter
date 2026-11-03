@@ -5,7 +5,7 @@ from database import create_tables, get_settings
 from routers import (
     groups, expenses, settlements, stats, users, payments, activity, recommend,
     food, knowledge_api, forecast, cron, receipts, push, loans, gmail_auth,
-    credit_cards, payment_claims, nudges, ledger, drinks, tennis, bets, badminton, salary,
+    credit_cards, payment_claims, nudges, ledger, drinks, tennis, bets, badminton, salary, discussions,
 )
 
 
@@ -110,6 +110,7 @@ app.include_router(expenses.router)
 app.include_router(settlements.router)
 app.include_router(stats.router)
 app.include_router(salary.router)
+app.include_router(discussions.router)
 app.include_router(payments.router)
 app.include_router(activity.router)
 app.include_router(recommend.router)

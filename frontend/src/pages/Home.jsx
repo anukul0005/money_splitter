@@ -273,6 +273,19 @@ export default function Home() {
           </button>
         </div>
 
+        {/* Discussions: planning with the group - enquiries, invites, quotes (pages/Discussions.jsx) */}
+        <button
+          onClick={() => nav('/discuss')}
+          className="w-full flex items-center gap-3 bg-white border border-amber-200 hover:border-brand-300 px-3 py-3 rounded-md active:scale-[0.99] transition-all text-left"
+        >
+          <span className="text-2xl leading-none">💬</span>
+          <span className="flex-1 min-w-0">
+            <span className="block text-sm font-bold text-gray-900">Discussions</span>
+            <span className="block text-[10px] text-gray-500 leading-snug">Plan with your group - ask members to enquire, invite by email, compare quotes</span>
+          </span>
+          <span className="text-brand-500 text-lg font-bold">›</span>
+        </button>
+
         {/* Groups (every group linked to a master group by members; the four most recently used first, the rest behind a toggle) */}
         {(allMasters.length > 0 || soloGroups.length > 0) && (
           <div>

@@ -21,6 +21,8 @@ import MonthlyGroup from './pages/MonthlyGroup'
 import EditGroup   from './pages/EditGroup'
 import History     from './pages/History'
 import SalaryDashboard from './pages/SalaryDashboard'
+import Discussions from './pages/Discussions'
+import DiscussionDetail from './pages/DiscussionDetail'
 import MLAnalysis  from './pages/MLAnalysis'
 import Insights    from './pages/Insights'
 import CardBill    from './pages/CardBill'
@@ -140,6 +142,8 @@ export default function App() {
                 <Route path="/recommend"  element={<Recommend />} />
                 <Route path="/history"    element={<History />} />
                 <Route path="/salary"     element={<SalaryDashboard />} />
+                <Route path="/discuss"    element={<Discussions />} />
+                <Route path="/discuss/:id" element={<DiscussionDetail />} />
                 <Route path="/ml-analysis" element={<MLAnalysis />} />
                 <Route path="/insights" element={<Insights />} />
                 <Route path="/credit-cards/card/:id" element={<CardBill />} />
