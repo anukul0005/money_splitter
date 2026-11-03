@@ -1072,24 +1072,29 @@ def _enquiries_context(db: Session, d: Discussion) -> str | None:
     return (f"Topic: {d.title}\nDetails: {d.description or '-'}\n\nEnquiries:\n" + "\n".join(lines))[:16000]
 
 
-_SUM_NOTES = """A group in India is comparing quotes (venues, caterers...). For each quote below you get what its
-members wrote about it - the note added with the quote and each member's opinion - and their reactions.
+_SUM_NOTES = """A group in India is collecting quotes (venues, caterers...). For each quote card below you get
+everything on it: the vendor, the price, the fields noted, the note added with it, each member's opinion, and the
+reactions.
 
-For each quote, list EVERY point that was made, as short bullet points:
-- one point per bullet; never merge two different points, never leave one out - someone reading only the bullets
-  must learn everything that was written
-- keep who said or felt it ("Papa likes it", "Mom doesn't - no open space"), the reasons, and any numbers,
-  places, names, comparisons and conditions exactly as written
-- tidy the wording (fix spelling, drop filler) but don't change the meaning or add anything not written
-- end with one bullet for the reactions when there are any ("Liked by Anjali; disliked by Utkarsh")
+Summarise each WHOLE card as short bullet points, so someone reading only the bullets knows everything on it:
+- first what it is and costs: the price as written and what it covers, then the key fields (capacity, location,
+  dates, inclusions...) - only what's given; leave out what isn't (never write "unspecified" or "not given")
+- then EVERY point from the note and the opinions, one per bullet: who said or felt it ("Papa likes it", "Mom
+  doesn't - no open space"), the reasons, numbers, conditions; never merge two points, never leave one out
+- never say the same point twice
+- last, one bullet for the reactions when there are any ("Liked by Anjali; disliked by Utkarsh")
+- tidy the wording but never change the meaning or add anything not on the card
+- describe, never rank or compare with other quotes: no "cheapest", "lowest", "best", "best value", "winner"
 
-Respond with ONLY a JSON object: {"quotes": [{"id": <the quote's id, given as [#id]>, "points": ["...", "..."]}]}
-Leave out a quote nobody wrote or reacted anything about."""
+Respond with ONLY a JSON object: {"quotes": [{"id": <the quote's id, given as [#id]>, "points": ["...", "..."]}]}"""
 
 
 def _notes_context(db: Session, d: Discussion) -> str | None:
-    """Each quote's note, opinions and reactions as text for _SUM_NOTES, or None when there are none."""
+    """Every quote card as text for _SUM_NOTES, or None when there are none."""
     quotes = db.query(DiscussionQuote).filter(DiscussionQuote.discussion_id == d.id).order_by(DiscussionQuote.id).all()
+    if not quotes:
+        return None
+    params = _loads(d.params_json, [])
     ops = _opinions(db, [q.id for q in quotes])
     reacts = _reactions(db, d.id)
 
@@ -1097,7 +1102,11 @@ def _notes_context(db: Session, d: Discussion) -> str | None:
         return "; ".join(f"{k}: {', '.join(v)}" for k, v in (r or {}).items() if v)
     blocks = []
     for q in quotes:
-        lines = []
+        vals = _loads(q.values_json, {})
+        lines = [f"  price: {q.price or 'not given'}", f"  noted by {q.entered_by}"]
+        for p in params:
+            if vals.get(p["key"]):
+                lines.append(f"  {p['label']}{' (' + p['unit'] + ')' if p.get('unit') else ''}: {vals[p['key']]}")
         if q.note:
             lines.append(f"  note by {q.entered_by}: {q.note[:2000]}")
         for o in ops.get(q.id, []):
@@ -1106,9 +1115,8 @@ def _notes_context(db: Session, d: Discussion) -> str | None:
         r = said(reacts.get(("quote", q.id)))
         if r:
             lines.append(f"  reactions to the quote - {r}")
-        if lines:
-            blocks.append(f"[#{q.id}] {q.vendor}" + (f" ({q.price})" if q.price else "") + "\n" + "\n".join(lines))
-    return ("\n\n".join(blocks))[:20000] if blocks else None
+        blocks.append(f"[#{q.id}] {q.vendor}\n" + "\n".join(lines))
+    return ("\n\n".join(blocks))[:20000]
 
 
 @router.post("/{discussion_id}/summary", response_model=dict)
@@ -1120,7 +1128,7 @@ def summarise(discussion_id: int, db: Session = Depends(get_db), caller: User = 
     talk, quotes = _summary_context(db, d, group, caller)
     enquiries = _enquiries_context(db, d)
     notes = _notes_context(db, d)
-    # Each part on its own key at once: the talk, the quotes, the enquiries, each quote's notes
+    # Each part on its own key at once: the talk, the quotes, the enquiries, each quote card
     jobs = [("talk", _SUM_TALK, talk)] + ([("quotes", _SUM_QUOTES, quotes)] if quotes else []) \
         + ([("enquiries", _SUM_ENQUIRIES, enquiries)] if enquiries else []) \
         + ([("notes", _SUM_NOTES, notes)] if notes else [])

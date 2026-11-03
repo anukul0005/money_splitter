@@ -1044,39 +1044,24 @@ function Quotes({ d, name, tasks, onChanged, quoteFor, clearQuoteFor }) {
                     </div>
                   )}
 
-                  <div className="mt-2 pt-2 border-t border-amber-100">
-                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-1">Notes &amp; opinions</p>
-                    {(() => {
-                      // The comparison's line for this quote: what everyone said and how they reacted
-                      const per = d.summary?.data?.quotes?.per_quote || []
-                      const ai = per.find((x) => Number(x.id) === q.id) || per.find((x) => (x.vendor || '').toLowerCase() === q.vendor.toLowerCase())
-                      const has = q.note || (q.opinions || []).length || Object.values(q.reactions || {}).some((v) => v.length)
-                      // Every point that was written, one per bullet (the summary's "notes" part);
-                      // the comparison's one line only until those are written
-                      const notesFor = (d.summary?.data?.notes?.quotes || [])
-                        .find((x) => Number(String(x.id).replace(/[^0-9]/g, '')) === q.id)
-                      const points = has && notesFor?.points?.length ? notesFor.points : null
-                      const line = points || (ai?.opinions && has ? ai.opinions : null)
-                      return (
-                        <>
-                          {line && (
-                            <div className="bg-brand-50/60 border border-brand-100 px-2 py-1.5 mb-1.5">
-                              <p className="text-[9px] font-black text-brand-600 uppercase tracking-widest">✨ AI summary{d.summary.stale ? ' · updating…' : ''}</p>
-                              {points ? (
-                                <ul className="mt-0.5 space-y-0.5">
-                                  {points.map((x, i) => (
-                                    <li key={i} className="text-[11px] text-gray-700 pl-3 relative"><span className="absolute left-0">·</span><Rich text={x} /></li>
-                                  ))}
-                                </ul>
-                              ) : <p className="text-[11px] text-gray-700 mt-0.5"><Rich text={line} /></p>}
-                            </div>
-                          )}
-                          {/* with the AI's line shown, what was written stays folded */}
-                          <QuoteNotes q={q} d={d} name={name} onChanged={onChanged} folded={!!line} />
-                        </>
-                      )
-                    })()}
-                  </div>
+                  {(() => {
+                    // The AI's read of this whole card - price, details, note, opinions, reactions
+                    const card = (d.summary?.data?.notes?.quotes || [])
+                      .find((x) => Number(String(x.id).replace(/[^0-9]/g, '')) === q.id)
+                    if (!card?.points?.length) return null
+                    return (
+                      <div className="bg-brand-50/60 border border-brand-100 px-2 py-1.5 mt-2">
+                        <p className="text-[9px] font-black text-brand-600 uppercase tracking-widest">✨ AI summary of this quote{d.summary.stale ? ' · updating…' : ''}</p>
+                        <ul className="mt-0.5 space-y-0.5">
+                          {card.points.map((x, i) => (
+                            <li key={i} className="text-[11px] text-gray-700 pl-3 relative"><span className="absolute left-0">·</span><Rich text={x} /></li>
+                          ))}
+                        </ul>
+                      </div>
+                    )
+                  })()}
+
+                  <QuoteNotes q={q} d={d} name={name} onChanged={onChanged} />
 
                   {q.entered_by.toLowerCase() === d.me.toLowerCase() && (
                     <div className="flex gap-3 mt-2">
@@ -1219,14 +1204,12 @@ function Reactions({ target, id, r, d, name, onChanged, small }) {
 }
 
 /**
- * A quote's Notes: what whoever noted it wrote, then each member's own
- * opinion (with who and when). Everyone can add theirs, edit it, or tidy it
- * with the AI first.
+ * A quote's Note (what whoever noted it wrote) and, below it, the Opinions -
+ * each member's on its own card, with who and when. Everyone can add theirs,
+ * edit it, or tidy it with the AI first.
  */
-function QuoteNotes({ q, d, name, onChanged, folded }) {
+function QuoteNotes({ q, d, name, onChanged }) {
   const me = d.me.toLowerCase()
-  const [show, setShow] = useState(false)
-  const written = (q.note ? 1 : 0) + (q.opinions || []).length
   const mine = (q.opinions || []).find((o) => o.author.toLowerCase() === me)
   const [editing, setEditing] = useState(false)
   const [text, setText] = useState('')
@@ -1245,29 +1228,33 @@ function QuoteNotes({ q, d, name, onChanged, folded }) {
     try { await setQuoteOpinion(d.id, q.id, value, polished); setEditing(false); await onChanged() }
     catch (e) { setErr(errText(e, "Couldn't save it.")) } finally { setBusy('') }
   }
-  const hidden = folded && !show && !editing
+  const who = (n) => (n.toLowerCase() === me ? 'You' : name(n))
+  const opinions = (q.opinions || []).filter((o) => !(o.author.toLowerCase() === me && editing))
   return (
-    <div className="space-y-1.5 whitespace-normal">
-      {folded && written > 0 && (
-        <button onClick={() => setShow((v) => !v)} aria-expanded={!hidden}
-          className="block text-[10px] font-bold text-gray-500 hover:text-gray-800">
-          {hidden ? '▸' : '▾'} {hidden ? 'Show' : 'Hide'} what was written ({written})
-        </button>
-      )}
-      {!hidden && q.note && (
-        <p className="text-[11px] text-gray-700 whitespace-pre-line">
-          <span className="font-bold">{q.entered_by.toLowerCase() === me ? 'You' : name(q.entered_by)}:</span> <Rich text={q.note} />
-        </p>
-      )}
-      {!hidden && (q.opinions || []).map((o) => (o.author.toLowerCase() === me && editing ? null : (
-        <div key={o.author}>
-          <p className="text-[11px] text-gray-700 whitespace-pre-line">
-            <span className="font-bold">{o.author.toLowerCase() === me ? 'You' : name(o.author)}:</span> <Rich text={o.text} />
-            <span className="text-[9px] text-gray-400"> · {ago(o.at)}{o.edited ? ' · edited' : ''}{o.polished ? ' · ✨' : ''}</span>
-          </p>
-          {o.id && <Reactions target="opinion" id={o.id} r={o.reactions} d={d} name={name} onChanged={onChanged} small />}
+    <div className="whitespace-normal">
+      {q.note && (
+        <div className="mt-2 pt-2 border-t border-amber-100">
+          <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-1">Note</p>
+          <div className="bg-gray-50 border-l-2 border-gray-300 px-2 py-1.5">
+            <p className="text-[11px] text-gray-700 whitespace-pre-line"><Rich text={q.note} /></p>
+            <p className="text-[9px] text-gray-400 mt-0.5">{who(q.entered_by)}, with the quote</p>
+          </div>
         </div>
-      )))}
+      )}
+      <div className="mt-2 pt-2 border-t border-amber-100 space-y-1.5">
+        <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">
+          Opinions{opinions.length ? ` (${opinions.length})` : ''}
+        </p>
+        {opinions.map((o) => (
+          <div key={o.author} className="bg-white border border-amber-200 px-2 py-1.5">
+            <p className="text-[10px] font-bold text-gray-800">
+              {who(o.author)}
+              <span className="font-normal text-[9px] text-gray-400"> · {ago(o.at)}{o.edited ? ' · edited' : ''}{o.polished ? ' · ✨' : ''}</span>
+            </p>
+            <p className="text-[11px] text-gray-700 whitespace-pre-line mt-0.5"><Rich text={o.text} /></p>
+            {o.id && <Reactions target="opinion" id={o.id} r={o.reactions} d={d} name={name} onChanged={onChanged} small />}
+          </div>
+        ))}
       {!editing && (
         <button onClick={start} className="block text-[10px] font-bold text-brand-600">{mine ? '✎ Edit your opinion' : '+ Your opinion'}</button>
       )}
@@ -1303,6 +1290,7 @@ function QuoteNotes({ q, d, name, onChanged, folded }) {
           </div>
         </div>
       )}
+      </div>
     </div>
   )
 }
