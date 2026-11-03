@@ -362,3 +362,4 @@ export const voteDiscussionPoll   = (id, pid, choices) => api.post(`/discussions
 export const setDiscussionPollState = (id, pid, closed) => api.post(`/discussions/${id}/polls/${pid}/state`, { closed })
 export const deleteDiscussionPoll = (id, pid)   => api.delete(`/discussions/${id}/polls/${pid}`)
 export const getDiscussionActivity = (id, scope = 'discussion') => api.get(`/discussions/${id}/activity`, { params: { scope } })
+export const addDiscussionPeople = (id, data)   => api.post(`/discussions/${id}/people`, data)

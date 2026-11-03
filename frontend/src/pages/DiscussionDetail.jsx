@@ -4,9 +4,10 @@ import {
   getDiscussion, postDiscussionMessage, deleteDiscussionMessage, setDiscussionTask, addDiscussionQuote,
   editDiscussionQuote, deleteDiscussionQuote, acceptDiscussionInvite, polishMessage, editDiscussion,
   deleteDiscussion, suggestQuoteFields, createDiscussionPoll, voteDiscussionPoll, setDiscussionPollState,
-  deleteDiscussionPoll, getDiscussionActivity,
+  deleteDiscussionPoll, getDiscussionActivity, addDiscussionPeople,
 } from '../api/index.js'
 import LoadingSpinner from '../components/LoadingSpinner'
+import PeoplePicker from '../components/PeoplePicker'
 import { dn } from '../utils/displayName'
 import { ago } from './Discussions'
 
@@ -151,16 +152,23 @@ export default function DiscussionDetail() {
 function Header({ d, name, onChanged, onDeleted }) {
   const nav = useNavigate()
   const [editing, setEditing] = useState(false)
+  const [adding, setAdding] = useState(false)
   return (
     <div className="bg-gradient-to-br from-field-800 to-field-950 text-white px-5 pt-10 md:pt-8 pb-4 border-b border-field-700">
       <div className="flex items-center justify-between">
         <button onClick={() => nav('/discuss')} className="text-slate-300/70 text-xs font-bold">‹ Discussions</button>
-        <button onClick={() => setEditing((v) => !v)} className="text-slate-300/70 text-xs font-bold">{editing ? 'Close' : 'Edit'}</button>
+        <span className="flex gap-4">
+          <button onClick={() => { setAdding((v) => !v); setEditing(false) }} className="text-slate-300/70 text-xs font-bold">{adding ? 'Close' : '+ People'}</button>
+          <button onClick={() => { setEditing((v) => !v); setAdding(false) }} className="text-slate-300/70 text-xs font-bold">{editing ? 'Close' : 'Edit'}</button>
+        </span>
       </div>
       <h1 className="text-xl font-black mt-2 tracking-tight">{d.title}</h1>
       <p className="text-slate-300/60 text-[11px] mt-0.5">
-        {d.group.emoji} {d.group.name} · {d.members.map(name).join(', ')}
+        {d.group.name !== d.title && <>{d.group.emoji} {d.group.name} · </>}
+        {d.members.map((m) => (m.toLowerCase() === d.me.toLowerCase() ? 'You' : name(m))).join(', ')}
+        {d.invites.some((i) => !i.accepted_by) && <> · {d.invites.filter((i) => !i.accepted_by).length} invited by email</>}
       </p>
+      {adding && <AddPeople d={d} onDone={() => { setAdding(false); onChanged() }} />}
       {d.description && <p className="text-slate-200/80 text-xs mt-2 whitespace-pre-line">{d.description}</p>}
       {!editing && d.params.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-2">
@@ -172,6 +180,34 @@ function Header({ d, name, onChanged, onDeleted }) {
         </div>
       )}
       {editing && <EditDiscussion d={d} onSaved={() => { setEditing(false); onChanged() }} onDeleted={onDeleted} />}
+    </div>
+  )
+}
+
+/** More people: app users go straight into the group, others get an email invite. */
+function AddPeople({ d, onDone }) {
+  const [members, setMembers] = useState([])
+  const [emails, setEmails] = useState([])
+  const [err, setErr] = useState('')
+  const [saving, setSaving] = useState(false)
+  const pending = d.invites.filter((i) => !i.accepted_by)
+  const save = async () => {
+    setSaving(true); setErr('')
+    try { await addDiscussionPeople(d.id, { members, invite_emails: emails }); onDone() }
+    catch (e) { setErr(errText(e, "Couldn't add them.")); setSaving(false) }
+  }
+  return (
+    <div className="mt-3 bg-white text-gray-800 px-3 py-3 space-y-2">
+      <p className="text-[11px] font-bold text-gray-600">Add people to {d.group.name}</p>
+      <PeoplePicker me={d.me} exclude={d.members} members={members} setMembers={setMembers}
+        emails={emails} setEmails={setEmails} onError={setErr} />
+      {pending.length > 0 && (
+        <p className="text-[10px] text-gray-400">Invited, not joined yet: {pending.map((i) => i.email).join(', ')}</p>
+      )}
+      {err && <p className="text-[11px] text-red-600">{err}</p>}
+      <button onClick={save} disabled={saving || !(members.length || emails.length)} className="btn-primary text-xs py-1.5 px-4 disabled:opacity-50">
+        {saving ? 'Adding…' : 'Add'}
+      </button>
     </div>
   )
 }

@@ -120,24 +120,77 @@ def list_discussions(db: Session = Depends(get_db), caller: User = Depends(curre
 
 
 class DiscussionIn(BaseModel):
-    group_id: int
     title: str
     description: str | None = None
     params: list = []
+    # Who it's with: app users by name, and emails of people not on the app
+    # (invited - they join from the email's link). A new group is made for it.
+    members: list[str] = []
+    invite_emails: list[str] = []
+    group_id: int | None = None          # an existing group instead (older clients)
+
+
+def _clean_emails(raw: list[str]) -> list[str]:
+    out = []
+    for e in raw or []:
+        e = (e or "").strip().lower()
+        if not e:
+            continue
+        if not _EMAIL.match(e):
+            raise HTTPException(400, f"{e} doesn't look like an email address")
+        if e not in out:
+            out.append(e)
+    if len(out) > 10:
+        raise HTTPException(400, "Invite at most 10 people at a time")
+    return out
 
 
 @router.post("", response_model=dict, status_code=201)
-def create_discussion(payload: DiscussionIn, db: Session = Depends(get_db), caller: User = Depends(current_user)):
-    group = member_group(payload.group_id, caller, db, with_history=False)
+def create_discussion(payload: DiscussionIn, bg: BackgroundTasks, db: Session = Depends(get_db),
+                      caller: User = Depends(current_user)):
     title = payload.title.strip()[:200]
     if not title:
         raise HTTPException(400, "Give the discussion a title")
-    d = Discussion(group_id=payload.group_id, title=title, description=(payload.description or "").strip() or None,
+    emails = _clean_emails(payload.invite_emails)
+    added: list[str] = []
+    if payload.group_id:
+        group = member_group(payload.group_id, caller, db, with_history=False)
+    else:
+        # The people picked, as they're named on the app - only real accounts
+        for n in payload.members:
+            u = db.query(User).filter(User.name.ilike((n or "").strip())).first()
+            if not u:
+                raise HTTPException(400, f"{n} isn't on the app - invite them by email instead")
+            if u.name.lower() != caller.name.lower() and u.name not in added:
+                added.append(u.name)
+        if not added and not emails:
+            raise HTTPException(400, "Add at least one person to discuss with")
+        group = Group(name=title, emoji="💬", category="other",
+                      description=f"Made for the discussion \"{title}\"")
+        db.add(group)
+        db.flush()
+        for n in [caller.name, *added]:
+            db.add(Member(group_id=group.id, name=n))
+        record_activity(db, group, caller.name, "created a new group",
+                        f"{group.name} · for a discussion · {len(added) + 1} members")
+    d = Discussion(group_id=group.id, title=title, description=(payload.description or "").strip() or None,
                    params_json=json.dumps(_clean_params(payload.params)), created_by=caller.name)
     db.add(d)
+    db.flush()
+    tokens = []
+    for e in emails:
+        tok = secrets.token_urlsafe(24)
+        db.add(DiscussionInvite(discussion_id=d.id, email=e, token=tok, invited_by=caller.name))
+        tokens.append((e, tok))
     _feed(db, group, caller.name, "started a discussion", d)
+    if emails:
+        _feed(db, group, caller.name, f"invited {len(emails)} by email", d, ", ".join(emails))
     db.commit()
-    return {"id": d.id}
+    if added:
+        bg.add_task(_notify_added, d.id, caller.name, added)
+    if tokens:
+        bg.add_task(_send_invites, d.id, caller.name, d.description or "", tokens)
+    return {"id": d.id, "group_id": group.id}
 
 
 class DiscussionEdit(BaseModel):
@@ -346,20 +399,63 @@ def _notify_message(discussion_id: int, message_id: int, invites: list[tuple[str
                     _push.send_push_to_user(db, mem.name, f"{m.author} in {d.title}", preview[:120], url=url)
                 except Exception as e:
                     print(f"[discussions] push failed: {e}")
-        front = get_settings().frontend_url.rstrip("/")
-        for email, tok in invites:
-            link = f"{front}/discuss/{d.id}?invite={tok}"
-            subject = f"{m.author} invited you to plan \"{d.title}\""
-            lines = [f"{m.author} would like your help with \"{d.title}\" ({group.name}) on SplitEasy:", preview,
-                     "Sign up (or sign in) and open the link - you'll join the group and can reply and add quotes."]
-            try:
-                emailer._send(email, subject, "\n\n".join(lines) + f"\n\nJoin here: {link}",
-                              emailer._layout(subject, [escape(x) for x in lines], button_url=link,
-                                              button_label="Join the discussion"))
-            except Exception as e:
-                print(f"[discussions] invite email to {email} failed: {e}")
+        _email_invites(d, group, m.author, preview, invites)
     except Exception as e:
         print(f"[discussions] notify failed: {e}")
+    finally:
+        db.close()
+
+
+def _notify_added(discussion_id: int, actor: str, names: list[str]) -> None:
+    """People put in a discussion's group: an email and push that open the discussion."""
+    import emailer
+    from database import get_session_factory
+    db = get_session_factory()()
+    try:
+        d = db.get(Discussion, discussion_id)
+        if not d:
+            return
+        for n in names:
+            emailer.send_notice(db, n, f"{actor} added you to \"{d.title}\"",
+                                [f"{actor} added you to the discussion \"{d.title}\" on SplitEasy."]
+                                + ([d.description] if d.description else [])
+                                + ["Reply, vote in polls and note the quotes you get there."],
+                                push_body=f"{actor} added you to \"{d.title}\"", url=f"/discuss/{d.id}",
+                                button_label="Open the discussion")
+    except Exception as e:
+        print(f"[discussions] added-notice failed: {e}")
+    finally:
+        db.close()
+
+
+def _email_invites(d: Discussion, group: Group, author: str, preview: str, invites: list[tuple[str, str]]) -> None:
+    import emailer
+    from database import get_settings
+    front = get_settings().frontend_url.rstrip("/")
+    for email, tok in invites:
+        link = f"{front}/discuss/{d.id}?invite={tok}"
+        subject = f"{author} invited you to plan \"{d.title}\""
+        lines = [f"{author} would like your help with \"{d.title}\" on SplitEasy" + (":" if preview else "."),
+                 *([preview] if preview else []),
+                 "Sign up (or sign in) and open the link - you'll join the group and can reply, vote and add quotes."]
+        try:
+            emailer._send(email, subject, "\n\n".join(lines) + f"\n\nJoin here: {link}",
+                          emailer._layout(subject, [escape(x) for x in lines], button_url=link,
+                                          button_label="Join the discussion"))
+        except Exception as e:
+            print(f"[discussions] invite email to {email} failed: {e}")
+
+
+def _send_invites(discussion_id: int, author: str, preview: str, invites: list[tuple[str, str]]) -> None:
+    """The invites made with a new discussion, emailed after the response."""
+    from database import get_session_factory
+    db = get_session_factory()()
+    try:
+        d = db.get(Discussion, discussion_id)
+        if d:
+            _email_invites(d, db.get(Group, d.group_id), author, preview, invites)
+    except Exception as e:
+        print(f"[discussions] invites failed: {e}")
     finally:
         db.close()
 
@@ -458,6 +554,47 @@ def delete_quote(discussion_id: int, quote_id: int, db: Session = Depends(get_db
     if q:
         db.delete(q)
         db.commit()
+
+
+class AddPeopleIn(BaseModel):
+    members: list[str] = []
+    invite_emails: list[str] = []
+
+
+@router.post("/{discussion_id}/people", response_model=dict)
+def add_people(discussion_id: int, payload: AddPeopleIn, bg: BackgroundTasks, db: Session = Depends(get_db),
+               caller: User = Depends(current_user)):
+    """More people for the discussion's group: app users straight in, others
+    invited by email."""
+    d, group = _discussion(db, discussion_id, caller)
+    have = {m.name.lower() for m in group.members}
+    added = []
+    for n in payload.members:
+        u = db.query(User).filter(User.name.ilike((n or "").strip())).first()
+        if not u:
+            raise HTTPException(400, f"{n} isn't on the app - invite them by email instead")
+        if u.name.lower() not in have and u.name not in added:
+            added.append(u.name)
+            db.add(Member(group_id=group.id, name=u.name))
+    emails = _clean_emails(payload.invite_emails)
+    tokens = []
+    for e in emails:
+        tok = secrets.token_urlsafe(24)
+        db.add(DiscussionInvite(discussion_id=d.id, email=e, token=tok, invited_by=caller.name))
+        tokens.append((e, tok))
+    if not added and not tokens:
+        raise HTTPException(400, "Pick someone new to add")
+    if added:
+        _feed(db, group, caller.name, f"added {', '.join(added)}", d)
+    if emails:
+        _feed(db, group, caller.name, f"invited {len(emails)} by email", d, ", ".join(emails))
+    _touch(d)
+    db.commit()
+    if added:
+        bg.add_task(_notify_added, d.id, caller.name, added)
+    if tokens:
+        bg.add_task(_send_invites, d.id, caller.name, d.description or "", tokens)
+    return {"added": added, "invited": emails}
 
 
 # ── polls ──────────────────────────────────────────────────────────────────

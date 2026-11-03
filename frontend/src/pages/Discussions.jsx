@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { listDiscussions, createDiscussion, getGroups, suggestQuoteFields } from '../api/index.js'
+import { listDiscussions, createDiscussion, suggestQuoteFields } from '../api/index.js'
 import LoadingSpinner from '../components/LoadingSpinner'
+import PeoplePicker from '../components/PeoplePicker'
+import { useUser } from '../UserContext'
 import { dn as displayName } from '../utils/displayName'
 
 export const ago = (t) => {
@@ -60,7 +62,10 @@ export default function Discussions() {
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <p className="text-sm font-black text-gray-900 truncate">{d.title}</p>
-                <p className="text-[11px] text-gray-400 truncate">{d.group.emoji} {d.group.name} · {d.members.length} member{d.members.length === 1 ? '' : 's'}</p>
+                <p className="text-[11px] text-gray-400 truncate">
+                  {d.group.name !== d.title && <>{d.group.emoji} {d.group.name} · </>}
+                  {d.members.map((n) => displayName(n, d.members)).join(', ')}
+                </p>
               </div>
               <span className="text-[10px] text-gray-400 shrink-0">{ago(d.last?.at || d.updated_at)}</span>
             </div>
@@ -85,10 +90,14 @@ export default function Discussions() {
   )
 }
 
-/** Pick the group, name it, and set the fields every quote will be noted in. */
+/**
+ * Pick the people (app users, or emails for anyone else), name it, and set
+ * the fields every quote will be noted in. A new group is made for it.
+ */
 function NewDiscussion({ onCancel, onCreated }) {
-  const [groups, setGroups] = useState(null)
-  const [groupId, setGroupId] = useState('')
+  const user = useUser()
+  const [members, setMembers] = useState([])
+  const [emails, setEmails] = useState([])
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [params, setParams] = useState([])
@@ -96,16 +105,6 @@ function NewDiscussion({ onCancel, onCreated }) {
   const [suggesting, setSuggesting] = useState(false)
   const [err, setErr] = useState('')
   const [saving, setSaving] = useState(false)
-
-  useEffect(() => {
-    getGroups().then((r) => {
-      // Monthly trackers are one person's own - nothing to discuss there.
-      const gs = r.data.filter((g) => !/^MONTHLY EXPENSES/i.test(g.name) && !g.is_historical)
-        .sort((a, b) => (b.member_count > 1) - (a.member_count > 1) || (b.last_activity || '').localeCompare(a.last_activity || ''))
-      setGroups(gs)
-      if (gs[0]) setGroupId(String(gs[0].id))
-    }).catch(() => setGroups([]))
-  }, [])
 
   const addParam = (label) => {
     const l = label.trim()
@@ -123,31 +122,19 @@ function NewDiscussion({ onCancel, onCreated }) {
   }
   const save = async (e) => {
     e.preventDefault()
-    if (!groupId || !title.trim()) return
+    if (!title.trim() || !(members.length || emails.length)) return
     setSaving(true); setErr('')
     try {
-      const { data } = await createDiscussion({ group_id: +groupId, title, description, params })
+      const { data } = await createDiscussion({ title, description, params, members, invite_emails: emails })
       onCreated(data.id)
     } catch (e2) {
       setErr(e2.response?.data?.detail || "Couldn't create it.")
       setSaving(false)
     }
   }
-  const group = groups?.find((g) => String(g.id) === groupId)
-
   return (
     <form onSubmit={save} className="card space-y-3">
       <p className="text-xs font-black text-gray-500 uppercase tracking-widest">New discussion</p>
-      <label className="block text-[11px] font-bold text-gray-600">Group
-        {groups === null ? <p className="text-xs text-gray-400 mt-1">Loading…</p> : groups.length === 0 ? (
-          <p className="text-xs text-gray-500 mt-1">Create a group with the people you're planning with first.</p>
-        ) : (
-          <select value={groupId} onChange={(e) => setGroupId(e.target.value)} className="input text-sm mt-1">
-            {groups.map((g) => <option key={g.id} value={g.id}>{g.emoji} {g.name} ({g.member_count})</option>)}
-          </select>
-        )}
-      </label>
-      {group && <p className="text-[10px] text-gray-400 -mt-2">With {group.member_names.map((n) => displayName(n, group.member_names)).join(', ')} · anyone else can be invited by email later</p>}
       <label className="block text-[11px] font-bold text-gray-600">Topic
         <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} className="input text-sm mt-1"
           placeholder="e.g. Wedding banquets in Jaipur" />
@@ -156,6 +143,11 @@ function NewDiscussion({ onCancel, onCreated }) {
         <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="input text-sm mt-1"
           placeholder="Date, guest count, budget, area…" />
       </label>
+
+      <div>
+        <p className="text-[11px] font-bold text-gray-600 mb-1">People <span className="font-normal text-gray-400">- a new group is made with you and them</span></p>
+        <PeoplePicker me={user?.name} members={members} setMembers={setMembers} emails={emails} setEmails={setEmails} onError={setErr} />
+      </div>
 
       <div>
         <div className="flex items-center justify-between">
@@ -181,7 +173,7 @@ function NewDiscussion({ onCancel, onCreated }) {
 
       {err && <p className="text-xs text-red-600">{typeof err === 'string' ? err : 'Check the details.'}</p>}
       <div className="flex gap-3">
-        <button type="submit" disabled={!groupId || !title.trim() || saving} className="btn-primary text-sm disabled:opacity-50">
+        <button type="submit" disabled={!title.trim() || !(members.length || emails.length) || saving} className="btn-primary text-sm disabled:opacity-50">
           {saving ? 'Creating…' : 'Start discussion'}
         </button>
         <button type="button" onClick={onCancel} className="text-sm font-bold text-gray-500">Cancel</button>
