@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   changePassword, setRecovery, getRecoveryQuestion, getMe, setMyEmail, setMyBirthday,
-  setMyDailySummary, setMyNewsAlerts, setMySalary, listMyUpiIds, addUpiId, deleteUpiId, setShowDrinks,
+  setMyDailySummary, setMyNewsAlerts, setMySalary, listMyUpiIds, addUpiId, deleteUpiId, listDrinksAccess, setDrinksAccess,
 } from '../api'
-import { useUser, isAdmin, hasFullAccess, useRefreshUser } from '../UserContext'
+import { useUser, isAdmin, hasFullAccess } from '../UserContext'
 import UnlockAccess from '../components/UnlockAccess'
 import FullNameCard from '../components/FullNameCard'
 import { ALL_QUESTIONS, RECOVERY_QUESTIONS, KEY_QUESTION, generateKey } from '../utils/security'
@@ -70,16 +70,7 @@ export default function Account() {
   // ── Nightly summary of yesterday's spending ──
   const [summaryOn, setSummaryOn]       = useState(false)
   const [news, setNews]                 = useState({ tennis: true, football: true, badminton: true })
-  // An admin's own Drinks section in Recommend
-  const refreshUser = useRefreshUser()
-  const [drinksOn, setDrinksOn]         = useState(user?.show_drinks !== false)
-  const [drinksErr, setDrinksErr]       = useState('')
-  const toggleDrinks = async () => {
-    const next = !drinksOn
-    setDrinksOn(next); setDrinksErr('')
-    try { await setShowDrinks(next); await refreshUser() }
-    catch (err) { setDrinksOn(!next); setDrinksErr(err.response?.data?.detail || 'Could not change that.') }
-  }
+
   const [newsErr, setNewsErr]           = useState('')
   const [summaryBusy, setSummaryBusy]   = useState(false)
   const [summaryError, setSummaryError] = useState('')
@@ -634,25 +625,8 @@ export default function Account() {
           {summaryError && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2 mt-2">{summaryError}</p>}
         </div>
 
-        {/* ── Admin: the Drinks section of Recommend, on or off for themselves ── */}
-        {isAdmin(user) && (
-          <div className="card">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-bold text-gray-800">Drinks in Recommend</h2>
-                <p className="text-xs text-gray-500 leading-relaxed mt-1">
-                  {drinksOn ? 'On - Recommend shows the Drinks section.' : 'Off - Recommend shows food only.'} Admins only; it changes just your own view.
-                </p>
-              </div>
-              <button type="button" role="switch" aria-checked={drinksOn} onClick={toggleDrinks}
-                aria-label="Drinks section in Recommend"
-                className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${drinksOn ? 'bg-brand-500' : 'bg-gray-300'}`}>
-                <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${drinksOn ? 'translate-x-5' : ''}`} />
-              </button>
-            </div>
-            {drinksErr && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2 mt-2">{drinksErr}</p>}
-          </div>
-        )}
+        {/* ── Admin: who sees the Drinks section of Recommend ── */}
+        {isAdmin(user) && <DrinksAccess />}
 
         {/* ── Sports news notifications ── */}
         {(
@@ -830,6 +804,63 @@ export default function Account() {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+
+/**
+ * Admin only: every user, with a switch for the drinks side - the Drinks
+ * section of Recommend and the party forecast (full access). Admins always
+ * have it.
+ */
+function DrinksAccess() {
+  const [rows, setRows] = useState(null)
+  const [q, setQ] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState('')
+  useEffect(() => { listDrinksAccess().then((r) => setRows(r.data)).catch(() => setErr("Couldn't load the users.")) }, [])
+  const flip = async (u) => {
+    const next = !u.on
+    setBusy(u.name); setErr('')
+    setRows((rs) => rs.map((x) => (x.name === u.name ? { ...x, on: next } : x)))
+    try { await setDrinksAccess(u.name, next) }
+    catch (e) {
+      setRows((rs) => rs.map((x) => (x.name === u.name ? { ...x, on: !next } : x)))
+      setErr(e.response?.data?.detail || 'Could not change that.')
+    } finally { setBusy('') }
+  }
+  const term = q.trim().toLowerCase()
+  const shown = (rows || []).filter((u) => !term || u.name.toLowerCase().includes(term) || (u.full_name || '').toLowerCase().includes(term))
+  const onCount = (rows || []).filter((u) => u.on && !u.admin).length
+  return (
+    <div className="card">
+      <h2 className="text-sm font-bold text-gray-800">Who sees Drinks</h2>
+      <p className="text-xs text-gray-500 leading-relaxed mt-1 mb-2">
+        Turn on the people who should see the Drinks section of Recommend (and the party forecast). Everyone else gets
+        food only. Admins always see it.{rows ? ` ${onCount} turned on.` : ''}
+      </p>
+      {rows && rows.length > 8 && (
+        <input value={q} onChange={(e) => setQ(e.target.value)} className="input text-xs py-2 mb-2" placeholder="Search people…" />
+      )}
+      {!rows && !err && <p className="text-xs text-gray-400">Loading…</p>}
+      <div className="max-h-80 overflow-y-auto -mx-1 px-1">
+        {shown.map((u) => (
+          <div key={u.name} className="flex items-center justify-between py-2 border-b border-amber-100 last:border-0">
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold text-gray-800 truncate">{u.full_name && u.full_name !== u.name ? u.full_name : u.name}</span>
+              <span className="block text-[10px] text-gray-400">{u.full_name && u.full_name !== u.name ? `${u.name} · ` : ''}{u.admin ? 'admin - always on' : u.on ? 'sees Drinks' : 'food only'}</span>
+            </span>
+            <button type="button" role="switch" aria-checked={u.on} onClick={() => flip(u)} disabled={u.admin || busy === u.name}
+              aria-label={`Drinks for ${u.name}`}
+              className={`relative w-11 h-6 rounded-full transition-colors shrink-0 disabled:opacity-50 ${u.on ? 'bg-brand-500' : 'bg-gray-300'}`}>
+              <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${u.on ? 'translate-x-5' : ''}`} />
+            </button>
+          </div>
+        ))}
+        {rows && shown.length === 0 && <p className="text-xs text-gray-400 py-2">No one matches.</p>}
+      </div>
+      {err && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2 mt-2">{err}</p>}
     </div>
   )
 }

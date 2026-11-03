@@ -13,7 +13,7 @@ import ProductReviewForm from '../components/ProductReviewForm'
 import RecommendTabs from '../components/RecommendTabs'
 import RecommendFood from './RecommendFood'
 import Forecast from './Forecast'
-import { useUser, hasFullAccess, isAdmin } from '../UserContext'
+import { useUser, hasFullAccess } from '../UserContext'
 
 // A missing number renders as a dash, never as "₹NaN". Number(undefined) is
 // NaN, so any field the server stops sending — or hasn't started sending yet,
@@ -253,8 +253,6 @@ function YourBottles() {
 export default function Recommend() {
   const user = useUser()
   if (!hasFullAccess(user)) return <RecommendFood tab="food" setTab={() => {}} />
-  // An admin can turn the Drinks section off for themselves (Account page)
-  if (isAdmin(user) && user.show_drinks === false) return <RecommendFood tab="food" setTab={() => {}} />
   return <DrinksRecommend />
 }
 

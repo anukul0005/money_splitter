@@ -585,20 +585,42 @@ def set_my_news_alerts(payload: SetNewsAlerts, db: Session = Depends(get_db),
     return caller
 
 
-class SetShowDrinks(BaseModel):
+# ── who sees the drinks side: an admin picks, user by user ─────────────────
+# The drinks side (Recommend's Drinks, the party forecast) is full_access -
+# the same switch an admin's one-time code turns on; here an admin flips it
+# directly for anyone. Admins always have it.
+
+def _admin(caller: User) -> None:
+    if not (caller.is_admin or caller.name.lower() in ADMIN_NAMES):
+        raise HTTPException(403, "Only an admin can change this")
+
+
+@router.get("/admin/drinks-access", response_model=list)
+def drinks_access(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    _admin(caller)
+    rows = db.query(User).order_by(User.name).all()
+    return [{"name": u.name, "full_name": u.full_name, "admin": bool(u.is_admin or u.name.lower() in ADMIN_NAMES),
+             "on": bool(u.has_full_access or u.name.lower() in ADMIN_NAMES)} for u in rows]
+
+
+class SetDrinksAccess(BaseModel):
+    name: str
     enabled: bool
 
 
-@router.post("/me/show-drinks", response_model=UserMeOut)
-def set_show_drinks(payload: SetShowDrinks, db: Session = Depends(get_db),
-                    caller: User = Depends(current_user)):
-    """An admin turns the Drinks section of Recommend on or off for themselves."""
-    if not (caller.is_admin or caller.name.lower() in ADMIN_NAMES):
-        raise HTTPException(403, "Only an admin can change this")
-    caller.show_drinks = payload.enabled
+@router.post("/admin/drinks-access", response_model=dict)
+def set_drinks_access(payload: SetDrinksAccess, db: Session = Depends(get_db),
+                      caller: User = Depends(current_user)):
+    _admin(caller)
+    target = db.query(User).filter(User.name.ilike((payload.name or "").strip())).first()
+    if not target:
+        raise HTTPException(404, f"No user named {payload.name}")
+    if target.is_admin or target.name.lower() in ADMIN_NAMES:
+        raise HTTPException(400, "Admins always see Drinks")
+    target.full_access = payload.enabled
     db.commit()
-    db.refresh(caller)
-    return caller
+    print(f"[access] {caller.name} turned Drinks {'on' if payload.enabled else 'off'} for {target.name}")
+    return {"name": target.name, "on": payload.enabled}
 
 
 @router.post("/me/salary", response_model=UserMeOut)
