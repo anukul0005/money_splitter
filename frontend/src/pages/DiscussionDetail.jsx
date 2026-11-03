@@ -86,6 +86,33 @@ function AttachmentCard({ a, caption, d, onQuote }) {
   )
 }
 
+/**
+ * A price however it was typed ("Overall budget 20 to 30 lakh", "12 - 14 lacs",
+ * "1350 per plate") in one format: { text: "≈ ₹20–30 lacs", value: rupees to
+ * compare by (a range's middle), extra: what was typed, when it said more }.
+ */
+// a unit may sit right against the number ("30L", "85k") - so no \b before it, only "not inside a word"
+const UNITS = [[/(?<![a-z])(crores?|cr)\b/, 'cr', 1e7], [/(?<![a-z])(lakhs?|lacs?|lac|l)\b/, 'lacs', 1e5], [/(?<![a-z])(thousand|k)\b/, 'k', 1e3]]
+const PER = /(?:\/|\bper\b|\ba\b)\s*(plate|person|head|pax|night|day|guest|hour|room)s?\b/
+const APPROX = /\b(approx\w*|around|about|roughly|estimated|overall|budget|upto|up to|nearly|apx)\b|~|≈/
+function priceInfo(raw) {
+  const str = String(raw || '').trim()
+  const low = str.toLowerCase()
+  const nums = (low.match(/\d+(?:,\d+)*(?:\.\d+)?/g) || []).map((n) => parseFloat(n.replace(/,/g, '')))
+  if (!nums.length) return { text: str, value: null, extra: '' }
+  const unit = UNITS.find(([rx]) => rx.test(low))
+  const per = low.match(PER)
+  const approx = APPROX.test(low)
+  const [a, b] = nums.length > 1 && nums[1] > nums[0] ? [nums[0], nums[1]] : [nums[0], null]
+  const fmt = (n) => (unit ? String(+n.toFixed(2)) : n.toLocaleString('en-IN', { maximumFractionDigits: 2 }))
+  const text = `${approx ? '≈ ' : ''}₹${fmt(a)}${b != null ? `–${fmt(b)}` : ''}${unit ? (unit[1] === 'k' ? 'k' : ` ${unit[1]}`) : ''}${per ? ` / ${per[1]}` : ''}`
+  const mult = unit ? unit[2] : 1
+  // Anything typed beyond the number, unit and range words ("overall budget ...including everything")
+  const rest = low.replace(PER, ' ').replace(unit ? unit[0] : /$^/, ' ').replace(/\d+(?:,\d+)*(?:\.\d+)?/g, ' ')
+    .replace(/₹|\brs\.?|\binr\b|\bto\b|-|–|\/-?/g, ' ').replace(/\s+/g, ' ').trim()
+  return { text, value: b != null ? ((a + b) / 2) * mult : a * mult, extra: rest ? str : '' }
+}
+
 /** A small copy-to-clipboard icon that says "Copied" for a moment. */
 function CopyButton({ text, className = '' }) {
   const [done, setDone] = useState(false)
@@ -926,7 +953,7 @@ function Quotes({ d, name, tasks, onChanged, quoteFor, clearQuoteFor }) {
   const shown = useMemo(() => {
     let qs = who ? d.quotes.filter((q) => q.entered_by === who) : [...d.quotes]
     if (sortKey) {
-      const pick = (q) => num(sortKey === '__price' ? q.price : q.values[sortKey])
+      const pick = (q) => (sortKey === '__price' ? priceInfo(q.price).value : num(q.values[sortKey]))
       qs.sort((a, b) => {
         const x = pick(a), y = pick(b)
         if (x == null && y == null) return 0
@@ -943,7 +970,7 @@ function Quotes({ d, name, tasks, onChanged, quoteFor, clearQuoteFor }) {
     const vals = shown.map((q) => num(q.values[p.key])).filter((v) => v != null)
     if (vals.length > 1) best[p.key] = Math.min(...vals)
   })
-  const prices = shown.map((q) => num(q.price)).filter((v) => v != null)
+  const prices = shown.map((q) => priceInfo(q.price).value).filter((v) => v != null)
   const bestPrice = prices.length > 1 ? Math.min(...prices) : null
   const taskLabel = (tid) => {
     const t = tasks.find((x) => x.id === tid)
@@ -988,7 +1015,8 @@ function Quotes({ d, name, tasks, onChanged, quoteFor, clearQuoteFor }) {
           {/* One card per quote, stacked - nothing to scroll sideways */}
           <div className="space-y-3">
             {shown.map((q) => {
-              const cheapest = bestPrice != null && num(q.price) === bestPrice
+              const pi = priceInfo(q.price)
+              const cheapest = bestPrice != null && pi.value === bestPrice
               const filled = d.params.filter((p) => q.values[p.key])
               return (
                 <div key={q.id} className={`card !p-3 ${cheapest ? 'border-green-300' : ''}`}>
@@ -1001,7 +1029,10 @@ function Quotes({ d, name, tasks, onChanged, quoteFor, clearQuoteFor }) {
                     </div>
                     <div className="text-right shrink-0 max-w-[50%]">
                       {q.price
-                        ? <p className={`text-sm font-black break-words ${cheapest ? 'text-green-700' : 'text-gray-900'}`}>{q.price}</p>
+                        ? <>
+                            <p className={`text-sm font-black break-words ${cheapest ? 'text-green-700' : 'text-gray-900'}`}>{pi.text}</p>
+                            {pi.extra && <p className="text-[10px] text-gray-400 break-words">{pi.extra}</p>}
+                          </>
                         : <p className="text-[11px] text-gray-300">no price yet</p>}
                       {cheapest && <p className="text-[9px] font-black text-green-700 uppercase tracking-widest">★ lowest</p>}
                     </div>
@@ -1225,7 +1256,7 @@ function QuoteNotes({ q, d, name, onChanged, folded }) {
     <div className="space-y-1.5 whitespace-normal">
       {folded && written > 0 && (
         <button onClick={() => setShow((v) => !v)} aria-expanded={!hidden}
-          className="text-[10px] font-bold text-gray-500 hover:text-gray-800">
+          className="block text-[10px] font-bold text-gray-500 hover:text-gray-800">
           {hidden ? '▸' : '▾'} {hidden ? 'Show' : 'Hide'} what was written ({written})
         </button>
       )}
@@ -1244,7 +1275,7 @@ function QuoteNotes({ q, d, name, onChanged, folded }) {
         </div>
       )))}
       {!editing && (
-        <button onClick={start} className="text-[10px] font-bold text-brand-600">{mine ? '✎ Edit your opinion' : '+ Your opinion'}</button>
+        <button onClick={start} className="block text-[10px] font-bold text-brand-600">{mine ? '✎ Edit your opinion' : '+ Your opinion'}</button>
       )}
       {editing && (
         <div className="bg-amber-50 border border-amber-200 p-2 space-y-1.5">
