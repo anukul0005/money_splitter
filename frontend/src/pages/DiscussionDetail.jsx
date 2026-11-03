@@ -950,6 +950,7 @@ function Quotes({ d, name, tasks, onChanged, quoteFor, clearQuoteFor }) {
 
   return (
     <div className="px-4 py-3 space-y-3 max-w-4xl w-full">
+      <QuotesSummary d={d} onChanged={onChanged} />
       {!form && (
         <button onClick={() => setForm({})} className="btn-primary text-sm">+ Add a quote</button>
       )}
@@ -1037,6 +1038,77 @@ function Quotes({ d, name, tasks, onChanged, quoteFor, clearQuoteFor }) {
           </div>
           {(bestPrice != null || Object.keys(best).length > 0) && <p className="text-[10px] text-gray-400">★ the lowest price</p>}
         </>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The AI's comparison of the quotes, here on the Quotes tab (the summary
+ * above the chat covers the discussion itself): how they compare, best value
+ * and cheapest, and per quote its pros and cons and what's still missing.
+ * Written with the rest of the summary - refreshed from here too.
+ */
+function QuotesSummary({ d, onChanged }) {
+  const [open, setOpen] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const s = d.summary
+  const q = s?.data?.quotes
+  if (!d.ai || d.quotes.length === 0) return null
+  const run = async () => {
+    setBusy(true); setErr('')
+    try { await summariseDiscussion(d.id); await onChanged() }
+    catch (e) { setErr(errText(e, "The AI couldn't compare them just now.")) } finally { setBusy(false) }
+  }
+  if (!q) return (
+    <div className="card !p-3">
+      <p className="text-[10px] font-black text-brand-600 uppercase tracking-widest">✨ AI on the quotes</p>
+      <p className="text-xs text-gray-500 mt-1">
+        {s?.data?.quotes_error ? "The quotes couldn't be compared last time." : 'Not compared yet.'}
+      </p>
+      <button onClick={run} disabled={busy} className="text-[11px] font-bold text-brand-600 mt-1.5 disabled:opacity-50">
+        {busy ? 'Comparing…' : '✨ Compare the quotes'}
+      </button>
+      {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
+    </div>
+  )
+  const copyText = ['Quotes:', q.summary.replace(/\*\*/g, ''), ...(q.best_value ? [`Best value: ${q.best_value}`] : []),
+    ...(q.cheapest ? [`Cheapest: ${q.cheapest}`] : []),
+    ...(q.per_quote || []).map((x) => `- ${x.vendor}: ${x.note}${x.missing ? ` (missing: ${x.missing})` : ''}`)].join('\n')
+  return (
+    <div className="card !p-0 border-brand-200">
+      <button onClick={() => setOpen((v) => !v)} className="w-full text-left px-3 py-2">
+        <span className="flex items-center justify-between gap-2">
+          <span className="text-[10px] font-black text-brand-600 uppercase tracking-widest">✨ AI on the quotes</span>
+          <span className="text-[10px] text-gray-400">
+            {busy ? <span className="text-brand-600 font-bold">updating… · </span>
+              : s.stale ? <span className="text-amber-600 font-bold">new activity since · </span> : null}{ago(s.at)} {open ? '▴' : '▾'}
+          </span>
+        </span>
+        <span className={`block text-xs text-gray-700 mt-1 ${open ? '' : 'line-clamp-2'}`}><Rich text={q.summary} /></span>
+      </button>
+      {open && (
+        <div className="px-3 pb-3">
+          <div className="flex flex-wrap gap-1.5">
+            {q.best_value && <span className="text-[10px] font-bold bg-green-50 border border-green-200 text-green-800 px-2 py-0.5">Best value: {q.best_value}</span>}
+            {q.cheapest && <span className="text-[10px] font-bold bg-amber-50 border border-amber-200 text-gray-700 px-2 py-0.5">Cheapest: {q.cheapest}</span>}
+          </div>
+          {q.per_quote?.map((x, i) => (
+            <p key={i} className="text-[11px] text-gray-600 mt-1.5">
+              <span className="font-bold text-gray-800">{x.vendor}</span> - <Rich text={x.note} />
+              {x.missing && <span className="block text-[10px] text-amber-700">Missing: {x.missing}</span>}
+            </p>
+          ))}
+          <div className="flex items-center gap-3 mt-3">
+            <button onClick={run} disabled={busy} className="text-[11px] font-bold text-brand-600 disabled:opacity-50">
+              {busy ? 'Comparing…' : s.stale ? '↻ Update with the latest' : '↻ Refresh'}
+            </button>
+            <CopyButton text={copyText} />
+            <span className="text-[10px] text-gray-400 ml-auto">AI-written - check before deciding</span>
+          </div>
+          {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
+        </div>
       )}
     </div>
   )
@@ -1322,7 +1394,6 @@ function Summary({ d, onChanged }) {
   )
 
   const t = s.data.talk || {}
-  const q = s.data.quotes
   const List = ({ title, items, tone = 'text-gray-700' }) => (items?.length ? (
     <div className="mt-2">
       <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{title}</p>
@@ -1336,7 +1407,6 @@ function Summary({ d, onChanged }) {
     ...(t.decided?.length ? ['Decided:', ...t.decided.map((x) => `- ${x}`)] : []),
     ...(t.open?.length ? ['Still open:', ...t.open.map((x) => `- ${x}`)] : []),
     ...(t.next?.length ? ['Next:', ...t.next.map((x) => `- ${x}`)] : []),
-    ...(q ? ['Quotes:', q.summary, ...(q.best_value ? [`Best value: ${q.best_value}`] : [])] : []),
   ].filter(Boolean).join('\n')
 
   return (
@@ -1364,23 +1434,6 @@ function Summary({ d, onChanged }) {
           <List title="Decided" items={t.decided} tone="text-green-700" />
           <List title="Still open" items={t.open} tone="text-amber-700" />
           <List title="Next steps" items={t.next} />
-          {q && (
-            <div className="mt-2 pt-2 border-t border-amber-100">
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">The quotes</p>
-              <p className="text-xs text-gray-700 mt-0.5"><Rich text={q.summary} /></p>
-              <div className="flex flex-wrap gap-1.5 mt-1.5">
-                {q.best_value && <span className="text-[10px] font-bold bg-green-50 border border-green-200 text-green-800 px-2 py-0.5">Best value: {q.best_value}</span>}
-                {q.cheapest && <span className="text-[10px] font-bold bg-amber-50 border border-amber-200 text-gray-700 px-2 py-0.5">Cheapest: {q.cheapest}</span>}
-              </div>
-              {q.per_quote?.map((x, i) => (
-                <p key={i} className="text-[11px] text-gray-600 mt-1">
-                  <span className="font-bold text-gray-800">{x.vendor}</span> - {x.note}
-                  {x.missing && <span className="block text-[10px] text-amber-700">Missing: {x.missing}</span>}
-                </p>
-              ))}
-            </div>
-          )}
-          {s.data.quotes_error && <p className="text-[10px] text-gray-400 mt-2">The quotes couldn't be compared this time - refresh to try again.</p>}
           <div className="flex items-center gap-3 mt-3">
             <button onClick={run} disabled={busy} className="text-[11px] font-bold text-brand-600 disabled:opacity-50">
               {busy ? 'Summarising…' : s.stale ? '↻ Update with the latest' : '↻ Refresh'}
