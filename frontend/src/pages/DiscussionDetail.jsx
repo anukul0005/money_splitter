@@ -1051,13 +1051,24 @@ function Quotes({ d, name, tasks, onChanged, quoteFor, clearQuoteFor }) {
                       const per = d.summary?.data?.quotes?.per_quote || []
                       const ai = per.find((x) => Number(x.id) === q.id) || per.find((x) => (x.vendor || '').toLowerCase() === q.vendor.toLowerCase())
                       const has = q.note || (q.opinions || []).length || Object.values(q.reactions || {}).some((v) => v.length)
-                      const line = ai?.opinions && has ? ai.opinions : null
+                      // Every point that was written, one per bullet (the summary's "notes" part);
+                      // the comparison's one line only until those are written
+                      const notesFor = (d.summary?.data?.notes?.quotes || [])
+                        .find((x) => Number(String(x.id).replace(/[^0-9]/g, '')) === q.id)
+                      const points = has && notesFor?.points?.length ? notesFor.points : null
+                      const line = points || (ai?.opinions && has ? ai.opinions : null)
                       return (
                         <>
                           {line && (
                             <div className="bg-brand-50/60 border border-brand-100 px-2 py-1.5 mb-1.5">
                               <p className="text-[9px] font-black text-brand-600 uppercase tracking-widest">✨ AI summary{d.summary.stale ? ' · updating…' : ''}</p>
-                              <p className="text-[11px] text-gray-700 mt-0.5"><Rich text={line} /></p>
+                              {points ? (
+                                <ul className="mt-0.5 space-y-0.5">
+                                  {points.map((x, i) => (
+                                    <li key={i} className="text-[11px] text-gray-700 pl-3 relative"><span className="absolute left-0">·</span><Rich text={x} /></li>
+                                  ))}
+                                </ul>
+                              ) : <p className="text-[11px] text-gray-700 mt-0.5"><Rich text={line} /></p>}
                             </div>
                           )}
                           {/* with the AI's line shown, what was written stays folded */}

@@ -1072,6 +1072,45 @@ def _enquiries_context(db: Session, d: Discussion) -> str | None:
     return (f"Topic: {d.title}\nDetails: {d.description or '-'}\n\nEnquiries:\n" + "\n".join(lines))[:16000]
 
 
+_SUM_NOTES = """A group in India is comparing quotes (venues, caterers...). For each quote below you get what its
+members wrote about it - the note added with the quote and each member's opinion - and their reactions.
+
+For each quote, list EVERY point that was made, as short bullet points:
+- one point per bullet; never merge two different points, never leave one out - someone reading only the bullets
+  must learn everything that was written
+- keep who said or felt it ("Papa likes it", "Mom doesn't - no open space"), the reasons, and any numbers,
+  places, names, comparisons and conditions exactly as written
+- tidy the wording (fix spelling, drop filler) but don't change the meaning or add anything not written
+- end with one bullet for the reactions when there are any ("Liked by Anjali; disliked by Utkarsh")
+
+Respond with ONLY a JSON object: {"quotes": [{"id": <the quote's id, given as [#id]>, "points": ["...", "..."]}]}
+Leave out a quote nobody wrote or reacted anything about."""
+
+
+def _notes_context(db: Session, d: Discussion) -> str | None:
+    """Each quote's note, opinions and reactions as text for _SUM_NOTES, or None when there are none."""
+    quotes = db.query(DiscussionQuote).filter(DiscussionQuote.discussion_id == d.id).order_by(DiscussionQuote.id).all()
+    ops = _opinions(db, [q.id for q in quotes])
+    reacts = _reactions(db, d.id)
+
+    def said(r):
+        return "; ".join(f"{k}: {', '.join(v)}" for k, v in (r or {}).items() if v)
+    blocks = []
+    for q in quotes:
+        lines = []
+        if q.note:
+            lines.append(f"  note by {q.entered_by}: {q.note[:2000]}")
+        for o in ops.get(q.id, []):
+            r = said(reacts.get(("opinion", o.id)))
+            lines.append(f"  opinion by {o.author}: {o.text[:2000]}" + (f"  (reactions to it - {r})" if r else ""))
+        r = said(reacts.get(("quote", q.id)))
+        if r:
+            lines.append(f"  reactions to the quote - {r}")
+        if lines:
+            blocks.append(f"[#{q.id}] {q.vendor}" + (f" ({q.price})" if q.price else "") + "\n" + "\n".join(lines))
+    return ("\n\n".join(blocks))[:20000] if blocks else None
+
+
 @router.post("/{discussion_id}/summary", response_model=dict)
 def summarise(discussion_id: int, db: Session = Depends(get_db), caller: User = Depends(current_user)):
     """The AI's summary, made fresh: the talk on one key and the quotes on the
@@ -1080,15 +1119,17 @@ def summarise(discussion_id: int, db: Session = Depends(get_db), caller: User = 
     d, group = _discussion(db, discussion_id, caller)
     talk, quotes = _summary_context(db, d, group, caller)
     enquiries = _enquiries_context(db, d)
-    # Each part on its own key at once: the talk, the quotes, the enquiries
+    notes = _notes_context(db, d)
+    # Each part on its own key at once: the talk, the quotes, the enquiries, each quote's notes
     jobs = [("talk", _SUM_TALK, talk)] + ([("quotes", _SUM_QUOTES, quotes)] if quotes else []) \
-        + ([("enquiries", _SUM_ENQUIRIES, enquiries)] if enquiries else [])
+        + ([("enquiries", _SUM_ENQUIRIES, enquiries)] if enquiries else []) \
+        + ([("notes", _SUM_NOTES, notes)] if notes else [])
     results = dict(zip([j[0] for j in jobs], ai_text.chat_json_tandem([(j[1], j[2]) for j in jobs])))
     if isinstance(results["talk"], Exception):
         print(f"[discussions] summary failed: {results['talk']!r}")
         raise HTTPException(503, "The AI couldn't be reached just now - try again in a minute.")
     data = {"talk": results["talk"]}
-    for part in ("quotes", "enquiries"):
+    for part in ("quotes", "enquiries", "notes"):
         if part in results:
             if isinstance(results[part], Exception):
                 print(f"[discussions] {part} summary failed: {results[part]!r}")
