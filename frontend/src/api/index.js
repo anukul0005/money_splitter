@@ -222,6 +222,8 @@ export const addInvestment      = (data)    => api.post('/salary/investments', d
 export const editInvestment     = (id, data) => api.put(`/salary/investments/${id}`, data)
 export const deleteInvestment   = (id)      => api.delete(`/salary/investments/${id}`)
 export const getSalaryItems     = (month, source) => api.get('/salary/items', { params: { month, source } })
+// A card spend already counted elsewhere (a group, say): left out of the dashboard - or counted again
+export const setCardSkip        = (key, counted) => api.post('/salary/card-skips', { key, counted })
 export const getPatterns        = ()        => api.get('/stats/patterns')
 export const getMLAnalysis      = ()        => api.get('/stats/ml-analysis')
 export const getPredictions     = (force = false) => api.get('/stats/predictions', { params: force ? { force } : {} })

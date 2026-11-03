@@ -1358,6 +1358,21 @@ class DiscussionVote(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class SalaryCardSkip(Base):
+    """A credit card spend the caller marked as already counted elsewhere (put
+    into a group by hand, say) - the salary dashboard leaves it out of what the
+    cards cost. `line_key` names the line: "<bill id>:<date>:<amount>:<description>",
+    or "<bill id>:bill" for a bill with no breakup."""
+
+    __tablename__ = "salary_card_skips"
+    __table_args__ = (UniqueConstraint("user_id", "line_key", name="ux_salary_card_skip"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    line_key = Column(String(300), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class ManualInvestment(Base):
     """An investment the statements don't show - a SIP straight from the
     bank account, EPF/PPF, an FD, a policy premium - entered by hand for the

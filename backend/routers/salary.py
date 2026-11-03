@@ -30,7 +30,14 @@ from sqlalchemy.orm import Session
 from auth import caller_groups, current_user
 from database import get_db
 from models import (CreditCardStatement, Expense, Loan, ManualInvestment, RecurringBill, RecurringCharge,
-                    StatementSkip, User)
+                    SalaryCardSkip, StatementSkip, User)
+
+
+def line_key(statement_id: int, t: dict | None = None) -> str:
+    """A card line's name for SalaryCardSkip - stable across reads of the bill."""
+    if t is None:
+        return f"{statement_id}:bill"
+    return f"{statement_id}:{(t.get('date') or '')[:10]}:{float(t.get('amount') or 0):.2f}:{(t.get('description') or '')[:120]}"
 
 router = APIRouter(prefix="/salary", tags=["salary"])
 
@@ -111,6 +118,9 @@ def dashboard(months: int = 12, db: Session = Depends(get_db), caller: User = De
     # ── credit cards: each bill's lines by the month they were spent ──
     card_gross = defaultdict(float)
     card_cats = {ym: defaultdict(float) for ym in yms}
+    skipped = {k for (k,) in db.query(SalaryCardSkip.line_key).filter(SalaryCardSkip.user_id == caller.id)}
+    marked = defaultdict(float)                     # lines the caller marked "already counted"
+    marked_cats = {ym: defaultdict(float) for ym in yms}
     unbroken = defaultdict(int)          # bills with no breakup: counted at their total
     for s in db.query(CreditCardStatement).filter(CreditCardStatement.user_id == caller.id):
         details = None
@@ -128,12 +138,18 @@ def dashboard(months: int = 12, db: Session = Depends(get_db), caller: User = De
                 if ym in want:
                     card_gross[ym] += float(t.get("amount") or 0)
                     card_cats[ym][t.get("category") or "Other"] += float(t.get("amount") or 0)
+                    if line_key(s.id, t) in skipped:
+                        marked[ym] += float(t.get("amount") or 0)
+                        marked_cats[ym][_history_category(t.get("category"))] += float(t.get("amount") or 0)
         else:
             ym = s.period or (s.statement_date or "")[:7]
             if ym in want and s.total_due:
                 card_gross[ym] += s.total_due
                 card_cats[ym]["Card bill (no breakup)"] += s.total_due
                 unbroken[ym] += 1
+                if line_key(s.id) in skipped:
+                    marked[ym] += s.total_due
+                    marked_cats[ym]["Card bill (no breakup)"] += s.total_due
     # Already counted elsewhere: card-paid expenses the caller paid (the whole
     # bill went on the card; their share is counted above, the rest is owed
     # back), and card lines passed on to someone as a loan.
@@ -153,7 +169,7 @@ def dashboard(months: int = 12, db: Session = Depends(get_db), caller: User = De
             passed[ln.start_date[:7]] += ln.principal
     for ym in yms:
         gross = card_gross[ym]
-        net = max(0.0, gross - overlap[ym] - passed[ym])
+        net = max(0.0, gross - overlap[ym] - passed[ym] - marked[ym])
         spend[ym]["cards"] = net
         if gross:
             # The entered expenses come off their own category first; what
@@ -161,8 +177,10 @@ def dashboard(months: int = 12, db: Session = Depends(get_db), caller: User = De
             left = defaultdict(float)
             for c, v in card_cats[ym].items():
                 left[c if c in ("Card fees & interest", "Card bill (no breakup)") else _history_category(c)] += v
-            for c, v in overlap_cats[ym].items():
-                left[c] = max(0.0, left.get(c, 0.0) - v) if c in left else 0.0
+            for src in (overlap_cats[ym], marked_cats[ym]):
+                for c, v in src.items():
+                    if c in left:
+                        left[c] = max(0.0, left[c] - v)
             rest = sum(left.values())
             f = net / rest if rest else 0
             for c, v in left.items():
@@ -219,7 +237,8 @@ def dashboard(months: int = 12, db: Session = Depends(get_db), caller: User = De
             "cats": c,
             "needs": round(sum(v for k, v in c.items() if k in NEEDS), 2),
             "cards": {"gross": round(card_gross[ym], 2), "already_entered": round(overlap[ym], 2),
-                      "passed_on": round(passed[ym], 2), "bills_without_breakup": unbroken[ym]},
+                      "passed_on": round(passed[ym], 2), "marked": round(marked[ym], 2),
+                      "bills_without_breakup": unbroken[ym]},
             "groups": [{"id": gid, "name": gmeta[gid]["name"], "emoji": gmeta[gid]["emoji"], "value": round(v, 2)}
                        for gid, v in sorted(top_groups[ym].items(), key=lambda kv: -kv[1])[:5] if gid in gmeta],
         }
@@ -325,6 +344,7 @@ def items(month: str, source: str, db: Session = Depends(get_db), caller: User =
 
     elif source == "cards":
         from card_bills import card_name
+        skipped = {k for (k,) in db.query(SalaryCardSkip.line_key).filter(SalaryCardSkip.user_id == caller.id)}
         from models import CreditCard
         cards = {c.id: c for c in db.query(CreditCard).filter(CreditCard.user_id == caller.id)}
         for s in db.query(CreditCardStatement).filter(CreditCardStatement.user_id == caller.id):
@@ -338,12 +358,20 @@ def items(month: str, source: str, db: Session = Depends(get_db), caller: User =
                 for t in lines:
                     if t.get("excluded") or t.get("type") != "debit" or not (t.get("date") or "").startswith(month):
                         continue
-                    out.append({"date": t["date"][:10], "title": t.get("description") or "Card spend",
-                                "detail": " · ".join(x for x in (card, t.get("category")) if x),
-                                "amount": round(float(t.get("amount") or 0), 2)})
+                    key = line_key(s.id, t)
+                    row = {"date": t["date"][:10], "title": t.get("description") or "Card spend",
+                           "detail": " · ".join(x for x in (card, t.get("category")) if x),
+                           "amount": round(float(t.get("amount") or 0), 2), "key": key}
+                    out.append(row)
+                    if key in skipped:
+                        less.append({**row, "detail": "you marked it already counted", "marked": True})
             elif (s.period or (s.statement_date or "")[:7]) == month and s.total_due:
-                out.append({"date": s.statement_date or "", "title": f"{card} bill", "detail": "not broken down yet - counted in full",
-                            "amount": round(s.total_due, 2)})
+                key = line_key(s.id)
+                row = {"date": s.statement_date or "", "title": f"{card} bill", "detail": "not broken down yet - counted in full",
+                       "amount": round(s.total_due, 2), "key": key}
+                out.append(row)
+                if key in skipped:
+                    less.append({**row, "detail": "you marked it already counted", "marked": True})
         if gids:
             for e in (db.query(Expense).filter(Expense.group_id.in_(gids), Expense.payment_mode == "credit_card",
                                                Expense.paid_by.ilike(caller.name), Expense.date.like(f"{month}%"))):
@@ -378,3 +406,26 @@ def items(month: str, source: str, db: Session = Depends(get_db), caller: User =
     out.sort(key=lambda x: (-x["amount"], x["date"]))
     less.sort(key=lambda x: -x["amount"])
     return {"month": month, "source": source, "items": out, "less": less, "gross": gross, "total": total}
+
+
+class CardSkipIn(BaseModel):
+    key: str
+    counted: bool = True           # True: already counted elsewhere - leave it out; False: count it again
+
+
+@router.post("/card-skips", response_model=dict)
+def card_skip(payload: CardSkipIn, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Mark a card spend as already counted (in a group, say) - or count it again."""
+    key = (payload.key or "").strip()[:300]
+    sid = key.split(":", 1)[0]
+    if not sid.isdigit() or not db.query(CreditCardStatement.id).filter(
+            CreditCardStatement.id == int(sid), CreditCardStatement.user_id == caller.id).first():
+        raise HTTPException(404, "No such card spend")
+    row = db.query(SalaryCardSkip).filter(SalaryCardSkip.user_id == caller.id, SalaryCardSkip.line_key == key).first()
+    if payload.counted and not row:
+        db.add(SalaryCardSkip(user_id=caller.id, line_key=key))
+    elif not payload.counted and row:
+        db.delete(row)
+    db.commit()
+    return {"key": key, "counted": payload.counted}
+

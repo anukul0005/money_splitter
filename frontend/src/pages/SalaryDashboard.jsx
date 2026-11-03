@@ -5,7 +5,7 @@ import {
   CategoryScale, LinearScale, Tooltip,
 } from 'chart.js'
 import { Bar } from 'react-chartjs-2'
-import { getSalaryDashboard, addInvestment, editInvestment, deleteInvestment, getSalaryItems } from '../api/index.js'
+import { getSalaryDashboard, addInvestment, editInvestment, deleteInvestment, getSalaryItems, setCardSkip } from '../api/index.js'
 import LoadingSpinner from '../components/LoadingSpinner'
 
 Chart.register(BarElement, BarController, LineElement, LineController, PointElement, CategoryScale, LinearScale, Tooltip)
@@ -270,7 +270,7 @@ export default function SalaryDashboard() {
           {SOURCES.map((s) => {
             const v = mo.spend[s.key] || 0
             if (v < 1 && s.key !== 'monthly') return null
-            return <SourceRow key={`${s.key}-${ym}`} s={s} v={v} salary={salary} ym={ym} onOpen={() => nav(s.to)} />
+            return <SourceRow key={`${s.key}-${ym}`} s={s} v={v} salary={salary} ym={ym} onOpen={() => nav(s.to)} onChanged={load} />
           })}
           <div className="flex justify-between pt-2 text-xs font-black">
             <span>Total utilised</span><span>{INR(mo.spent)} · {pct(mo.spent, salary)}%</span>
@@ -426,18 +426,25 @@ export default function SalaryDashboard() {
  * its amount (fetched then - the same rules as the dashboard, so they add up),
  * biggest first, with what was taken off for cards.
  */
-function SourceRow({ s, v, salary, ym, onOpen }) {
+function SourceRow({ s, v, salary, ym, onOpen, onChanged }) {
   const [open, setOpen] = useState(false)
   const [data, setData] = useState(null)
   const [err, setErr] = useState('')
   const [all, setAll] = useState(false)
+  const [busyKey, setBusyKey] = useState('')
+  const fetchItems = () => getSalaryItems(ym, s.key).then((r) => setData(r.data)).catch(() => setErr("Couldn't load them."))
   const toggle = () => {
     const next = !open
     setOpen(next)
-    if (next && !data) {
-      setErr('')
-      getSalaryItems(ym, s.key).then((r) => setData(r.data)).catch(() => setErr("Couldn't load them."))
-    }
+    if (next && !data) { setErr(''); fetchItems() }
+  }
+  // Card spends: "already counted" (in a group, say) takes one out of the
+  // dashboard's sums; "count again" puts it back - the totals update at once
+  const marked = new Set((data?.less || []).filter((x) => x.marked).map((x) => x.key))
+  const mark = async (key, counted) => {
+    setBusyKey(key); setErr('')
+    try { await setCardSkip(key, counted); await Promise.all([fetchItems(), onChanged?.()]) }
+    catch { setErr("Couldn't change that.") } finally { setBusyKey('') }
   }
   const list = data ? (all ? data.items : data.items.slice(0, 15)) : []
   const day = (d) => (d && d.length >= 10 ? `${+d.slice(8, 10)} ${MON[+d.slice(5, 7) - 1]}` : '')
@@ -459,16 +466,28 @@ function SourceRow({ s, v, salary, ym, onOpen }) {
           {!data && !err && <p className="text-[11px] text-gray-400">Loading…</p>}
           {err && <p className="text-[11px] text-red-600">{err}</p>}
           {data && data.items.length === 0 && <p className="text-[11px] text-gray-400">Nothing this month.</p>}
-          {list.map((x, i) => (
-            <div key={i} className="flex items-baseline gap-2 py-1 border-b border-amber-100/70 last:border-0">
-              <span className="text-[10px] text-gray-400 w-11 shrink-0 tabular-nums">{day(x.date)}</span>
-              <span className="flex-1 min-w-0">
-                <span className="block text-[11px] font-semibold text-gray-800 truncate">{x.title}</span>
-                {x.detail && <span className="block text-[10px] text-gray-400 truncate">{x.detail}</span>}
-              </span>
-              <span className="text-[11px] font-black text-gray-900 tabular-nums shrink-0">{INR(x.amount)}</span>
-            </div>
-          ))}
+          {s.key === 'cards' && data?.items.length > 0 && (
+            <p className="text-[10px] text-gray-400 mb-1">Tap <b>Already counted</b> on a spend you've put into a group (or elsewhere) - it's left out of the totals.</p>
+          )}
+          {list.map((x, i) => {
+            const off = x.key && marked.has(x.key)
+            return (
+              <div key={x.key || i} className={`flex items-baseline gap-2 py-1 border-b border-amber-100/70 last:border-0 ${off ? 'opacity-50' : ''}`}>
+                <span className="text-[10px] text-gray-400 w-11 shrink-0 tabular-nums">{day(x.date)}</span>
+                <span className="flex-1 min-w-0">
+                  <span className={`block text-[11px] font-semibold text-gray-800 truncate ${off ? 'line-through' : ''}`}>{x.title}</span>
+                  {x.detail && <span className="block text-[10px] text-gray-400 truncate">{x.detail}</span>}
+                  {x.key && (
+                    <button onClick={() => mark(x.key, !off)} disabled={busyKey === x.key}
+                      className={`text-[10px] font-bold mt-0.5 disabled:opacity-50 ${off ? 'text-brand-600' : 'text-gray-500 hover:text-red-600'}`}>
+                      {busyKey === x.key ? 'Saving…' : off ? 'Count again' : 'Already counted'}
+                    </button>
+                  )}
+                </span>
+                <span className={`text-[11px] font-black text-gray-900 tabular-nums shrink-0 ${off ? 'line-through' : ''}`}>{INR(x.amount)}</span>
+              </div>
+            )
+          })}
           {data && data.items.length > 15 && (
             <button onClick={() => setAll((a) => !a)} className="text-[10px] font-bold text-brand-600 mt-1">
               {all ? 'Show fewer' : `Show all ${data.items.length}`}
@@ -486,6 +505,12 @@ function SourceRow({ s, v, salary, ym, onOpen }) {
                   <span className="flex-1 min-w-0">
                     <span className="block text-[11px] text-gray-700 truncate">{x.title}</span>
                     <span className="block text-[10px] text-gray-400 truncate">{x.detail}</span>
+                    {x.marked && (
+                      <button onClick={() => mark(x.key, false)} disabled={busyKey === x.key}
+                        className="text-[10px] font-bold text-brand-600 mt-0.5 disabled:opacity-50">
+                        {busyKey === x.key ? 'Saving…' : 'Count again'}
+                      </button>
+                    )}
                   </span>
                   <span className="text-[11px] font-bold text-green-700 tabular-nums shrink-0">−{INR(x.amount)}</span>
                 </div>
