@@ -301,6 +301,7 @@ async function resummarise(d) {
  */
 function DetailsBlock({ d, onChanged }) {
   const [editing, setEditing] = useState(false)
+  const [show, setShow] = useState(false)          // folded away by default - the AI summary is what's read
   const [text, setText] = useState(d.description || '')
   const [busy, setBusy] = useState('')
   const [err, setErr] = useState('')
@@ -318,12 +319,22 @@ function DetailsBlock({ d, onChanged }) {
   }
   if (!editing) return (
     <div className="mt-2">
-      {d.description && <p className="text-slate-200/80 text-xs whitespace-pre-line">{d.description}</p>}
-      <span className="flex items-center gap-3 mt-1">
-        <button onClick={() => { setText(d.description || ''); setEditing(true) }} className="text-[10px] font-bold text-brand-300 hover:text-white">✎ Edit details</button>
-        {d.description && <CopyButton text={d.description} className="!text-slate-400 hover:!text-white" />}
+      <span className="flex items-center gap-3">
+        <button onClick={() => setShow((v) => !v)} aria-expanded={show}
+          className="text-[11px] font-bold text-slate-300/80 hover:text-white">
+          <span className="inline-block w-3">{show ? '▾' : '▸'}</span>Details
+        </button>
         {busy === 'summary' && <span className="text-[10px] text-slate-300/70">✨ Re-summarising…</span>}
       </span>
+      {show && (
+        <>
+          {d.description && <p className="text-slate-200/80 text-xs whitespace-pre-line mt-1 pl-3">{d.description}</p>}
+          <span className="flex items-center gap-3 mt-1 pl-3">
+            <button onClick={() => { setText(d.description || ''); setEditing(true) }} className="text-[10px] font-bold text-brand-300 hover:text-white">✎ Edit details</button>
+            {d.description && <CopyButton text={d.description} className="!text-slate-400 hover:!text-white" />}
+          </span>
+        </>
+      )}
     </div>
   )
   return (
@@ -719,7 +730,11 @@ function Composer({ d, name, onSent }) {
       await attachDiscussionFile(d.id, f, text.trim())
       setText(''); setOriginal(null); setSuggestion(null)
       onSent()
-    } catch (e) { setErr(errText(e, "The AI couldn't read that file.")) }
+    } catch (e) {
+      setErr(e.response?.status === 404 && !e.response?.data?.detail?.includes?.('discussion')
+        ? 'The server is still updating - try again in a minute.'
+        : errText(e, "The AI couldn't read that file."))
+    }
     finally { setBusy(''); setReading(''); if (fileRef.current) fileRef.current.value = '' }
   }
   const [err, setErr] = useState('')
@@ -1136,7 +1151,7 @@ function ActivityTab({ d, name }) {
  */
 function Summary({ d, onChanged }) {
   const s = d.summary
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(true)            // read first, so open from the start
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const run = async () => {
@@ -1145,14 +1160,29 @@ function Summary({ d, onChanged }) {
     catch (e) { setErr(errText(e, "The AI couldn't summarise it just now.")) }
     finally { setBusy(false) }
   }
+  // Missing or out of date when the page opens: written / brought up to date once, on its own
+  const auto = useRef(false)
+  useEffect(() => {
+    if (auto.current || !d.ai || !d.description) return
+    if (!s || s.stale) { auto.current = true; run() }
+  }, [d.id])
 
   if (!s) return (
     <div className="mt-3">
-      <button onClick={run} disabled={busy}
+      {busy && (
+        <div className="bg-white text-gray-800 border border-brand-200 px-3 py-3 mb-1">
+          <p className="text-[10px] font-black text-brand-600 uppercase tracking-widest">✨ AI summary</p>
+          <p className="text-xs text-gray-500 mt-1">
+            <span className="inline-block w-2 h-2 mr-1.5 rounded-full bg-brand-400 animate-pulse align-middle" />
+            Writing it from the details, the chat and the quotes…
+          </p>
+        </div>
+      )}
+      {!busy && <button onClick={run} disabled={busy}
         className="text-[11px] font-bold border border-brand-400/60 text-brand-300 px-2.5 py-1 hover:bg-brand-400/10 disabled:opacity-50">
-        {busy ? '✨ Summarising…' : '✨ Summarise with AI'}
-      </button>
-      <span className="text-[10px] text-slate-300/50 ml-2">the details, everyone's thoughts and the quotes, in one read</span>
+        ✨ Summarise with AI
+      </button>}
+      {!busy && <span className="text-[10px] text-slate-300/50 ml-2">the details, everyone's thoughts and the quotes, in one read</span>}
       {err && <p className="text-[11px] text-red-300 mt-1">{err}</p>}
     </div>
   )
@@ -1181,7 +1211,8 @@ function Summary({ d, onChanged }) {
         <span className="flex items-center justify-between gap-2">
           <span className="text-[10px] font-black text-brand-600 uppercase tracking-widest">✨ AI summary</span>
           <span className="text-[10px] text-gray-400">
-            {s.stale ? <span className="text-amber-600 font-bold">new activity since · </span> : null}{ago(s.at)} {open ? '▴' : '▾'}
+            {busy ? <span className="text-brand-600 font-bold">updating… · </span>
+              : s.stale ? <span className="text-amber-600 font-bold">new activity since · </span> : null}{ago(s.at)} {open ? '▴' : '▾'}
           </span>
         </span>
         <span className={`block text-xs text-gray-700 mt-1 ${open ? '' : 'line-clamp-2'}`}><Rich text={t.overview} /></span>
