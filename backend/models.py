@@ -1199,6 +1199,11 @@ class Discussion(Base):
     created_by = Column(String(100), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())   # last activity
+    # The AI's summary of it all (routers/discussions.py summarise) and the
+    # updated_at it was made from - newer activity makes it stale.
+    summary_json = Column(Text, nullable=True)
+    summary_basis = Column(DateTime(timezone=True), nullable=True)
+    summary_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class DiscussionMessage(Base):
@@ -1264,6 +1269,20 @@ class DiscussionInvite(Base):
     accepted_by = Column(String(100), nullable=True)
     accepted_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class DiscussionPref(Base):
+    """One member's notification choice for one discussion: "all" (the
+    default - every message, poll and quote), "mine" (only enquiries
+    directed at them) or "off"."""
+
+    __tablename__ = "discussion_prefs"
+    __table_args__ = (UniqueConstraint("discussion_id", "user_name", name="ux_discussion_pref"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    discussion_id = Column(Integer, ForeignKey("discussions.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_name = Column(String(100), nullable=False)
+    notify = Column(String(10), nullable=False, default="all")
 
 
 class DiscussionPoll(Base):

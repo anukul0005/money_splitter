@@ -231,6 +231,9 @@ _ADDED_COLUMNS = [
     ("recurring_charges", "settlement_ref", "VARCHAR(32)"),
     ("gmail_connections", "mail_synced_at", "TIMESTAMP WITH TIME ZONE"),
     ("discussion_invites", "accepted_at", "TIMESTAMP WITH TIME ZONE"),
+    ("discussions", "summary_json", "TEXT"),
+    ("discussions", "summary_basis", "TIMESTAMP WITH TIME ZONE"),
+    ("discussions", "summary_at", "TIMESTAMP WITH TIME ZONE"),
 ]
 
 # (index name, statement)

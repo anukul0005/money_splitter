@@ -28,7 +28,7 @@ from activity import record_activity
 from auth import caller_groups, current_user, member_group
 from database import get_db
 from models import (Activity, Discussion, DiscussionInvite, DiscussionMessage, DiscussionPoll, DiscussionQuote,
-                    DiscussionTask, DiscussionVote, Group, Member, User)
+                    DiscussionPref, DiscussionTask, DiscussionVote, Group, Member, User)
 
 router = APIRouter(prefix="/discussions", tags=["discussions"])
 
@@ -77,6 +77,22 @@ def _discussion(db: Session, discussion_id: int, caller: User) -> tuple[Discussi
 
 def _touch(d: Discussion) -> None:
     d.updated_at = _now()
+
+
+NOTIFY_LEVELS = ("all", "mine", "off")
+
+
+def _notify_level(db: Session, discussion_id: int, name: str) -> str:
+    row = db.query(DiscussionPref).filter(DiscussionPref.discussion_id == discussion_id,
+                                          DiscussionPref.user_name.ilike(name)).first()
+    return row.notify if row else "all"
+
+
+def _wants(db: Session, discussion_id: int, name: str, direct: bool) -> bool:
+    """Whether a member wants this notification: "all" hears everything,
+    "mine" only what's directed at them (an enquiry), "off" nothing."""
+    level = _notify_level(db, discussion_id, name)
+    return level == "all" or (level == "mine" and direct)
 
 
 def _feed(db: Session, group: Group, actor: str, verb: str, d: Discussion, detail: str = "") -> None:
@@ -151,6 +167,9 @@ def create_discussion(payload: DiscussionIn, bg: BackgroundTasks, db: Session = 
     title = payload.title.strip()[:200]
     if not title:
         raise HTTPException(400, "Give the discussion a title")
+    details = (payload.description or "").strip()
+    if not details:
+        raise HTTPException(400, "Add the details - date, guests, budget, area - so everyone knows what to ask for")
     emails = _clean_emails(payload.invite_emails)
     added: list[str] = []
     if payload.group_id:
@@ -173,7 +192,7 @@ def create_discussion(payload: DiscussionIn, bg: BackgroundTasks, db: Session = 
             db.add(Member(group_id=group.id, name=n))
         record_activity(db, group, caller.name, "created a new group",
                         f"{group.name} · for a discussion · {len(added) + 1} members")
-    d = Discussion(group_id=group.id, title=title, description=(payload.description or "").strip() or None,
+    d = Discussion(group_id=group.id, title=title, description=details[:5000],
                    params_json=json.dumps(_clean_params(payload.params)), created_by=caller.name)
     db.add(d)
     db.flush()
@@ -206,7 +225,9 @@ def edit_discussion(discussion_id: int, payload: DiscussionEdit, db: Session = D
     if payload.title is not None and payload.title.strip():
         d.title = payload.title.strip()[:200]
     if payload.description is not None:
-        d.description = payload.description.strip() or None
+        if not payload.description.strip():
+            raise HTTPException(400, "The details can't be empty")
+        d.description = payload.description.strip()[:5000]
     if payload.params is not None:
         d.params_json = json.dumps(_clean_params(payload.params))
     _touch(d)
@@ -262,6 +283,8 @@ def get_discussion(discussion_id: int, db: Session = Depends(get_db), caller: Us
         "invites": [{"email": i.email, "invited_by": i.invited_by, "accepted_by": i.accepted_by,
                      "created_at": i.created_at} for i in invites],
         "polls": _polls_out(db, d, group, caller),
+        "summary": _summary_out(d),
+        "notify": _notify_level(db, d.id, caller.name),
         "ai": _ai_available(),
     }
 
@@ -386,7 +409,7 @@ def _notify_message(discussion_id: int, message_id: int, invites: list[tuple[str
         assignees = _loads(m.assignees_json, [])
         preview = m.text if len(m.text) <= 300 else m.text[:297] + "…"
         for name in assignees:
-            if name.lower() == m.author.lower():
+            if name.lower() == m.author.lower() or not _wants(db, d.id, name, direct=True):
                 continue
             emailer.send_notice(db, name, f"{m.author} asked you: {d.title}",
                                 [f"{m.author} directed this to you in \"{d.title}\" ({group.name}):", preview],
@@ -394,7 +417,7 @@ def _notify_message(discussion_id: int, message_id: int, invites: list[tuple[str
                                 button_label="Open the discussion")
         skip = {a.lower() for a in assignees} | {m.author.lower()}
         for mem in group.members:
-            if mem.name.lower() not in skip:
+            if mem.name.lower() not in skip and _wants(db, d.id, mem.name, direct=False):
                 try:
                     _push.send_push_to_user(db, mem.name, f"{m.author} in {d.title}", preview[:120], url=url)
                 except Exception as e:
@@ -501,7 +524,7 @@ def _clean_values(d: Discussion, values: dict) -> dict:
 
 
 @router.post("/{discussion_id}/quotes", response_model=dict, status_code=201)
-def add_quote(discussion_id: int, payload: QuoteIn, db: Session = Depends(get_db),
+def add_quote(discussion_id: int, payload: QuoteIn, bg: BackgroundTasks, db: Session = Depends(get_db),
               caller: User = Depends(current_user)):
     d, group = _discussion(db, discussion_id, caller)
     vendor = payload.vendor.strip()[:200]
@@ -522,7 +545,32 @@ def add_quote(discussion_id: int, payload: QuoteIn, db: Session = Depends(get_db
     _feed(db, group, caller.name, "added a quote", d, vendor)
     _touch(d)
     db.commit()
+    # The one who asked hears of it even on "only when I'm asked"
+    asked_by = db.get(DiscussionMessage, task.message_id).author if task else None
+    bg.add_task(_notify_quote, d.id, caller.name, vendor, asked_by)
     return _quote_out(q)
+
+
+def _notify_quote(discussion_id: int, author: str, vendor: str, asked_by: str | None) -> None:
+    import push as _push
+    from database import get_session_factory
+    db = get_session_factory()()
+    try:
+        d = db.get(Discussion, discussion_id)
+        if not d:
+            return
+        for m in db.get(Group, d.group_id).members:
+            if m.name.lower() == author.lower():
+                continue
+            direct = bool(asked_by) and m.name.lower() == asked_by.lower()
+            if _wants(db, d.id, m.name, direct=direct):
+                try:
+                    _push.send_push_to_user(db, m.name, f"{author} added a quote: {vendor}"[:120],
+                                            f"In \"{d.title}\"", url=f"/discuss/{d.id}?tab=quotes")
+                except Exception as e:
+                    print(f"[discussions] quote push failed: {e}")
+    finally:
+        db.close()
 
 
 @router.put("/{discussion_id}/quotes/{quote_id}", response_model=dict)
@@ -595,6 +643,27 @@ def add_people(discussion_id: int, payload: AddPeopleIn, bg: BackgroundTasks, db
     if tokens:
         bg.add_task(_send_invites, d.id, caller.name, d.description or "", tokens)
     return {"added": added, "invited": emails}
+
+
+class NotifyIn(BaseModel):
+    notify: str
+
+
+@router.post("/{discussion_id}/notify", response_model=dict)
+def set_notify(discussion_id: int, payload: NotifyIn, db: Session = Depends(get_db),
+               caller: User = Depends(current_user)):
+    """The caller's own notifications for this discussion: all / mine / off."""
+    d, _ = _discussion(db, discussion_id, caller)
+    if payload.notify not in NOTIFY_LEVELS:
+        raise HTTPException(400, "all, mine or off")
+    row = db.query(DiscussionPref).filter(DiscussionPref.discussion_id == d.id,
+                                          DiscussionPref.user_name.ilike(caller.name)).first()
+    if row:
+        row.notify = payload.notify
+    else:
+        db.add(DiscussionPref(discussion_id=d.id, user_name=caller.name, notify=payload.notify))
+    db.commit()
+    return {"notify": payload.notify}
 
 
 # ── polls ──────────────────────────────────────────────────────────────────
@@ -698,7 +767,7 @@ def _notify_poll(discussion_id: int, poll_id: int) -> None:
         if not d or not p:
             return
         for m in db.get(Group, d.group_id).members:
-            if m.name.lower() != p.author.lower():
+            if m.name.lower() != p.author.lower() and _wants(db, d.id, m.name, direct=False):
                 try:
                     _push.send_push_to_user(db, m.name, f"{p.author} asks: {p.question}"[:120],
                                             f"Vote in \"{d.title}\"", url=f"/discuss/{d.id}")
@@ -760,6 +829,105 @@ def activity(discussion_id: int, scope: str = "discussion", db: Session = Depend
                       "text": f"joined from {i.invited_by}'s invite", "detail": ""})
     items.sort(key=lambda x: str(x["at"] or ""), reverse=True)
     return {"scope": "discussion", "items": items}
+
+
+# ── AI summary: the details, the talk and the quotes in one read ───────────
+
+def _summary_out(d: Discussion) -> dict | None:
+    data = _loads(d.summary_json, None)
+    if not data:
+        return None
+    # Anything since (a message, a quote, a vote) makes it out of date
+    return {"data": data, "at": d.summary_at, "stale": d.summary_basis != d.updated_at}
+
+
+_SUM_TALK = """You summarise a group's planning discussion in an Indian money-sharing app (a wedding, trip or
+event), so a member who missed it can catch up in a minute and join in.
+
+From the details, the messages, the enquiries and the polls, write:
+- "overview": 2-3 sentences - what is being planned and where it stands now.
+- "people": for each member who said or did anything, their views, preferences and what they found out
+  (one or two lines each). Use their names exactly as given.
+- "decided": what has been agreed (poll winners, choices everyone accepted). Empty if nothing yet.
+- "open": questions still undecided or things nobody has found out yet.
+- "next": concrete next steps, each naming who should do it when that is clear (pending enquiries first).
+
+Rules: only facts from the text - never invent prices, names or dates. Keep the members' language plain and short.
+Respond with ONLY a JSON object:
+{"overview": "...", "people": [{"name": "...", "summary": "..."}], "decided": ["..."], "open": ["..."], "next": ["..."]}"""
+
+_SUM_QUOTES = """You compare quotes a group in India collected while planning (venues, caterers, hotels...).
+Given the requirements and every quote (vendor, the fields noted, notes, who got it), write:
+- "summary": 2-3 sentences comparing them - the price range and how they differ.
+- "best_value": which quote looks best for the stated requirements and why (one line), or "" if it can't be told.
+- "cheapest": the vendor with the lowest main price, or "".
+- "per_quote": for each vendor, one line of pros/cons against the requirements, and what is still missing to compare
+  it fairly (e.g. "no capacity given").
+
+Rules: use only the numbers given - never invent or estimate prices. Amounts in Rs as written.
+Respond with ONLY a JSON object:
+{"summary": "...", "best_value": "...", "cheapest": "...", "per_quote": [{"vendor": "...", "note": "...", "missing": "..."}]}"""
+
+
+def _summary_context(db: Session, d: Discussion, group: Group, caller: User) -> tuple[str, str | None]:
+    """(the talk, the quotes) as text for the two prompts; quotes None when there are none."""
+    params = _loads(d.params_json, [])
+    head = [f"Topic: {d.title}", f"Details: {d.description or '-'}",
+            f"Members: {', '.join(m.name for m in group.members)}"]
+    msgs = (db.query(DiscussionMessage).filter(DiscussionMessage.discussion_id == d.id)
+            .order_by(DiscussionMessage.id.desc()).limit(120).all())[::-1]
+    tasks = db.query(DiscussionTask).filter(DiscussionTask.discussion_id == d.id).all()
+    lines = []
+    for m in msgs:
+        who = _loads(m.assignees_json, [])
+        status = [f"{t.assignee}: {t.status}" for t in tasks if t.message_id == m.id]
+        lines.append(f"[{str(m.created_at)[:16]}] {m.author}" + (f" (asked {', '.join(who)} to enquire)" if who else "")
+                     + f": {m.text[:1500]}" + (f"  [enquiry status - {'; '.join(status)}]" if status else ""))
+    for p in _polls_out(db, d, group, caller):
+        res = "; ".join(f"{o['text']}: {len(o['voters'])} ({', '.join(o['voters']) or 'none'})" for o in p["options"])
+        lines.append(f"POLL by {p['author']}{' (closed)' if p['closed'] else ''}: {p['question']} -> {res}"
+                     + (f"; not voted: {', '.join(p['waiting'])}" if p["waiting"] else ""))
+    quotes = db.query(DiscussionQuote).filter(DiscussionQuote.discussion_id == d.id).order_by(DiscussionQuote.id).all()
+    if quotes:
+        lines.append(f"{len(quotes)} quotes noted so far: " + ", ".join(f"{q.vendor} (by {q.entered_by})" for q in quotes))
+    talk = "\n".join(head) + "\n\nMessages and polls, oldest first:\n" + ("\n".join(lines) or "(none yet)")
+    if not quotes:
+        return talk[:24000], None
+    qlines = []
+    for q in quotes:
+        vals = _loads(q.values_json, {})
+        fields = "; ".join(f"{p['label']}{' (' + p['unit'] + ')' if p.get('unit') else ''}: {vals[p['key']]}"
+                           for p in params if vals.get(p["key"]))
+        qlines.append(f"- {q.vendor} (noted by {q.entered_by}): {fields or 'no fields filled'}"
+                      + (f". Notes: {q.note[:600]}" if q.note else ""))
+    quotes_text = "\n".join(head[:2]) + "\n\nQuotes:\n" + "\n".join(qlines)
+    return talk[:24000], quotes_text[:16000]
+
+
+@router.post("/{discussion_id}/summary", response_model=dict)
+def summarise(discussion_id: int, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """The AI's summary, made fresh: the talk on one key and the quotes on the
+    other, at the same time (ai_text.chat_json_tandem), then put together."""
+    import ai_text
+    d, group = _discussion(db, discussion_id, caller)
+    talk, quotes = _summary_context(db, d, group, caller)
+    jobs = [(_SUM_TALK, talk)] + ([(_SUM_QUOTES, quotes)] if quotes else [])
+    results = ai_text.chat_json_tandem(jobs)
+    if isinstance(results[0], Exception):
+        print(f"[discussions] summary failed: {results[0]!r}")
+        raise HTTPException(503, "The AI couldn't be reached just now - try again in a minute.")
+    data = {"talk": results[0]}
+    if quotes:
+        if isinstance(results[1], Exception):
+            print(f"[discussions] quote summary failed: {results[1]!r}")
+            data["quotes_error"] = True
+        else:
+            data["quotes"] = results[1]
+    d.summary_json = json.dumps(data)
+    d.summary_basis = d.updated_at           # not _touch: a summary isn't new activity
+    d.summary_at = _now()
+    db.commit()
+    return _summary_out(d)
 
 
 # ── invites ────────────────────────────────────────────────────────────────

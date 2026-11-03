@@ -122,7 +122,7 @@ function NewDiscussion({ onCancel, onCreated }) {
   }
   const save = async (e) => {
     e.preventDefault()
-    if (!title.trim() || !(members.length || emails.length)) return
+    if (!title.trim() || !description.trim() || !(members.length || emails.length)) return
     setSaving(true); setErr('')
     try {
       const { data } = await createDiscussion({ title, description, params, members, invite_emails: emails })
@@ -139,9 +139,9 @@ function NewDiscussion({ onCancel, onCreated }) {
         <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} className="input text-sm mt-1"
           placeholder="e.g. Wedding banquets in Jaipur" />
       </label>
-      <label className="block text-[11px] font-bold text-gray-600">Details <span className="font-normal text-gray-400">(optional)</span>
+      <label className="block text-[11px] font-bold text-gray-600">Details <span className="text-red-500">*</span> <span className="font-normal text-gray-400">- what everyone should ask about</span>
         <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="input text-sm mt-1"
-          placeholder="Date, guest count, budget, area…" />
+          placeholder="Date, guest count, budget, area, must-haves…" required />
       </label>
 
       <div>
@@ -173,7 +173,7 @@ function NewDiscussion({ onCancel, onCreated }) {
 
       {err && <p className="text-xs text-red-600">{typeof err === 'string' ? err : 'Check the details.'}</p>}
       <div className="flex gap-3">
-        <button type="submit" disabled={!title.trim() || !(members.length || emails.length) || saving} className="btn-primary text-sm disabled:opacity-50">
+        <button type="submit" disabled={!title.trim() || !description.trim() || !(members.length || emails.length) || saving} className="btn-primary text-sm disabled:opacity-50">
           {saving ? 'Creating…' : 'Start discussion'}
         </button>
         <button type="button" onClick={onCancel} className="text-sm font-bold text-gray-500">Cancel</button>

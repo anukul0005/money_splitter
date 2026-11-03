@@ -16,7 +16,10 @@ def available() -> bool:
     return bool(_candidates())
 
 
-def chat_json(system: str, user: str, temperature: float = 0.3) -> dict:
+def chat_json(system: str, user: str, temperature: float = 0.3, prefer: int = 0) -> dict:
+    """`prefer` picks which key goes first (0 = the first Groq key, 1 = the
+    second...); the rest follow as fallbacks, so two calls made side by side
+    with prefer 0 and 1 each start on their own key's rate limit."""
     payload = json.dumps({
         "model": GROQ_MODEL,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
@@ -24,7 +27,11 @@ def chat_json(system: str, user: str, temperature: float = 0.3) -> dict:
         "temperature": temperature,
     }).encode()
     last: Exception | None = None
-    for url, key, extra in _candidates():
+    keys = _candidates()
+    if keys:
+        k = prefer % len(keys)
+        keys = keys[k:] + keys[:k]
+    for url, key, extra in keys:
         req = urllib.request.Request(url, data=payload, method="POST", headers={
             "Authorization": f"Bearer {key}", "Content-Type": "application/json",
             # Groq's Cloudflare front-end blocks urllib's default user agent.
@@ -51,3 +58,19 @@ def chat_json(system: str, user: str, temperature: float = 0.3) -> dict:
                 last = e
                 break
     raise last or RuntimeError("No AI key configured")
+
+
+def chat_json_tandem(jobs: list[tuple[str, str]], temperature: float = 0.3) -> list[dict | Exception]:
+    """Several (system, user) prompts at once, each started on a different
+    key - the two Groq keys working in tandem instead of one after the
+    other. Each result is the answer, or the Exception that job ended in."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def run(i_job):
+        i, (system, user) = i_job
+        try:
+            return chat_json(system, user, temperature, prefer=i)
+        except Exception as e:
+            return e
+    with ThreadPoolExecutor(max_workers=max(1, len(jobs))) as pool:
+        return list(pool.map(run, enumerate(jobs)))

@@ -4,7 +4,7 @@ import {
   getDiscussion, postDiscussionMessage, deleteDiscussionMessage, setDiscussionTask, addDiscussionQuote,
   editDiscussionQuote, deleteDiscussionQuote, acceptDiscussionInvite, polishMessage, editDiscussion,
   deleteDiscussion, suggestQuoteFields, createDiscussionPoll, voteDiscussionPoll, setDiscussionPollState,
-  deleteDiscussionPoll, getDiscussionActivity, addDiscussionPeople,
+  deleteDiscussionPoll, getDiscussionActivity, addDiscussionPeople, summariseDiscussion, setDiscussionNotify,
 } from '../api/index.js'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PeoplePicker from '../components/PeoplePicker'
@@ -157,7 +157,8 @@ function Header({ d, name, onChanged, onDeleted }) {
     <div className="bg-gradient-to-br from-field-800 to-field-950 text-white px-5 pt-10 md:pt-8 pb-4 border-b border-field-700">
       <div className="flex items-center justify-between">
         <button onClick={() => nav('/discuss')} className="text-slate-300/70 text-xs font-bold">‹ Discussions</button>
-        <span className="flex gap-4">
+        <span className="flex items-center gap-4">
+          <NotifyBell d={d} onChanged={onChanged} />
           <button onClick={() => { setAdding((v) => !v); setEditing(false) }} className="text-slate-300/70 text-xs font-bold">{adding ? 'Close' : '+ People'}</button>
           <button onClick={() => { setEditing((v) => !v); setAdding(false) }} className="text-slate-300/70 text-xs font-bold">{editing ? 'Close' : 'Edit'}</button>
         </span>
@@ -170,6 +171,7 @@ function Header({ d, name, onChanged, onDeleted }) {
       </p>
       {adding && <AddPeople d={d} onDone={() => { setAdding(false); onChanged() }} />}
       {d.description && <p className="text-slate-200/80 text-xs mt-2 whitespace-pre-line">{d.description}</p>}
+      {d.ai && <Summary d={d} onChanged={onChanged} />}
       {!editing && d.params.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-2">
           {d.params.map((p) => (
@@ -181,6 +183,49 @@ function Header({ d, name, onChanged, onDeleted }) {
       )}
       {editing && <EditDiscussion d={d} onSaved={() => { setEditing(false); onChanged() }} onDeleted={onDeleted} />}
     </div>
+  )
+}
+
+const NOTIFY = [
+  ['all', '🔔', 'All activity', "Messages, polls and quotes - push; email when you're asked"],
+  ['mine', '📨', "Only when I'm asked", 'Just enquiries directed at you (and quotes for yours)'],
+  ['off', '🔕', 'Off', 'No notifications from this discussion'],
+]
+
+/** The caller's own notifications for this discussion: all / only mine / off. */
+function NotifyBell({ d, onChanged }) {
+  const [open, setOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const cur = NOTIFY.find(([k]) => k === (d.notify || 'all')) || NOTIFY[0]
+  const pick = async (k) => {
+    setSaving(true)
+    try { await setDiscussionNotify(d.id, k); await onChanged() } catch { /* stays as it was */ }
+    finally { setSaving(false); setOpen(false) }
+  }
+  return (
+    <span className="relative">
+      <button onClick={() => setOpen((v) => !v)} title={`Notifications: ${cur[2]}`} aria-label={`Notifications: ${cur[2]}`}
+        className="text-sm leading-none text-slate-300/80 hover:text-white">{cur[1]}</button>
+      {open && (
+        <>
+          <span className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
+          <span className="absolute right-0 mt-2 w-64 bg-white text-gray-800 border border-amber-200 shadow-lg z-30 py-1 block">
+            <span className="block px-3 pt-1 pb-1.5 text-[10px] font-black text-gray-400 tracking-widest">NOTIFY ME</span>
+            {NOTIFY.map(([k, icon, label, sub]) => (
+              <button key={k} onClick={() => pick(k)} disabled={saving}
+                className={`w-full text-left px-3 py-2 hover:bg-amber-50 flex gap-2 ${k === cur[0] ? 'bg-brand-50' : ''}`}>
+                <span className="text-sm">{icon}</span>
+                <span>
+                  <span className="block text-xs font-bold">{label}{k === cur[0] ? ' ✓' : ''}</span>
+                  <span className="block text-[10px] text-gray-400">{sub}</span>
+                </span>
+              </button>
+            ))}
+            <span className="block px-3 pt-1 pb-1.5 text-[10px] text-gray-400">Just for you, just this discussion. Push needs notifications turned on for the app.</span>
+          </span>
+        </>
+      )}
+    </span>
   )
 }
 
@@ -243,7 +288,7 @@ function EditDiscussion({ d, onSaved, onDeleted }) {
   return (
     <div className="mt-3 bg-white text-gray-800 px-3 py-3 space-y-2">
       <input value={title} onChange={(e) => setTitle(e.target.value)} className="input text-sm" />
-      <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="input text-xs" placeholder="Details" />
+      <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="input text-xs" placeholder="Details (needed) - date, guests, budget, area" />
       <div className="flex items-center justify-between">
         <p className="text-[11px] font-bold text-gray-600">Quote fields</p>
         <button onClick={suggest} disabled={busy} className="text-[11px] font-bold text-brand-600 disabled:opacity-40">✨ Suggest</button>
@@ -264,7 +309,7 @@ function EditDiscussion({ d, onSaved, onDeleted }) {
       <p className="text-[10px] text-gray-400">Removing a field hides it from the quotes; adding one leaves earlier quotes blank there.</p>
       {err && <p className="text-[11px] text-red-600">{err}</p>}
       <div className="flex items-center gap-3">
-        <button onClick={save} disabled={busy} className="btn-primary text-xs py-1.5 px-4 disabled:opacity-50">Save</button>
+        <button onClick={save} disabled={busy || !title.trim() || !description.trim()} className="btn-primary text-xs py-1.5 px-4 disabled:opacity-50">Save</button>
         {d.created_by.toLowerCase() === d.me.toLowerCase() && (
           <button onClick={remove} className="text-xs font-bold text-red-600 ml-auto">Delete discussion</button>
         )}
@@ -862,6 +907,110 @@ function ActivityTab({ d, name }) {
           </div>
         </div>
       ))}
+    </div>
+  )
+}
+
+// ── AI summary of the details, the talk and the quotes ─────────────────────
+
+/**
+ * What the discussion comes to, for anyone catching up: the AI reads the
+ * details, messages, enquiries and polls on one key and compares the
+ * quotes on the other, at once. Kept until asked again; marked out of date
+ * once anything new happens.
+ */
+function Summary({ d, onChanged }) {
+  const s = d.summary
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const run = async () => {
+    setBusy(true); setErr('')
+    try { await summariseDiscussion(d.id); setOpen(true); await onChanged() }
+    catch (e) { setErr(errText(e, "The AI couldn't summarise it just now.")) }
+    finally { setBusy(false) }
+  }
+
+  if (!s) return (
+    <div className="mt-3">
+      <button onClick={run} disabled={busy}
+        className="text-[11px] font-bold border border-brand-400/60 text-brand-300 px-2.5 py-1 hover:bg-brand-400/10 disabled:opacity-50">
+        {busy ? '✨ Summarising…' : '✨ Summarise with AI'}
+      </button>
+      <span className="text-[10px] text-slate-300/50 ml-2">the details, everyone's thoughts and the quotes, in one read</span>
+      {err && <p className="text-[11px] text-red-300 mt-1">{err}</p>}
+    </div>
+  )
+
+  const t = s.data.talk || {}
+  const q = s.data.quotes
+  const List = ({ title, items, tone = 'text-gray-700' }) => (items?.length ? (
+    <div className="mt-2">
+      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{title}</p>
+      <ul className="mt-0.5 space-y-0.5">
+        {items.map((x, i) => <li key={i} className={`text-xs ${tone} pl-3 relative`}><span className="absolute left-0">·</span>{x}</li>)}
+      </ul>
+    </div>
+  ) : null)
+  const copyText = [
+    `${d.title} - summary`, t.overview,
+    ...(t.decided?.length ? ['Decided:', ...t.decided.map((x) => `- ${x}`)] : []),
+    ...(t.open?.length ? ['Still open:', ...t.open.map((x) => `- ${x}`)] : []),
+    ...(t.next?.length ? ['Next:', ...t.next.map((x) => `- ${x}`)] : []),
+    ...(q ? ['Quotes:', q.summary, ...(q.best_value ? [`Best value: ${q.best_value}`] : [])] : []),
+  ].filter(Boolean).join('\n')
+
+  return (
+    <div className="mt-3 bg-white text-gray-800 border border-brand-200">
+      <button onClick={() => setOpen((v) => !v)} className="w-full text-left px-3 py-2">
+        <span className="flex items-center justify-between gap-2">
+          <span className="text-[10px] font-black text-brand-600 uppercase tracking-widest">✨ AI summary</span>
+          <span className="text-[10px] text-gray-400">
+            {s.stale ? <span className="text-amber-600 font-bold">new activity since · </span> : null}{ago(s.at)} {open ? '▴' : '▾'}
+          </span>
+        </span>
+        <span className={`block text-xs text-gray-700 mt-1 ${open ? '' : 'line-clamp-2'}`}>{t.overview}</span>
+      </button>
+      {open && (
+        <div className="px-3 pb-3">
+          {t.people?.length > 0 && (
+            <div className="mt-1">
+              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">What each person thinks</p>
+              {t.people.map((p, i) => (
+                <p key={i} className="text-xs text-gray-700 mt-0.5"><span className="font-bold">{p.name}:</span> {p.summary}</p>
+              ))}
+            </div>
+          )}
+          <List title="Decided" items={t.decided} tone="text-green-700" />
+          <List title="Still open" items={t.open} tone="text-amber-700" />
+          <List title="Next steps" items={t.next} />
+          {q && (
+            <div className="mt-2 pt-2 border-t border-amber-100">
+              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">The quotes</p>
+              <p className="text-xs text-gray-700 mt-0.5">{q.summary}</p>
+              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                {q.best_value && <span className="text-[10px] font-bold bg-green-50 border border-green-200 text-green-800 px-2 py-0.5">Best value: {q.best_value}</span>}
+                {q.cheapest && <span className="text-[10px] font-bold bg-amber-50 border border-amber-200 text-gray-700 px-2 py-0.5">Cheapest: {q.cheapest}</span>}
+              </div>
+              {q.per_quote?.map((x, i) => (
+                <p key={i} className="text-[11px] text-gray-600 mt-1">
+                  <span className="font-bold text-gray-800">{x.vendor}</span> - {x.note}
+                  {x.missing && <span className="block text-[10px] text-amber-700">Missing: {x.missing}</span>}
+                </p>
+              ))}
+            </div>
+          )}
+          {s.data.quotes_error && <p className="text-[10px] text-gray-400 mt-2">The quotes couldn't be compared this time - refresh to try again.</p>}
+          <div className="flex items-center gap-3 mt-3">
+            <button onClick={run} disabled={busy} className="text-[11px] font-bold text-brand-600 disabled:opacity-50">
+              {busy ? 'Summarising…' : s.stale ? '↻ Update with the latest' : '↻ Refresh'}
+            </button>
+            <CopyButton text={copyText} />
+            <span className="text-[10px] text-gray-400 ml-auto">AI-written from the chat - check before deciding</span>
+          </div>
+          {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
+        </div>
+      )}
     </div>
   )
 }
