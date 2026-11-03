@@ -1142,12 +1142,12 @@ function QuoteForm({ d, tasks, name, initial, onCancel, onSaved }) {
   return (
     <form onSubmit={save} className="card space-y-2">
       <p className="text-xs font-black text-gray-500 uppercase tracking-widest">{initial.id ? 'Edit quote' : 'New quote'}</p>
-      <div className="grid grid-cols-5 gap-2">
-        <label className="col-span-3 block text-[11px] font-bold text-gray-600">Quote from
-          <input value={vendor} onChange={(e) => setVendor(e.target.value)} className="input text-sm mt-0.5" placeholder="e.g. Royal Orchid Banquet" autoFocus />
+      <div className="grid grid-cols-2 gap-2">
+        <label className="block text-[11px] font-bold text-gray-600 min-w-0">Quote from
+          <input value={vendor} onChange={(e) => setVendor(e.target.value)} className="input !px-2.5 !py-2 text-xs mt-0.5" placeholder="e.g. Royal Orchid" autoFocus />
         </label>
-        <label className="col-span-2 block text-[11px] font-bold text-gray-600">Price
-          <input value={price} onChange={(e) => setPrice(e.target.value)} className="input text-sm mt-0.5" placeholder="Rs 1,350 / plate" />
+        <label className="block text-[11px] font-bold text-gray-600 min-w-0">Price
+          <input value={price} onChange={(e) => setPrice(e.target.value)} className="input !px-2.5 !py-2 text-xs mt-0.5" placeholder="₹1,350 / plate" />
         </label>
       </div>
       {d.params.length > 0 && (
@@ -1156,18 +1156,18 @@ function QuoteForm({ d, tasks, name, initial, onCancel, onSaved }) {
             <label key={p.key} className="block text-[11px] font-bold text-gray-600">
               {p.label}{p.unit ? <span className="font-normal text-gray-400"> ({p.unit})</span> : null}
               <input value={values[p.key] || ''} onChange={(e) => setValues((v) => ({ ...v, [p.key]: e.target.value }))}
-                className="input text-xs py-1.5 mt-0.5" inputMode={PRICE.test(`${p.label} ${p.unit}`) ? 'decimal' : 'text'} />
+                className="input !px-2.5 !py-2 text-xs mt-0.5" inputMode={PRICE.test(`${p.label} ${p.unit}`) ? 'decimal' : 'text'} />
             </label>
           ))}
         </div>
       )}
       <label className="block text-[11px] font-bold text-gray-600">Notes <span className="font-normal text-gray-400">(optional)</span>
-        <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} className="input text-xs mt-0.5"
+        <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} className="input !px-2.5 !py-2 text-xs mt-0.5"
           placeholder="What's included, contact person, conditions…" />
       </label>
       {!initial.id && myTasks.length > 0 && (
         <label className="block text-[11px] font-bold text-gray-600">Answers an enquiry
-          <select value={taskId} onChange={(e) => setTaskId(e.target.value)} className="input text-xs py-1.5 mt-0.5">
+          <select value={taskId} onChange={(e) => setTaskId(e.target.value)} className="input !px-2.5 !py-2 text-xs mt-0.5">
             <option value="">— none —</option>
             {myTasks.map((t) => (
               <option key={t.id} value={t.id}>{name(t.message.author)}: {t.message.text.slice(0, 60)}{t.message.text.length > 60 ? '…' : ''}</option>
