@@ -980,12 +980,15 @@ Given the requirements and every quote (vendor, the fields noted, notes, who got
 - "summary": 2-3 sentences comparing them - the price range and how they differ.
 - "best_value": which quote looks best for the stated requirements and why (one line), or "" if it can't be told.
 - "cheapest": the vendor with the lowest main price, or "".
-- "per_quote": for each vendor, one line of pros/cons against the requirements, and what is still missing to compare
-  it fairly (e.g. "no capacity given").
+- "per_quote": for each quote (keep its id number, given as [#id]), one line of pros/cons against the
+  requirements, what is still missing to compare it fairly (e.g. "no capacity given"), and "opinions": one short
+  line on what the members said about it in its notes and opinions and how they reacted (likes / dislikes) - who
+  likes it, who has doubts and why; "" when nobody has said anything.
 
 Rules: use only the numbers given - never invent or estimate prices. Amounts in Rs as written.
 Respond with ONLY a JSON object:
-{"summary": "...", "best_value": "...", "cheapest": "...", "per_quote": [{"vendor": "...", "note": "...", "missing": "..."}]}"""
+{"summary": "...", "best_value": "...", "cheapest": "...",
+ "per_quote": [{"id": 0, "vendor": "...", "note": "...", "missing": "...", "opinions": "..."}]}"""
 
 
 def _summary_context(db: Session, d: Discussion, group: Group, caller: User) -> tuple[str, str | None]:
@@ -1021,12 +1024,16 @@ def _summary_context(db: Session, d: Discussion, group: Group, caller: User) -> 
         vals = _loads(q.values_json, {})
         fields = "; ".join(f"{p['label']}{' (' + p['unit'] + ')' if p.get('unit') else ''}: {vals[p['key']]}"
                            for p in params if vals.get(p["key"]))
-        views = "; ".join(f"{o.author}: {o.text[:300]}" for o in ops.get(q.id, []))
+        def _r(target, tid):
+            r = reacts.get((target, tid)) or {}
+            return ", ".join(f"{k} by {', '.join(v)}" for k, v in r.items() if v)
+        views = "; ".join(f"{o.author}: {o.text[:300]}" + (f" [{_r('opinion', o.id)}]" if _r("opinion", o.id) else "")
+                          for o in ops.get(q.id, []))
         rq = reacts.get(("quote", q.id))
         if rq and any(rq.values()):
             views = (views + "; " if views else "") + "reactions - " + ", ".join(
                 f"{k} by {', '.join(v)}" for k, v in rq.items() if v)
-        qlines.append(f"- {q.vendor} (noted by {q.entered_by})" + (f", price {q.price}" if q.price else "")
+        qlines.append(f"- [#{q.id}] {q.vendor} (noted by {q.entered_by})" + (f", price {q.price}" if q.price else "")
                       + f": {fields or 'no fields filled'}"
                       + (f". Notes: {q.note[:600]}" if q.note else "")
                       + (f". Members' opinions - {views}" if views else ""))

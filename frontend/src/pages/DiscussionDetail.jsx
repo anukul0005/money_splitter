@@ -1026,6 +1026,18 @@ function Quotes({ d, name, tasks, onChanged, quoteFor, clearQuoteFor }) {
 
                   <div className="mt-2 pt-2 border-t border-amber-100">
                     <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-1">Notes &amp; opinions</p>
+                    {(() => {
+                      // The comparison's line for this quote: what everyone said and how they reacted
+                      const per = d.summary?.data?.quotes?.per_quote || []
+                      const ai = per.find((x) => Number(x.id) === q.id) || per.find((x) => (x.vendor || '').toLowerCase() === q.vendor.toLowerCase())
+                      const has = q.note || (q.opinions || []).length || Object.values(q.reactions || {}).some((v) => v.length)
+                      return ai?.opinions && has ? (
+                        <div className="bg-brand-50/60 border border-brand-100 px-2 py-1.5 mb-1.5">
+                          <p className="text-[9px] font-black text-brand-600 uppercase tracking-widest">✨ AI summary{d.summary.stale ? ' · updating soon' : ''}</p>
+                          <p className="text-[11px] text-gray-700 mt-0.5"><Rich text={ai.opinions} /></p>
+                        </div>
+                      ) : null
+                    })()}
                     <QuoteNotes q={q} d={d} name={name} onChanged={onChanged} />
                   </div>
 
@@ -1057,6 +1069,17 @@ function QuotesSummary({ d, onChanged }) {
   const [open, setOpen] = useState(true)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  // Missing, or older than the latest quote / opinion / reaction: written again once, on its own
+  const auto = useRef(false)
+  useEffect(() => {
+    if (auto.current || !d.ai || !d.quotes.length) return
+    const sm = d.summary
+    if (!sm || sm.stale || !sm.data?.quotes) {
+      auto.current = true
+      setBusy(true)
+      summariseDiscussion(d.id).then(onChanged).catch(() => {}).finally(() => setBusy(false))
+    }
+  }, [d.id])
   const s = d.summary
   const q = s?.data?.quotes
   if (!d.ai || d.quotes.length === 0) return null
@@ -1148,7 +1171,7 @@ function Reactions({ target, id, r, d, name, onChanged, small }) {
           const on = mine === k
           return (
             <button key={k} onClick={() => tap(k)} title={label} aria-label={`${label}${n ? ` (${n})` : ''}`} aria-pressed={on}
-              className={`flex items-center gap-1 border rounded-full tabular-nums transition-colors ${small ? 'px-1.5 py-0 text-[10px]' : 'px-2 py-0.5 text-[11px]'} ${
+              className={`flex items-center justify-center gap-1 border rounded-none tabular-nums transition-colors ${small ? 'min-w-[3.75rem] px-1.5 py-0.5 text-[10px]' : 'min-w-[4.75rem] px-2 py-1 text-[11px]'} ${
                 on ? 'bg-brand-50 border-brand-400 text-brand-700 font-black' : 'bg-white border-amber-200 text-gray-600 hover:border-brand-300'}`}>
               <span className="font-semibold">{label}</span>{n > 0 && <span className="font-black">{n}</span>}
             </button>
