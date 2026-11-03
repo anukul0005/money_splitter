@@ -235,6 +235,7 @@ _ADDED_COLUMNS = [
     ("discussions", "summary_basis", "TIMESTAMP WITH TIME ZONE"),
     ("discussions", "summary_at", "TIMESTAMP WITH TIME ZONE"),
     ("discussion_messages", "edited_at", "TIMESTAMP WITH TIME ZONE"),
+    ("discussion_polls", "mandatory", "BOOLEAN NOT NULL DEFAULT FALSE"),
 ]
 
 # (index name, statement)

@@ -1299,6 +1299,8 @@ class DiscussionPoll(Base):
     options_json = Column(Text, nullable=False)
     multi = Column(Boolean, nullable=False, default=False)
     closed = Column(Boolean, nullable=False, default=False)
+    # Everyone but the asker answers it before they can use the chat
+    mandatory = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

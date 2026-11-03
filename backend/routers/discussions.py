@@ -289,6 +289,20 @@ def get_discussion(discussion_id: int, db: Session = Depends(get_db), caller: Us
     }
 
 
+def _mandatory_pending(db: Session, discussion_id: int, name: str) -> list[DiscussionPoll]:
+    """Open mandatory polls this member hasn't answered (their own don't count)."""
+    polls = db.query(DiscussionPoll).filter(DiscussionPoll.discussion_id == discussion_id,
+                                            DiscussionPoll.mandatory.is_(True), DiscussionPoll.closed.is_(False)).all()
+    out = []
+    for p in polls:
+        if p.author.lower() == name.lower():
+            continue
+        if not db.query(DiscussionVote.id).filter(DiscussionVote.poll_id == p.id,
+                                                  DiscussionVote.voter.ilike(name)).first():
+            out.append(p)
+    return out
+
+
 def _polls_out(db: Session, d: Discussion, group: Group, caller: User) -> list[dict]:
     polls = db.query(DiscussionPoll).filter(DiscussionPoll.discussion_id == d.id).order_by(DiscussionPoll.id).all()
     if not polls:
@@ -303,6 +317,7 @@ def _polls_out(db: Session, d: Discussion, group: Group, caller: User) -> list[d
         voted = {v.lower() for v in voters}
         out.append({
             "id": p.id, "author": p.author, "question": p.question, "multi": p.multi, "closed": p.closed,
+            "mandatory": bool(p.mandatory),
             "created_at": p.created_at,
             "options": [{"text": o, "voters": sorted({v.voter for v in vs if v.option_index == i}, key=str.lower)}
                         for i, o in enumerate(options)],
@@ -332,6 +347,10 @@ class MessageIn(BaseModel):
 def post_message(discussion_id: int, payload: MessageIn, bg: BackgroundTasks,
                  db: Session = Depends(get_db), caller: User = Depends(current_user)):
     d, group = _discussion(db, discussion_id, caller)
+    pending = _mandatory_pending(db, d.id, caller.name)
+    if pending:
+        raise HTTPException(409, {"code": "poll_required",
+                                  "message": f"Answer the poll first: {pending[0].question}"})
     text = payload.text.strip()
     if not text:
         raise HTTPException(400, "Write something first")
@@ -698,6 +717,7 @@ class PollIn(BaseModel):
     question: str
     options: list[str]
     multi: bool = False
+    mandatory: bool = False
 
 
 @router.post("/{discussion_id}/polls", response_model=dict, status_code=201)
@@ -715,9 +735,9 @@ def create_poll(discussion_id: int, payload: PollIn, bg: BackgroundTasks, db: Se
     if not 2 <= len(options) <= 10:
         raise HTTPException(400, "Give 2 to 10 different options")
     p = DiscussionPoll(discussion_id=d.id, author=caller.name, question=question,
-                       options_json=json.dumps(options), multi=payload.multi)
+                       options_json=json.dumps(options), multi=payload.multi, mandatory=payload.mandatory)
     db.add(p)
-    _feed(db, group, caller.name, "started a poll", d, question)
+    _feed(db, group, caller.name, "started a mandatory poll" if payload.mandatory else "started a poll", d, question)
     _touch(d)
     db.commit()
     bg.add_task(_notify_poll, d.id, p.id)
@@ -793,10 +813,12 @@ def _notify_poll(discussion_id: int, poll_id: int) -> None:
         if not d or not p:
             return
         for m in db.get(Group, d.group_id).members:
-            if m.name.lower() != p.author.lower() and _wants(db, d.id, m.name, direct=False):
+            # A mandatory poll is asked of everyone: it reaches "only when I'm asked" too
+            if m.name.lower() != p.author.lower() and _wants(db, d.id, m.name, direct=bool(p.mandatory)):
                 try:
                     _push.send_push_to_user(db, m.name, f"{p.author} asks: {p.question}"[:120],
-                                            f"Vote in \"{d.title}\"", url=f"/discuss/{d.id}")
+                                            (f"Your answer is needed to use the chat in \"{d.title}\"" if p.mandatory
+                                             else f"Vote in \"{d.title}\""), url=f"/discuss/{d.id}")
                 except Exception as e:
                     print(f"[discussions] poll push failed: {e}")
     finally:

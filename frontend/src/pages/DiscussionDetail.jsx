@@ -22,7 +22,7 @@ const num = (v) => {
 }
 const errText = (e, fallback) => {
   const d = e?.response?.data?.detail
-  return typeof d === 'string' ? d : fallback
+  return typeof d === 'string' ? d : d?.message || fallback
 }
 
 /** A small copy-to-clipboard icon that says "Copied" for a moment. */
@@ -421,17 +421,45 @@ function EditDiscussion({ d, onSaved, onDeleted }) {
 function Chat({ d, name, onChanged, onQuote }) {
   const endRef = useRef(null)
   const count = d.messages.length + d.polls.length
-  useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }) }, [count])
   const me = d.me.toLowerCase()
+  // Open polls this member hasn't answered: pinned on top, newest first
+  const pinned = d.polls.filter((p) => !p.closed && p.mine.length === 0)
+    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)) || b.id - a.id)
+  const pinnedIds = new Set(pinned.map((p) => p.id))
+  // Mandatory ones (not their own) must be answered before the chat opens
+  const gate = pinned.filter((p) => p.mandatory && p.author.toLowerCase() !== me)
+  // With something pinned, stay at the top where it is; otherwise the latest message
+  useEffect(() => { if (!pinned.length) endRef.current?.scrollIntoView({ block: 'end' }) }, [count, pinned.length])
   // Messages and polls in one timeline, oldest first
   const items = [
     ...d.messages.map((m) => ({ kind: 'm', at: m.created_at, id: m.id, m })),
-    ...d.polls.map((p) => ({ kind: 'p', at: p.created_at, id: p.id, p })),
+    ...d.polls.filter((p) => !pinnedIds.has(p.id)).map((p) => ({ kind: 'p', at: p.created_at, id: p.id, p })),
   ].sort((a, b) => String(a.at).localeCompare(String(b.at)) || a.id - b.id)
+
+  if (gate.length) return (
+    <div className="flex-1 px-4 py-4 space-y-3 max-w-2xl w-full">
+      <div className="border border-brand-300 bg-brand-50 px-4 py-3">
+        <p className="text-sm font-black text-gray-900">🔒 Answer {gate.length === 1 ? 'this poll' : `these ${gate.length} polls`} to enter the chat</p>
+        <p className="text-xs text-gray-600 mt-0.5">
+          {gate.length === 1 ? `${name(gate[0].author)} needs` : 'The group needs'} everyone's answer before going on.
+          The chat opens as soon as you vote.
+        </p>
+      </div>
+      {gate.map((p) => <PollCard key={p.id} p={p} d={d} name={name} onChanged={onChanged} />)}
+    </div>
+  )
 
   return (
     <>
       <div className="flex-1 px-4 py-3 space-y-3 max-w-2xl w-full">
+        {pinned.length > 0 && (
+          <div className="space-y-2 pb-3 border-b border-dashed border-brand-200">
+            <p className="text-[10px] font-black text-brand-600 uppercase tracking-widest">
+              📌 Waiting for your answer{pinned.length > 1 ? ` · ${pinned.length}` : ''}
+            </p>
+            {pinned.map((p) => <PollCard key={`pin${p.id}`} p={p} d={d} name={name} onChanged={onChanged} />)}
+          </div>
+        )}
         {count === 0 && (
           <div className="text-center py-8">
             <p className="text-sm font-bold text-gray-700">Start the discussion</p>
@@ -507,6 +535,7 @@ function PollCard({ p, d, name, onChanged }) {
       <div className="flex items-baseline justify-between gap-3">
         <span className="text-[10px] font-black text-brand-600 uppercase tracking-widest">
           📊 Poll · {mineAuthor ? 'you asked' : `${name(p.author)} asks`}{p.closed ? ' · closed' : ''}
+          {p.mandatory && <span className="ml-1.5 text-[9px] bg-red-500 text-white px-1 py-px normal-case tracking-normal">must answer</span>}
         </span>
         <span className="flex items-center gap-2">
           <span className="text-[10px] text-gray-400">{ago(p.created_at)}</span>
@@ -557,12 +586,13 @@ function PollForm({ d, onDone, onCancel }) {
   const [question, setQuestion] = useState('')
   const [options, setOptions] = useState(['', ''])
   const [multi, setMulti] = useState(false)
+  const [mandatory, setMandatory] = useState(false)
   const [err, setErr] = useState('')
   const [saving, setSaving] = useState(false)
   const filled = options.map((o) => o.trim()).filter(Boolean)
   const save = async () => {
     setSaving(true); setErr('')
-    try { await createDiscussionPoll(d.id, { question, options: filled, multi }); onDone() }
+    try { await createDiscussionPoll(d.id, { question, options: filled, multi, mandatory }); onDone() }
     catch (e) { setErr(errText(e, "Couldn't create the poll.")); setSaving(false) }
   }
   return (
@@ -588,6 +618,10 @@ function PollForm({ d, onDone, onCancel }) {
         <label className="flex items-center gap-1.5 text-[11px] text-gray-600">
           <input type="checkbox" checked={multi} onChange={(e) => setMulti(e.target.checked)} className="w-3.5 h-3.5 accent-brand-400" />
           Allow more than one pick
+        </label>
+        <label className="flex items-center gap-1.5 text-[11px] text-gray-600" title="Members can't use the chat until they've answered">
+          <input type="checkbox" checked={mandatory} onChange={(e) => setMandatory(e.target.checked)} className="w-3.5 h-3.5 accent-red-500" />
+          Mandatory - everyone answers before using the chat
         </label>
       </div>
       {err && <p className="text-[11px] text-red-600">{err}</p>}
