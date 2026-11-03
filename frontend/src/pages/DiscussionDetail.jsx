@@ -14,7 +14,7 @@ import { ago } from './Discussions'
 const POLL_MS = 15000
 const NL = String.fromCharCode(10)
 const EMAIL = /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i
-// Fields where the lowest figure is the best one, marked in the comparison.
+// Fields that hold money - typed with a number keypad.
 const PRICE = /price|cost|rate|₹|\brs\b|fee|charge|budget|rent|tariff|amount|total/i
 const num = (v) => {
   const n = parseFloat(String(v ?? '').replace(/[,₹\s]/g, '').replace(/rs\.?/i, ''))
@@ -964,14 +964,6 @@ function Quotes({ d, name, tasks, onChanged, quoteFor, clearQuoteFor }) {
     }
     return qs
   }, [d.quotes, sortKey, who])
-  // The lowest figure in each price-like column
-  const best = {}
-  d.params.filter((p) => PRICE.test(`${p.label} ${p.unit}`)).forEach((p) => {
-    const vals = shown.map((q) => num(q.values[p.key])).filter((v) => v != null)
-    if (vals.length > 1) best[p.key] = Math.min(...vals)
-  })
-  const prices = shown.map((q) => priceInfo(q.price).value).filter((v) => v != null)
-  const bestPrice = prices.length > 1 ? Math.min(...prices) : null
   const taskLabel = (tid) => {
     const t = tasks.find((x) => x.id === tid)
     return t ? `for ${name(t.message.author)}'s enquiry` : ''
@@ -1016,10 +1008,9 @@ function Quotes({ d, name, tasks, onChanged, quoteFor, clearQuoteFor }) {
           <div className="space-y-3">
             {shown.map((q) => {
               const pi = priceInfo(q.price)
-              const cheapest = bestPrice != null && pi.value === bestPrice
               const filled = d.params.filter((p) => q.values[p.key])
               return (
-                <div key={q.id} className={`card !p-3 ${cheapest ? 'border-green-300' : ''}`}>
+                <div key={q.id} className="card !p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-sm font-black text-gray-900 break-words">{q.vendor}</p>
@@ -1030,11 +1021,10 @@ function Quotes({ d, name, tasks, onChanged, quoteFor, clearQuoteFor }) {
                     <div className="text-right shrink-0 max-w-[50%]">
                       {q.price
                         ? <>
-                            <p className={`text-sm font-black break-words ${cheapest ? 'text-green-700' : 'text-gray-900'}`}>{pi.text}</p>
+                            <p className="text-sm font-black break-words text-gray-900">{pi.text}</p>
                             {pi.extra && <p className="text-[10px] text-gray-400 break-words">{pi.extra}</p>}
                           </>
                         : <p className="text-[11px] text-gray-300">no price yet</p>}
-                      {cheapest && <p className="text-[9px] font-black text-green-700 uppercase tracking-widest">★ lowest</p>}
                     </div>
                   </div>
 
@@ -1044,11 +1034,10 @@ function Quotes({ d, name, tasks, onChanged, quoteFor, clearQuoteFor }) {
                     <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 mt-2 pt-2 border-t border-amber-100">
                       {filled.map((p) => {
                         const v = q.values[p.key]
-                        const isBest = best[p.key] != null && num(v) === best[p.key]
                         return (
                           <div key={p.key} className="min-w-0">
                             <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide truncate">{p.label}{p.unit ? ` (${p.unit})` : ''}</p>
-                            <p className={`text-xs break-words ${isBest ? 'text-green-700 font-black' : 'text-gray-800'}`}>{v}{isBest ? ' ★' : ''}</p>
+                            <p className="text-xs break-words text-gray-800">{v}</p>
                           </div>
                         )
                       })}
@@ -1089,7 +1078,6 @@ function Quotes({ d, name, tasks, onChanged, quoteFor, clearQuoteFor }) {
               )
             })}
           </div>
-          {(bestPrice != null || Object.keys(best).length > 0) && <p className="text-[10px] text-gray-400">★ the lowest price</p>}
         </>
       )}
     </div>
@@ -1099,7 +1087,7 @@ function Quotes({ d, name, tasks, onChanged, quoteFor, clearQuoteFor }) {
 /**
  * The AI's comparison of the quotes, here on the Quotes tab (the summary
  * above the chat covers the discussion itself): how they compare, best value
- * and cheapest, and per quote its pros and cons and what's still missing.
+ * and per quote its pros and cons and what's still missing - no ranking.
  * Written with the rest of the summary - refreshed from here too.
  */
 function QuotesSummary({ d, onChanged }) {
@@ -1141,8 +1129,7 @@ function QuotesSummary({ d, onChanged }) {
       {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
     </div>
   )
-  const copyText = ['Quotes:', q.summary.replace(/\*\*/g, ''), ...(q.best_value ? [`Best value: ${q.best_value}`] : []),
-    ...(q.cheapest ? [`Cheapest: ${q.cheapest}`] : []),
+  const copyText = ['Quotes:', q.summary.replace(/\*\*/g, ''),
     ...(q.per_quote || []).map((x) => `- ${x.vendor}: ${x.note}${x.missing ? ` (missing: ${x.missing})` : ''}`)].join('\n')
   return (
     <div className="card !p-0 border-brand-200">
@@ -1158,10 +1145,6 @@ function QuotesSummary({ d, onChanged }) {
       </button>
       {open && (
         <div className="px-3 pb-3">
-          <div className="flex flex-wrap gap-1.5">
-            {q.best_value && <span className="text-[10px] font-bold bg-green-50 border border-green-200 text-green-800 px-2 py-0.5">Best value: {q.best_value}</span>}
-            {q.cheapest && <span className="text-[10px] font-bold bg-amber-50 border border-amber-200 text-gray-700 px-2 py-0.5">Cheapest: {q.cheapest}</span>}
-          </div>
           {q.per_quote?.map((x, i) => (
             <p key={i} className="text-[11px] text-gray-600 mt-1.5">
               <span className="font-bold text-gray-800">{x.vendor}</span> - <Rich text={x.note} />

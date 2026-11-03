@@ -977,9 +977,8 @@ Respond with ONLY a JSON object:
 
 _SUM_QUOTES = """You compare quotes a group in India collected while planning (venues, caterers, hotels...).
 Given the requirements and every quote (vendor, the fields noted, notes, who got it), write:
-- "summary": 2-3 sentences comparing them - the price range and how they differ.
-- "best_value": which quote looks best for the stated requirements and why (one line), or "" if it can't be told.
-- "cheapest": the vendor with the lowest main price, or "".
+- "summary": 2-3 sentences comparing them - the price range and how they differ. Describe, never rank: no
+  "cheapest", "lowest", "best", "best value", "winner" or "top pick" - the group decides that.
 - "per_quote": for each quote (keep its id number, given as [#id]), one line of pros/cons against the
   requirements, what is still missing to compare it fairly (e.g. "no capacity given"), and "opinions": what the
   members said about it in its notes and opinions and how they reacted (likes / dislikes) - who likes it, who has
@@ -989,7 +988,7 @@ Given the requirements and every quote (vendor, the fields noted, notes, who got
 
 Rules: use only the numbers given - never invent or estimate prices. Amounts in Rs as written.
 Respond with ONLY a JSON object:
-{"summary": "...", "best_value": "...", "cheapest": "...",
+{"summary": "...",
  "per_quote": [{"id": 0, "vendor": "...", "note": "...", "missing": "...", "opinions": "..."}]}"""
 
 
