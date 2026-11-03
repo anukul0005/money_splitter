@@ -1118,7 +1118,7 @@ function QuotesSummary({ d, onChanged }) {
   )
 }
 
-const REACTS = [['like', '👍', 'Like'], ['dislike', '👎', 'Dislike'], ['neutral', '😐', 'Neutral']]
+const REACTS = [['like', 'Like'], ['dislike', 'Dislike'], ['neutral', 'Neutral']]
 
 /**
  * Like / dislike / neutral on a quote or an opinion: one each, tap again to
@@ -1139,18 +1139,18 @@ function Reactions({ target, id, r, d, name, onChanged, small }) {
     try { await reactInDiscussion(d.id, target, id, kind); await onChanged() } catch { setLocal(null) }
   }
   const who = REACTS.filter(([k]) => cur[k]?.length)
-    .map(([k, icon]) => `${icon} ${cur[k].map((n) => (n.toLowerCase() === me ? 'you' : name(n))).join(', ')}`).join('  ·  ')
+    .map(([k, label]) => `${label}: ${cur[k].map((n) => (n.toLowerCase() === me ? 'you' : name(n))).join(', ')}`).join('  ·  ')
   return (
     <div className={small ? 'mt-0.5 mb-1' : 'mt-2'}>
       <div className="flex items-center gap-1.5">
-        {REACTS.map(([k, icon, label]) => {
+        {REACTS.map(([k, label]) => {
           const n = cur[k]?.length || 0
           const on = mine === k
           return (
             <button key={k} onClick={() => tap(k)} title={label} aria-label={`${label}${n ? ` (${n})` : ''}`} aria-pressed={on}
               className={`flex items-center gap-1 border rounded-full tabular-nums transition-colors ${small ? 'px-1.5 py-0 text-[10px]' : 'px-2 py-0.5 text-[11px]'} ${
                 on ? 'bg-brand-50 border-brand-400 text-brand-700 font-black' : 'bg-white border-amber-200 text-gray-600 hover:border-brand-300'}`}>
-              <span>{icon}</span>{n > 0 && <span className="font-bold">{n}</span>}
+              <span className="font-semibold">{label}</span>{n > 0 && <span className="font-black">{n}</span>}
             </button>
           )
         })}
