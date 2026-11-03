@@ -309,7 +309,9 @@ def matchup(tour: str, a: int | None = None, b: int | None = None, surface: str 
         rows = db.execute(text(f"SELECT {COLS} FROM tennis_matches WHERE tour = :t AND (winner_id = :p OR loser_id = :p) "
                                f"ORDER BY play_date DESC, match_id DESC"), {"t": tour, "p": pid}).mappings().all()
         out["players"][key] = {"info": dict(p) if p else {"player_id": pid}, "rank": rank_now.get(pid),
-                               **_form(rows, pid, surface)}
+                               **_form(rows, pid, surface),
+                               # their side of the early-break pattern - the live "at this score" card
+                               "early_break": tennis_early_break.player(tour, p["name"]) if p else None}
     if a and b:
         out["h2h"] = h2h(tour, a, b, db, _)
     return out

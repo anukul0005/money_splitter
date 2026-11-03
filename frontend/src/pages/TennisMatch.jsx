@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { tennisLive, tennisLiveFeed, tennisMatchup } from '../api'
+import { tennisEarlyBreak, tennisLive, tennisLiveFeed, tennisMatchup } from '../api'
 import { LiveRow, MatchRow, ROUND_NAME, SURFACE, Safe, ScoreText, fmtShort, matchLink, startTime, useLivePoints, withPoints } from './BettingAnalytics'
 
 /**
@@ -119,6 +119,183 @@ function Commentary({ espn, tour, names }) {
   )
 }
 
+/**
+ * Where the set being played stands: the games, the leader, and how many breaks
+ * up they are - worked out from who serves now (players alternate serve, so the
+ * games each has served are known; every break moves the gap by two from that).
+ */
+function setState(live) {
+  const [p0, p1] = live.players
+  const g0 = p0.games?.[p0.games.length - 1] ?? 0, g1 = p1.games?.[p1.games.length - 1] ?? 0
+  const hi = Math.max(g0, g1), lo = Math.min(g0, g1)
+  const setNo = Math.max(p0.games?.length || 0, 1)
+  if ((hi >= 6 && hi - lo >= 2) || (hi === 7 && lo === 6)) return { done: true, setNo }
+  const g = g0 + g1
+  const srv = p0.serving ? 0 : p1.serving ? 1 : null
+  let net = null                                    // breaks player 0 is up in this set
+  if (srv != null && !(g0 === 6 && g1 === 6)) {
+    const first = g % 2 === 0 ? srv : 1 - srv       // who served the set's first game
+    const served = [0, 0]
+    served[first] = Math.ceil(g / 2); served[1 - first] = Math.floor(g / 2)
+    const x = (g0 - g1 - (served[0] - served[1])) / 2
+    if (Number.isInteger(x)) net = x
+  }
+  const leader = g0 > g1 ? 0 : g1 > g0 ? 1 : null
+  const breaks = net == null || leader == null ? null : Math.abs(net) * (Math.sign(net) === (leader === 0 ? 1 : -1) ? 1 : -1)
+  return { g0, g1, hi, lo, g, setNo, leader, breaks, tiebreak: g0 === 6 && g1 === 6 }
+}
+
+const P = (n, d) => (d ? (100 * n) / d : null)
+const fmtPct = (v) => (v == null ? '—' : `${Math.round(v)}%`)
+
+/** One line of a player's side: theirs, the tour's, and the gap. */
+function PSide({ label, mine, avg, i }) {
+  const p = mine ? P(mine[i], mine[0]) : null, t = avg ? P(avg[i], avg[0]) : null
+  const few = !mine?.[0] || mine[0] < 5
+  const diff = p != null && t != null && !few ? p - t : null
+  return (
+    <div className="grid grid-cols-[1fr_auto_auto] items-baseline gap-2 py-1 border-t border-gray-100 first:border-t-0">
+      <span className="text-[11px] text-gray-700">{label}</span>
+      <span className={`text-sm font-black tabular-nums text-right ${few ? 'text-gray-300' : 'text-gray-900'}`}>
+        {fmtPct(p)}<span className="text-[9px] font-semibold text-gray-400"> {mine?.[0] ? `${mine[i]}/${mine[0]}` : ''}</span>
+      </span>
+      <span className="text-[10px] font-bold tabular-nums text-gray-500 w-20 text-right">
+        tour {fmtPct(t)}{diff != null && <span className={diff >= 5 ? ' text-green-600' : diff <= -5 ? ' text-red-500' : ' text-gray-400'}> {diff > 0 ? '+' : ''}{Math.round(diff)}</span>}
+      </span>
+    </div>
+  )
+}
+
+/**
+ * The live set's score, read against the stats: how often sets at this exact
+ * score (and breaks up) ended under / over 8.5 games, and the leader's and the
+ * trailer's own early-break record from their side (Match Charting Project).
+ */
+function ScoreStats({ live, eb, players, names }) {
+  const st = setState(live)
+  const T = eb?.tours?.[live.tour]
+  if (!T) return null
+  const head = <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">At this score · set {st.setNo}</p>
+  if (st.done) return null
+  const last = (n) => n.split(' ').slice(-1)[0]
+  const avg = players.find((x) => x?.early_break?.avg)?.early_break?.avg
+  const surfaceOver = (pl) => {
+    const x = pl?.sets_surface_12_months?.sets ? pl.sets_surface_12_months : pl?.sets_12_months
+    return x?.sets ? { p: P(x.over, x.sets), n: x.sets, surface: x === pl?.sets_surface_12_months } : null
+  }
+
+  if (st.leader == null) {
+    return (
+      <div className="card">
+        {head}
+        <p className="text-sm font-bold text-gray-900 mt-1">Level at {st.g0}-{st.g1}{st.tiebreak ? ' - tie-break' : ''}</p>
+        <p className="text-[11px] text-gray-500 mt-0.5">
+          {st.g >= 9 || st.tiebreak ? 'The set is already over 8.5 games.' : 'No one is ahead yet - the scoreline stats start once a player leads.'}
+        </p>
+        {[0, 1].map((i) => {
+          const o = surfaceOver(players[i])
+          return o && <p key={i} className="text-[11px] text-gray-600 mt-1"><b>{last(names[i])}</b>: {Math.round(o.p)}% of their sets over 8.5 ({o.n} sets, 12 months{o.surface ? ', this surface' : ''})</p>
+        })}
+      </div>
+    )
+  }
+
+  const L = st.leader, Tr = 1 - L
+  const k = `${st.hi}-${st.lo}`
+  const kb = st.breaks != null && st.breaks >= 0 ? `${k}/${st.breaks}` : null
+  const exact = (kb && T.by_score?.[kb]?.n >= 30) ? T.by_score[kb] : null
+  const any = T.by_score?.[k]
+  const c = exact || any
+  const under = c?.n ? P(c.under, c.n) : null
+  const overDone = st.g >= 9
+  const lead = players[L]?.early_break?.player, trail = players[Tr]?.early_break?.player
+  const breakUp = st.breaks != null && st.breaks > 0
+  const odds = (v) => (v ? (100 / v).toFixed(2) : '—')
+  return (
+    <div className="card">
+      {head}
+      <p className="text-sm font-black text-gray-900 mt-1">
+        {last(names[L])} leads {st.hi}-{st.lo}
+        <span className="text-[11px] font-bold text-gray-500">
+          {' · '}{st.breaks == null ? 'breaks not known' : st.breaks === 0 ? 'on serve' : `${st.breaks} break${st.breaks > 1 ? 's' : ''} up`}
+        </span>
+      </p>
+
+      {/* the set at this score, on the whole tour */}
+      {overDone ? (
+        <p className="text-[11px] text-gray-500 mt-1">{st.g} games played - the set is already over 8.5.</p>
+      ) : c?.n ? (
+        <div className="grid grid-cols-2 gap-2 mt-2">
+          <div className="bg-green-50 border border-green-200 px-2.5 py-2">
+            <p className="text-[9px] font-black text-green-800 uppercase tracking-widest">Set under 8.5</p>
+            <p className="text-xl font-black text-green-800 tabular-nums">{fmtPct(under)}</p>
+            <p className="text-[10px] text-green-900/70">break-even odds {odds(under)}</p>
+          </div>
+          <div className="bg-amber-50 border border-amber-200 px-2.5 py-2">
+            <p className="text-[9px] font-black text-amber-800 uppercase tracking-widest">Set over 8.5</p>
+            <p className="text-xl font-black text-amber-800 tabular-nums">{fmtPct(under == null ? null : 100 - under)}</p>
+            <p className="text-[10px] text-amber-900/70">break-even odds {odds(under == null ? null : 100 - under)}</p>
+          </div>
+          <p className="col-span-2 text-[10px] text-gray-400">
+            {live.tour} sets that were at {k}{exact ? ` with the leader ${st.breaks === 0 ? 'on serve' : `${st.breaks} break${st.breaks > 1 ? 's' : ''} up`}` : ''}: {c.n.toLocaleString('en-IN')} charted sets
+            {exact && any && any.n !== c.n ? ` (any ${k}: ${fmtPct(P(any.under, any.n))} under)` : ''}.
+          </p>
+        </div>
+      ) : (
+        <p className="text-[11px] text-gray-400 mt-1">Too few charted sets at {k} to say.</p>
+      )}
+
+      {/* the leader, from their side */}
+      <div className="mt-3">
+        <p className="text-[10px] font-black text-green-700 uppercase tracking-widest">▲ {names[L]} - ahead</p>
+        {lead ? (
+          breakUp ? (
+            <>
+              <p className="text-[10px] text-gray-400">Sets where they broke early ({lead.broke[0]} charted):</p>
+              <PSide label="Set ends under 8.5" mine={lead.broke} avg={avg?.broke} i={1} />
+              <PSide label="They win the set" mine={lead.broke} avg={avg?.broke} i={2} />
+              <PSide label="They close it 6-2 or better" mine={lead.broke} avg={avg?.broke} i={3} />
+            </>
+          ) : (
+            <>
+              <p className="text-[10px] text-gray-400">All their charted sets ({lead.all[0]}):</p>
+              <PSide label="Set ends under 8.5" mine={lead.all} avg={avg?.all} i={1} />
+              <PSide label="They win the set" mine={lead.all} avg={avg?.all} i={2} />
+            </>
+          )
+        ) : <p className="text-[11px] text-gray-400">Too few of their sets are charted - the tour's figure above stands for them.</p>}
+        {(() => { const o = surfaceOver(players[L]); return o && <p className="text-[10px] text-gray-500 mt-1">Their sets over 8.5: {Math.round(o.p)}% of {o.n} (12 months{o.surface ? ', this surface' : ''})</p> })()}
+      </div>
+
+      {/* the one behind */}
+      <div className="mt-3">
+        <p className="text-[10px] font-black text-red-600 uppercase tracking-widest">▼ {names[Tr]} - behind</p>
+        {trail ? (
+          breakUp ? (
+            <>
+              <p className="text-[10px] text-gray-400">Sets where they were broken early ({trail.broken[0]} charted):</p>
+              <PSide label="Set ends under 8.5" mine={trail.broken} avg={avg?.broken} i={1} />
+              <PSide label="They still win the set" mine={trail.broken} avg={avg?.broken} i={2} />
+            </>
+          ) : (
+            <>
+              <p className="text-[10px] text-gray-400">All their charted sets ({trail.all[0]}):</p>
+              <PSide label="Set ends under 8.5" mine={trail.all} avg={avg?.all} i={1} />
+              <PSide label="They win the set" mine={trail.all} avg={avg?.all} i={2} />
+            </>
+          )
+        ) : <p className="text-[11px] text-gray-400">Too few of their sets are charted - the tour's figure above stands for them.</p>}
+        {(() => { const o = surfaceOver(players[Tr]); return o && <p className="text-[10px] text-gray-500 mt-1">Their sets over 8.5: {Math.round(o.p)}% of {o.n} (12 months{o.surface ? ', this surface' : ''})</p> })()}
+      </div>
+
+      <p className="text-[10px] text-gray-400 mt-2">
+        Under 8.5 = the set ends 6-2 or wider. "Broke early" = a break in the set's first 4 games. Match Charting Project, {eb.from_year} on;
+        break-even odds are 100 ÷ the % - a price above them pays if the rate holds. Updates with the score.
+      </p>
+    </div>
+  )
+}
+
 export default function TennisMatch() {
   const nav = useNavigate()
   const [q] = useSearchParams()
@@ -142,6 +319,8 @@ export default function TennisMatch() {
   }, [espn])
 
   const pts = useLivePoints(live?.tour === 'WTA' && live?.state === 'live')
+  const [eb, setEb] = useState(null)               // the scoreline stats (tennis_early_break)
+  useEffect(() => { if (live?.state === 'live' && !eb) tennisEarlyBreak().then((r) => setEb(r.data)).catch(() => {}) }, [live?.state])
   const m = d?.match
   const A = d?.players?.a, B = d?.players?.b
   const nameA = m?.winner.name || A?.info?.name || q.get('an') || 'Player 1'
@@ -185,6 +364,12 @@ export default function TennisMatch() {
                 </div>
               )}
             </div>
+
+            {!m && live && !live.gone && live.state === 'live' && eb && (
+              <Safe what="the stats at this score">
+                <ScoreStats live={withPoints(live, pts)} eb={eb} players={[A, B]} names={live.players.map((p) => p.name)} />
+              </Safe>
+            )}
 
             {!m && live && !live.gone && live.state === 'live' && (
               <Commentary espn={espn} tour={live.tour} names={live.players.map((p) => p.name)} />
