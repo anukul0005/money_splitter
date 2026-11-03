@@ -7,7 +7,7 @@ import {
   deleteDiscussionPoll, getDiscussionActivity, addDiscussionPeople, summariseDiscussion, setDiscussionNotify, editDiscussionMessage, attachDiscussionFile, setQuoteOpinion, reactInDiscussion,
 } from '../api/index.js'
 import LoadingSpinner from '../components/LoadingSpinner'
-import PeoplePicker from '../components/PeoplePicker'
+import PeoplePicker from '../components/DiscussionPeoplePicker'
 import { dn } from '../utils/displayName'
 import { ago } from './Discussions'
 

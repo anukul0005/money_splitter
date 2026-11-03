@@ -1,87 +1,108 @@
-import { useEffect, useState } from 'react'
-import { listUsersBasic } from '../api/index.js'
-
-const EMAIL = /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i
+import { useState } from 'react'
 
 /**
- * Pick people to plan with: app users by searching their name, and anyone
- * else by email (they get an invite). `exclude` hides names already in.
+ * Who this recommendation/forecast is for, as a type-ahead rather than a
+ * wall of one button per friend. A handful of friends fit fine as buttons,
+ * but the list only grows, never shrinks, and a wide friend circle turned
+ * this into several rows of pills to scan through just to find one name -
+ * the same "app's own suggestion list" pattern the brand and restaurant
+ * search boxes already use, applied to people instead of bottles.
+ *
+ * Selected people show as removable chips above the box; the box itself
+ * only ever suggests names not already picked.
  */
-export default function PeoplePicker({ me, exclude = [], members, setMembers, emails, setEmails, onError }) {
-  const [users, setUsers] = useState(null)
-  const [q, setQ] = useState('')
-  const [emailDraft, setEmailDraft] = useState('')
-  useEffect(() => { listUsersBasic().then((r) => setUsers(r.data)).catch(() => setUsers([])) }, [])
+export default function PeoplePicker({ options, selected, onChange, placeholder = 'Add a person', allowNew = false }) {
+  const [query, setQuery] = useState('')
+  const [open, setOpen] = useState(false)
 
-  const skip = new Set([me, ...exclude, ...members].map((n) => (n || '').toLowerCase()))
-  const term = q.trim().toLowerCase()
-  const matches = (users || [])
-    .filter((u) => !skip.has(u.name.toLowerCase()))
-    .filter((u) => !term || u.name.toLowerCase().includes(term) || (u.full_name || '').toLowerCase().includes(term))
-    .slice(0, term ? 8 : 6)
-  const label = (n) => {
-    const u = users?.find((x) => x.name === n)
-    return u?.full_name && u.full_name !== u.name ? `${u.full_name} (${u.name})` : n
+  const qLower = query.trim().toLowerCase()
+  const suggestions = qLower.length === 0 ? [] : options
+    .filter((n) => !selected.includes(n) && n.toLowerCase().includes(qLower))
+    .sort((a, b) => {
+      const aStarts = a.toLowerCase().startsWith(qLower)
+      const bStarts = b.toLowerCase().startsWith(qLower)
+      if (aStarts !== bStarts) return aStarts ? -1 : 1
+      return a.length - b.length
+    })
+    .slice(0, 8)
+
+  // A typed name that isn't already an option or picked - offered as a new
+  // person when the caller allows it (loans and bills can name someone who
+  // isn't in any group yet).
+  const typed = query.trim()
+  const canAddNew = allowNew && typed.length > 0 &&
+    ![...options, ...selected].some((n) => n.toLowerCase() === qLower)
+
+  const add = (name) => {
+    onChange([...selected, name])
+    setQuery('')
+    setOpen(false)
   }
-  const addEmail = () => {
-    const e = emailDraft.trim().toLowerCase()
-    if (!e) return
-    if (!EMAIL.test(e)) { onError?.(`${e} doesn't look like an email address`); return }
-    // An email that belongs to someone already on the app is still fine - the invite link adds them
-    if (!emails.includes(e)) setEmails([...emails, e])
-    setEmailDraft(''); onError?.('')
-  }
+  const remove = (name) => onChange(selected.filter((x) => x !== name))
 
   return (
-    <div className="space-y-2">
-      {(members.length > 0 || emails.length > 0) && (
-        <div className="flex flex-wrap gap-1.5">
-          {members.map((n) => (
-            <span key={n} className="flex items-center gap-1 text-[11px] font-bold bg-brand-50 border border-brand-200 text-gray-800 pl-2 pr-1 py-0.5">
-              👤 {label(n)}
-              <button type="button" onClick={() => setMembers(members.filter((x) => x !== n))} className="text-gray-400 hover:text-red-600 px-0.5" aria-label={`Remove ${n}`}>✕</button>
-            </span>
-          ))}
-          {emails.map((e) => (
-            <span key={e} className="flex items-center gap-1 text-[11px] font-bold bg-amber-50 border border-amber-200 text-gray-700 pl-2 pr-1 py-0.5">
-              ✉ {e}
-              <button type="button" onClick={() => setEmails(emails.filter((x) => x !== e))} className="text-gray-400 hover:text-red-600 px-0.5" aria-label={`Remove ${e}`}>✕</button>
-            </span>
+    <div>
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {selected.map((n) => (
+            <button
+              key={n}
+              type="button"
+              onClick={() => remove(n)}
+              className="rounded-md pl-2.5 pr-1.5 py-1 text-xs font-bold border bg-brand-400 border-brand-400 text-white active:scale-95 transition-all flex items-center gap-1"
+            >
+              {n}
+              <span className="opacity-80">✕</span>
+            </button>
           ))}
         </div>
       )}
-
-      <div>
-        <input value={q} onChange={(e) => setQ(e.target.value)} className="input text-xs py-1.5"
-          placeholder="Search people on the app…"
+      <div className="relative">
+        <input
+          className="input text-xs"
+          value={query}
+          placeholder={placeholder}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true) }}
+          onFocus={() => setOpen(true)}
+          // Delayed so a tap on a suggestion registers before the blur
+          // closes the list out from under it - same trick the brand and
+          // restaurant search suggestions already use.
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
           onKeyDown={(e) => {
-            // Enter picks the only match, and never submits the form around it
-            if (e.key !== 'Enter') return
-            e.preventDefault()
-            if (term && matches.length === 1) { setMembers([...members, matches[0].name]); setQ('') }
-          }} />
-        {users === null ? <p className="text-[10px] text-gray-400 mt-1">Loading people…</p> : (
-          <div className="flex flex-wrap gap-1.5 mt-1.5">
-            {matches.map((u) => (
-              <button key={u.id} type="button" onClick={() => { setMembers([...members, u.name]); setQ('') }}
-                className="text-[11px] font-bold bg-white border border-amber-200 hover:border-brand-300 text-gray-700 px-2 py-0.5">
-                + {u.full_name && u.full_name !== u.name ? `${u.full_name} (${u.name})` : u.name}
-              </button>
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              if (suggestions.length > 0) add(suggestions[0])
+              else if (canAddNew) add(typed)
+            }
+          }}
+        />
+        {open && (suggestions.length > 0 || canAddNew) && (
+          <ul className="absolute left-0 right-0 top-full mt-1 z-20 bg-white border border-amber-200 rounded-md shadow-lg overflow-hidden max-h-56 overflow-y-auto">
+            {suggestions.map((n) => (
+              <li key={n}>
+                <button
+                  type="button"
+                  onMouseDown={() => add(n)}
+                  className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-amber-50 border-b border-amber-50 last:border-0"
+                >
+                  {n}
+                </button>
+              </li>
             ))}
-            {term && matches.length === 0 && (
-              <span className="text-[10px] text-gray-400">No one on the app called "{q.trim()}" - invite them by email below.</span>
+            {canAddNew && (
+              <li>
+                <button
+                  type="button"
+                  onMouseDown={() => add(typed)}
+                  className="w-full text-left px-3 py-2 text-xs font-bold text-brand-600 hover:bg-amber-50"
+                >
+                  + Add "{typed}" as a new person
+                </button>
+              </li>
             )}
-          </div>
+          </ul>
         )}
       </div>
-
-      <div className="flex gap-2">
-        <input value={emailDraft} onChange={(e) => setEmailDraft(e.target.value)} type="email"
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addEmail() } }}
-          className="input text-xs py-1.5 flex-1" placeholder="Not on the app? Their email - name@email.com" />
-        <button type="button" onClick={addEmail} disabled={!emailDraft.trim()} className="text-xs font-bold text-brand-600 disabled:opacity-40 px-2">Invite</button>
-      </div>
-      {emails.length > 0 && <p className="text-[10px] text-gray-400">They get an email with a link - once signed up, it adds them to the group.</p>}
     </div>
   )
 }

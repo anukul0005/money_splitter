@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { listDiscussions, createDiscussion, suggestQuoteFields } from '../api/index.js'
 import LoadingSpinner from '../components/LoadingSpinner'
-import PeoplePicker from '../components/PeoplePicker'
+import PeoplePicker from '../components/DiscussionPeoplePicker'
 import { useUser } from '../UserContext'
 import { dn as displayName } from '../utils/displayName'
 
