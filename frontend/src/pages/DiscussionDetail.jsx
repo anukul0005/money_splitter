@@ -4,7 +4,7 @@ import {
   getDiscussion, postDiscussionMessage, deleteDiscussionMessage, setDiscussionTask, addDiscussionQuote,
   editDiscussionQuote, deleteDiscussionQuote, acceptDiscussionInvite, polishMessage, editDiscussion,
   deleteDiscussion, suggestQuoteFields, createDiscussionPoll, voteDiscussionPoll, setDiscussionPollState,
-  deleteDiscussionPoll, getDiscussionActivity, addDiscussionPeople, summariseDiscussion, setDiscussionNotify, editDiscussionMessage,
+  deleteDiscussionPoll, getDiscussionActivity, addDiscussionPeople, summariseDiscussion, setDiscussionNotify, editDiscussionMessage, attachDiscussionFile,
 } from '../api/index.js'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PeoplePicker from '../components/PeoplePicker'
@@ -23,6 +23,65 @@ const num = (v) => {
 const errText = (e, fallback) => {
   const d = e?.response?.data?.detail
   return typeof d === 'string' ? d : d?.message || fallback
+}
+
+// Money in a text: Rs / ₹ / INR amounts, with lakh/crore/k and "per plate"-style tails
+const AMOUNT = /((?:₹|\bRs\.?|\bINR)\s?\d+(?:,\d+)*(?:\.\d+)?(?:\s?(?:lakhs?|lacs?|k|cr|crores?)\b)?(?:\s?(?:\/|per)\s?(?:plate|person|head|pax|night|day|guest|hour)s?\b)?(?:\s?\/-)?)/gi
+
+/** Text with **bold** marks shown bold, and any amount of money bolded too. */
+function Rich({ text }) {
+  const out = []
+  String(text || '').split(/(\*\*[^*]+\*\*)/g).forEach((part, i) => {
+    if (/^\*\*[^*]+\*\*$/.test(part)) { out.push(<strong key={i} className="font-black text-gray-900">{part.slice(2, -2)}</strong>); return }
+    part.split(AMOUNT).forEach((bit, j) => {
+      if (!bit) return
+      out.push(j % 2 ? <strong key={`${i}-${j}`} className="font-black text-gray-900">{bit}</strong> : <span key={`${i}-${j}`}>{bit}</span>)
+    })
+  })
+  return out
+}
+
+/**
+ * A shared photo / PDF, as the AI read it: its brief summary (amounts in
+ * bold), what it filled of the quote fields, and "Add as quote" to note it
+ * in the comparison. The file itself was never kept.
+ */
+function AttachmentCard({ a, caption, d, onQuote }) {
+  const label = (k) => d.params.find((p) => p.key === k)?.label || k
+  const plain = (a.summary || '').replace(/\*\*/g, '')
+  const fields = Object.entries(a.values || {})
+  return (
+    <div className="mt-1">
+      {caption && <p className="text-sm text-gray-800 whitespace-pre-line break-words mb-1.5"><Rich text={caption} /></p>}
+      <div className="border border-amber-200 bg-amber-50/50 px-2.5 py-2">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] font-black text-gray-700 truncate">📎 {a.name}</span>
+          <span className="flex items-center gap-2 shrink-0">
+            <span className="text-[9px] font-bold text-brand-600 uppercase tracking-widest">✨ AI read</span>
+            <CopyButton text={(a.vendor ? `${a.vendor}\n` : '') + plain} />
+          </span>
+        </div>
+        {a.vendor && <p className="text-xs font-bold text-gray-900 mt-1">{a.vendor}</p>}
+        <p className="text-xs text-gray-700 whitespace-pre-line mt-1 break-words"><Rich text={a.summary} /></p>
+        {fields.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {fields.map(([k, v]) => (
+              <span key={k} className="text-[10px] bg-white border border-amber-200 px-1.5 py-0.5 text-gray-600">
+                {label(k)}: <Rich text={v} />
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="flex items-center gap-3 mt-2">
+          {onQuote && (a.vendor || fields.length > 0) && (
+            <button onClick={() => onQuote({ prefill: { vendor: a.vendor || '', values: a.values || {}, note: plain } })}
+              className="text-[11px] font-bold text-brand-600">+ Add as quote</button>
+          )}
+          <span className="text-[9px] text-gray-400 ml-auto">file not kept - only this summary{a.pages > 1 ? ` · ${a.pages} pages` : ''}</span>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 /** A small copy-to-clipboard icon that says "Copied" for a moment. */
@@ -284,7 +343,7 @@ function DetailsBlock({ d, onChanged }) {
 }
 
 /** A message's text; its author can edit it (the summary is re-written after) or delete it. */
-function MessageText({ m, d, mine, onChanged }) {
+function MessageText({ m, d, mine, onChanged, onQuote }) {
   const [editing, setEditing] = useState(false)
   const [text, setText] = useState(m.text)
   const [busy, setBusy] = useState(false)
@@ -314,10 +373,14 @@ function MessageText({ m, d, mine, onChanged }) {
   )
   return (
     <>
-      <p className="text-sm text-gray-800 whitespace-pre-line mt-1 break-words">{m.text}</p>
+      {m.attachment ? (
+        <AttachmentCard a={m.attachment} caption={m.text.split('📎')[0].trim()} d={d} onQuote={onQuote} />
+      ) : (
+        <p className="text-sm text-gray-800 whitespace-pre-line mt-1 break-words"><Rich text={m.text} /></p>
+      )}
       {mine && (
         <span className="flex gap-3 mt-1">
-          <button onClick={() => { setText(m.text); setEditing(true) }} className="text-[10px] text-gray-400 hover:text-brand-600">Edit</button>
+          {!m.attachment && <button onClick={() => { setText(m.text); setEditing(true) }} className="text-[10px] text-gray-400 hover:text-brand-600">Edit</button>}
           <button
             onClick={async () => { if (confirm('Delete this message?')) { await deleteDiscussionMessage(d.id, m.id).catch(() => {}); onChanged() } }}
             className="text-[10px] text-gray-300 hover:text-red-500">Delete</button>
@@ -483,7 +546,7 @@ function Chat({ d, name, onChanged, onQuote }) {
                 {m.assignees.length > 0 && (
                   <p className="text-[10px] font-bold text-brand-700 mt-0.5">→ {m.assignees.map((a) => (a.toLowerCase() === me ? 'you' : name(a))).join(', ')}</p>
                 )}
-                <MessageText m={m} d={d} mine={mine} onChanged={onChanged} />
+                <MessageText m={m} d={d} mine={mine} onChanged={onChanged} onQuote={onQuote} />
                 {m.tasks.length > 0 && (
                   <div className="mt-2 pt-1.5 border-t border-amber-100 space-y-1">
                     {m.tasks.map((t) => (
@@ -646,6 +709,19 @@ function Composer({ d, name, onSent }) {
   const [showDirect, setShowDirect] = useState(false)
   const [polling, setPolling] = useState(false)
   const [busy, setBusy] = useState('')
+  const [reading, setReading] = useState('')         // the file the AI is reading
+  const fileRef = useRef(null)
+  const attach = async (f) => {
+    if (!f) return
+    if (f.size > 12 * 1024 * 1024) { setErr('That file is over 12 MB - share a smaller one or a screenshot.'); return }
+    setReading(f.name); setBusy('attach'); setErr('')
+    try {
+      await attachDiscussionFile(d.id, f, text.trim())
+      setText(''); setOriginal(null); setSuggestion(null)
+      onSent()
+    } catch (e) { setErr(errText(e, "The AI couldn't read that file.")) }
+    finally { setBusy(''); setReading(''); if (fileRef.current) fileRef.current.value = '' }
+  }
   const [err, setErr] = useState('')
   const others = d.members.filter((m) => m.toLowerCase() !== d.me.toLowerCase())
 
@@ -718,6 +794,13 @@ function Composer({ d, name, onSent }) {
       <textarea value={text} onChange={(e) => setText(e.target.value)} rows={text.split('\n').length > 2 ? 5 : 2}
         placeholder={to.length ? `Ask ${to.map(name).join(', ')}…` : 'Write a message…'} className="input text-sm" />
       {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
+      {reading && (
+        <p className="text-[11px] text-brand-700 mt-1">
+          <span className="inline-block w-2 h-2 mr-1.5 rounded-full bg-brand-400 animate-pulse align-middle" />
+          📎 Reading {reading} with AI - this can take up to a minute. Only the summary is kept, not the file.
+        </p>
+      )}
+      <input ref={fileRef} type="file" accept="image/*,application/pdf,.pdf" className="hidden" onChange={(e) => attach(e.target.files?.[0])} />
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mt-2">
         <button onClick={() => setShowDirect((v) => !v)} className={`text-[11px] font-bold ${showDirect || to.length ? 'text-brand-600' : 'text-gray-500'}`}>
           👥 Direct / invite{to.length + emails.length ? ` (${to.length + emails.length})` : ''}
@@ -725,6 +808,10 @@ function Composer({ d, name, onSent }) {
         <button onClick={() => setPolling((v) => !v)} className={`text-[11px] font-bold ${polling ? 'text-brand-600' : 'text-gray-500'}`}>
           📊 Poll
         </button>
+        {d.ai && (
+          <button onClick={() => fileRef.current?.click()} disabled={!!busy} title="Attach a quotation, menu or brochure (photo or PDF) - the AI summarises it for everyone"
+            className="text-[11px] font-bold text-gray-500 disabled:opacity-40">📎 Attach</button>
+        )}
         {d.ai && (
           <button onClick={polish} disabled={!text.trim() || !!busy} className="text-[11px] font-bold text-gray-500 disabled:opacity-40">
             {busy === 'polish' ? 'Improving…' : '✨ Improve with AI'}
@@ -770,10 +857,10 @@ function TaskLine({ t, d, name, onChanged, onQuote, compact }) {
 // ── quotes ─────────────────────────────────────────────────────────────────
 
 function Quotes({ d, name, tasks, onChanged, quoteFor, clearQuoteFor }) {
-  const [form, setForm] = useState(quoteFor ? { task_id: quoteFor.id } : null)
+  const [form, setForm] = useState(quoteFor ? (quoteFor.prefill || { task_id: quoteFor.id }) : null)
   const [sortKey, setSortKey] = useState('')
   const [who, setWho] = useState('')
-  useEffect(() => { if (quoteFor) { setForm({ task_id: quoteFor.id }); clearQuoteFor() } }, [quoteFor])
+  useEffect(() => { if (quoteFor) { setForm(quoteFor.prefill || { task_id: quoteFor.id }); clearQuoteFor() } }, [quoteFor])
 
   const people = [...new Set(d.quotes.map((q) => q.entered_by))]
   const shown = useMemo(() => {
@@ -1097,7 +1184,7 @@ function Summary({ d, onChanged }) {
             {s.stale ? <span className="text-amber-600 font-bold">new activity since · </span> : null}{ago(s.at)} {open ? '▴' : '▾'}
           </span>
         </span>
-        <span className={`block text-xs text-gray-700 mt-1 ${open ? '' : 'line-clamp-2'}`}>{t.overview}</span>
+        <span className={`block text-xs text-gray-700 mt-1 ${open ? '' : 'line-clamp-2'}`}><Rich text={t.overview} /></span>
       </button>
       {open && (
         <div className="px-3 pb-3">
@@ -1115,7 +1202,7 @@ function Summary({ d, onChanged }) {
           {q && (
             <div className="mt-2 pt-2 border-t border-amber-100">
               <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">The quotes</p>
-              <p className="text-xs text-gray-700 mt-0.5">{q.summary}</p>
+              <p className="text-xs text-gray-700 mt-0.5"><Rich text={q.summary} /></p>
               <div className="flex flex-wrap gap-1.5 mt-1.5">
                 {q.best_value && <span className="text-[10px] font-bold bg-green-50 border border-green-200 text-green-800 px-2 py-0.5">Best value: {q.best_value}</span>}
                 {q.cheapest && <span className="text-[10px] font-bold bg-amber-50 border border-amber-200 text-gray-700 px-2 py-0.5">Cheapest: {q.cheapest}</span>}

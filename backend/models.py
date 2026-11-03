@@ -1222,6 +1222,9 @@ class DiscussionMessage(Base):
     assignees_json = Column(Text, nullable=True)
     invites_json = Column(Text, nullable=True)
     edited_at = Column(DateTime(timezone=True), nullable=True)      # its author changed the text
+    # A photo / PDF shared here, as the AI read it - {name, kind, summary,
+    # vendor, values, read_by, pages}. The file itself is never stored.
+    attachment_json = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

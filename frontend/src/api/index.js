@@ -366,3 +366,10 @@ export const addDiscussionPeople = (id, data)   => api.post(`/discussions/${id}/
 export const summariseDiscussion = (id)         => api.post(`/discussions/${id}/summary`)
 export const setDiscussionNotify = (id, notify) => api.post(`/discussions/${id}/notify`, { notify })
 export const editDiscussionMessage = (id, mid, text) => api.patch(`/discussions/${id}/messages/${mid}`, { text })
+// A photo / PDF read by the AI into a chat summary - the file itself isn't kept
+export const attachDiscussionFile = (id, file, caption = '') => {
+  const fd = new FormData()
+  fd.append('file', file)
+  if (caption) fd.append('caption', caption)
+  return api.post(`/discussions/${id}/attachments`, fd, { timeout: 180000 })
+}

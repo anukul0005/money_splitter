@@ -19,7 +19,7 @@ import secrets
 from datetime import datetime, timezone
 from html import escape
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -278,6 +278,7 @@ def get_discussion(discussion_id: int, db: Session = Depends(get_db), caller: Us
             "id": m.id, "author": m.author, "text": m.text, "polished": bool(m.original_text),
             "assignees": _loads(m.assignees_json, []), "invites": _loads(m.invites_json, []),
             "tasks": by_msg.get(m.id, []), "created_at": m.created_at, "edited_at": m.edited_at,
+            "attachment": _loads(m.attachment_json, None),
         } for m in msgs],
         "quotes": [_quote_out(q) for q in quotes],
         "invites": [{"email": i.email, "invited_by": i.invited_by, "accepted_by": i.accepted_by,
@@ -395,6 +396,39 @@ def post_message(discussion_id: int, payload: MessageIn, bg: BackgroundTasks,
     db.commit()
     bg.add_task(_notify_message, d.id, m.id, tokens)
     return {"id": m.id}
+
+
+@router.post("/{discussion_id}/attachments", response_model=dict, status_code=201)
+def attach(discussion_id: int, bg: BackgroundTasks, file: UploadFile = File(...), caption: str = Form(""),
+           db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """A photo or PDF (a quotation, menu, brochure), read by the AI into a
+    brief summary posted to the chat. Only the summary is kept - the file is
+    read in memory and dropped (attachment_reader.read)."""
+    import attachment_reader
+    d, group = _discussion(db, discussion_id, caller)
+    pending = _mandatory_pending(db, d.id, caller.name)
+    if pending:
+        raise HTTPException(409, {"code": "poll_required", "message": f"Answer the poll first: {pending[0].question}"})
+    raw = file.file.read(attachment_reader.MAX_BYTES + 1)
+    name = (file.filename or "attachment")[:120]
+    try:
+        got = attachment_reader.read(raw, name, file.content_type or "", d.title, d.description or "",
+                                     _loads(d.params_json, []))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    finally:
+        del raw
+        file.file.close()
+    caption = caption.strip()[:2000]
+    text = (f"{caption}\n\n" if caption else "") + f"📎 {name}\n{got['summary']}"
+    m = DiscussionMessage(discussion_id=d.id, author=caller.name, text=text[:5000],
+                          attachment_json=json.dumps({"name": name, **got}))
+    db.add(m)
+    _feed(db, group, caller.name, "shared a file", d, f"{name}" + (f" · {got['vendor']}" if got["vendor"] else ""))
+    _touch(d)
+    db.commit()
+    bg.add_task(_notify_message, d.id, m.id, [])
+    return {"id": m.id, "attachment": {"name": name, **got}}
 
 
 class MessageEdit(BaseModel):
