@@ -585,6 +585,22 @@ def set_my_news_alerts(payload: SetNewsAlerts, db: Session = Depends(get_db),
     return caller
 
 
+class SetShowDrinks(BaseModel):
+    enabled: bool
+
+
+@router.post("/me/show-drinks", response_model=UserMeOut)
+def set_show_drinks(payload: SetShowDrinks, db: Session = Depends(get_db),
+                    caller: User = Depends(current_user)):
+    """An admin turns the Drinks section of Recommend on or off for themselves."""
+    if not (caller.is_admin or caller.name.lower() in ADMIN_NAMES):
+        raise HTTPException(403, "Only an admin can change this")
+    caller.show_drinks = payload.enabled
+    db.commit()
+    db.refresh(caller)
+    return caller
+
+
 @router.post("/me/salary", response_model=UserMeOut)
 def set_my_salary(payload: SetSalary, db: Session = Depends(get_db),
                   caller: User = Depends(current_user)):

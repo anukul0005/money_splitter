@@ -73,6 +73,7 @@ export const setMyEmail         = (data)     => api.post('/users/me/email', data
 export const setMyBirthday      = (data)     => api.post('/users/me/birthday', data)
 export const setMyDailySummary  = (enabled)  => api.post('/users/me/daily-summary', { enabled })
 export const setMyNewsAlerts    = (sport, enabled) => api.post('/users/me/news-alerts', { sport, enabled })
+export const setShowDrinks      = (enabled)  => api.post('/users/me/show-drinks', { enabled })
 export const setMySalary        = (data)     => api.post('/users/me/salary', data)
 // multipart, not JSON - axios sets the right Content-Type + boundary on
 // its own once it sees a FormData body, so nothing is set here by hand.

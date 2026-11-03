@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   changePassword, setRecovery, getRecoveryQuestion, getMe, setMyEmail, setMyBirthday,
-  setMyDailySummary, setMyNewsAlerts, setMySalary, listMyUpiIds, addUpiId, deleteUpiId,
+  setMyDailySummary, setMyNewsAlerts, setMySalary, listMyUpiIds, addUpiId, deleteUpiId, setShowDrinks,
 } from '../api'
-import { useUser, isAdmin, hasFullAccess } from '../UserContext'
+import { useUser, isAdmin, hasFullAccess, useRefreshUser } from '../UserContext'
 import UnlockAccess from '../components/UnlockAccess'
 import FullNameCard from '../components/FullNameCard'
 import { ALL_QUESTIONS, RECOVERY_QUESTIONS, KEY_QUESTION, generateKey } from '../utils/security'
@@ -70,6 +70,16 @@ export default function Account() {
   // ── Nightly summary of yesterday's spending ──
   const [summaryOn, setSummaryOn]       = useState(false)
   const [news, setNews]                 = useState({ tennis: true, football: true, badminton: true })
+  // An admin's own Drinks section in Recommend
+  const refreshUser = useRefreshUser()
+  const [drinksOn, setDrinksOn]         = useState(user?.show_drinks !== false)
+  const [drinksErr, setDrinksErr]       = useState('')
+  const toggleDrinks = async () => {
+    const next = !drinksOn
+    setDrinksOn(next); setDrinksErr('')
+    try { await setShowDrinks(next); await refreshUser() }
+    catch (err) { setDrinksOn(!next); setDrinksErr(err.response?.data?.detail || 'Could not change that.') }
+  }
   const [newsErr, setNewsErr]           = useState('')
   const [summaryBusy, setSummaryBusy]   = useState(false)
   const [summaryError, setSummaryError] = useState('')
@@ -623,6 +633,26 @@ export default function Account() {
           </button>
           {summaryError && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2 mt-2">{summaryError}</p>}
         </div>
+
+        {/* ── Admin: the Drinks section of Recommend, on or off for themselves ── */}
+        {isAdmin(user) && (
+          <div className="card">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-bold text-gray-800">Drinks in Recommend</h2>
+                <p className="text-xs text-gray-500 leading-relaxed mt-1">
+                  {drinksOn ? 'On - Recommend shows the Drinks section.' : 'Off - Recommend shows food only.'} Admins only; it changes just your own view.
+                </p>
+              </div>
+              <button type="button" role="switch" aria-checked={drinksOn} onClick={toggleDrinks}
+                aria-label="Drinks section in Recommend"
+                className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${drinksOn ? 'bg-brand-500' : 'bg-gray-300'}`}>
+                <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${drinksOn ? 'translate-x-5' : ''}`} />
+              </button>
+            </div>
+            {drinksErr && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2 mt-2">{drinksErr}</p>}
+          </div>
+        )}
 
         {/* ── Sports news notifications ── */}
         {(
