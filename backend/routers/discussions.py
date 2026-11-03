@@ -277,7 +277,7 @@ def get_discussion(discussion_id: int, db: Session = Depends(get_db), caller: Us
         "messages": [{
             "id": m.id, "author": m.author, "text": m.text, "polished": bool(m.original_text),
             "assignees": _loads(m.assignees_json, []), "invites": _loads(m.invites_json, []),
-            "tasks": by_msg.get(m.id, []), "created_at": m.created_at,
+            "tasks": by_msg.get(m.id, []), "created_at": m.created_at, "edited_at": m.edited_at,
         } for m in msgs],
         "quotes": [_quote_out(q) for q in quotes],
         "invites": [{"email": i.email, "invited_by": i.invited_by, "accepted_by": i.accepted_by,
@@ -376,6 +376,32 @@ def post_message(discussion_id: int, payload: MessageIn, bg: BackgroundTasks,
     db.commit()
     bg.add_task(_notify_message, d.id, m.id, tokens)
     return {"id": m.id}
+
+
+class MessageEdit(BaseModel):
+    text: str
+
+
+@router.patch("/{discussion_id}/messages/{message_id}", response_model=dict)
+def edit_message(discussion_id: int, message_id: int, payload: MessageEdit, db: Session = Depends(get_db),
+                 caller: User = Depends(current_user)):
+    """Its author rewrites a message (who it was directed at stays as it was);
+    the AI summary then counts as out of date."""
+    d, _ = _discussion(db, discussion_id, caller)
+    m = db.query(DiscussionMessage).filter(DiscussionMessage.id == message_id,
+                                           DiscussionMessage.discussion_id == d.id).first()
+    if not m:
+        raise HTTPException(404, "No such message")
+    if m.author.lower() != caller.name.lower():
+        raise HTTPException(403, "Only its author can edit a message")
+    text = payload.text.strip()
+    if not text:
+        raise HTTPException(400, "A message can't be empty - delete it instead")
+    if text != m.text:
+        m.text, m.edited_at = text[:5000], _now()
+        _touch(d)
+        db.commit()
+    return {"ok": True, "edited_at": m.edited_at}
 
 
 @router.delete("/{discussion_id}/messages/{message_id}", status_code=204)

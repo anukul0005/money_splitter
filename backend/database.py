@@ -234,6 +234,7 @@ _ADDED_COLUMNS = [
     ("discussions", "summary_json", "TEXT"),
     ("discussions", "summary_basis", "TIMESTAMP WITH TIME ZONE"),
     ("discussions", "summary_at", "TIMESTAMP WITH TIME ZONE"),
+    ("discussion_messages", "edited_at", "TIMESTAMP WITH TIME ZONE"),
 ]
 
 # (index name, statement)

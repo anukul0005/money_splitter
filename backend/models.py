@@ -1221,6 +1221,7 @@ class DiscussionMessage(Base):
     original_text = Column(Text, nullable=True)
     assignees_json = Column(Text, nullable=True)
     invites_json = Column(Text, nullable=True)
+    edited_at = Column(DateTime(timezone=True), nullable=True)      # its author changed the text
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

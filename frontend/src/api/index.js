@@ -365,3 +365,4 @@ export const getDiscussionActivity = (id, scope = 'discussion') => api.get(`/dis
 export const addDiscussionPeople = (id, data)   => api.post(`/discussions/${id}/people`, data)
 export const summariseDiscussion = (id)         => api.post(`/discussions/${id}/summary`)
 export const setDiscussionNotify = (id, notify) => api.post(`/discussions/${id}/notify`, { notify })
+export const editDiscussionMessage = (id, mid, text) => api.patch(`/discussions/${id}/messages/${mid}`, { text })

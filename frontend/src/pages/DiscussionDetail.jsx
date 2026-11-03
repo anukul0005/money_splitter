@@ -4,7 +4,7 @@ import {
   getDiscussion, postDiscussionMessage, deleteDiscussionMessage, setDiscussionTask, addDiscussionQuote,
   editDiscussionQuote, deleteDiscussionQuote, acceptDiscussionInvite, polishMessage, editDiscussion,
   deleteDiscussion, suggestQuoteFields, createDiscussionPoll, voteDiscussionPoll, setDiscussionPollState,
-  deleteDiscussionPoll, getDiscussionActivity, addDiscussionPeople, summariseDiscussion, setDiscussionNotify,
+  deleteDiscussionPoll, getDiscussionActivity, addDiscussionPeople, summariseDiscussion, setDiscussionNotify, editDiscussionMessage,
 } from '../api/index.js'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PeoplePicker from '../components/PeoplePicker'
@@ -12,6 +12,7 @@ import { dn } from '../utils/displayName'
 import { ago } from './Discussions'
 
 const POLL_MS = 15000
+const NL = String.fromCharCode(10)
 const EMAIL = /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i
 // Fields where the lowest figure is the best one, marked in the comparison.
 const PRICE = /price|cost|rate|₹|\brs\b|fee|charge|budget|rent|tariff|amount|total/i
@@ -170,7 +171,7 @@ function Header({ d, name, onChanged, onDeleted }) {
         {d.invites.some((i) => !i.accepted_by) && <> · {d.invites.filter((i) => !i.accepted_by).length} invited by email</>}
       </p>
       {adding && <AddPeople d={d} onDone={() => { setAdding(false); onChanged() }} />}
-      {d.description && <p className="text-slate-200/80 text-xs mt-2 whitespace-pre-line">{d.description}</p>}
+      <DetailsBlock d={d} onChanged={onChanged} />
       {d.ai && <Summary d={d} onChanged={onChanged} />}
       {!editing && d.params.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-2">
@@ -226,6 +227,103 @@ function NotifyBell({ d, onChanged }) {
         </>
       )}
     </span>
+  )
+}
+
+/** Re-run the AI summary once something it was written from has changed. */
+async function resummarise(d) {
+  if (!d.ai) return
+  try { await summariseDiscussion(d.id) } catch { /* the card says it's out of date; Refresh retries */ }
+}
+
+/**
+ * The details, editable right where they're read; saving them re-writes the
+ * AI summary from the new text.
+ */
+function DetailsBlock({ d, onChanged }) {
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState(d.description || '')
+  const [busy, setBusy] = useState('')
+  const [err, setErr] = useState('')
+  const save = async () => {
+    if (!text.trim()) { setErr("The details can't be empty."); return }
+    setErr(''); setBusy('save')
+    try {
+      await editDiscussion(d.id, { description: text })
+      setEditing(false)
+      setBusy('summary')
+      await resummarise(d)
+      await onChanged()
+    } catch (e) { setErr(errText(e, "Couldn't save the details.")) }
+    finally { setBusy('') }
+  }
+  if (!editing) return (
+    <div className="mt-2">
+      {d.description && <p className="text-slate-200/80 text-xs whitespace-pre-line">{d.description}</p>}
+      <span className="flex items-center gap-3 mt-1">
+        <button onClick={() => { setText(d.description || ''); setEditing(true) }} className="text-[10px] font-bold text-brand-300 hover:text-white">✎ Edit details</button>
+        {d.description && <CopyButton text={d.description} className="!text-slate-400 hover:!text-white" />}
+        {busy === 'summary' && <span className="text-[10px] text-slate-300/70">✨ Re-summarising…</span>}
+      </span>
+    </div>
+  )
+  return (
+    <div className="mt-2 bg-white text-gray-800 px-3 py-2.5">
+      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Details</p>
+      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={Math.min(10, Math.max(3, text.split(NL).length + 1))}
+        className="input text-xs mt-1" autoFocus placeholder="Date, guests, budget, area, must-haves…" />
+      {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
+      <div className="flex items-center gap-3 mt-2">
+        <button onClick={save} disabled={!!busy || !text.trim()} className="btn-primary text-xs py-1.5 px-4 disabled:opacity-50">
+          {busy ? 'Saving…' : d.ai ? 'Save & re-summarise' : 'Save'}
+        </button>
+        <button onClick={() => { setEditing(false); setErr('') }} className="text-xs font-bold text-gray-500">Cancel</button>
+      </div>
+    </div>
+  )
+}
+
+/** A message's text; its author can edit it (the summary is re-written after) or delete it. */
+function MessageText({ m, d, mine, onChanged }) {
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState(m.text)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const save = async () => {
+    setBusy(true); setErr('')
+    try {
+      await editDiscussionMessage(d.id, m.id, text)
+      setEditing(false)
+      if (d.summary) await resummarise(d)     // keep an existing summary in step
+      await onChanged()
+    } catch (e) { setErr(errText(e, "Couldn't save it.")) }
+    finally { setBusy(false) }
+  }
+  if (editing) return (
+    <div className="mt-1">
+      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={Math.min(10, Math.max(2, text.split(NL).length + 1))}
+        className="input text-sm" autoFocus />
+      {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
+      <div className="flex gap-3 mt-1.5">
+        <button onClick={save} disabled={busy || !text.trim()} className="text-[11px] font-bold text-brand-600 disabled:opacity-50">
+          {busy ? (d.summary ? 'Saving & re-summarising…' : 'Saving…') : 'Save'}
+        </button>
+        <button onClick={() => { setEditing(false); setText(m.text); setErr('') }} className="text-[11px] font-bold text-gray-500">Cancel</button>
+      </div>
+    </div>
+  )
+  return (
+    <>
+      <p className="text-sm text-gray-800 whitespace-pre-line mt-1 break-words">{m.text}</p>
+      {mine && (
+        <span className="flex gap-3 mt-1">
+          <button onClick={() => { setText(m.text); setEditing(true) }} className="text-[10px] text-gray-400 hover:text-brand-600">Edit</button>
+          <button
+            onClick={async () => { if (confirm('Delete this message?')) { await deleteDiscussionMessage(d.id, m.id).catch(() => {}); onChanged() } }}
+            className="text-[10px] text-gray-300 hover:text-red-500">Delete</button>
+        </span>
+      )}
+    </>
   )
 }
 
@@ -350,14 +448,14 @@ function Chat({ d, name, onChanged, onQuote }) {
                 <div className="flex items-baseline justify-between gap-3">
                   <span className="text-[11px] font-black text-gray-700">{mine ? 'You' : name(m.author)}</span>
                   <span className="flex items-center gap-2">
-                    <span className="text-[10px] text-gray-400">{ago(m.created_at)}{m.polished ? ' · ✨' : ''}</span>
+                    <span className="text-[10px] text-gray-400">{ago(m.created_at)}{m.polished ? ' · ✨' : ''}{m.edited_at ? ' · edited' : ''}</span>
                     <CopyButton text={m.text} />
                   </span>
                 </div>
                 {m.assignees.length > 0 && (
                   <p className="text-[10px] font-bold text-brand-700 mt-0.5">→ {m.assignees.map((a) => (a.toLowerCase() === me ? 'you' : name(a))).join(', ')}</p>
                 )}
-                <p className="text-sm text-gray-800 whitespace-pre-line mt-1 break-words">{m.text}</p>
+                <MessageText m={m} d={d} mine={mine} onChanged={onChanged} />
                 {m.tasks.length > 0 && (
                   <div className="mt-2 pt-1.5 border-t border-amber-100 space-y-1">
                     {m.tasks.map((t) => (
@@ -368,11 +466,7 @@ function Chat({ d, name, onChanged, onQuote }) {
                 {m.invites.length > 0 && (
                   <p className="text-[10px] text-gray-400 mt-1.5">✉ Invited {m.invites.join(', ')}</p>
                 )}
-                {mine && (
-                  <button
-                    onClick={async () => { if (confirm('Delete this message?')) { await deleteDiscussionMessage(d.id, m.id).catch(() => {}); onChanged() } }}
-                    className="text-[10px] text-gray-300 hover:text-red-500 mt-1">Delete</button>
-                )}
+
               </div>
             </div>
           )
@@ -549,7 +643,7 @@ function Composer({ d, name, onSent }) {
   }
 
   return (
-    <div className="sticky bottom-16 md:bottom-0 bg-cream border-t border-amber-200 px-4 py-3 max-w-2xl w-full">
+    <div className="sticky bottom-0 z-20 bg-cream border-t border-amber-200 px-4 py-3 max-w-2xl w-full shadow-[0_-4px_12px_rgba(0,0,0,0.04)]">
       {polling && <PollForm d={d} onCancel={() => setPolling(false)} onDone={() => { setPolling(false); onSent() }} />}
       {suggestion && (
         <div className="mb-2 bg-white border border-brand-200 px-3 py-2">
