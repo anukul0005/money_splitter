@@ -143,9 +143,6 @@ export default function Login({ onLogin }) {
             <h1 className="text-3xl font-bold text-brand-400 tracking-tight">Settle</h1>
           </div>
 
-          <p className="text-2xl font-black text-slate-100/80 leading-tight mb-3">
-            Split expenses.<br />Stay friends.
-          </p>
           <p className="text-sm text-slate-300/40 font-semibold mb-10 leading-relaxed">
             The simplest way to track shared expenses<br />and settle up with your group.
           </p>
@@ -166,13 +163,10 @@ export default function Login({ onLogin }) {
 
         {/* Mobile logo */}
         <div className="md:hidden mb-8 text-center">
-          <div className="flex items-center justify-center gap-2.5 mb-2">
+          <div className="flex items-center justify-center gap-2.5">
             <img src="/icon-192.png" alt="" className="w-9 h-9" />
             <h1 className="text-3xl font-bold text-brand-400 tracking-tight">Settle</h1>
           </div>
-          <p className="text-slate-300/35 text-[10px] font-bold tracking-widest uppercase">
-            Split expenses, stay friends
-          </p>
         </div>
 
         {/* Auth card */}
