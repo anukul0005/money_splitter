@@ -150,7 +150,8 @@ def geocode(place: str) -> dict | None:
         if wait > 0:
             time.sleep(wait)
         try:
-            q = urllib.parse.urlencode({"q": place if "india" in k else f"{place}, India", "format": "json", "limit": 1})
+            # As named - the trip can be anywhere ("Edinburgh", "Jaisalmer" both resolve)
+            q = urllib.parse.urlencode({"q": place, "format": "json", "limit": 1})
             rows = _get_json(f"https://nominatim.openstreetmap.org/search?{q}")
             hit = {"name": place, "lat": float(rows[0]["lat"]), "lon": float(rows[0]["lon"]),
                    "label": rows[0]["display_name"]} if rows else None
@@ -183,7 +184,7 @@ def weather(place: dict, start: date, end: date) -> dict | None:
     daily = "temperature_2m_max,temperature_2m_min"
     if start <= today + timedelta(days=15) and end >= today:
         url = (f"https://api.open-meteo.com/v1/forecast?latitude={place['lat']}&longitude={place['lon']}"
-               f"&daily={daily},precipitation_probability_max&timezone=Asia%2FKolkata"
+               f"&daily={daily},precipitation_probability_max&timezone=auto"
                f"&start_date={max(start, today)}&end_date={min(end, today + timedelta(days=15))}")
         kind = "forecast"
     else:
@@ -192,7 +193,7 @@ def weather(place: dict, start: date, end: date) -> dict | None:
         except ValueError:                                  # 29 Feb
             s, e = start - timedelta(days=365), end - timedelta(days=365)
         url = (f"https://archive-api.open-meteo.com/v1/archive?latitude={place['lat']}&longitude={place['lon']}"
-               f"&daily={daily},precipitation_sum&timezone=Asia%2FKolkata&start_date={s}&end_date={e}")
+               f"&daily={daily},precipitation_sum&timezone=auto&start_date={s}&end_date={e}")
         kind = "last_year"
     try:
         d = _get_json(url)["daily"]
@@ -279,6 +280,53 @@ def web_search(query: str) -> list[dict]:
              "checked": checked} for r in d.get("results", []) if r.get("url")]
 
 
+_fx_cache: dict[tuple[str, str], float] = {}
+
+
+def inr_rate(code: str) -> float | None:
+    """Rupees for one unit of `code`, today: Frankfurter (ECB rates), else
+    open.er-api.com - both free, no key. Cached for the day."""
+    code = code.upper()
+    if code == "INR":
+        return 1.0
+    key = (code, datetime.now(IST).date().isoformat())
+    if key in _fx_cache:
+        return _fx_cache[key]
+    rate = None
+    for url, pick in ((f"https://api.frankfurter.dev/v1/latest?base={code}&symbols=INR", lambda d: d["rates"]["INR"]),
+                      (f"https://open.er-api.com/v6/latest/{code}", lambda d: d["rates"]["INR"])):
+        try:
+            rate = float(pick(_get_json(url)))
+            break
+        except Exception as e:
+            print(f"[trip] rate {code}: {url.split('/')[2]} {e!r}")
+    if rate:
+        _fx_cache[key] = rate
+    return rate
+
+
+def to_rupees(plan: dict) -> dict:
+    """Every item's cost into rupees at today's rate - the AI writes prices in
+    the currency they're in and never converts. Records the rates used."""
+    rates: dict[str, float] = {}
+    for d in plan["days"]:
+        for it in d["items"]:
+            cur = it.get("currency") or "INR"
+            if cur == "INR" or not it["cost"]:
+                it["currency"] = "INR"
+                continue
+            if cur not in rates:
+                rates[cur] = inr_rate(cur)
+            if rates[cur]:
+                it["cost_local"] = it["cost_local"] if it.get("cost_local") is not None else it["cost"]
+                it["cost"] = round(it["cost_local"] * rates[cur])
+            else:                                   # no rate: keep the figure, but say it isn't in rupees
+                it["basis"] = f"{it['basis']} (in {cur} - no exchange rate today)".strip()
+    plan["fx"] = {c: round(r, 2) for c, r in rates.items() if r}
+    plan["fx_date"] = datetime.now(IST).date().isoformat() if plan["fx"] else None
+    return plan
+
+
 def _trip_month(spec: dict) -> str:
     """"December 2026" - the trip's month (its start), else this month."""
     d = _date(spec.get("start_date")) or datetime.now(IST).date()
@@ -299,7 +347,8 @@ def fix_query_dates(q: str, when: str) -> str:
 
 # ── the prompts ────────────────────────────────────────────────────────────
 
-_SPEC = """You turn a group trip request (from India) into a trip spec for a planner. Today is {today}.
+_SPEC = """You turn a group trip request (the group lives in India; the trip can be anywhere in the world) into a trip
+spec for a planner. Today is {today}. Budgets are in rupees.
 Respond with ONLY a JSON object:
 {{"origin": "city the group starts from ('' if not said)",
   "destinations": ["places to visit, in visiting order"],
@@ -313,7 +362,8 @@ group size given below. Amounts in rupees as numbers ("12k" = 12000, "1.2 lakh" 
 in budget_per_person, a whole-trip one in budget_total. rooms only when the request says. Never invent places
 the request doesn't name, except when it asks for suggestions."""
 
-_SEARCHES = """You pick web searches for a trip planner in India: at most {n}, short Google-style queries for
+_SEARCHES = """You pick web searches for a trip planner (the group lives in India; the trip can be anywhere): at most {n},
+short Google-style queries for
 what most changes the cost and the plan - fares between the origin and each place and between places (train, bus,
 flight - match the transport preference), hotel or guest-house prices per night in each place (match the stay
 preference and budget), entry fees of the main sights, and the paid activities the interests name (e.g. desert
@@ -321,10 +371,14 @@ safari or camp prices). Today is {today}. The trip is in {when}: put "{when}" in
 never any other month or year. Respond with ONLY JSON:
 {{"searches": [{{"q": "...", "for": "transport|stay|activity|food|local"}}]}}"""
 
-_PLAN = """You are Settle's trip planner. Write a realistic day-by-day plan for this group trip in India from the
-facts and numbered sources given.
+_PLAN = """You are Settle's trip planner. Write a realistic day-by-day plan for this group trip (the group lives in
+India; the trip can be anywhere) from the facts and numbered sources given.
 Rules:
-- Every item that costs money has `cost` (rupees, a number) and `per`: "person" (each person pays it - a train
+- Every item that costs money has `cost` (a number) in `currency` (ISO code: "INR", "GBP", "EUR", "USD", "THB"...)
+  - the currency the price is actually in: a source's price exactly as the source states it, an estimate in the
+  local currency of where it's paid. NEVER convert between currencies yourself - the app converts at today's rate.
+  Flights or trains booked from India are usually in INR.
+- Every costed item has `per`: "person" (each person pays it - a train
   ticket, an entry fee, a meal), "group" (one cost shared by all - a hired cab, a guide) or "room" (per room per
   night - stays only, one stay item per night, using the room count given).
 - `source` is "found" ONLY when the price is taken from a given source: list them in `source_ids` (e.g. ["S3"])
@@ -345,7 +399,7 @@ Rules:
 Respond with ONLY JSON:
 {"title": "...", "summary": "2-3 sentences", "days": [{"day": 1, "date": "YYYY-MM-DD", "city": "...",
   "title": "...", "items": [{"time": "07:30", "title": "...", "detail": "...",
-  "category": "transport|stay|food|activity|local|other", "cost": 0, "per": "person|group|room",
+  "category": "transport|stay|food|activity|local|other", "cost": 0, "currency": "INR", "per": "person|group|room",
   "source": "found|estimate", "source_ids": [], "basis": "..."}]}],
  "tips": ["..."], "assumptions": ["..."]}"""
 
@@ -394,6 +448,12 @@ def normalise_spec(raw: dict, members: int) -> dict:
     return spec
 
 
+# A currency written as a word or a sign instead of its code
+_CURRENCY_WORDS = {"RUPEE": "INR", "RS": "INR", "₹": "INR", "POUND": "GBP", "£": "GBP", "STERLING": "GBP",
+                   "EURO": "EUR", "€": "EUR", "DOLLAR": "USD", "$": "USD", "US$": "USD", "BAHT": "THB", "YEN": "JPY",
+                   "¥": "JPY", "DIRHAM": "AED", "RINGGIT": "MYR", "DONG": "VND", "FRANC": "CHF"}
+
+
 def clean_plan(raw: dict, sources: dict[str, dict], spec: dict) -> dict:
     days = []
     raw_days = raw.get("days") if isinstance(raw.get("days"), list) else []
@@ -405,8 +465,12 @@ def clean_plan(raw: dict, sources: dict[str, dict], spec: dict) -> dict:
             cat = it.get("category") if it.get("category") in CATEGORIES else "other"
             ids = [s for s in (it.get("source_ids") or []) if isinstance(s, str) and s in sources]
             found = it.get("source") == "found" and bool(ids) and cost > 0
+            cur = str(it.get("currency") or "INR").strip().upper()
+            cur = _CURRENCY_WORDS.get(cur.rstrip("S"), cur)
+            cur = cur if re.fullmatch(r"[A-Z]{3}", cur) else "INR"
             items.append({"time": str(it.get("time") or "")[:10], "title": str(it.get("title") or "")[:140],
-                          "detail": str(it.get("detail") or "")[:400], "category": cat, "cost": round(cost),
+                          "detail": str(it.get("detail") or "")[:400], "category": cat,
+                          "cost": round(cost) if cur == "INR" else round(cost, 2), "currency": cur,
                           "per": per, "source": "found" if found else "estimate",
                           "source_ids": ids if found else [], "basis": str(it.get("basis") or "")[:200]})
         days.append({"day": len(days) + 1, "date": str(d.get("date") or "")[:10], "city": str(d.get("city") or "")[:80],
@@ -488,8 +552,8 @@ def _run(plan_id: int) -> None:
 
         facts = _facts(spec, research)
         if parent and parent.plan_json:
-            facts += f"\n\nThe current plan (revise it - change what's asked, keep the rest):\n{parent.plan_json[:12000]}" \
-                     f"\n\nChange asked for: {plan.prompt}"
+            facts += f"\n\nThe current plan (revise it - change what's asked, keep the rest):\n" \
+                     f"{for_ai(json.loads(parent.plan_json))}\n\nChange asked for: {plan.prompt}"
         result, money = write_plan(spec, research, facts, step)
         plan.plan_json, plan.budget_json = json.dumps(result), json.dumps(money)
         plan.status, plan.finished_at = "done", datetime.now(timezone.utc)
@@ -512,6 +576,14 @@ def _run(plan_id: int) -> None:
         db.close()
 
 
+def for_ai(plan: dict) -> str:
+    """A plan handed back to the AI: each price in the currency it was written
+    in (the rupee figures are the app's conversion), so the AI never mixes them."""
+    days = [{**d, "items": [{k: v for k, v in {**it, "cost": it.get("cost_local", it["cost"])}.items()
+                             if k not in ("cost_local", "per_person")} for it in d["items"]]} for d in plan["days"]]
+    return json.dumps({k: v for k, v in {**plan, "days": days}.items() if k not in ("fx", "fx_date")})[:12000]
+
+
 def gaps(plan: dict, spec: dict) -> list[str]:
     """What a plan leaves out that the trip needs: days, the way home."""
     missing = []
@@ -531,14 +603,14 @@ def write_plan(spec: dict, research: dict, facts: str, step) -> tuple[dict, dict
     way home out, then brought within the budget if it's over - each fix one
     more round with the AI, kept only when it's better."""
     sources = {s["id"]: s for s in research["sources"]}
+    write = lambda prompt: to_rupees(clean_plan(_llm(_PLAN, prompt), sources, spec))
     step("Writing the day-by-day plan")
-    result = clean_plan(_llm(_PLAN, facts), sources, spec)
+    result = write(facts)
 
     missing = gaps(result, spec)
     if missing and result["days"]:
         step("Filling in what the plan left out")
-        fuller = clean_plan(_llm(_PLAN, facts + f"\n\n{' '.join(missing)} Return the WHOLE plan, every day:\n"
-                                 f"{json.dumps(result)[:12000]}"), sources, spec)
+        fuller = write(facts + f"\n\n{' '.join(missing)} Return the WHOLE plan, every day:\n{for_ai(result)}")
         if len(fuller["days"]) >= len(result["days"]) and len(gaps(fuller, spec)) < len(missing):
             result = fuller
     if not result["days"]:
@@ -549,8 +621,8 @@ def write_plan(spec: dict, research: dict, facts: str, step) -> tuple[dict, dict
         step(f"₹{money['per_person']:,} a person is ₹{money['over_by']:,} over the budget - finding cheaper options")
         retry = facts + (f"\n\nYour plan below costs Rs {money['per_person']} per person, Rs {money['over_by']} over "
                          f"the Rs {spec['budget_per_person']} budget. Rework it to fit (cheaper transport, stays, "
-                         f"activities) without leaving any cost, day or the way home out:\n{json.dumps(result)[:12000]}")
-        cheaper = clean_plan(_llm(_PLAN, retry), sources, spec)
+                         f"activities) without leaving any cost, day or the way home out:\n{for_ai(result)}")
+        cheaper = write(retry)
         cheaper_money = work_out_budget(cheaper, spec)
         if len(cheaper["days"]) >= len(result["days"]) and cheaper_money["per_person"] < money["per_person"] \
                 and len(gaps(cheaper, spec)) <= len(gaps(result, spec)):

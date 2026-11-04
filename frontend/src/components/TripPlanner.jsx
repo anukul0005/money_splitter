@@ -10,6 +10,12 @@ import { listTripPlans, createTripPlan, getTripPlan, deleteTripPlan } from '../a
  */
 const POLL_MS = 2500
 const INR = (n) => `₹${Math.round(n || 0).toLocaleString('en-IN')}`
+// A price in the currency it was found in - "£24", "€8.50", "THB 350"
+function money(n, cur) {
+  try {
+    return new Intl.NumberFormat('en-IN', { style: 'currency', currency: cur, maximumFractionDigits: n % 1 ? 2 : 0 }).format(n)
+  } catch { return `${cur} ${n}` }
+}
 const CAT = { transport: 'Getting there & between', stay: 'Stays', food: 'Food', activity: 'Sights & activities', local: 'Local transport', other: 'Other' }
 const PER = { person: 'each', group: 'for the group', room: 'a room' }
 const EXAMPLE = 'Plan a 4-day Jodhpur and Jaisalmer trip for 5 friends from Delhi, 20–24 December. Under ₹12,000 per person, with transport, stays, sightseeing, food and activities.'
@@ -263,6 +269,12 @@ function PlanView({ p, me, name, onRevise, onRetry, onDelete, busy }) {
           ))}
         </div>
         <p className="text-[10px] text-gray-400 mt-2">
+          {plan.fx && Object.keys(plan.fx).length > 0 && (
+            <span className="block text-gray-500 mb-0.5">
+              Prices abroad converted at {Object.entries(plan.fx).map(([c, r]) => `${money(1, c)} = ₹${r}`).join(', ')}
+              {plan.fx_date ? ` (rate of ${day(plan.fx_date, { day: 'numeric', month: 'short' })})` : ''}.
+            </span>
+          )}
           Amounts are per person, with the total for all {b.travellers} under each. {b.found_share}% of this cost comes from a source; the rest are estimates. Totals are added up by the app, not the AI. Stays are shared {b.rooms} room{b.rooms > 1 ? 's' : ''}.
         </p>
       </div>
@@ -318,6 +330,9 @@ function PlanView({ p, me, name, onRevise, onRetry, onDelete, busy }) {
                     {it.cost > 0 ? (
                       <>
                         <p className="text-xs font-black text-gray-900 tabular-nums">{INR(it.cost)}</p>
+                        {it.currency && it.currency !== 'INR' && it.cost_local != null && (
+                          <p className="text-[10px] font-bold text-gray-600 tabular-nums">{money(it.cost_local, it.currency)}</p>
+                        )}
                         <p className="text-[9px] text-gray-400">{PER[it.per]}{it.per !== 'person' ? ` · ${INR(it.per_person)} each` : ''}</p>
                       </>
                     ) : <p className="text-[10px] text-gray-400">free</p>}
