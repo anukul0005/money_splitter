@@ -235,7 +235,7 @@ function PlanView({ p, me, name, onRevise, onRetry, onDelete, busy }) {
           <div>
             <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">Per person</p>
             <p className="text-2xl font-black text-gray-900 tabular-nums">{INR(b.per_person)}</p>
-            <p className="text-[11px] text-gray-500">Group total {INR(b.group_total)}</p>
+            <p className="text-[11px] text-gray-500">Group total {INR(b.group_total)} · for {b.travellers} {b.travellers === 1 ? 'person' : 'people'}</p>
           </div>
           {b.budget_per_person && (
             <p className={`text-[11px] font-bold text-right ${b.over_by ? 'text-red-600' : 'text-green-700'}`}>
@@ -255,12 +255,15 @@ function PlanView({ p, me, name, onRevise, onRetry, onDelete, busy }) {
             <div key={c} className="flex items-center gap-2 text-[11px]">
               <span className="w-32 shrink-0 text-gray-600">{CAT[c] || c}</span>
               <span className="flex-1 h-1.5 bg-gray-100"><span className="block h-full bg-brand-400" style={{ width: `${(100 * v) / top}%` }} /></span>
-              <span className="w-16 text-right font-bold tabular-nums text-gray-800">{INR(v)}</span>
+              <span className="w-20 text-right shrink-0">
+                <span className="block font-bold tabular-nums text-gray-800">{INR(v)}</span>
+                {b.travellers > 1 && <span className="block text-[9px] text-gray-400 tabular-nums">{INR(v * b.travellers)} for {b.travellers}</span>}
+              </span>
             </div>
           ))}
         </div>
         <p className="text-[10px] text-gray-400 mt-2">
-          {b.found_share}% of this cost comes from a source; the rest are estimates. Totals are added up by the app, not the AI. Stays are shared {b.rooms} room{b.rooms > 1 ? 's' : ''}.
+          Amounts are per person, with the total for all {b.travellers} under each. {b.found_share}% of this cost comes from a source; the rest are estimates. Totals are added up by the app, not the AI. Stays are shared {b.rooms} room{b.rooms > 1 ? 's' : ''}.
         </p>
       </div>
 
