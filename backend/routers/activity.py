@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from auth import current_user
@@ -20,6 +21,12 @@ def _visible_group_ids(name: str, db: Session) -> list[int]:
         .all()
     )
     return [r[0] for r in rows]
+
+
+# Discussions' milestones (routers/discussions._feed, "💬 <title>") stay in
+# the group's record - a discussion's Activity tab shows them - but not in this
+# feed or its badge: each discussion has its own notifications and activity.
+_NOT_DISCUSSIONS = or_(Activity.summary.is_(None), ~Activity.summary.like("💬 %"))
 
 
 def _last_seen(name: str, db: Session):
@@ -57,7 +64,7 @@ def list_activity(limit: int = 40, db: Session = Depends(get_db),
     last_seen = _last_seen(name, db)
     rows = (
         db.query(Activity)
-        .filter(Activity.group_id.in_(group_ids))
+        .filter(Activity.group_id.in_(group_ids), _NOT_DISCUSSIONS)
         .order_by(Activity.created_at.desc(), Activity.id.desc())
         .limit(max(1, min(limit, 100)))
         .all()
@@ -79,7 +86,7 @@ def unread_count(db: Session = Depends(get_db), caller: User = Depends(current_u
         return {"count": 0}
 
     last_seen = _last_seen(name, db)
-    q = db.query(Activity).filter(Activity.group_id.in_(group_ids))
+    q = db.query(Activity).filter(Activity.group_id.in_(group_ids), _NOT_DISCUSSIONS)
     if last_seen is not None:
         q = q.filter(Activity.created_at > last_seen)
     return {"count": q.count()}

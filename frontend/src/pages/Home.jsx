@@ -281,7 +281,7 @@ export default function Home() {
           <span className="text-2xl leading-none">💬</span>
           <span className="flex-1 min-w-0">
             <span className="block text-sm font-bold text-gray-900">Discussions</span>
-            <span className="block text-[10px] text-gray-500 leading-snug">Plan with your group - ask members to enquire, invite by email, compare quotes</span>
+            <span className="block text-[10px] text-gray-500 leading-snug">Plan together and compare quotes</span>
           </span>
           <span className="text-brand-500 text-lg font-bold">›</span>
         </button>
