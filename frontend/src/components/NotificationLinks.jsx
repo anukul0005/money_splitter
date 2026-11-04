@@ -9,10 +9,14 @@ import { useNavigate } from 'react-router-dom'
  * app: an iPhone home-screen app may open on its usual page (then
  * RememberPage takes it to the last page seen), and iPhone may stop the
  * worker before the app is up. Signed out, it waits here until after login.
+ * And while the app is on screen it looks every second: a tap with the app
+ * already open neither starts it nor brings it back, and iPhone doesn't
+ * always deliver the worker's message to it.
  */
 const TAP_CACHE = 'settle-notification-tap'
 const TAP_KEY = '/__notification-tap'
 const FRESH_MS = 2 * 60 * 1000             // an older tap isn't what's being opened now
+const LOOK_MS = 1000                       // while on screen - a local lookup, no network
 
 async function takeTap() {
   if (!('caches' in window)) return null
@@ -44,8 +48,12 @@ export default function NotificationLinks() {
     sw?.startMessages?.()
     document.addEventListener('visibilitychange', check)
     window.addEventListener('focus', check)
+    window.addEventListener('pageshow', check)
+    const timer = setInterval(check, LOOK_MS)
     check()
     return () => {
+      clearInterval(timer)
+      window.removeEventListener('pageshow', check)
       sw?.removeEventListener('message', onMessage)
       document.removeEventListener('visibilitychange', check)
       window.removeEventListener('focus', check)
