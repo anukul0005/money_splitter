@@ -59,37 +59,78 @@ def _post_json(url: str, body: dict, headers: dict, timeout: int = 60) -> dict:
         return json.loads(r.read().decode())
 
 
-def _llm(system: str, user: str, max_tokens: int = 8000) -> dict:
-    """One JSON answer: Gemini first (long prompts, generous free tier), then
-    the Groq / OpenRouter keys (ai_text)."""
-    from attachment_reader import GEMINI_MODELS, GEMINI_URL
+def _gemini_one(model: str, system: str, user: str, max_tokens: int) -> dict:
+    from attachment_reader import GEMINI_URL
     from database import get_settings
-    key = get_settings().gemini_api_key
+    body = {"model": model, "temperature": 0.3, "max_tokens": max_tokens,
+            "response_format": {"type": "json_object"}, "reasoning_effort": "low",
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+    for attempt in range(2):
+        try:
+            d = _post_json(GEMINI_URL, body, {"Authorization": f"Bearer {get_settings().gemini_api_key}"}, timeout=120)
+        except urllib.error.HTTPError as e:
+            if e.code == 400 and attempt == 0:                # a model that won't take reasoning_effort
+                body.pop("reasoning_effort", None)
+                continue
+            raise
+        text = d["choices"][0]["message"]["content"]
+        m = re.search(r"\{.*\}", text, re.S)
+        out = json.loads(m.group(0) if m else text)
+        if not isinstance(out, dict):
+            raise ValueError("not an object")
+        return out
+    raise RuntimeError("no answer")
+
+
+def _gemini(system: str, user: str, max_tokens: int) -> dict:
+    """The first two models asked at once - whichever answers first wins (one
+    of them is often slow) - then the rest in turn."""
+    from attachment_reader import GEMINI_MODELS
+    from concurrent.futures import FIRST_COMPLETED, wait
+    from database import get_settings
+    if not get_settings().gemini_api_key:
+        raise RuntimeError("no Gemini key")
     last: Exception | None = None
-    if key:
-        for model in GEMINI_MODELS:
-            try:
-                d = _post_json(GEMINI_URL, {
-                    "model": model, "temperature": 0.3, "max_tokens": max_tokens,
-                    "response_format": {"type": "json_object"},
-                    "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-                }, {"Authorization": f"Bearer {key}"}, timeout=120)
-                text = d["choices"][0]["message"]["content"]
-                m = re.search(r"\{.*\}", text, re.S)
-                out = json.loads(m.group(0) if m else text)
-                if isinstance(out, dict):
-                    return out
-            except urllib.error.HTTPError as e:
-                last = e
-                if e.code in (401, 403):
-                    break
-            except Exception as e:
-                last = e
+    pool = ThreadPoolExecutor(max_workers=2)
+    pending = {pool.submit(_gemini_one, m, system, user, max_tokens) for m in GEMINI_MODELS[:2]}
     try:
-        import ai_text
-        return ai_text.chat_json(system, user[:24000], temperature=0.3)
-    except Exception as e:
-        raise RuntimeError(f"The AI couldn't be reached ({type(last or e).__name__})") from e
+        while pending:
+            done, pending = wait(pending, return_when=FIRST_COMPLETED)
+            for f in done:
+                try:
+                    return f.result()
+                except Exception as e:
+                    last = e
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+    for model in GEMINI_MODELS[2:]:
+        try:
+            return _gemini_one(model, system, user, max_tokens)
+        except urllib.error.HTTPError as e:
+            last = e
+            if e.code in (401, 403):
+                break
+        except Exception as e:
+            last = e
+    raise last or RuntimeError("Gemini didn't answer")
+
+
+def _llm(system: str, user: str, max_tokens: int = 12000, quick: bool = False) -> dict:
+    """One JSON answer. `quick` (a short job - reading the request, picking
+    searches): Groq first, it answers in seconds; else Gemini first, for the
+    long plan-writing prompt. Each falls back to the other."""
+    import ai_text
+    tries = [lambda: ai_text.chat_json(system, user[:24000], temperature=0.3),
+             lambda: _gemini(system, user, max_tokens)]
+    if not quick:
+        tries.reverse()
+    last: Exception | None = None
+    for t in tries:
+        try:
+            return t()
+        except Exception as e:
+            last = e
+    raise RuntimeError(f"The AI couldn't be reached ({type(last).__name__})") from last
 
 
 # ── the tools ──────────────────────────────────────────────────────────────
@@ -399,7 +440,7 @@ def _run(plan_id: int) -> None:
                   "Return the whole updated spec - change only what's asked."
         else:
             ask = f"{context}\n\nRequest:\n{plan.prompt}"
-        spec = normalise_spec(_llm(_SPEC.format(today=today.isoformat()), ask, 1500), len(members))
+        spec = normalise_spec(_llm(_SPEC.format(today=today.isoformat()), ask, 1500, quick=True), len(members))
         if not spec["destinations"]:
             raise ValueError("Say which places the trip is to - e.g. \"Jodhpur and Jaisalmer\".")
         plan.spec_json = json.dumps(spec)
@@ -415,27 +456,11 @@ def _run(plan_id: int) -> None:
         plan.research_json = json.dumps(research)
         db.commit()
 
-        step("Writing the day-by-day plan")
         facts = _facts(spec, research)
         if parent and parent.plan_json:
             facts += f"\n\nThe current plan (revise it - change what's asked, keep the rest):\n{parent.plan_json[:12000]}" \
                      f"\n\nChange asked for: {plan.prompt}"
-        sources = {s["id"]: s for s in research["sources"]}
-        result = clean_plan(_llm(_PLAN, facts), sources, spec)
-        money = work_out_budget(result, spec)
-
-        if money["over_by"] > 0.05 * (spec["budget_per_person"] or 0):
-            step(f"₹{money['per_person']:,} a person is ₹{money['over_by']:,} over the budget - finding cheaper options")
-            retry = facts + (f"\n\nYour plan below costs Rs {money['per_person']} per person, Rs {money['over_by']} over "
-                             f"the Rs {spec['budget_per_person']} budget. Rework it to fit (cheaper transport, stays, "
-                             f"activities) without leaving any cost out:\n{json.dumps(result)[:12000]}")
-            cheaper = clean_plan(_llm(_PLAN, retry), sources, spec)
-            cheaper_money = work_out_budget(cheaper, spec)
-            if cheaper["days"] and cheaper_money["per_person"] < money["per_person"]:
-                result, money = cheaper, cheaper_money
-
-        if not result["days"]:
-            raise ValueError("The AI didn't come back with a plan - try again.")
+        result, money = write_plan(spec, research, facts, step)
         plan.plan_json, plan.budget_json = json.dumps(result), json.dumps(money)
         plan.status, plan.finished_at = "done", datetime.now(timezone.utc)
         within = "" if not spec["budget_per_person"] else (
@@ -455,6 +480,52 @@ def _run(plan_id: int) -> None:
         db.commit()
     finally:
         db.close()
+
+
+def gaps(plan: dict, spec: dict) -> list[str]:
+    """What a plan leaves out that the trip needs: days, the way home."""
+    missing = []
+    if len(plan["days"]) < spec["days"]:
+        missing.append(f"Your plan stops at day {len(plan['days'])}, but the trip is {spec['days']} days - "
+                       f"plan every day up to {spec['end_date'] or 'the last day'}.")
+    if spec["origin"] and plan["days"] and not any(it["category"] == "transport" for it in plan["days"][-1]["items"]):
+        missing.append(f"The last day must end with getting back to {spec['origin']}, with its cost.")
+    if spec["days"] > 1 and not any(it["category"] == "stay" for d in plan["days"] for it in d["items"]):
+        missing.append("It has nowhere to sleep: add a stay item (per room per night) for each night that isn't "
+                       "spent on an overnight train or bus - a desert camp counts as a stay.")
+    return missing
+
+
+def write_plan(spec: dict, research: dict, facts: str, step) -> tuple[dict, dict]:
+    """The plan and its money: written, then completed if it left days or the
+    way home out, then brought within the budget if it's over - each fix one
+    more round with the AI, kept only when it's better."""
+    sources = {s["id"]: s for s in research["sources"]}
+    step("Writing the day-by-day plan")
+    result = clean_plan(_llm(_PLAN, facts), sources, spec)
+
+    missing = gaps(result, spec)
+    if missing and result["days"]:
+        step("Filling in what the plan left out")
+        fuller = clean_plan(_llm(_PLAN, facts + f"\n\n{' '.join(missing)} Return the WHOLE plan, every day:\n"
+                                 f"{json.dumps(result)[:12000]}"), sources, spec)
+        if len(fuller["days"]) >= len(result["days"]) and len(gaps(fuller, spec)) < len(missing):
+            result = fuller
+    if not result["days"]:
+        raise ValueError("The AI didn't come back with a plan - try again.")
+
+    money = work_out_budget(result, spec)
+    if money["over_by"] > 0.05 * (spec["budget_per_person"] or 0):
+        step(f"₹{money['per_person']:,} a person is ₹{money['over_by']:,} over the budget - finding cheaper options")
+        retry = facts + (f"\n\nYour plan below costs Rs {money['per_person']} per person, Rs {money['over_by']} over "
+                         f"the Rs {spec['budget_per_person']} budget. Rework it to fit (cheaper transport, stays, "
+                         f"activities) without leaving any cost, day or the way home out:\n{json.dumps(result)[:12000]}")
+        cheaper = clean_plan(_llm(_PLAN, retry), sources, spec)
+        cheaper_money = work_out_budget(cheaper, spec)
+        if len(cheaper["days"]) >= len(result["days"]) and cheaper_money["per_person"] < money["per_person"] \
+                and len(gaps(cheaper, spec)) <= len(gaps(result, spec)):
+            result, money = cheaper, cheaper_money
+    return result, money
 
 
 def _research(spec: dict, step) -> dict:
@@ -494,7 +565,7 @@ def _research(spec: dict, step) -> dict:
     if get_settings().tavily_api_key:
         step("Choosing what to search for")
         try:
-            qs = _llm(_SEARCHES.format(n=MAX_SEARCHES), json.dumps(spec), 1000).get("searches") or []
+            qs = _llm(_SEARCHES.format(n=MAX_SEARCHES), json.dumps(spec), 1000, quick=True).get("searches") or []
         except Exception:
             qs = []
         queries = [str(q.get("q") if isinstance(q, dict) else q)[:150] for q in qs if q][:MAX_SEARCHES]
