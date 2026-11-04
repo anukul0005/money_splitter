@@ -2,7 +2,11 @@
 # Vercel and Render used to pick it up. Needs three repository secrets:
 #   VM_HOST     the VM's public IP
 #   VM_USER     ubuntu
-#   VM_SSH_KEY  the private key the VM accepts (the one Oracle made at creation)
+#   VM_SSH_KEY  a deploy-only private key - on the VM its public half is
+#               restricted to running deploy.sh, nothing else
+#   VM_FINGERPRINT  the VM's SSH host key (SHA256:...), so the action refuses
+#               to talk to anything else answering on that IP
+# and the repository variable VM_DEPLOY = on.
 name: Deploy to VM
 
 on:
@@ -24,5 +28,6 @@ jobs:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
+          fingerprint: ${{ secrets.VM_FINGERPRINT }}
           command_timeout: 20m
           script: bash /opt/settle/deploy/deploy.sh
