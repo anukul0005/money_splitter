@@ -104,17 +104,19 @@ export default function TripPlanner({ d, name, onChanged }) {
       {plans && !plans.length && (
         <p className="text-xs text-gray-400 text-center py-6">No plans yet - describe the trip above.</p>
       )}
-      {sel && <PlanView p={sel} name={name} onRevise={(t) => run(t, sel.id)} onRetry={() => run(sel.prompt, sel.parent_id)}
+      {sel && <PlanView p={sel} me={d.me} name={name} onRevise={(t) => run(t, sel.id)} onRetry={() => run(sel.prompt, sel.parent_id)}
         onDelete={remove} busy={busy || running} />}
     </div>
   )
 }
 
-function PlanView({ p, name, onRevise, onRetry, onDelete, busy }) {
+function PlanView({ p, me, name, onRevise, onRetry, onDelete, busy }) {
   const [change, setChange] = useState('')
-  const mine = p.created_by.toLowerCase() === name.toLowerCase()
+  // `name` turns a username into the name to show (DiscussionDetail's dn); `me` is the caller's username
+  const mine = (p.created_by || '').toLowerCase() === (me || '').toLowerCase()
+  const shown = (u) => (typeof name === 'function' ? name(u) : u)
   const asked = (
-    <p className="text-[11px] text-gray-500 italic border-l-2 border-gray-200 pl-2">“{p.prompt}” <span className="not-italic text-gray-400">- {p.created_by}</span></p>
+    <p className="text-[11px] text-gray-500 italic border-l-2 border-gray-200 pl-2">“{p.prompt}” <span className="not-italic text-gray-400">- {mine ? 'you' : shown(p.created_by)}</span></p>
   )
 
   if (p.status === 'running' || p.status === 'failed') {
