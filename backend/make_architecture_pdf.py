@@ -31,7 +31,7 @@ class Doc(FPDF):
             return
         self.set_font("Helvetica", "", 8)
         self.set_text_color(*MUTED)
-        self.cell(0, 6, "SplitEasy - Drink Recommender Architecture", align="R")
+        self.cell(0, 6, "Settle - Drink Recommender Architecture", align="R")
         self.ln(8)
 
     def footer(self):
@@ -126,7 +126,7 @@ def build() -> Path:
     p.multi_cell(0, 10.5, "Drink Recommender", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     p.set_font("Helvetica", "", 11.5)
     p.set_text_color(*MUTED)
-    p.multi_cell(0, 5.6, "Architecture and design decisions - SplitEasy", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    p.multi_cell(0, 5.6, "Architecture and design decisions - Settle", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     p.ln(1)
     p.set_font("Helvetica", "", 8.6)
     p.multi_cell(0, 4.4, "September 2026", new_x=XPos.LMARGIN, new_y=YPos.NEXT)

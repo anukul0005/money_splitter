@@ -51,7 +51,7 @@ class OCRSpaceProvider(OCRProvider):
         return bool(get_settings().ocrspace_api_key)
 
     def extract_text(self, image_bytes: bytes) -> str:
-        boundary = "----SplitEasyReceiptBoundary"
+        boundary = "----SettleReceiptBoundary"
 
         def field(name: str, value: str) -> str:
             return f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'

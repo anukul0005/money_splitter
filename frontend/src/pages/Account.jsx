@@ -536,8 +536,8 @@ export default function Account() {
           <p className="text-xs text-gray-500 leading-relaxed mt-1 mb-3">
             Get a notification on this device for the same things that email
             you — new expenses, being added to a group, birthdays and
-            monthly reminders — even when SplitEasy isn't open.
-            {' '}On iPhone, this only works after you've added SplitEasy to
+            monthly reminders — even when Settle isn't open.
+            {' '}On iPhone, this only works after you've added Settle to
             your Home Screen (Safari's Share button → Add to Home Screen);
             a regular Safari tab can't receive them at all.
           </p>

@@ -67,7 +67,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Money Splitter API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Settle API", version="1.0.0", lifespan=lifespan)
 
 settings = get_settings()
 origins = [o.strip() for o in settings.allowed_origins.split(",")]

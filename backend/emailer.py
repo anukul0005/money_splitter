@@ -62,7 +62,7 @@ def credentials() -> tuple[str, str]:
 # here rather than imported because email cannot share a stylesheet with the
 # app - every rule has to be inlined into the markup - so these are the one
 # place to change if the palette moves.
-BRAND = "#f97316"        # brand-400, the orange the SplitEasy wordmark uses
+BRAND = "#f97316"        # brand-400, the orange the Settle wordmark uses
 BRAND_DEEP = "#ea580c"   # brand-500, buttons
 INK = "#0f172a"          # field-950, the dark chrome
 BODY_TEXT = "#334155"
@@ -82,8 +82,8 @@ MONO = "'IBM Plex Mono', 'Courier New', Courier, monospace"
 
 def _layout(heading: str, lines: list[str], button_url: str = "",
             button_label: str = "", highlight: str = "",
-            footer: str = "Sent automatically by SplitEasy because you're in this group.") -> str:
-    """One SplitEasy-branded HTML email, deliberately restrained.
+            footer: str = "Sent automatically by Settle because you're in this group.") -> str:
+    """One Settle-branded HTML email, deliberately restrained.
 
     Table-based with every style inlined, which looks archaic next to the
     app's Tailwind but is what email clients actually support - Gmail strips
@@ -145,7 +145,7 @@ def _layout(heading: str, lines: list[str], button_url: str = "",
          style="max-width:520px;background:#ffffff;">
     <tr><td style="padding:0 4px 18px;font-family:{FONT};">
       <span style="font-size:19px;font-weight:700;letter-spacing:-0.01em;
-                   color:{BRAND};">SplitEasy</span>
+                   color:{BRAND};">Settle</span>
     </td></tr>
     <tr><td style="padding:0 4px;font-family:{FONT};">
       <h1 style="margin:0 0 16px;font-size:17px;font-weight:600;
@@ -178,11 +178,11 @@ def _send_via_brevo(sender: str, to_email: str, subject: str, body: str,
     # deleted key rather than a whitespace problem and sends you looking in
     # the wrong place entirely.
     api_key = (settings.brevo_api_key or "").strip()
-    # "SplitEasy" as the display name rather than a bare gmail address - it is
+    # "Settle" as the display name rather than a bare gmail address - it is
     # what the app calls itself, and a named sender is both more recognisable
     # in a crowded inbox and marginally less spam-like.
     message = {
-        "sender": {"email": sender, "name": "SplitEasy"},
+        "sender": {"email": sender, "name": "Settle"},
         "to": [{"email": to_email}],
         "subject": subject,
         "textContent": body,
@@ -280,7 +280,7 @@ def deliver(to_email: str, subject: str, body: str, html: str = "") -> str:
     else:
         msg = MIMEText(body, "plain", "utf-8")
     msg["Subject"] = Header(subject, "utf-8")
-    msg["From"] = formataddr(("SplitEasy", sender))
+    msg["From"] = formataddr(("Settle", sender))
     msg["To"] = to_email
 
     # 465 first because implicit TLS is one round trip fewer, then 587 as a
@@ -337,7 +337,7 @@ def _send(to_email: str, subject: str, body: str, html: str = "") -> None:
 def send_login_code(email: str, code: str) -> None:
     _send(
         email,
-        "Your SplitEasy login code",
+        "Your Settle login code",
         f"Your one-time login code is {code}.\n\n"
         "It expires in 10 minutes and works once. If you didn't ask for "
         "this, ignore this email — nobody can sign in without it.",
@@ -404,7 +404,7 @@ def send_birthday_wish(db, to_email: str | None, name: str, top_partners: list[t
             _layout(
                 f"Happy birthday, {first}! 🎂",
                 lines,
-                footer="Sent automatically by SplitEasy on the birthday you set in Account settings.",
+                footer="Sent automatically by Settle on the birthday you set in Account settings.",
             ),
         )
     _push.send_push_to_user(db, name, f"🎂 Happy birthday, {first}!", plain_lines[-1] if len(plain_lines) > 1 else plain_lines[0])
@@ -451,12 +451,12 @@ def send_debt_reminder(db, to_email: str | None, name: str, debts: list[tuple[st
     if to_email:
         _send(
             to_email,
-            "💰 Your SplitEasy dues this month",
+            "💰 Your Settle dues this month",
             "\n\n".join(plain_lines),
             _layout(
                 "Your dues this month 💰",
                 lines,
-                footer="Sent automatically by SplitEasy on the 1st of every month.",
+                footer="Sent automatically by Settle on the 1st of every month.",
             ),
         )
 
@@ -511,8 +511,8 @@ def send_nudge(db, to_email: str | None, recipient: str, sender: str, they_owe: 
     channels = []
     if to_email:
         _send(to_email, subject, "\n\n".join(plain) + f"\n\n{link}",
-              _layout(heading, html, button_url=link, button_label="Open in SplitEasy",
-                      footer=f"Sent by SplitEasy because {sender} tapped \"remind\" for you."))
+              _layout(heading, html, button_url=link, button_label="Open in Settle",
+                      footer=f"Sent by Settle because {sender} tapped \"remind\" for you."))
         channels.append("email")
     if _push.available():
         from models import PushSubscription, User
@@ -587,7 +587,7 @@ def send_daily_summary(db, to_email: str | None, name: str, s: dict) -> None:
                 _layout(
                     f"Your spending on {escape(label)}", html,
                     button_url=link, button_label="See History",
-                    footer="Sent by SplitEasy every day because you turned on the daily summary in Account settings.",
+                    footer="Sent by Settle every day because you turned on the daily summary in Account settings.",
                 ),
             )
         except Exception as e:
@@ -645,7 +645,7 @@ def notify_group_memory(db, group, expenses: list) -> None:
                 lines,
                 button_url=link,
                 button_label="Open the group",
-                footer="Sent automatically by SplitEasy because an expense in this group happened on this date last year.",
+                footer="Sent automatically by Settle because an expense in this group happened on this date last year.",
             )
             try:
                 _send(email, subject, body, html)
@@ -715,7 +715,7 @@ def notify_group_activity(db, group, actor_name: str, verb: str, summary: str,
                 f"{who} {verb} in {escape(group.name)}",
                 [escape(summary)],
                 button_url=link,
-                button_label="Open in SplitEasy",
+                button_label="Open in Settle",
             )
             try:
                 _send(email, subject, body, html)
@@ -747,17 +747,17 @@ def notify_added_to_group(db, group, actor_name: str, added_names: list[str]) ->
         email = _email_for(db, name)
         if email:
             body = (
-                (f"You added yourself to \"{group.name}\" on Money Splitter.\n\n"
+                (f"You added yourself to \"{group.name}\" on Settle.\n\n"
                  if is_self else
-                 f"{actor_name} added you to \"{group.name}\" on Money Splitter.\n\n")
+                 f"{actor_name} added you to \"{group.name}\" on Settle.\n\n")
                 + f"View it here: {link}"
             )
             html = _layout(
                 f"You're in {escape(group.name)}",
-                [f"You added yourself to \"{escape(group.name)}\" on SplitEasy."
+                [f"You added yourself to \"{escape(group.name)}\" on Settle."
                  if is_self else
                  f"{escape(actor_name)} added you to \"{escape(group.name)}\" "
-                 "on SplitEasy."],
+                 "on Settle."],
                 button_url=link,
                 button_label="Open the group",
             )
@@ -821,7 +821,7 @@ def notify_added_to_group_bg(group_id: int, actor_name: str, added_names: list[s
 
 
 def send_notice(db, name: str, subject: str, lines: list[str], push_body: str,
-                url: str = "/loans", button_label: str = "Open in SplitEasy") -> None:
+                url: str = "/loans", button_label: str = "Open in Settle") -> None:
     """One plain notification to one person - email if they have one, push
     if they've enabled it, independently, the same rule the group
     notifications follow. `lines` are plain text; escaped here for the HTML
@@ -834,7 +834,7 @@ def send_notice(db, name: str, subject: str, lines: list[str], push_body: str,
                 email, subject, "\n\n".join(lines) + f"\n\n{button_label}: {link}",
                 _layout(subject, [escape(l) for l in lines],
                         button_url=link, button_label=button_label,
-                        footer="Sent automatically by SplitEasy."),
+                        footer="Sent automatically by Settle."),
             )
         except Exception as e:
             print(f"[email] send_notice error: {e}")

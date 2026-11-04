@@ -1,4 +1,4 @@
-// SplitEasy's push service worker.
+// Settle's push service worker.
 //
 // This file has to live at the site root (not under /src) - a service
 // worker's scope is everything at or below the path it's served from, and
@@ -7,7 +7,7 @@
 // this kind of file.
 
 self.addEventListener('push', (event) => {
-  let data = { title: 'SplitEasy', body: '', url: '/' }
+  let data = { title: 'Settle', body: '', url: '/' }
   try {
     if (event.data) data = { ...data, ...event.data.json() }
   } catch {
@@ -26,7 +26,7 @@ self.addEventListener('push', (event) => {
   )
 })
 
-// Clicking the notification focuses an already-open SplitEasy tab if one
+// Clicking the notification focuses an already-open Settle tab if one
 // exists, rather than always opening a new one - the same behaviour any
 // native app's own notifications have.
 self.addEventListener('notificationclick', (event) => {

@@ -55,7 +55,7 @@ def _candidates() -> list[tuple[str, str, dict]]:
             # OpenRouter asks for these on top of the usual headers - they
             # only affect OpenRouter's own leaderboard/analytics, not the
             # request's behaviour.
-            {"HTTP-Referer": "https://money-splitter-api.onrender.com", "X-Title": "Money Splitter"},
+            {"HTTP-Referer": "https://www.settle0.in.net", "X-Title": "Settle"},
         ))
     return out
 

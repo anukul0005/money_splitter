@@ -551,7 +551,7 @@ def _notify_added(discussion_id: int, actor: str, names: list[str]) -> None:
             return
         for n in names:
             emailer.send_notice(db, n, f"{actor} added you to \"{d.title}\"",
-                                [f"{actor} added you to the discussion \"{d.title}\" on SplitEasy."]
+                                [f"{actor} added you to the discussion \"{d.title}\" on Settle."]
                                 + ([d.description] if d.description else [])
                                 + ["Reply, vote in polls and note the quotes you get there."],
                                 push_body=f"{actor} added you to \"{d.title}\"", url=f"/discuss/{d.id}",
@@ -569,7 +569,7 @@ def _email_invites(d: Discussion, group: Group, author: str, preview: str, invit
     for email, tok in invites:
         link = f"{front}/discuss/{d.id}?invite={tok}"
         subject = f"{author} invited you to plan \"{d.title}\""
-        lines = [f"{author} would like your help with \"{d.title}\" on SplitEasy" + (":" if preview else "."),
+        lines = [f"{author} would like your help with \"{d.title}\" on Settle" + (":" if preview else "."),
                  *([preview] if preview else []),
                  "Sign up (or sign in) and open the link - you'll join the group and can reply, vote and add quotes."]
         try:

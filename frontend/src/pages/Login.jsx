@@ -142,7 +142,7 @@ export default function Login({ onLogin }) {
             <div className="w-11 h-11 bg-brand-400 rounded-lg flex items-center justify-center shadow-lg shadow-brand-400/30">
               <span className="text-white font-bold text-xl">S</span>
             </div>
-            <h1 className="text-3xl font-bold text-brand-400 tracking-tight">SplitEasy</h1>
+            <h1 className="text-3xl font-bold text-brand-400 tracking-tight">Settle</h1>
           </div>
 
           <p className="text-2xl font-black text-slate-100/80 leading-tight mb-3">
@@ -172,7 +172,7 @@ export default function Login({ onLogin }) {
             <div className="w-9 h-9 bg-brand-400 rounded-lg flex items-center justify-center">
               <span className="text-white font-bold text-base">S</span>
             </div>
-            <h1 className="text-3xl font-bold text-brand-400 tracking-tight">SplitEasy</h1>
+            <h1 className="text-3xl font-bold text-brand-400 tracking-tight">Settle</h1>
           </div>
           <p className="text-slate-300/35 text-[10px] font-bold tracking-widest uppercase">
             Split expenses, stay friends
@@ -468,7 +468,7 @@ export default function Login({ onLogin }) {
 
         {/* Footer hint */}
         <p className="mt-6 text-[10px] text-slate-300/20 font-semibold tracking-widest text-center">
-          SPLITEASY · SHARED EXPENSES MADE SIMPLE
+          SETTLE · SHARED EXPENSES MADE SIMPLE
         </p>
       </div>
 

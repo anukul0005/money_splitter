@@ -226,7 +226,7 @@ def _fetch() -> list[dict]:
     items = []
     for sport, source, url in FEEDS:
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "SplitEasy news reader"})
+            req = urllib.request.Request(url, headers={"User-Agent": "Settle news reader"})
             with urllib.request.urlopen(req, timeout=15) as r:
                 items += parse(source, r.read(), sport)
         except Exception as e:      # one desk down never stops the others
@@ -484,7 +484,7 @@ def article(db, news_id: int) -> dict | None:
     body = _bodies.get(r.id)
     if body is None:
         try:
-            req = urllib.request.Request(r.link, headers={"User-Agent": "Mozilla/5.0 (compatible; SplitEasy reader)"})
+            req = urllib.request.Request(r.link, headers={"User-Agent": "Mozilla/5.0 (compatible; Settle reader)"})
             with urllib.request.urlopen(req, timeout=20) as resp:
                 charset = resp.headers.get_content_charset() or "utf-8"
                 body = extract(resp.read().decode(charset, "replace"))

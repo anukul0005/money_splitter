@@ -100,7 +100,7 @@ export default function ResetPassword() {
         <div className="w-9 h-9 bg-brand-400 rounded-lg flex items-center justify-center">
           <span className="text-white font-bold text-base">S</span>
         </div>
-        <h1 className="text-3xl font-bold text-brand-400 tracking-tight">SplitEasy</h1>
+        <h1 className="text-3xl font-bold text-brand-400 tracking-tight">Settle</h1>
       </div>
 
       <div className="bg-cream shadow-2xl w-full max-w-sm border border-amber-200 rounded-xl overflow-hidden">

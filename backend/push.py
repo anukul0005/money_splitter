@@ -1,4 +1,4 @@
-"""Web Push - the system-level notification that shows even when SplitEasy
+"""Web Push - the system-level notification that shows even when Settle
 isn't open in a tab, distinct from both email and the in-app Activity feed.
 
 One VAPID keypair (see database.Settings) identifies this server to every

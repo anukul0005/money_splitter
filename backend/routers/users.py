@@ -800,7 +800,7 @@ def email_diagnostics_send(payload: dict, caller: User = Depends(require_admin))
     try:
         transport = deliver(
             to,
-            "Money Splitter email test",
+            "Settle email test",
             "If you're reading this, the server can send mail. "
             "Login codes and group notifications will arrive the same way.",
         )

@@ -123,7 +123,7 @@ def create_claim(payload: ClaimCreate, db: Session = Depends(get_db),
         db, payee_user.name, f"{caller.name} says they paid you ₹{claim.amount:,.2f}",
         [f"{caller.name} says they sent you ₹{claim.amount:,.2f} by UPI ({what}).",
          f"Marked as paid: {_when(claim)} - look for a payment around then in your UPI app's history.",
-         "Tap the button below - SplitEasy will ask you Yes (it arrived) or No (it didn't) "
+         "Tap the button below - Settle will ask you Yes (it arrived) or No (it didn't) "
          "before anything else. Nothing is recorded until you answer."],
         f"Did ₹{claim.amount:,.0f} from {caller.name} arrive? Paid {_when(claim)}",
         # The confirm prompt is app-wide (PaymentClaimsInbox blocks every

@@ -34,7 +34,7 @@ class Doc(FPDF):
             return
         self.set_font("Helvetica", "", 8)
         self.set_text_color(*MUTED)
-        self.cell(0, 6, "SplitEasy - Retrieval on Receipts", align="R")
+        self.cell(0, 6, "Settle - Retrieval on Receipts", align="R")
         self.ln(8)
 
     def footer(self):
@@ -165,7 +165,7 @@ def build() -> Path:
     p.ln(22)
     p.set_font("Courier", "B", 9)
     p.set_text_color(*SIGNAL)
-    p.multi_cell(0, 5, "SPLITEASY / ENGINEERING NOTE",
+    p.multi_cell(0, 5, "SETTLE / ENGINEERING NOTE",
                  new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     p.ln(4)
     p.set_font("Helvetica", "B", 30)
@@ -531,7 +531,7 @@ def build() -> Path:
     p.set_font("Helvetica", "", 8)
     p.set_text_color(*MUTED)
     p.multi_cell(0, 4.2,
-                 "SplitEasy - knowledge base built over 497 expenses, 180 "
+                 "Settle - knowledge base built over 497 expenses, 180 "
                  "indexed, 2048 dimensions, pgvector 0.8.0 on Neon. All figures "
                  "measured against the live database, not estimated. Frontend "
                  "changes in this work are unverified: there is no Node "
