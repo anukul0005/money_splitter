@@ -29,7 +29,7 @@ from auth import caller_groups, current_user, member_group
 from database import get_db
 from models import (Activity, Discussion, DiscussionInvite, DiscussionMessage, DiscussionPoll, DiscussionQuote,
                     DiscussionPref, DiscussionQuoteNote, DiscussionReaction, DiscussionTask, DiscussionVote, Group,
-                    Member, User)
+                    Member, TripPlan, User)
 
 router = APIRouter(prefix="/discussions", tags=["discussions"])
 
@@ -1364,3 +1364,91 @@ def suggest_params(payload: SuggestIn, caller: User = Depends(current_user)):
         print(f"[discussions] suggest failed: {e!r}")
         raise HTTPException(503, "The AI couldn't be reached just now - add the fields yourself.")
     return {"params": _clean_params(out.get("params") or [])}
+
+
+# ── trip plans: the AI travel planner (trip_planner.py) ───────────────────
+
+class TripPlanIn(BaseModel):
+    prompt: str
+    parent_id: int | None = None      # revising this plan
+
+
+def _trip_out(p: TripPlan, full: bool) -> dict:
+    plan = _loads(p.plan_json, None)
+    money = _loads(p.budget_json, None)
+    out = {"id": p.id, "parent_id": p.parent_id, "created_by": p.created_by, "prompt": p.prompt,
+           "status": p.status, "error": p.error, "created_at": p.created_at, "finished_at": p.finished_at,
+           "title": plan["title"] if plan else None, "per_person": money["per_person"] if money else None}
+    if full:
+        research = _loads(p.research_json, {}) or {}
+        out.update(steps=_loads(p.steps_json, []), spec=_loads(p.spec_json, None), plan=plan, budget=money,
+                   legs=research.get("legs", []), weather=research.get("weather", []),
+                   sources=[{k: s.get(k) for k in ("id", "kind", "title", "url", "query")}
+                            for s in research.get("sources", [])])
+    return out
+
+
+def _trip(db: Session, discussion_id: int, plan_id: int, caller: User) -> TripPlan:
+    _discussion(db, discussion_id, caller)
+    p = db.get(TripPlan, plan_id)
+    if not p or p.discussion_id != discussion_id:
+        raise HTTPException(404, "No such plan")
+    return p
+
+
+@router.get("/{discussion_id}/trip-plans", response_model=dict)
+def list_trip_plans(discussion_id: int, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    import trip_planner
+    from database import get_settings
+    _discussion(db, discussion_id, caller)
+    rows = db.query(TripPlan).filter(TripPlan.discussion_id == discussion_id).order_by(TripPlan.id.desc()).all()
+    for p in rows:
+        trip_planner.mark_stale(db, p)
+    return {"plans": [_trip_out(p, False) for p in rows], "web_search": bool(get_settings().tavily_api_key)}
+
+
+@router.post("/{discussion_id}/trip-plans", response_model=dict)
+def create_trip_plan(discussion_id: int, payload: TripPlanIn, db: Session = Depends(get_db),
+                     caller: User = Depends(current_user)):
+    import trip_planner
+    d, _ = _discussion(db, discussion_id, caller)
+    prompt = payload.prompt.strip()
+    if len(prompt) < 8:
+        raise HTTPException(400, "Describe the trip - where, when, how many people, the budget")
+    running = db.query(TripPlan).filter(TripPlan.discussion_id == d.id, TripPlan.status == "running").all()
+    for p in running:
+        trip_planner.mark_stale(db, p)
+    if any(p.status == "running" for p in running):
+        raise HTTPException(409, "A plan is already being made here - wait for it to finish")
+    if payload.parent_id:
+        _trip(db, d.id, payload.parent_id, caller)
+    p = TripPlan(discussion_id=d.id, parent_id=payload.parent_id, created_by=caller.name, prompt=prompt[:2000],
+                 status="running", steps_json="[]")
+    db.add(p)
+    db.commit()
+    db.refresh(p)
+    trip_planner.start(p.id)
+    return _trip_out(p, True)
+
+
+@router.get("/{discussion_id}/trip-plans/{plan_id}", response_model=dict)
+def get_trip_plan(discussion_id: int, plan_id: int, db: Session = Depends(get_db),
+                  caller: User = Depends(current_user)):
+    import trip_planner
+    p = _trip(db, discussion_id, plan_id, caller)
+    trip_planner.mark_stale(db, p)
+    return _trip_out(p, True)
+
+
+@router.delete("/{discussion_id}/trip-plans/{plan_id}", response_model=dict)
+def delete_trip_plan(discussion_id: int, plan_id: int, db: Session = Depends(get_db),
+                     caller: User = Depends(current_user)):
+    p = _trip(db, discussion_id, plan_id, caller)
+    if p.created_by.lower() != caller.name.lower():
+        raise HTTPException(403, "Only whoever made a plan can delete it")
+    if p.status == "running":
+        raise HTTPException(409, "Wait for it to finish first")
+    db.query(TripPlan).filter(TripPlan.parent_id == p.id).update({TripPlan.parent_id: None})
+    db.delete(p)
+    db.commit()
+    return {"deleted": plan_id}

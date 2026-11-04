@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     # notebook feature returns a "not configured" error rather than failing
     # mid-read. Free tier: aistudio.google.com/apikey.
     gemini_api_key: str = ""
+    # Tavily web search (trip_planner.py) - free plan, 1,000 searches a month.
+    # Blank: the trip planner still works from Wikivoyage, maps and weather,
+    # with every price it can't find marked as an estimate.
+    tavily_api_key: str = ""
 
     # Gmail OAuth (routers/gmail_auth.py) - a Google Cloud OAuth client,
     # read-only Gmail scope, used to find and download credit card

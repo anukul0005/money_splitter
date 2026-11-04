@@ -1358,6 +1358,31 @@ class DiscussionVote(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class TripPlan(Base):
+    """An AI trip plan in a discussion (trip_planner.py): what was asked, the
+    steps as they ran, the trip as understood (`spec_json`), what was found
+    (`research_json`: sources, weather, road legs), the day-wise plan
+    (`plan_json`) and its budget, worked out in code (`budget_json`).
+    `parent_id`: the plan this one revises ("make day 2 cheaper")."""
+
+    __tablename__ = "trip_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    discussion_id = Column(Integer, ForeignKey("discussions.id", ondelete="CASCADE"), nullable=False, index=True)
+    parent_id = Column(Integer, ForeignKey("trip_plans.id", ondelete="SET NULL"), nullable=True)
+    created_by = Column(String(100), nullable=False)
+    prompt = Column(Text, nullable=False)
+    status = Column(String(10), nullable=False, default="running")      # running | done | failed
+    steps_json = Column(Text, nullable=True)
+    spec_json = Column(Text, nullable=True)
+    research_json = Column(Text, nullable=True)
+    plan_json = Column(Text, nullable=True)
+    budget_json = Column(Text, nullable=True)
+    error = Column(String(500), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class SalaryCardSkip(Base):
     """A credit card spend the caller marked as already counted elsewhere (put
     into a group by hand, say) - the salary dashboard leaves it out of what the

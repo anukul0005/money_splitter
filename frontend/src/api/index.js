@@ -371,6 +371,11 @@ export const voteDiscussionPoll   = (id, pid, choices, note) => api.post(`/discu
 export const setDiscussionPollState = (id, pid, closed) => api.post(`/discussions/${id}/polls/${pid}/state`, { closed })
 export const deleteDiscussionPoll = (id, pid)   => api.delete(`/discussions/${id}/polls/${pid}`)
 export const getDiscussionActivity = (id, scope = 'discussion') => api.get(`/discussions/${id}/activity`, { params: { scope } })
+// The AI trip planner: a plan runs in the background - poll getTripPlan for its steps
+export const listTripPlans  = (id)                     => api.get(`/discussions/${id}/trip-plans`)
+export const createTripPlan = (id, prompt, parentId)   => api.post(`/discussions/${id}/trip-plans`, { prompt, parent_id: parentId || null })
+export const getTripPlan    = (id, pid)                => api.get(`/discussions/${id}/trip-plans/${pid}`)
+export const deleteTripPlan = (id, pid)                => api.delete(`/discussions/${id}/trip-plans/${pid}`)
 export const addDiscussionPeople = (id, data)   => api.post(`/discussions/${id}/people`, data)
 export const summariseDiscussion = (id)         => api.post(`/discussions/${id}/summary`)
 export const setDiscussionNotify = (id, notify) => api.post(`/discussions/${id}/notify`, { notify })

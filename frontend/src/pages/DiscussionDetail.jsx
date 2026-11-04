@@ -8,6 +8,7 @@ import {
 } from '../api/index.js'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PeoplePicker from '../components/DiscussionPeoplePicker'
+import TripPlanner from '../components/TripPlanner'
 import { dn } from '../utils/displayName'
 import { ago } from './Discussions'
 
@@ -211,7 +212,7 @@ export default function DiscussionDetail() {
 
       <div className="flex border-b border-amber-200 px-4 mt-2 sticky top-0 bg-cream z-10 overflow-x-auto">
         {[['chat', 'Chat', d.messages.length + d.polls.length], ['quotes', 'Quotes', d.quotes.length],
-          ['asks', 'Enquiries', tasks.length], ['activity', 'Activity', null]].map(([k, label, n]) => (
+          ['asks', 'Enquiries', tasks.length], ['plan', 'Plan', null], ['activity', 'Activity', null]].map(([k, label, n]) => (
           <button key={k} onClick={() => setTab(k)}
             className={`px-2.5 py-2.5 text-xs font-bold border-b-2 -mb-px whitespace-nowrap ${tab === k ? 'border-brand-400 text-gray-900' : 'border-transparent text-gray-400'}`}>
             {label} {n != null && <span className="text-[10px] text-gray-400">{n}</span>}
@@ -234,6 +235,7 @@ export default function DiscussionDetail() {
       {tab === 'asks' && (
         <Asks d={d} name={name} tasks={tasks} onChanged={load} onQuote={(t) => { setQuoteFor(t); setTab('quotes') }} />
       )}
+      {tab === 'plan' && <TripPlanner d={d} name={name} onChanged={load} />}
       {tab === 'activity' && <ActivityTab d={d} name={name} />}
     </div>
   )
