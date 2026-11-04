@@ -333,7 +333,7 @@ def google_flights(frm: str, to: str, out_date: str, back_date: str | None) -> d
     cheapest = min(o["price"] for o in options)
     options = [o for o in options if o["price"] <= 3 * cheapest]      # not a 2-stop Etihad for a 1-hour hop
     pi = d.get("price_insights") or {}
-    out = {"from": frm, "to": to, "date": out_date, "back": back_date, "options": options[:8],
+    out = {"site": "Google Flights", "from": frm, "to": to, "date": out_date, "back": back_date, "options": options[:8],
            "lowest": pi.get("lowest_price") or min(o["price"] for o in options),
            "level": pi.get("price_level"), "typical": pi.get("typical_price_range"),
            "url": (d.get("search_metadata") or {}).get("google_flights_url") or "https://www.google.com/travel/flights",
@@ -342,11 +342,53 @@ def google_flights(frm: str, to: str, out_date: str, back_date: str | None) -> d
     return out
 
 
+def skyscanner_flights(frm: str, to: str, out_date: str, back_date: str | None) -> dict | None:
+    """API.SH's Skyscanner (1 credit): one adult's fares in rupees on the
+    Indian market for those dates - a round trip when `back_date`, else one
+    way - in the same shape as google_flights (no price verdict). Cached."""
+    ck = ("sky", frm, to, out_date, back_date)
+    if ck in _flight_cache:
+        return _flight_cache[ck]
+    params = {"origin": frm, "destination": to, "date": out_date, "adults": 1, "market": "IN", "currency": "INR",
+              "locale": "en-GB", "sort": "best", "limit": 25} | ({"return_date": back_date} if back_date else {})
+    # Skyscanner gathers fares from many sites - 30-60 s
+    d = _apish("skyscanner/v1/flights", params, timeout=90) if frm and to and frm != to else None
+    options = []
+    for it in (d or {}).get("itineraries") or []:
+        legs = it.get("legs") or []
+        if not it.get("price") or not legs or it.get("self_transfer"):
+            continue
+        names = [a.get("name", "?") for l in legs for a in (l.get("airlines") or [])]
+        options.append({"price": round(it["price"]), "airlines": " + ".join(dict.fromkeys(names)) or "?",
+                        "stops": max(l.get("stops") or 0 for l in legs),
+                        "hours": round((legs[0].get("duration_minutes") or 0) / 60, 1),
+                        "depart": (legs[0].get("departure") or "")[11:16]})
+    if not options:
+        _flight_cache[ck] = None
+        return None
+    options.sort(key=lambda o: o["price"])
+    cheapest = options[0]["price"]
+    options = [o for o in options if o["price"] <= 3 * cheapest]
+    ymd = lambda s: s[2:4] + s[5:7] + s[8:10]
+    out = {"site": "Skyscanner", "from": frm, "to": to, "date": out_date, "back": back_date, "options": options[:8],
+           "lowest": cheapest, "level": None, "typical": None,
+           "url": f"https://www.skyscanner.co.in/transport/flights/{frm.lower()}/{to.lower()}/{ymd(out_date)}/"
+                  + (f"{ymd(back_date)}/" if back_date else "") + "?adultsv2=1&cabinclass=economy",
+           "checked": datetime.now(IST).date().isoformat()}
+    _flight_cache[ck] = out
+    return out
+
+
+def find_flights(frm: str, to: str, out_date: str, back_date: str | None) -> dict | None:
+    """Skyscanner first (API.SH credits); Google Flights (SerpApi's 250 a month) when it finds nothing."""
+    return skyscanner_flights(frm, to, out_date, back_date) or google_flights(frm, to, out_date, back_date)
+
+
 _train_cache: dict[tuple, dict | None] = {}
 
 
-def _apish(path: str, params: dict) -> dict | None:
-    """One API.SH call (Indian Railways, Booking.com), None without a key or on failure."""
+def _apish(path: str, params: dict, timeout: int = 40) -> dict | None:
+    """One API.SH call (Indian Railways, Booking.com, Skyscanner), None without a key or on failure."""
     from database import get_settings
     key = get_settings().api_sh_key
     if not key:
@@ -354,7 +396,7 @@ def _apish(path: str, params: dict) -> dict | None:
     req = urllib.request.Request(f"https://api.api.sh/{path}?{urllib.parse.urlencode(params)}",
                                  headers={"x-api-key": key, "User-Agent": UA})
     try:
-        with urllib.request.urlopen(req, timeout=40) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read())
     except Exception as e:
         print(f"[trip] api.sh {path}: {type(e).__name__}")
@@ -525,7 +567,8 @@ Respond with ONLY a JSON object:
   "transport_pref": "", "stay_pref": "", "interests": [], "food": "", "notes": "",
   "airports": {{"origin": "IATA code of the origin's main airport", "destinations": ["IATA code nearest each
   destination, same order; null where there's none within ~150 km"]}},
-  "stations": {{"origin": "Indian Railways code of the origin's main station (NDLS, JP, BCT...)", "destinations":
+  "stations": {{"origin": "Indian Railways code of the origin's main station (NDLS New Delhi, JP Jaipur, JU Jodhpur,
+  BCT Mumbai Central - a railway code, never the airport's)", "destinations":
   ["Indian Railways code of each destination's main station, same order; null outside India or with no railway"]}}}}
 Rules: a date without a year is the next one after today. "4-day trip between 20-24 December" means 4 days from
 the 20th (days wins over the range). When only a month, a span of months or a season is given ("March-April 2027",
@@ -570,7 +613,7 @@ Rules:
   request rules it out.
 - Tickets (flights, trains, buses, entry fees) are per person: `cost` is ONE person's fare, `per` "person". A return
   journey is one person's round-trip fare, or two one-way items. Never a guessed figure "for the group".
-- Google Flights sources are real fares for ONE adult on the trip's dates, in INR: when flying, pick one of
+- Flight sources (Skyscanner, Google Flights) are real fares for ONE adult on the trip's dates, in INR: when flying, pick one of
   those options (say which airline in the title) - `per` "person", `currency` "INR", source "found" with its id.
   A round-trip fare goes half on the flight out and half on the flight back, each saying so in `basis`
   ("half of the Rs 165,800 British Airways round trip").
@@ -758,7 +801,10 @@ def _run(plan_id: int) -> None:
         if parent and parent.plan_json:
             facts += f"\n\nThe current plan (revise it - change what's asked, keep the rest):\n" \
                      f"{for_ai(json.loads(parent.plan_json))}\n\nChange asked for: {plan.prompt}"
-        result, money = write_plan(spec, research, facts, step)
+        compact = _facts(spec, research, compact=True)
+        if parent and parent.plan_json:
+            compact = facts                             # a revision carries the whole plan: Gemini's job
+        result, money = write_plan(spec, research, facts, step, compact)
         plan.plan_json, plan.budget_json = json.dumps(result), json.dumps(money)
         plan.status, plan.finished_at = "done", datetime.now(timezone.utc)
         within = "" if not spec["budget_per_person"] else (
@@ -786,6 +832,30 @@ def for_ai(plan: dict) -> str:
     days = [{**d, "items": [{k: v for k, v in {**it, "cost": it.get("cost_local", it["cost"])}.items()
                              if k not in ("cost_local", "per_person")} for it in d["items"]]} for d in plan["days"]]
     return json.dumps({k: v for k, v in {**plan, "days": days}.items() if k not in ("fx", "fx_date")})[:12000]
+
+
+_OVERNIGHT = re.compile(r"overnight|night (?:train|bus|flight)|sleeper", re.I)
+
+
+def fill_stays(plan: dict, spec: dict) -> dict:
+    """Another night in the same place is the same stay at the same price: a
+    night with no stay (and no overnight journey) gets a copy of the stay from
+    the night before, when the group is still in that city. The AI often
+    prices one stay a city, not one a night."""
+    days = plan["days"]
+    sleeps_in = lambda d: re.split(r"→|->|\bto\b", str(d.get("city") or ""))[-1].strip().lower()   # "Delhi → Jodhpur"
+    for i in range(min(len(days), spec["days"] - 1)):           # the night after day i
+        items = days[i]["items"]
+        if any(it["category"] == "stay" or (it["category"] == "transport" and
+               _OVERNIGHT.search(f"{it['title']} {it['detail']}")) for it in items):
+            continue
+        before = next(((d, it) for d in reversed(days[:i]) for it in reversed(d["items"])
+                       if it["category"] == "stay"), None)
+        if before and sleeps_in(days[i]) and sleeps_in(before[0]) == sleeps_in(days[i]):
+            stay = before[1]
+            items.append({**stay, "time": "22:00", "title": f"Another night: {stay['title']}".replace(
+                "Check-in ", "").replace("Check‑in ", ""), "detail": "Same stay as the night before"})
+    return plan
 
 
 def gaps(plan: dict, spec: dict) -> list[str]:
@@ -819,14 +889,49 @@ def gaps(plan: dict, spec: dict) -> list[str]:
     return missing
 
 
-def write_plan(spec: dict, research: dict, facts: str, step) -> tuple[dict, dict]:
+# Groq's free plan takes 8,000 tokens a minute per key - what goes in and
+# what comes out together - so it writes from the compact facts, and only
+# when the answer has room; else (a revision, a long trip) Gemini writes.
+GROQ_TOKENS = 7600
+
+
+def _groq_plan(user: str) -> dict:
+    import ai_text
+    tokens_in = (len(_PLAN) + len(user)) / 3.2
+    room = int(GROQ_TOKENS - tokens_in)
+    if room < 2500:
+        raise ValueError("too long for Groq")
+    # The second key: the first has just read the request and picked the searches this minute
+    return ai_text.chat_json(_PLAN, user, 0.3, prefer=1, timeout=90,
+                             extra={"max_completion_tokens": room, "reasoning_effort": "low"})
+
+
+def _write_ai(compact: str, full: str) -> dict:
+    """Groq (GPT-OSS 120B) on the compact facts first, Gemini on the full ones after."""
+    last: Exception | None = None
+    for name, ask in (("groq", lambda: _groq_plan(compact)), ("gemini", lambda: _gemini(_PLAN, full, 12000))):
+        try:
+            out = ask()
+            print(f"[trip] plan written by {name}")
+            return out
+        except Exception as e:
+            last = e
+            print(f"[trip] {name} didn't write the plan: {e!r}"[:300])
+    raise RuntimeError(f"The AI couldn't be reached ({type(last).__name__})") from last
+
+
+def write_plan(spec: dict, research: dict, facts: str, step, compact: str | None = None) -> tuple[dict, dict]:
     """The plan and its money: written, then completed if it left days or the
     way home out, then brought within the budget if it's over - each fix one
-    more round with the AI, kept only when it's better."""
+    more round with the AI, kept only when it's better. `compact`: the facts
+    cut down for Groq (each round adds the same text to both)."""
     sources = {s["id"]: s for s in research["sources"]}
-    write = lambda prompt: to_rupees(clean_plan(_llm(_PLAN, prompt), sources, spec))
+    compact = compact or facts
+
+    def write(more: str = "") -> dict:
+        return fill_stays(to_rupees(clean_plan(_write_ai(compact + more, facts + more), sources, spec)), spec)
     step("Writing the day-by-day plan")
-    result = write(facts)
+    result = write()
 
     for _ in range(2):                                  # up to two rounds to fill what's missing
         missing = gaps(result, spec)
@@ -834,7 +939,7 @@ def write_plan(spec: dict, research: dict, facts: str, step) -> tuple[dict, dict
             break
         step("Filling in what the plan left out")
         try:
-            fuller = write(facts + f"\n\n{' '.join(missing)} Return the WHOLE plan, every day:\n{for_ai(result)}")
+            fuller = write(f"\n\n{' '.join(missing)} Return the WHOLE plan, every day:\n{for_ai(result)}")
         except Exception as e:                          # the AI's quota or a timeout: keep the plan written
             print(f"[trip] fill round failed: {e!r}")
             step("Couldn't reach the AI again - keeping the plan as written")
@@ -850,7 +955,7 @@ def write_plan(spec: dict, research: dict, facts: str, step) -> tuple[dict, dict
     money = work_out_budget(result, spec)
     if money["over_by"] > 0.05 * (spec["budget_per_person"] or 0):
         step(f"₹{money['per_person']:,} a person is ₹{money['over_by']:,} over the budget - finding cheaper options")
-        retry = facts + (f"\n\nYour plan below costs Rs {money['per_person']} per person, Rs {money['over_by']} over "
+        retry = (f"\n\nYour plan below costs Rs {money['per_person']} per person, Rs {money['over_by']} over "
                          f"the Rs {spec['budget_per_person']} budget. Rework it to fit by choosing cheaper transport, "
                          f"stays and activities - never by lowering a price below what the sources show, or leaving "
                          f"any cost, day or the way home out. If it can't fit, keep real prices and say so:\n"
@@ -871,14 +976,16 @@ def write_plan(spec: dict, research: dict, facts: str, step) -> tuple[dict, dict
 
 
 def _flights(spec: dict, pts: list[dict], step) -> list[dict]:
-    """Google Flights for the long legs: when the first place is far (over
-    ~350 km - Delhi-Jodhpur is a flight route) or flying was asked for, and the dates and airports are known.
+    """Flight fares for the long legs (Skyscanner, else Google Flights): when the
+    first place is far (over ~350 km - Delhi-Jodhpur is a flight route) or flying
+    was asked for, and the dates and airports are known.
     One destination: a round trip. Several: out to the first, back from the last."""
     from database import get_settings
     air = spec.get("airports") or {}
     start, end = spec.get("start_date"), spec.get("end_date")
     home, dests = air.get("origin"), air.get("destinations") or []
-    if not get_settings().serpapi_key or not (start and end and home and dests and dests[0]):
+    s = get_settings()
+    if not (s.api_sh_key or s.serpapi_key) or not (start and end and home and dests and dests[0]):
         return []
     by_name = {p["name"]: p for p in pts}
     a, b = by_name.get(spec["origin"]), by_name.get(spec["destinations"][0])
@@ -890,9 +997,9 @@ def _flights(spec: dict, pts: list[dict], step) -> list[dict]:
         legs = [(home, dests[0], start, end)]
     else:
         legs = [(home, dests[0], start, None)] + ([(last, home, end, None)] if last else [])
-    step("Checking Google Flights: " + " · ".join(f"{f} → {t}" + (" and back" if r else "") for f, t, _, r in legs))
+    step("Checking flight fares: " + " · ".join(f"{f} → {t}" + (" and back" if r else "") for f, t, _, r in legs))
     with ThreadPoolExecutor(max_workers=2) as pool:
-        found = list(pool.map(lambda leg: google_flights(*leg), legs))
+        found = list(pool.map(lambda leg: find_flights(*leg), legs))
     return [f for f in found if f]
 
 
@@ -968,16 +1075,18 @@ def _research(spec: dict, step) -> dict:
     for f in _flights(spec, pts, step):
         n += 1
         what = "round trip" if f["back"] else "one way"
-        lines = [f"Google Flights fares for ONE adult, in INR, {what}, {f['from']} -> {f['to']} on {f['date']}"
+        site = f.get("site") or "Google Flights"
+        lines = [f"{site} fares for ONE adult, in INR, {what}, {f['from']} -> {f['to']} on {f['date']}"
                  + (f", back {f['back']}" if f["back"] else "") + f": lowest Rs {f['lowest']}"
                  + (f" (Google rates it '{f['level']}'; usual range Rs {f['typical'][0]}-{f['typical'][1]})"
                     if f.get("level") and f.get("typical") else "")]
         lines += [f"- Rs {o['price']}: {o['airlines']}, {o['stops']} stop(s), {o['hours']} h, departs {o['depart']}"
                   for o in f["options"]]
         research["sources"].append({"id": f"S{n}", "kind": "flights", "checked": f["checked"], "url": f["url"],
-                                    "title": f"Google Flights: {f['from']} → {f['to']}" + (" and back" if f["back"] else ""),
+                                    "title": f"{site}: {f['from']} → {f['to']}" + (" and back" if f["back"] else ""),
                                     "text": "\n".join(lines)})
-        research["flights"].append({k: f[k] for k in ("from", "to", "date", "back", "lowest", "level", "typical")})
+        research["flights"].append({"site": site} | {k: f[k] for k in ("from", "to", "date", "back", "lowest",
+                                                                         "level", "typical")})
 
     research["trains"] = []
     for t in _trains(spec, pts, step):
@@ -1054,23 +1163,50 @@ def _research(spec: dict, step) -> dict:
     return research
 
 
-def _facts(spec: dict, research: dict) -> str:
-    out = [f"Trip spec: {json.dumps(spec)}",
-           f"Travellers: {spec['travellers']} - rooms: {spec['rooms']} (stays are priced per room per night)"]
+# Compact facts (for Groq): what each kind of source keeps - list lines, or characters of text
+_COMPACT_LINES = {"flights": 5, "trains": 5, "stays": 6}
+_COMPACT_CHARS = {"wikivoyage": 700, "web": 380}
+
+
+def _facts(spec: dict, research: dict, compact: bool = False) -> str:
+    """The research handed to the AI. `compact`: about a third of the size -
+    the spec without its empty fields, a weather line a place, fewer options in
+    each list and short page extracts, no URLs."""
+    if compact:
+        brief = {k: v for k, v in spec.items() if v not in (None, "", [], {})}
+        out = [f"Trip spec: {json.dumps(brief, separators=(',', ':'))}",
+               f"Travellers: {spec['travellers']} - rooms: {spec['rooms']} (stays priced per room per night)"]
+    else:
+        out = [f"Trip spec: {json.dumps(spec)}",
+               f"Travellers: {spec['travellers']} - rooms: {spec['rooms']} (stays are priced per room per night)"]
     if research["legs"]:
         out.append("Road distances (OSRM): " + "; ".join(
             f"{l['from']} -> {l['to']}: {l['km']} km, about {l['hours']} h by road" for l in research["legs"]))
     for w in research["weather"]:
         label = "forecast" if w["kind"] == "forecast" else "same dates last year (a guide, not a forecast)"
+        if compact and w["days"]:
+            rain = max((x.get("rain_chance") or 0) for x in w["days"])
+            out.append(f"Weather in {w['place']} ({label}): {min(x['min'] for x in w['days'])}-"
+                       f"{max(x['max'] for x in w['days'])} C" + (f", rain up to {rain}%" if rain > 20 else ""))
+            continue
         out.append(f"Weather in {w['place']}, {label}: " + "; ".join(
             f"{x['date']}: {x['min']}-{x['max']} C" + (f", rain {x['rain_chance']}%" if x.get("rain_chance") is not None
                                                        else f", rain {x['rain_mm']} mm" if x.get("rain_mm") else "")
             for x in w["days"]))
     out.append("Sources (cite by id):")
-    budget = 26000
+    budget = 9000 if compact else 26000
     for s in research["sources"]:
         checked = f" - page checked {s['checked']}" if s.get("checked") else ""
-        block = f"[{s['id']}] {s['title']} ({s['url']}){checked}\n{s['text']}"
+        text = s["text"]
+        if compact:
+            if s["kind"] in _COMPACT_LINES:
+                lines = text.split("\n")
+                text = "\n".join(lines[:1 + _COMPACT_LINES[s["kind"]]])
+            else:
+                text = text[:_COMPACT_CHARS.get(s["kind"], 380)]
+            block = f"[{s['id']}] {s['title']}{checked}\n{text}"
+        else:
+            block = f"[{s['id']}] {s['title']} ({s['url']}){checked}\n{text}"
         if budget - len(block) < 0:
             break
         budget -= len(block)

@@ -16,15 +16,17 @@ def available() -> bool:
     return bool(_candidates())
 
 
-def chat_json(system: str, user: str, temperature: float = 0.3, prefer: int = 0) -> dict:
+def chat_json(system: str, user: str, temperature: float = 0.3, prefer: int = 0,
+              extra: dict | None = None, timeout: int = 40) -> dict:
     """`prefer` picks which key goes first (0 = the first Groq key, 1 = the
     second...); the rest follow as fallbacks, so two calls made side by side
-    with prefer 0 and 1 each start on their own key's rate limit."""
+    with prefer 0 and 1 each start on their own key's rate limit. `extra`
+    adds request fields (max_completion_tokens, reasoning_effort)."""
     payload = json.dumps({
         "model": GROQ_MODEL,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         "response_format": {"type": "json_object"},
-        "temperature": temperature,
+        "temperature": temperature, **(extra or {}),
     }).encode()
     last: Exception | None = None
     keys = _candidates()
@@ -41,7 +43,7 @@ def chat_json(system: str, user: str, temperature: float = 0.3, prefer: int = 0)
         })
         for attempt in range(2):
             try:
-                with urllib.request.urlopen(req, timeout=40) as resp:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
                     data = json.loads(resp.read().decode())
                 reply = json.loads(data["choices"][0]["message"]["content"])
                 if isinstance(reply, dict):

@@ -286,7 +286,7 @@ function PlanView({ p, me, name, onRevise, onRetry, onDelete, busy }) {
         <div className="bg-white border border-amber-200 p-3 space-y-2">
           {(p.flights || []).map((f) => (
             <p key={`${f.from}${f.to}`} className="text-[11px] text-gray-700">
-              ✈️ <b>{f.from} → {f.to}{f.back ? ' and back' : ''}</b> on Google Flights: from <b>{INR(f.lowest)}</b> a person
+              ✈️ <b>{f.from} → {f.to}{f.back ? ' and back' : ''}</b> on {f.site || 'Google Flights'}: from <b>{INR(f.lowest)}</b> a person
               {f.back ? ' round trip' : ''}
               {f.level && <span className={`ml-1 text-[10px] font-bold ${f.level === 'low' ? 'text-green-700' : f.level === 'high' ? 'text-red-600' : 'text-gray-500'}`}>· {f.level} for these dates</span>}
               {f.typical && <span className="text-[10px] text-gray-400"> (usually {INR(f.typical[0])}–{INR(f.typical[1])})</span>}
