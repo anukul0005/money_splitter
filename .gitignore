@@ -54,3 +54,8 @@ Tennis_scraper/*.log
 # secrets/ holds the ENCRYPTED key backup (*.enc, committed) plus the scripts.
 # The decrypted plaintext (*.txt) must never be committed - only the .enc is.
 secrets/*.txt
+
+# Personal spending sheets the one-off import scripts (seed.py,
+# migrate_groups.py) read - local only, never in the public repo
+Expenditure.xlsx
+Trip Fare*.csv
