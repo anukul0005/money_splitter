@@ -6,6 +6,12 @@
 // Vite serves everything under /public unprocessed at the root for exactly
 // this kind of file.
 
+// A new version of this file takes over at once, rather than waiting for
+// every open copy of the app to close - a home-screen app is hardly ever
+// fully closed, so a fix here would otherwise never arrive.
+self.addEventListener('install', () => self.skipWaiting())
+self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()))
+
 self.addEventListener('push', (event) => {
   let data = { title: 'Settle', body: '', url: '/' }
   try {
@@ -26,22 +32,55 @@ self.addEventListener('push', (event) => {
   )
 })
 
-// Clicking the notification focuses an already-open Settle tab if one
-// exists, rather than always opening a new one - the same behaviour any
-// native app's own notifications have.
+// Tapping a notification opens the app on the page it is about.
+//
+// The app moves itself there (App.jsx's NotificationLinks, its own router -
+// no reload): client.navigate() is refused for a page this worker didn't
+// load, and unreliable on iPhone. And an iPhone home-screen app started by
+// the tap may open on its start page whatever was asked (then RememberPage
+// takes it to the last page seen), so the page is handed over again when the
+// app says it is up - `pending`, kept for a short while.
+let pending = null                         // { path, at, done }
+const PENDING_MS = 20000
+
+// Always a page on this site: a notification may carry a full address,
+// from a server that knows the site by another name
+function pathOf(url) {
+  try {
+    const u = new URL(url || '/', self.location.origin)
+    return u.pathname + u.search + u.hash
+  } catch { return '/' }
+}
+
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
-  const targetUrl = event.notification.data?.url || '/'
+  const path = pathOf(event.notification.data?.url)
 
-  event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
-      for (const client of clients) {
-        if ('focus' in client) {
-          client.navigate(targetUrl)
-          return client.focus()
-        }
+  event.waitUntil((async () => {
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+    const open = wins.find((c) => new URL(c.url).origin === self.location.origin)
+    await new Promise((resolve) => {
+      if (pending) pending.done()
+      pending = { path, at: Date.now(), done: resolve }
+      setTimeout(resolve, PENDING_MS)
+      if (open) {
+        open.postMessage({ type: 'open', url: path })
+        open.focus().catch(() => {})
+      } else {
+        self.clients.openWindow(new URL(path, self.location.origin).href).catch(() => {})
       }
-      if (self.clients.openWindow) return self.clients.openWindow(targetUrl)
     })
-  )
+  })())
+})
+
+// The app, on starting or coming back to the screen: "anything to open?" -
+// and "opened", once it is on the page
+self.addEventListener('message', (event) => {
+  if (!pending) return
+  if (event.data?.type === 'ready' && Date.now() - pending.at < PENDING_MS) {
+    event.source?.postMessage({ type: 'open', url: pending.path })
+  } else if (event.data?.type === 'opened') {
+    pending.done()
+    pending = null
+  }
 })

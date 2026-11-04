@@ -654,7 +654,7 @@ def notify_group_memory(db, group, expenses: list) -> None:
         # Independent of email: an account with push enabled but no email
         # on file must still hear about this - send_push_to_user is
         # itself a no-op for anyone with no account or no subscription.
-        _push.send_push_to_user(db, m.name, subject, push_body, url=link)
+        _push.send_push_to_user(db, m.name, subject, push_body, url=f"/groups/{group.id}")
 
 
 def _email_for(db, name: str) -> str | None:
@@ -721,7 +721,7 @@ def notify_group_activity(db, group, actor_name: str, verb: str, summary: str,
                 _send(email, subject, body, html)
             except Exception as e:
                 print(f"[email] notify_group_activity error: {e}")
-        _push.send_push_to_user(db, m.name, subject, summary, url=link)
+        _push.send_push_to_user(db, m.name, subject, summary, url=f"/groups/{group.id}")
 
 
 def notify_added_to_group(db, group, actor_name: str, added_names: list[str]) -> None:
@@ -765,7 +765,7 @@ def notify_added_to_group(db, group, actor_name: str, added_names: list[str]) ->
                 _send(email, subject, body, html)
             except Exception as e:
                 print(f"[email] notify_added_to_group error: {e}")
-        _push.send_push_to_user(db, name, subject, push_body, url=link)
+        _push.send_push_to_user(db, name, subject, push_body, url=f"/groups/{group.id}")
 
 
 def notify_group_activity_bg(group_id: int, actor_name: str, verb: str, summary: str,
