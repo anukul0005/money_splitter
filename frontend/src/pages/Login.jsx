@@ -139,9 +139,7 @@ export default function Login({ onLogin }) {
 
         <div className="relative z-10">
           <div className="flex items-center gap-3 mb-10">
-            <div className="w-11 h-11 bg-brand-400 rounded-lg flex items-center justify-center shadow-lg shadow-brand-400/30">
-              <span className="text-white font-bold text-xl">S</span>
-            </div>
+            <img src="/icon-192.png" alt="" className="w-11 h-11 shadow-lg shadow-brand-400/30 rounded-[10px]" />
             <h1 className="text-3xl font-bold text-brand-400 tracking-tight">Settle</h1>
           </div>
 
@@ -169,9 +167,7 @@ export default function Login({ onLogin }) {
         {/* Mobile logo */}
         <div className="md:hidden mb-8 text-center">
           <div className="flex items-center justify-center gap-2.5 mb-2">
-            <div className="w-9 h-9 bg-brand-400 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-base">S</span>
-            </div>
+            <img src="/icon-192.png" alt="" className="w-9 h-9" />
             <h1 className="text-3xl font-bold text-brand-400 tracking-tight">Settle</h1>
           </div>
           <p className="text-slate-300/35 text-[10px] font-bold tracking-widest uppercase">

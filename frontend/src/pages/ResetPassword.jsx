@@ -97,9 +97,7 @@ export default function ResetPassword() {
   return (
     <div className="min-h-screen bg-field-900 flex flex-col items-center justify-center px-5 py-12">
       <div className="flex items-center justify-center gap-2.5 mb-6">
-        <div className="w-9 h-9 bg-brand-400 rounded-lg flex items-center justify-center">
-          <span className="text-white font-bold text-base">S</span>
-        </div>
+        <img src="/icon-192.png" alt="" className="w-9 h-9" />
         <h1 className="text-3xl font-bold text-brand-400 tracking-tight">Settle</h1>
       </div>
 
