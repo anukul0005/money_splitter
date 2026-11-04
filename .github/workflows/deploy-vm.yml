@@ -1,12 +1,14 @@
 # Every push to main goes live on the Oracle VM (deploy/deploy.sh), the way
-# Vercel and Render used to pick it up. Needs three repository secrets:
+# Vercel and Render used to pick it up. Needs repository secrets:
 #   VM_HOST     the VM's public IP
 #   VM_USER     ubuntu
 #   VM_SSH_KEY  a deploy-only private key - on the VM its public half is
 #               restricted to running deploy.sh, nothing else
-#   VM_FINGERPRINT  the VM's SSH host key (SHA256:...), so the action refuses
-#               to talk to anything else answering on that IP
 # and the repository variable VM_DEPLOY = on.
+# Plain ssh with the VM's host key pinned below: it refuses to connect to
+# anything else answering on that IP. (The key is the server's public half -
+# safe to publish; after rebuilding the VM, replace it with the new
+# /etc/ssh/ssh_host_ed25519_key.pub.)
 name: Deploy to VM
 
 on:
@@ -18,16 +20,25 @@ concurrency:
   group: deploy-vm
   cancel-in-progress: false
 
+env:
+  HOST_KEY: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIL9s9egaSNKB+82jYmECL0rgHMQdMLTKdUyLrqYFLo0b
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     if: ${{ vars.VM_DEPLOY == 'on' }}
+    timeout-minutes: 20
     steps:
-      - uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.VM_HOST }}
-          username: ${{ secrets.VM_USER }}
-          key: ${{ secrets.VM_SSH_KEY }}
-          fingerprint: ${{ secrets.VM_FINGERPRINT }}
-          command_timeout: 20m
-          script: bash /opt/settle/deploy/deploy.sh
+      - name: Deploy
+        env:
+          SSH_KEY: ${{ secrets.VM_SSH_KEY }}
+          VM_HOST: ${{ secrets.VM_HOST }}
+          VM_USER: ${{ secrets.VM_USER }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          echo "$VM_HOST $HOST_KEY" > ~/.ssh/known_hosts
+          # The key's forced command on the VM runs deploy.sh whatever is sent
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+              -o ConnectTimeout=20 -o ServerAliveInterval=30 "$VM_USER@$VM_HOST" deploy
