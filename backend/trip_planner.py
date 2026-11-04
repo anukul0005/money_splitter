@@ -82,24 +82,52 @@ def _gemini_one(model: str, system: str, user: str, max_tokens: int) -> dict:
     raise RuntimeError("no answer")
 
 
+# Models out of their free daily quota, till Google's reset (midnight Pacific)
+_out_for_day: dict[str, date] = {}
+
+
+def _pacific_day() -> date:
+    return datetime.now(timezone(timedelta(hours=-8))).date()
+
+
 def _gemini(system: str, user: str, max_tokens: int) -> dict:
     """The models one at a time (asking two at once doubled what each plan
-    takes from the free daily quota); a slow or busy one hands over to the next."""
+    takes from the free daily quota); a slow or busy one hands over to the next.
+    A model out of its daily quota is skipped till the reset; when the rest were
+    only busy (a per-minute limit, 503, slow), all are asked once more after a pause."""
     from attachment_reader import GEMINI_MODELS
     from database import get_settings
     if not get_settings().gemini_api_key:
         raise RuntimeError("no Gemini key")
     last: Exception | None = None
-    for model in GEMINI_MODELS:
-        try:
-            return _gemini_one(model, system, user, max_tokens)
-        except urllib.error.HTTPError as e:
-            last = e
-            if e.code in (401, 403):
-                break
-        except Exception as e:
-            last = e
-    raise last or RuntimeError("Gemini didn't answer")
+    for round_ in range(2):
+        busy = False
+        for model in GEMINI_MODELS:
+            if _out_for_day.get(model) == _pacific_day():
+                continue
+            try:
+                return _gemini_one(model, system, user, max_tokens)
+            except urllib.error.HTTPError as e:
+                last = e
+                if e.code in (401, 403):
+                    raise
+                body = ""
+                try:
+                    body = e.read().decode(errors="ignore")
+                except Exception:
+                    pass
+                if e.code == 429 and "PerDay" in body:
+                    _out_for_day[model] = _pacific_day()
+                else:
+                    busy = True
+                print(f"[trip] gemini {model}: {e.code}")
+            except Exception as e:
+                last, busy = e, True
+                print(f"[trip] gemini {model}: {type(e).__name__}")
+        if not busy or round_:
+            break
+        time.sleep(20)
+    raise last or RuntimeError("Gemini didn't answer - every model is out of today's free quota")
 
 
 def _llm(system: str, user: str, max_tokens: int = 12000, quick: bool = False) -> dict:
