@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     # Blank: the trip planner still works from Wikivoyage, maps and weather,
     # with every price it can't find marked as an estimate.
     tavily_api_key: str = ""
+    # SerpApi's Google Flights (trip_planner.py) - free plan, 250 searches a
+    # month: real fares for the trip's dates. Blank: flights are web-searched.
+    serpapi_key: str = ""
+    # Qrail (trip_planner.py) - free plan, 100 requests a day: trains between
+    # stations and schedules (fares aren't in the free plan).
+    qrail_api_key: str = ""
 
     # Gmail OAuth (routers/gmail_auth.py) - a Google Cloud OAuth client,
     # read-only Gmail scope, used to find and download credit card

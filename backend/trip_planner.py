@@ -267,6 +267,57 @@ def web_search(query: str) -> list[dict]:
              "checked": checked} for r in d.get("results", []) if r.get("url")]
 
 
+_flight_cache: dict[tuple, dict | None] = {}
+
+
+def google_flights(frm: str, to: str, out_date: str, back_date: str | None) -> dict | None:
+    """SerpApi's Google Flights: one adult's fares in rupees for those dates -
+    a round trip when `back_date`, else one way. Cached in this process (a
+    revision asks the same again); None without a key or on failure."""
+    from database import get_settings
+    key = get_settings().serpapi_key
+    if not key or not frm or not to or frm == to:
+        return None
+    ck = (frm, to, out_date, back_date)
+    if ck in _flight_cache:
+        return _flight_cache[ck]
+    params = {"engine": "google_flights", "departure_id": frm, "arrival_id": to, "outbound_date": out_date,
+              "type": 1 if back_date else 2, "adults": 1, "currency": "INR", "gl": "in", "hl": "en", "api_key": key}
+    if back_date:
+        params["return_date"] = back_date
+    try:
+        d = _get_json(f"https://serpapi.com/search.json?{urllib.parse.urlencode(params)}", timeout=60)
+    except Exception as e:
+        print(f"[trip] flights {frm}->{to}: {type(e).__name__}")
+        _flight_cache[ck] = None
+        return None
+    options = []
+    for f in (d.get("best_flights") or []) + (d.get("other_flights") or []):
+        legs = f.get("flights") or []
+        if not f.get("price") or not legs:
+            continue
+        options.append({"price": f["price"], "airlines": " + ".join(dict.fromkeys(l.get("airline", "?") for l in legs)),
+                        "stops": len(legs) - 1, "hours": round((f.get("total_duration") or 0) / 60, 1),
+                        "depart": (legs[0].get("departure_airport") or {}).get("time", "")[-5:]})
+    if not options:
+        _flight_cache[ck] = None
+        return None
+    pi = d.get("price_insights") or {}
+    out = {"from": frm, "to": to, "date": out_date, "back": back_date, "options": options[:8],
+           "lowest": pi.get("lowest_price") or min(o["price"] for o in options),
+           "level": pi.get("price_level"), "typical": pi.get("typical_price_range"),
+           "url": (d.get("search_metadata") or {}).get("google_flights_url") or "https://www.google.com/travel/flights",
+           "checked": datetime.now(IST).date().isoformat()}
+    _flight_cache[ck] = out
+    return out
+
+
+def _km(a: dict, b: dict) -> float:
+    la1, lo1, la2, lo2 = map(math.radians, (a["lat"], a["lon"], b["lat"], b["lon"]))
+    h = math.sin((la2 - la1) / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin((lo2 - lo1) / 2) ** 2
+    return 6371 * 2 * math.asin(math.sqrt(h))
+
+
 _fx_cache: dict[tuple[str, str], float] = {}
 
 
@@ -342,7 +393,9 @@ Respond with ONLY a JSON object:
   "start_date": "YYYY-MM-DD or null", "end_date": "YYYY-MM-DD or null", "days": 0,
   "travellers": 0, "rooms": null,
   "budget_per_person": null, "budget_total": null,
-  "transport_pref": "", "stay_pref": "", "interests": [], "food": "", "notes": ""}}
+  "transport_pref": "", "stay_pref": "", "interests": [], "food": "", "notes": "",
+  "airports": {{"origin": "IATA code of the origin's main airport", "destinations": ["IATA code nearest each
+  destination, same order; null where there's none within ~150 km"]}}}}
 Rules: a date without a year is the next one after today. "4-day trip between 20-24 December" means 4 days from
 the 20th (days wins over the range). When only a month, a span of months or a season is given ("March-April 2027",
 "next winter"), pick real dates inside it - the best time to go when the request asks, else a sensible start -
@@ -386,6 +439,10 @@ Rules:
   request rules it out.
 - Tickets (flights, trains, buses, entry fees) are per person: `cost` is ONE person's fare, `per` "person". A return
   journey is one person's round-trip fare, or two one-way items. Never a guessed figure "for the group".
+- Google Flights sources are real fares for ONE adult on the trip's dates, in INR: when flying, pick one of
+  those options (say which airline in the title) - `per` "person", `currency` "INR", source "found" with its id.
+  A round-trip fare goes half on the flight out and half on the flight back, each saying so in `basis`
+  ("half of the Rs 165,800 British Airways round trip").
 - When a source gives a fare or rate, use it - don't replace it with a lower guess. An estimate is a realistic
   market price for those dates, never shaded down to fit the budget.
 - When a per-person budget is given, fit it by choosing cheaper things (sleeper or 3AC trains, buses, guest
@@ -442,6 +499,11 @@ def normalise_spec(raw: dict, members: int) -> dict:
     spec["budget_total"] = round(bpp * spec["travellers"]) if bpp else None
     for k in ("transport_pref", "stay_pref", "food", "notes"):
         spec[k] = str(spec[k] or "")[:200]
+    air = raw.get("airports") if isinstance(raw.get("airports"), dict) else {}
+    code = lambda c: str(c).strip().upper() if c and re.fullmatch(r"[A-Za-z]{3}", str(c).strip()) else None
+    dests = [code(c) for c in (air.get("destinations") or [])][:len(spec["destinations"])]
+    spec["airports"] = {"origin": code(air.get("origin")),
+                        "destinations": dests + [None] * (len(spec["destinations"]) - len(dests))}
     return spec
 
 
@@ -663,6 +725,32 @@ def write_plan(spec: dict, research: dict, facts: str, step) -> tuple[dict, dict
     return result, money
 
 
+def _flights(spec: dict, pts: list[dict], step) -> list[dict]:
+    """Google Flights for the long legs: when the first place is far (over
+    ~700 km) or flying was asked for, and the dates and airports are known.
+    One destination: a round trip. Several: out to the first, back from the last."""
+    from database import get_settings
+    air = spec.get("airports") or {}
+    start, end = spec.get("start_date"), spec.get("end_date")
+    home, dests = air.get("origin"), air.get("destinations") or []
+    if not get_settings().serpapi_key or not (start and end and home and dests and dests[0]):
+        return []
+    by_name = {p["name"]: p for p in pts}
+    a, b = by_name.get(spec["origin"]), by_name.get(spec["destinations"][0])
+    far = a and b and _km(a, b) > 700
+    if not (far or re.search(r"fl(y|ight)|air", spec.get("transport_pref") or "", re.I)):
+        return []
+    last = next((c for c in reversed(dests) if c), None)
+    if last == dests[0]:
+        legs = [(home, dests[0], start, end)]
+    else:
+        legs = [(home, dests[0], start, None)] + ([(last, home, end, None)] if last else [])
+    step("Checking Google Flights: " + " · ".join(f"{f} → {t}" + (" and back" if r else "") for f, t, _, r in legs))
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        found = list(pool.map(lambda leg: google_flights(*leg), legs))
+    return [f for f in found if f]
+
+
 def _research(spec: dict, step) -> dict:
     places = ([spec["origin"]] if spec["origin"] else []) + spec["destinations"]
     step("Finding the places on the map")
@@ -680,10 +768,25 @@ def _research(spec: dict, step) -> dict:
         step("Checking the weather")
         research["weather"] = [w for w in (weather(p, start, end) for p in dest_pts) if w]
 
+    n = 0
+    research["flights"] = []
+    for f in _flights(spec, pts, step):
+        n += 1
+        what = "round trip" if f["back"] else "one way"
+        lines = [f"Google Flights fares for ONE adult, in INR, {what}, {f['from']} -> {f['to']} on {f['date']}"
+                 + (f", back {f['back']}" if f["back"] else "") + f": lowest Rs {f['lowest']}"
+                 + (f" (Google rates it '{f['level']}'; usual range Rs {f['typical'][0]}-{f['typical'][1]})"
+                    if f.get("level") and f.get("typical") else "")]
+        lines += [f"- Rs {o['price']}: {o['airlines']}, {o['stops']} stop(s), {o['hours']} h, departs {o['depart']}"
+                  for o in f["options"]]
+        research["sources"].append({"id": f"S{n}", "kind": "flights", "checked": f["checked"], "url": f["url"],
+                                    "title": f"Google Flights: {f['from']} → {f['to']}" + (" and back" if f["back"] else ""),
+                                    "text": "\n".join(lines)})
+        research["flights"].append({k: f[k] for k in ("from", "to", "date", "back", "lowest", "level", "typical")})
+
     step("Reading Wikivoyage: " + ", ".join(spec["destinations"]))
     with ThreadPoolExecutor(max_workers=4) as pool:
         pages = list(pool.map(wikivoyage, spec["destinations"]))
-    n = 0
     for page in pages:
         if not page:
             continue
