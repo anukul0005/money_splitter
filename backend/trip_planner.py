@@ -317,19 +317,24 @@ def google_flights(frm: str, to: str, out_date: str, back_date: str | None) -> d
 _train_cache: dict[tuple, dict | None] = {}
 
 
-def _rail(path: str, params: dict) -> dict | None:
+def _apish(path: str, params: dict) -> dict | None:
+    """One API.SH call (Indian Railways, Booking.com), None without a key or on failure."""
     from database import get_settings
     key = get_settings().api_sh_key
     if not key:
         return None
-    req = urllib.request.Request(f"https://api.api.sh/indian-rail/v1/{path}?{urllib.parse.urlencode(params)}",
+    req = urllib.request.Request(f"https://api.api.sh/{path}?{urllib.parse.urlencode(params)}",
                                  headers={"x-api-key": key, "User-Agent": UA})
     try:
         with urllib.request.urlopen(req, timeout=40) as r:
             return json.loads(r.read())
     except Exception as e:
-        print(f"[trip] rail {path}: {type(e).__name__}")
+        print(f"[trip] api.sh {path}: {type(e).__name__}")
         return None
+
+
+def _rail(path: str, params: dict) -> dict | None:
+    return _apish(f"indian-rail/v1/{path}", params)
 
 
 def _station(code: str | None, place: str) -> str | None:
@@ -370,6 +375,41 @@ def indian_trains(frm: str, to: str, on: str | None, frm_place: str = "", to_pla
                        "fares": {c: f.get("adult") for c, f in t["fares"].items() if f.get("adult")}}
                       for t in trains[:8]]}
     _train_cache[ck] = out
+    return out
+
+
+_stay_cache: dict[tuple, dict | None] = {}
+
+
+def booking_stays(place: str, checkin: str) -> dict | None:
+    """API.SH's Booking.com: places to stay in `place` for the night of
+    `checkin` - one room for two, the night's price with taxes in INR - popular
+    ones with a fair number of reviews, cheapest first. Cached in this process."""
+    nights = 1
+    ck = (place.lower(), checkin)
+    if ck in _stay_cache:
+        return _stay_cache[ck]
+    out_date = (date.fromisoformat(checkin) + timedelta(days=nights)).isoformat()
+    d = _apish("booking/v1/search", {"q": place, "checkin": checkin, "checkout": out_date, "adults": 2, "rooms": 1,
+                     "currency": "INR", "sort": "popularity"})
+    hotels = []
+    for h in (d or {}).get("hotels") or []:
+        price = h.get("price_per_night") or h.get("price_amount")
+        if not price or h.get("sold_out") or (h.get("currency") or "INR") != "INR" or (h.get("review_count") or 0) < 5:
+            continue
+        hotels.append({"name": h.get("name"), "price": round(price + (h.get("taxes_and_fees") or 0)),
+                       "stars": h.get("stars"), "score": h.get("review_score"), "reviews": h.get("review_count"),
+                       "area": h.get("district") or h.get("address"), "distance": h.get("distance"),
+                       "room": ", ".join((h.get("unit") or {}).get("names") or [])[:60],
+                       "breakfast": bool(h.get("meal_plan")), "url": h.get("url")})
+    if not hotels:
+        _stay_cache[ck] = None
+        return None
+    hotels.sort(key=lambda h: h["price"])
+    out = {"place": place, "checkin": checkin, "hotels": hotels[:12],
+           "url": f"https://www.booking.com/searchresults.html?{urllib.parse.urlencode({'ss': place, 'checkin': checkin, 'checkout': out_date, 'group_adults': 2, 'no_rooms': 1, 'selected_currency': 'INR'})}",
+           "checked": datetime.now(IST).date().isoformat()}
+    _stay_cache[ck] = out
     return out
 
 
@@ -511,6 +551,10 @@ Rules:
   `cost` that class's fare, `per` "person", source "found" with its id. A night train (arriving the next day)
   covers that night - no stay needed. Choose the class by the budget and preference (SL cheapest, 3A the usual
   comfortable choice). Booked close to the date, Tatkal costs more - say so in a tip when the trip is soon.
+- Booking.com sources are real prices of one room for two for one night of the trip, taxes included, in INR:
+  pick a place from them for each night there (its name in the title) - `cost` its price, `per` "room",
+  `currency` "INR", source "found" with its id - choosing by the stay preference and budget, and well rated.
+  Other nights in the same place keep the same stay and price.
 - When a source gives a fare or rate, use it - don't replace it with a lower guess. An estimate is a realistic
   market price for those dates, never shaded down to fit the budget.
 - When a per-person budget is given, fit it by choosing cheaper things (sleeper or 3AC trains, buses, guest
@@ -853,6 +897,27 @@ def _trains(spec: dict, pts: list[dict], step) -> list[dict]:
     return [f for f in found if f]
 
 
+def _stays(spec: dict, step) -> list[dict]:
+    """Booking.com for each place the group sleeps: the trip's nights shared
+    out across the places in order, priced for the first night in each."""
+    from database import get_settings
+    start, nights = _date(spec["start_date"]), spec["days"] - 1
+    dests = spec["destinations"][:5]
+    if not get_settings().api_sh_key or not start or nights < 1 or not dests:
+        return []
+    each, extra = divmod(nights, len(dests))
+    asks, day = [], start
+    for i, place in enumerate(dests):
+        n = each + (1 if i < extra else 0)
+        if n:
+            asks.append((place, day.isoformat()))
+        day += timedelta(days=n)
+    step("Checking Booking.com: " + " · ".join(f"{p} from {d[8:]}/{d[5:7]}" for p, d in asks))
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        found = list(pool.map(lambda a: booking_stays(*a), asks))
+    return [f for f in found if f]
+
+
 def _research(spec: dict, step) -> dict:
     places = ([spec["origin"]] if spec["origin"] else []) + spec["destinations"]
     step("Finding the places on the map")
@@ -905,6 +970,22 @@ def _research(spec: dict, step) -> dict:
         research["trains"].append({"from": t["from"]["name"], "to": t["to"]["name"], "date": t["date"],
                                    "count": len(t["trains"]), "fastest": t["trains"][0]["name"],
                                    "fastest_hours": t["trains"][0]["hours"], "lowest": cheapest})
+
+    research["stays"] = []
+    for s in _stays(spec, step):
+        n += 1
+        lines = [f"Booking.com, {s['place']}, the night of {s['checkin']}: price of ONE room for two for that night"
+                 " in INR, taxes included, cheapest first"]
+        lines += [f"- Rs {h['price']}: {h['name']}" + (f", {h['stars']} star" if h["stars"] else "")
+                  + (f", rated {h['score']}/10 by {h['reviews']}" if h["score"] else "")
+                  + (f", {h['area']}" if h["area"] else "") + (f" ({h['distance']})" if h["distance"] else "")
+                  + (f", {h['room']}" if h["room"] else "") + (", breakfast included" if h["breakfast"] else "")
+                  for h in s["hotels"]]
+        research["sources"].append({"id": f"S{n}", "kind": "stays", "checked": s["checked"], "url": s["url"],
+                                    "title": f"Booking.com: {s['place']}", "text": "\n".join(lines)})
+        prices = [h["price"] for h in s["hotels"]]
+        research["stays"].append({"place": s["place"], "checkin": s["checkin"], "count": len(prices),
+                                  "lowest": min(prices), "highest": max(prices)})
 
     step("Reading Wikivoyage: " + ", ".join(spec["destinations"]))
     with ThreadPoolExecutor(max_workers=4) as pool:

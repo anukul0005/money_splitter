@@ -282,7 +282,7 @@ function PlanView({ p, me, name, onRevise, onRetry, onDelete, busy }) {
         </p>
       </div>
 
-      {(p.weather?.length > 0 || p.legs?.length > 0 || p.flights?.length > 0 || p.trains?.length > 0) && (
+      {(p.weather?.length > 0 || p.legs?.length > 0 || p.flights?.length > 0 || p.trains?.length > 0 || p.stays?.length > 0) && (
         <div className="bg-white border border-amber-200 p-3 space-y-2">
           {(p.flights || []).map((f) => (
             <p key={`${f.from}${f.to}`} className="text-[11px] text-gray-700">
@@ -297,6 +297,13 @@ function PlanView({ p, me, name, onRevise, onRetry, onDelete, busy }) {
               🚆 <b>{t.from} → {t.to}</b>: {t.count} train{t.count > 1 ? 's' : ''}{t.date ? ` on ${day(t.date, { day: 'numeric', month: 'short' })}` : ''}
               {t.lowest != null && <> from <b>{INR(t.lowest)}</b> a person</>}
               <span className="text-[10px] text-gray-400"> (fastest {t.fastest}, {t.fastest_hours} h)</span>
+            </p>
+          ))}
+          {(p.stays || []).map((s) => (
+            <p key={s.place} className="text-[11px] text-gray-700">
+              🏨 <b>{s.place}</b> on Booking.com, {day(s.checkin, { day: 'numeric', month: 'short' })}: {s.count} places
+              from <b>{INR(s.lowest)}</b> a room a night
+              <span className="text-[10px] text-gray-400"> (up to {INR(s.highest)})</span>
             </p>
           ))}
           {p.weather.map((w) => (
