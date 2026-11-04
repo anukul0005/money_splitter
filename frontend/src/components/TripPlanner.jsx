@@ -239,14 +239,17 @@ function PlanView({ p, me, name, onRevise, onRetry, onDelete, busy }) {
       <div className="bg-white border border-amber-200 p-3">
         <div className="flex items-end justify-between gap-3">
           <div>
-            <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">Per person</p>
-            <p className="text-2xl font-black text-gray-900 tabular-nums">{INR(b.per_person)}</p>
-            <p className="text-[11px] text-gray-500">Group total {INR(b.group_total)} · for {b.travellers} {b.travellers === 1 ? 'person' : 'people'}</p>
+            <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">
+              Whole trip · {b.travellers} {b.travellers === 1 ? 'person' : 'people'}
+            </p>
+            <p className="text-2xl font-black text-gray-900 tabular-nums">{INR(b.group_total)}</p>
+            {b.travellers > 1 && <p className="text-[11px] text-gray-500 tabular-nums">{INR(b.per_person)} per person</p>}
           </div>
           {b.budget_per_person && (
             <p className={`text-[11px] font-bold text-right ${b.over_by ? 'text-red-600' : 'text-green-700'}`}>
-              {b.over_by ? `${INR(b.over_by)} over` : `${INR(b.budget_per_person - b.per_person)} under`}
-              <span className="block font-normal text-gray-500">budget {INR(b.budget_per_person)}</span>
+              {b.over_by ? `${INR(b.over_by * b.travellers)} over` : `${INR((b.budget_per_person - b.per_person) * b.travellers)} under`}
+              <span className="block font-normal text-gray-500">budget {INR(b.budget_per_person * b.travellers)}</span>
+              {b.travellers > 1 && <span className="block font-normal text-[10px] text-gray-400">{INR(b.budget_per_person)} per person</span>}
             </p>
           )}
         </div>
@@ -262,8 +265,8 @@ function PlanView({ p, me, name, onRevise, onRetry, onDelete, busy }) {
               <span className="w-32 shrink-0 text-gray-600">{CAT[c] || c}</span>
               <span className="flex-1 h-1.5 bg-gray-100"><span className="block h-full bg-brand-400" style={{ width: `${(100 * v) / top}%` }} /></span>
               <span className="w-20 text-right shrink-0">
-                <span className="block font-bold tabular-nums text-gray-800">{INR(v)}</span>
-                {b.travellers > 1 && <span className="block text-[9px] text-gray-400 tabular-nums">{INR(v * b.travellers)} for {b.travellers}</span>}
+                <span className="block font-bold tabular-nums text-gray-800">{INR(v * b.travellers)}</span>
+                {b.travellers > 1 && <span className="block text-[9px] text-gray-400 tabular-nums">{INR(v)} each</span>}
               </span>
             </div>
           ))}
@@ -275,7 +278,7 @@ function PlanView({ p, me, name, onRevise, onRetry, onDelete, busy }) {
               {plan.fx_date ? ` (rate of ${day(plan.fx_date, { day: 'numeric', month: 'short' })})` : ''}.
             </span>
           )}
-          Amounts are per person, with the total for all {b.travellers} under each. {b.found_share}% of this cost comes from a source; the rest are estimates. Totals are added up by the app, not the AI. Stays are shared {b.rooms} room{b.rooms > 1 ? 's' : ''}.
+          {b.travellers > 1 ? `Amounts are for all ${b.travellers}, with each person's share under each. ` : ''} {b.found_share}% of this cost comes from a source; the rest are estimates. Totals are added up by the app, not the AI. Stays are shared {b.rooms} room{b.rooms > 1 ? 's' : ''}.
         </p>
       </div>
 
