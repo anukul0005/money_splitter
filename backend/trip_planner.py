@@ -257,19 +257,44 @@ def wikivoyage(place: str) -> dict | None:
 
 
 def web_search(query: str) -> list[dict]:
-    """Tavily - nothing when no key is set."""
+    """Tavily - nothing when no key is set. Pages from the past year first
+    (stale fares and rates are the commonest wrong answer); if that finds
+    nothing, any age."""
     from database import get_settings
     key = get_settings().tavily_api_key
     if not key:
         return []
-    try:
-        d = _post_json("https://api.tavily.com/search", {"query": query, "max_results": 5, "search_depth": "basic"},
-                       {"Authorization": f"Bearer {key}"}, timeout=30)
-    except Exception as e:
-        print(f"[trip] search {query!r}: {e!r}")
-        return []
-    return [{"title": r.get("title", "")[:150], "url": r.get("url", ""), "text": (r.get("content") or "")[:700]}
-            for r in d.get("results", []) if r.get("url")]
+    d = {}
+    for extra in ({"time_range": "year"}, {}):
+        try:
+            d = _post_json("https://api.tavily.com/search",
+                           {"query": query, "max_results": 5, "search_depth": "basic", **extra},
+                           {"Authorization": f"Bearer {key}"}, timeout=30)
+            if d.get("results"):
+                break
+        except Exception as e:
+            print(f"[trip] search {query!r} {extra}: {e!r}")
+    checked = datetime.now(IST).date().isoformat()
+    return [{"title": r.get("title", "")[:150], "url": r.get("url", ""), "text": (r.get("content") or "")[:700],
+             "checked": checked} for r in d.get("results", []) if r.get("url")]
+
+
+def _trip_month(spec: dict) -> str:
+    """"December 2026" - the trip's month (its start), else this month."""
+    d = _date(spec.get("start_date")) or datetime.now(IST).date()
+    return d.strftime("%B %Y")
+
+
+def fix_query_dates(q: str, when: str) -> str:
+    """A search about another year or month gets the trip's instead - the AI
+    picking searches doesn't always know what year it is."""
+    month, year = when.split()
+    q = re.sub(r"\b(19|20)\d{2}\b", year, q)
+    q = re.sub(r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\b",
+               month, q, flags=re.I)
+    if year not in q:
+        q = f"{q} {when}"
+    return q
 
 
 # ── the prompts ────────────────────────────────────────────────────────────
@@ -292,7 +317,8 @@ _SEARCHES = """You pick web searches for a trip planner in India: at most {n}, s
 what most changes the cost and the plan - fares between the origin and each place and between places (train, bus,
 flight - match the transport preference), hotel or guest-house prices per night in each place (match the stay
 preference and budget), entry fees of the main sights, and the paid activities the interests name (e.g. desert
-safari or camp prices). Put the month and year in each. Respond with ONLY JSON:
+safari or camp prices). Today is {today}. The trip is in {when}: put "{when}" in each query that's about a price -
+never any other month or year. Respond with ONLY JSON:
 {{"searches": [{{"q": "...", "for": "transport|stay|activity|food|local"}}]}}"""
 
 _PLAN = """You are Settle's trip planner. Write a realistic day-by-day plan for this group trip in India from the
@@ -304,6 +330,10 @@ Rules:
 - `source` is "found" ONLY when the price is taken from a given source: list them in `source_ids` (e.g. ["S3"])
   and use the figure that source states (a range: its middle). Otherwise "estimate", with `basis` saying how it
   was estimated ("typical 3AC fare Delhi-Jodhpur"). Never cite a source that wasn't given, never invent one.
+- Web prices are what the page showed on the day it was checked (given with each source), often for other
+  dates ("cheapest in the next 14 days", last season's rates). When a found price isn't for the trip's own dates,
+  `basis` says so ("lowest fare on the page, for early Nov - December fares may differ"). Fares and hotel rates
+  usually rise around Christmas, New Year, Diwali and long weekends - say so where it applies.
 - Cover everything the trip costs: getting there and back, between places, local transport, stays, food (one
   item a day per person is fine), entry fees and activities. Free things cost 0.
 - Include each place's main sights and the experience it is known for (the reason people go there), unless the
@@ -564,11 +594,14 @@ def _research(spec: dict, step) -> dict:
     from database import get_settings
     if get_settings().tavily_api_key:
         step("Choosing what to search for")
+        when = _trip_month(spec)
         try:
-            qs = _llm(_SEARCHES.format(n=MAX_SEARCHES), json.dumps(spec), 1000, quick=True).get("searches") or []
+            qs = _llm(_SEARCHES.format(n=MAX_SEARCHES, today=datetime.now(IST).date().isoformat(), when=when),
+                      json.dumps(spec), 1000, quick=True).get("searches") or []
         except Exception:
             qs = []
-        queries = [str(q.get("q") if isinstance(q, dict) else q)[:150] for q in qs if q][:MAX_SEARCHES]
+        queries = [fix_query_dates(str(q.get("q") if isinstance(q, dict) else q)[:150], when)
+                   for q in qs if q][:MAX_SEARCHES]
         for q in queries:
             step(f"Searching: {q}")
         with ThreadPoolExecutor(max_workers=3) as pool:
@@ -576,7 +609,7 @@ def _research(spec: dict, step) -> dict:
                 for h in hits[:3]:
                     n += 1
                     research["sources"].append({"id": f"S{n}", "kind": "web", "title": h["title"], "url": h["url"],
-                                                "text": h["text"], "query": q})
+                                                "text": h["text"], "query": q, "checked": h["checked"]})
     else:
         step("Live web search isn't set up - prices not on Wikivoyage will be estimates")
     return research
@@ -597,7 +630,8 @@ def _facts(spec: dict, research: dict) -> str:
     out.append("Sources (cite by id):")
     budget = 26000
     for s in research["sources"]:
-        block = f"[{s['id']}] {s['title']} ({s['url']})\n{s['text']}"
+        checked = f" - page checked {s['checked']}" if s.get("checked") else ""
+        block = f"[{s['id']}] {s['title']} ({s['url']}){checked}\n{s['text']}"
         if budget - len(block) < 0:
             break
         budget -= len(block)

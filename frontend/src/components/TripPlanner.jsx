@@ -116,7 +116,9 @@ export default function TripPlanner({ d, name, onChanged }) {
         const f = full[p.id]
         return (
           <div key={p.id} className="space-y-3">
-            <PlanCard p={p} isOpen={open === p.id} onToggle={() => toggle(p.id)} />
+            <PlanCard p={p} isOpen={open === p.id} onToggle={() => toggle(p.id)}
+              onDelete={p.created_by.toLowerCase() === (d.me || '').toLowerCase() && p.status !== 'running'
+                ? () => remove(p.id) : null} />
             {open === p.id && (f
               ? <PlanView p={f} me={d.me} name={name} onRevise={(t) => run(t, p.id)} onRetry={() => run(p.prompt, p.parent_id)}
                   onDelete={() => remove(p.id)} busy={busy || running} />
@@ -128,15 +130,25 @@ export default function TripPlanner({ d, name, onChanged }) {
   )
 }
 
-/** A saved plan at a glance: the trip, how many people, what it all costs. */
-function PlanCard({ p, isOpen, onToggle }) {
+/** A saved plan at a glance: the trip, how many people, what it all costs -
+ * and, for whoever made it, a bin to delete it (its research goes with it). */
+function PlanCard({ p, isOpen, onToggle, onDelete }) {
   const dates = p.start_date
     ? `${day(p.start_date, { day: 'numeric', month: 'short' })} – ${day(p.end_date, { day: 'numeric', month: 'short' })}` : null
   const route = [p.origin, ...(p.destinations || [])].filter(Boolean).join(' → ')
   const facts = [p.travellers && `${p.travellers} people`, p.days && `${p.days} days`, dates].filter(Boolean).join(' · ')
   return (
+    <div className={`relative bg-white border ${isOpen ? 'border-gray-900' : 'border-amber-200'}`}>
+    {onDelete && (
+      <button onClick={onDelete} aria-label="Delete this plan" title="Delete this plan"
+        className="absolute left-2 bottom-2 p-1 text-gray-300 hover:text-red-600">
+        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6" />
+        </svg>
+      </button>
+    )}
     <button onClick={onToggle} aria-expanded={isOpen}
-      className={`w-full text-left bg-white border p-3 flex gap-3 items-start ${isOpen ? 'border-gray-900' : 'border-amber-200'}`}>
+      className={`w-full text-left p-3 flex gap-3 items-start ${onDelete ? 'pb-8' : ''}`}>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-black text-gray-900 leading-snug">
           {p.title || (p.status === 'running' ? 'Planning…' : p.status === 'failed' ? "Didn't finish" : 'Trip plan')}
@@ -166,6 +178,7 @@ function PlanCard({ p, isOpen, onToggle }) {
         <p className="text-[10px] text-gray-400 mt-1">{isOpen ? '▾ Hide' : '▸ Details'}</p>
       </div>
     </button>
+    </div>
   )
 }
 
@@ -306,7 +319,7 @@ function PlanView({ p, me, name, onRevise, onRetry, onDelete, busy }) {
                       </>
                     ) : <p className="text-[10px] text-gray-400">free</p>}
                     {it.cost > 0 && (s
-                      ? <a href={s.url} target="_blank" rel="noreferrer" title={s.title}
+                      ? <a href={s.url} target="_blank" rel="noreferrer" title={`${s.title}${s.checked ? ` - checked ${s.checked}` : ''}`}
                           className="inline-block mt-0.5 text-[9px] font-bold border border-green-300 text-green-700 px-1">Source ↗</a>
                       : <span className="inline-block mt-0.5 text-[9px] font-bold border border-gray-200 text-gray-400 px-1">Estimate</span>)}
                   </div>
@@ -341,10 +354,11 @@ function PlanView({ p, me, name, onRevise, onRetry, onDelete, busy }) {
             {p.sources.map((s) => (
               <li key={s.id} className="text-[11px] truncate">
                 <a href={s.url} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline">{s.title}</a>
+                {s.checked && <span className="text-gray-400"> · checked {day(s.checked, { day: 'numeric', month: 'short', year: 'numeric' })}</span>}
               </li>
             ))}
           </ul>
-          <p className="text-[10px] text-gray-400 mt-1">Places: OpenStreetMap · Roads: OSRM · Weather: Open-Meteo. Check prices before booking.</p>
+          <p className="text-[10px] text-gray-400 mt-1">Places: OpenStreetMap · Roads: OSRM · Weather: Open-Meteo. Web prices are what each page showed when it was checked - often for other dates; fares rise near holidays. Check before booking.</p>
         </div>
       )}
 
