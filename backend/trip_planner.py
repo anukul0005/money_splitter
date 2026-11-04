@@ -590,11 +590,21 @@ def gaps(plan: dict, spec: dict) -> list[str]:
     if len(plan["days"]) < spec["days"]:
         missing.append(f"Your plan stops at day {len(plan['days'])}, but the trip is {spec['days']} days - "
                        f"plan every day up to {spec['end_date'] or 'the last day'}.")
-    if spec["origin"] and plan["days"] and not any(it["category"] == "transport" for it in plan["days"][-1]["items"]):
-        missing.append(f"The last day must end with getting back to {spec['origin']}, with its cost.")
-    if spec["days"] > 1 and not any(it["category"] == "stay" for d in plan["days"] for it in d["items"]):
-        missing.append("It has nowhere to sleep: add a stay item (per room per night) for each night that isn't "
-                       "spent on an overnight train or bus - a desert camp counts as a stay.")
+    home = spec["origin"].lower()
+    if home and plan["days"]:
+        last = [it for it in plan["days"][-1]["items"] if it["category"] == "transport"]
+        if not any(home in f"{it['title']} {it['detail']}".lower() for it in last):
+            missing.append(f"The last day must end with the journey back to {spec['origin']} (the flight, train or "
+                           f"bus home, named and with its cost) - getting to the airport or station isn't enough.")
+    nights = spec["days"] - 1
+    items = [it for d in plan["days"] for it in d["items"]]
+    stays = sum(1 for it in items if it["category"] == "stay")
+    overnight = sum(1 for it in items if it["category"] == "transport"
+                    and re.search(r"overnight|night (?:train|bus|flight)|sleeper", f"{it['title']} {it['detail']}", re.I))
+    if nights > 0 and stays + overnight < nights:
+        missing.append(f"The trip has {nights} night{'s' if nights > 1 else ''} but only {stays} stay item"
+                       f"{'s' if stays != 1 else ''}: add one stay (per room per night) for every night not spent on an "
+                       f"overnight train, bus or flight - a desert camp counts as a stay.")
     return missing
 
 
