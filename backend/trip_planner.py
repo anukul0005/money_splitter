@@ -67,7 +67,7 @@ def _gemini_one(model: str, system: str, user: str, max_tokens: int) -> dict:
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
     for attempt in range(2):
         try:
-            d = _post_json(GEMINI_URL, body, {"Authorization": f"Bearer {get_settings().gemini_api_key}"}, timeout=120)
+            d = _post_json(GEMINI_URL, body, {"Authorization": f"Bearer {get_settings().gemini_api_key}"}, timeout=80)
         except urllib.error.HTTPError as e:
             if e.code == 400 and attempt == 0:                # a model that won't take reasoning_effort
                 body.pop("reasoning_effort", None)
@@ -83,27 +83,14 @@ def _gemini_one(model: str, system: str, user: str, max_tokens: int) -> dict:
 
 
 def _gemini(system: str, user: str, max_tokens: int) -> dict:
-    """The first two models asked at once - whichever answers first wins (one
-    of them is often slow) - then the rest in turn."""
+    """The models one at a time (asking two at once doubled what each plan
+    takes from the free daily quota); a slow or busy one hands over to the next."""
     from attachment_reader import GEMINI_MODELS
-    from concurrent.futures import FIRST_COMPLETED, wait
     from database import get_settings
     if not get_settings().gemini_api_key:
         raise RuntimeError("no Gemini key")
     last: Exception | None = None
-    pool = ThreadPoolExecutor(max_workers=2)
-    pending = {pool.submit(_gemini_one, m, system, user, max_tokens) for m in GEMINI_MODELS[:2]}
-    try:
-        while pending:
-            done, pending = wait(pending, return_when=FIRST_COMPLETED)
-            for f in done:
-                try:
-                    return f.result()
-                except Exception as e:
-                    last = e
-    finally:
-        pool.shutdown(wait=False, cancel_futures=True)
-    for model in GEMINI_MODELS[2:]:
+    for model in GEMINI_MODELS:
         try:
             return _gemini_one(model, system, user, max_tokens)
         except urllib.error.HTTPError as e:
@@ -357,8 +344,13 @@ Respond with ONLY a JSON object:
   "budget_per_person": null, "budget_total": null,
   "transport_pref": "", "stay_pref": "", "interests": [], "food": "", "notes": ""}}
 Rules: a date without a year is the next one after today. "4-day trip between 20-24 December" means 4 days from
-the 20th (days wins over the range). travellers: the number the request gives ("5 friends" = 5), else the
-group size given below. Amounts in rupees as numbers ("12k" = 12000, "1.2 lakh" = 120000); a per-person budget goes
+the 20th (days wins over the range). When only a month, a span of months or a season is given ("March-April 2027",
+"next winter"), pick real dates inside it - the best time to go when the request asks, else a sensible start -
+and say which and why in notes; start_date is null only when nothing at all is said about when. "5n 6d" = 6 days. travellers: the number the request gives ("5 friends" = 5), else the
+group size given below - but count the people the words imply first: "my wife and I", "a honeymoon", "a couple" = 2;
+"me and 3 friends" = 4. origin: where the trip starts; when not said, a city in India the request or the details
+suggest, else "Delhi" - and say in notes that it was assumed (the plan always includes getting there and back).
+Amounts in rupees as numbers ("12k" = 12000, "1.2 lakh" = 120000); a per-person budget goes
 in budget_per_person, a whole-trip one in budget_total. rooms only when the request says. Never invent places
 the request doesn't name, except when it asks for suggestions."""
 
@@ -392,8 +384,13 @@ Rules:
   item a day per person is fine), entry fees and activities. Free things cost 0.
 - Include each place's main sights and the experience it is known for (the reason people go there), unless the
   request rules it out.
-- When a per-person budget is given, plan to fit it (sleeper or 3AC trains, buses, guest houses, shared cabs)
-  - but never leave a cost out to fit.
+- Tickets (flights, trains, buses, entry fees) are per person: `cost` is ONE person's fare, `per` "person". A return
+  journey is one person's round-trip fare, or two one-way items. Never a guessed figure "for the group".
+- When a source gives a fare or rate, use it - don't replace it with a lower guess. An estimate is a realistic
+  market price for those dates, never shaded down to fit the budget.
+- When a per-person budget is given, fit it by choosing cheaper things (sleeper or 3AC trains, buses, guest
+  houses, shared cabs, fewer paid activities) - never by lowering prices or leaving a cost out. If it can't fit,
+  leave it over budget and say so in the summary.
 - Use the road times given to keep days realistic, and the weather (hot afternoons, rain) when choosing what
   goes when. Day 1 is the start date.
 Respond with ONLY JSON:
@@ -593,9 +590,16 @@ def gaps(plan: dict, spec: dict) -> list[str]:
     home = spec["origin"].lower()
     if home and plan["days"]:
         last = [it for it in plan["days"][-1]["items"] if it["category"] == "transport"]
-        if not any(home in f"{it['title']} {it['detail']}".lower() for it in last):
+        back = [it for it in last if home in f"{it['title']} {it['detail']}".lower()]
+        if not back:
             missing.append(f"The last day must end with the journey back to {spec['origin']} (the flight, train or "
                            f"bus home, named and with its cost) - getting to the airport or station isn't enough.")
+        elif not any(it["cost"] > 0 for it in back):
+            missing.append(f"The journey back to {spec['origin']} has no cost - give its real fare per person.")
+        first = [it for it in plan["days"][0]["items"] if it["category"] == "transport"
+                 and home in f"{it['title']} {it['detail']}".lower()]
+        if first and not any(it["cost"] > 0 for it in first):
+            missing.append(f"The journey from {spec['origin']} has no cost - give its real fare per person.")
     nights = spec["days"] - 1
     items = [it for d in plan["days"] for it in d["items"]]
     stays = sum(1 for it in items if it["category"] == "stay")
@@ -617,25 +621,44 @@ def write_plan(spec: dict, research: dict, facts: str, step) -> tuple[dict, dict
     step("Writing the day-by-day plan")
     result = write(facts)
 
-    missing = gaps(result, spec)
-    if missing and result["days"]:
+    for _ in range(2):                                  # up to two rounds to fill what's missing
+        missing = gaps(result, spec)
+        if not missing or not result["days"]:
+            break
         step("Filling in what the plan left out")
-        fuller = write(facts + f"\n\n{' '.join(missing)} Return the WHOLE plan, every day:\n{for_ai(result)}")
+        try:
+            fuller = write(facts + f"\n\n{' '.join(missing)} Return the WHOLE plan, every day:\n{for_ai(result)}")
+        except Exception as e:                          # the AI's quota or a timeout: keep the plan written
+            print(f"[trip] fill round failed: {e!r}")
+            step("Couldn't reach the AI again - keeping the plan as written")
+            break
         if len(fuller["days"]) >= len(result["days"]) and len(gaps(fuller, spec)) < len(missing):
             result = fuller
     if not result["days"]:
         raise ValueError("The AI didn't come back with a plan - try again.")
+    left = gaps(result, spec)
+    if left:                                            # say what it still lacks, rather than hide it
+        result["assumptions"] = (result.get("assumptions") or []) + [f"Not complete: {x}" for x in left]
 
     money = work_out_budget(result, spec)
     if money["over_by"] > 0.05 * (spec["budget_per_person"] or 0):
         step(f"₹{money['per_person']:,} a person is ₹{money['over_by']:,} over the budget - finding cheaper options")
         retry = facts + (f"\n\nYour plan below costs Rs {money['per_person']} per person, Rs {money['over_by']} over "
-                         f"the Rs {spec['budget_per_person']} budget. Rework it to fit (cheaper transport, stays, "
-                         f"activities) without leaving any cost, day or the way home out:\n{for_ai(result)}")
-        cheaper = write(retry)
+                         f"the Rs {spec['budget_per_person']} budget. Rework it to fit by choosing cheaper transport, "
+                         f"stays and activities - never by lowering a price below what the sources show, or leaving "
+                         f"any cost, day or the way home out. If it can't fit, keep real prices and say so:\n"
+                         f"{for_ai(result)}")
+        try:
+            cheaper = write(retry)
+        except Exception as e:
+            print(f"[trip] cheaper round failed: {e!r}")
+            step("Couldn't reach the AI again - keeping the plan as written")
+            return result, money
         cheaper_money = work_out_budget(cheaper, spec)
+        # Cheaper by real choices, not by guessing lower or dropping things: complete (no gaps at all), and
+        # leaning on sources as much as the first plan did
         if len(cheaper["days"]) >= len(result["days"]) and cheaper_money["per_person"] < money["per_person"] \
-                and len(gaps(cheaper, spec)) <= len(gaps(result, spec)):
+                and not gaps(cheaper, spec) and cheaper_money["found_share"] >= money["found_share"] - 5:
             result, money = cheaper, cheaper_money
     return result, money
 
