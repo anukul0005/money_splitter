@@ -1375,10 +1375,16 @@ class TripPlanIn(BaseModel):
 
 def _trip_out(p: TripPlan, full: bool) -> dict:
     plan = _loads(p.plan_json, None)
-    money = _loads(p.budget_json, None)
+    money = _loads(p.budget_json, None) or {}
+    spec = _loads(p.spec_json, None) or {}
+    # The card: what the trip is and what it costs, at a glance
     out = {"id": p.id, "parent_id": p.parent_id, "created_by": p.created_by, "prompt": p.prompt,
            "status": p.status, "error": p.error, "created_at": p.created_at, "finished_at": p.finished_at,
-           "title": plan["title"] if plan else None, "per_person": money["per_person"] if money else None}
+           "title": plan["title"] if plan else None, "per_person": money.get("per_person"),
+           "group_total": money.get("group_total"), "travellers": money.get("travellers") or spec.get("travellers"),
+           "budget_per_person": money.get("budget_per_person"), "over_by": money.get("over_by"),
+           "found_share": money.get("found_share"), "days": spec.get("days"), "start_date": spec.get("start_date"),
+           "end_date": spec.get("end_date"), "origin": spec.get("origin"), "destinations": spec.get("destinations")}
     if full:
         research = _loads(p.research_json, {}) or {}
         out.update(steps=_loads(p.steps_json, []), spec=_loads(p.spec_json, None), plan=plan, budget=money,

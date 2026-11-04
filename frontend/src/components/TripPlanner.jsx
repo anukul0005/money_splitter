@@ -21,53 +21,72 @@ function day(iso, opts = { weekday: 'short', day: 'numeric', month: 'short' }) {
 }
 
 export default function TripPlanner({ d, name, onChanged }) {
-  const [plans, setPlans] = useState(null)
+  const [plans, setPlans] = useState(null)       // the saved plans, as cards
   const [webSearch, setWebSearch] = useState(true)
-  const [sel, setSel] = useState(null)          // the open plan, in full
+  const [open, setOpen] = useState(null)         // the expanded card's id
+  const [full, setFull] = useState({})           // id -> the plan in full, once opened
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
-  const loadList = useCallback(async (pick) => {
+  const loadList = useCallback(async () => {
     try {
       const { data } = await listTripPlans(d.id)
       setPlans(data.plans)
       setWebSearch(data.web_search)
-      const id = pick ?? data.plans[0]?.id
-      if (id) setSel((await getTripPlan(d.id, id)).data)
-      else setSel(null)
+      return data.plans
     } catch { setErr("Couldn't load the plans.") }
   }, [d.id])
-  useEffect(() => { loadList() }, [loadList])
+  const loadFull = useCallback(async (id) => {
+    try {
+      const { data } = await getTripPlan(d.id, id)
+      setFull((f) => ({ ...f, [id]: data }))
+      return data
+    } catch { setErr("Couldn't open that plan.") }
+  }, [d.id])
 
-  // While a plan is being made, follow its steps
+  // A plan still being made opens by itself, to show its steps
   useEffect(() => {
-    if (sel?.status !== 'running') return
+    loadList().then((ps) => {
+      const live = ps?.find((p) => p.status === 'running')
+      if (live) { setOpen(live.id); loadFull(live.id) }
+    })
+  }, [loadList, loadFull])
+
+  const toggle = (id) => {
+    if (open === id) { setOpen(null); return }
+    setOpen(id)
+    if (!full[id] || full[id].status === 'running') loadFull(id)
+  }
+
+  // While a plan is being made, follow its steps; done, refresh its card
+  const runningId = (plans || []).find((p) => p.status === 'running')?.id
+  useEffect(() => {
+    if (!runningId) return
     const t = setInterval(async () => {
-      try {
-        const { data } = await getTripPlan(d.id, sel.id)
-        setSel(data)
-        if (data.status !== 'running') { loadList(data.id); onChanged?.() }
-      } catch { /* the next poll */ }
+      const data = await loadFull(runningId)
+      if (data && data.status !== 'running') { loadList(); onChanged?.() }
     }, POLL_MS)
     return () => clearInterval(t)
-  }, [sel?.id, sel?.status, d.id, loadList, onChanged])
+  }, [runningId, loadFull, loadList, onChanged])
 
   const run = async (text, parentId) => {
     setBusy(true); setErr('')
     try {
       const { data } = await createTripPlan(d.id, text, parentId)
-      setSel(data); setPrompt('')
-      setPlans((ps) => [{ ...data }, ...(ps || [])])
+      setPrompt('')
+      setFull((f) => ({ ...f, [data.id]: data }))
+      setOpen(data.id)
+      await loadList()
     } catch (e) { setErr(errText(e, "Couldn't start the plan.")) } finally { setBusy(false) }
   }
 
-  const remove = async () => {
+  const remove = async (id) => {
     if (!confirm('Delete this plan?')) return
-    try { await deleteTripPlan(d.id, sel.id); await loadList() } catch (e) { setErr(errText(e, "Couldn't delete it.")) }
+    try { await deleteTripPlan(d.id, id); setOpen(null); await loadList() } catch (e) { setErr(errText(e, "Couldn't delete it.")) }
   }
 
-  const running = (plans || []).some((p) => p.status === 'running')
+  const running = Boolean(runningId)
   return (
     <div className="px-4 pt-3 pb-6 max-w-2xl w-full space-y-3">
       <div className="bg-white border border-amber-200 p-3">
@@ -87,26 +106,66 @@ export default function TripPlanner({ d, name, onChanged }) {
         {err && <p className="text-[11px] text-red-600 mt-2">{err}</p>}
       </div>
 
-      {plans?.length > 1 && (
-        <div className="flex gap-1.5 overflow-x-auto pb-1">
-          {plans.map((p, i) => (
-            <button key={p.id} onClick={() => loadList(p.id)}
-              className={`shrink-0 text-[11px] font-bold px-2.5 py-1.5 border ${sel?.id === p.id ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200'}`}>
-              {p.parent_id ? 'Revised' : 'Plan'} {plans.length - i}
-              {p.status === 'done' && p.per_person != null && <span className="font-normal"> · {INR(p.per_person)}</span>}
-              {p.status === 'running' && <span className="font-normal"> · making…</span>}
-              {p.status === 'failed' && <span className="font-normal"> · failed</span>}
-            </button>
-          ))}
-        </div>
-      )}
-
       {plans && !plans.length && (
         <p className="text-xs text-gray-400 text-center py-6">No plans yet - describe the trip above.</p>
       )}
-      {sel && <PlanView p={sel} me={d.me} name={name} onRevise={(t) => run(t, sel.id)} onRetry={() => run(sel.prompt, sel.parent_id)}
-        onDelete={remove} busy={busy || running} />}
+      {plans?.length > 0 && (
+        <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide pt-1">Saved plans · {plans.length}</p>
+      )}
+      {(plans || []).map((p) => {
+        const f = full[p.id]
+        return (
+          <div key={p.id} className="space-y-3">
+            <PlanCard p={p} isOpen={open === p.id} onToggle={() => toggle(p.id)} />
+            {open === p.id && (f
+              ? <PlanView p={f} me={d.me} name={name} onRevise={(t) => run(t, p.id)} onRetry={() => run(p.prompt, p.parent_id)}
+                  onDelete={() => remove(p.id)} busy={busy || running} />
+              : <p className="text-[11px] text-gray-400 px-1">Opening…</p>)}
+          </div>
+        )
+      })}
     </div>
+  )
+}
+
+/** A saved plan at a glance: the trip, how many people, what it all costs. */
+function PlanCard({ p, isOpen, onToggle }) {
+  const dates = p.start_date
+    ? `${day(p.start_date, { day: 'numeric', month: 'short' })} – ${day(p.end_date, { day: 'numeric', month: 'short' })}` : null
+  const route = [p.origin, ...(p.destinations || [])].filter(Boolean).join(' → ')
+  const facts = [p.travellers && `${p.travellers} people`, p.days && `${p.days} days`, dates].filter(Boolean).join(' · ')
+  return (
+    <button onClick={onToggle} aria-expanded={isOpen}
+      className={`w-full text-left bg-white border p-3 flex gap-3 items-start ${isOpen ? 'border-gray-900' : 'border-amber-200'}`}>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-black text-gray-900 leading-snug">
+          {p.title || (p.status === 'running' ? 'Planning…' : p.status === 'failed' ? "Didn't finish" : 'Trip plan')}
+          {p.parent_id && <span className="ml-1.5 align-middle text-[9px] font-bold border border-gray-300 text-gray-500 px-1">REVISED</span>}
+        </p>
+        {facts && <p className="text-[11px] text-gray-600 mt-0.5">{facts}</p>}
+        {route && <p className="text-[10px] text-gray-400 truncate">{route}</p>}
+        {!p.title && <p className="text-[10px] text-gray-400 italic truncate">“{p.prompt}”</p>}
+      </div>
+      <div className="text-right shrink-0">
+        {p.status === 'done' && p.group_total != null ? (
+          <>
+            <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">Whole trip</p>
+            <p className="text-lg font-black text-gray-900 tabular-nums leading-tight">{INR(p.group_total)}</p>
+            <p className="text-[10px] text-gray-500 tabular-nums">{INR(p.per_person)} each</p>
+            {p.budget_per_person ? (
+              <p className={`text-[10px] font-bold ${p.over_by ? 'text-red-600' : 'text-green-700'}`}>
+                {p.over_by ? `${INR(p.over_by)} over budget` : 'within budget'}
+              </p>
+            ) : null}
+          </>
+        ) : p.status === 'running' ? (
+          <p className="text-[11px] font-bold text-brand-600 animate-pulse">making…</p>
+        ) : (
+          <p className="text-[11px] font-bold text-red-600">failed</p>
+        )}
+        <p className="text-[10px] text-gray-400 mt-1">{isOpen ? '▾ Hide' : '▸ Details'}</p>
+      </div>
+    </button>
   )
 }
 
@@ -151,14 +210,10 @@ function PlanView({ p, me, name, onRevise, onRetry, onDelete, busy }) {
   const top = cats[0]?.[1] || 1
   return (
     <div className="space-y-3">
+      {/* the card above says what and how much; this is the why */}
       <div className="bg-white border border-amber-200 p-3">
-        <p className="text-base font-black text-gray-900 leading-snug">{plan.title}</p>
-        <p className="text-[11px] text-gray-500 mt-0.5">
-          {spec.days} days{spec.start_date ? ` · ${day(spec.start_date, { day: 'numeric', month: 'short' })} – ${day(spec.end_date, { day: 'numeric', month: 'short' })}` : ''}
-          {' · '}{b.travellers} people · {b.rooms} room{b.rooms > 1 ? 's' : ''}
-          {spec.origin ? ` · from ${spec.origin}` : ''}
-        </p>
-        {plan.summary && <p className="text-xs text-gray-700 mt-2">{plan.summary}</p>}
+        {plan.summary && <p className="text-xs text-gray-700">{plan.summary}</p>}
+        <p className="text-[10px] text-gray-400 mt-1">{b.rooms} room{b.rooms > 1 ? 's' : ''} for {b.travellers} people{spec.origin ? ` · from ${spec.origin}` : ''}</p>
         <div className="mt-2">{asked}</div>
       </div>
 
