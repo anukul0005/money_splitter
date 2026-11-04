@@ -1,0 +1,33 @@
+# Caddy on the Oracle VM: the whole app on one address.
+#   /api/*  -> the FastAPI server on 127.0.0.1:8000 (the /api is stripped first -
+#             the routes themselves have no prefix)
+#   else    -> the built frontend in /var/www/settle, index.html for app routes
+# HTTPS certificates are fetched and renewed by Caddy itself (Let's Encrypt).
+
+settle0.in.net {
+	redir https://www.settle0.in.net{uri} permanent
+}
+
+www.settle0.in.net {
+	encode zstd gzip
+
+	# Statement PDFs and attachment photos
+	request_body {
+		max_size 30MB
+	}
+
+	handle_path /api/* {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	handle {
+		root * /var/www/settle
+		# Hashed bundles never change; index.html always checked, so a deploy shows up at once
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		@page path / /index.html
+		header @page Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+}

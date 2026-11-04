@@ -1,0 +1,5 @@
+# /etc/cron.d/settle-cron - the VM's clock is UTC.
+# Daily jobs (birthdays, memories, reminders, summaries) at 12:35 IST
+35 7 * * * ubuntu /opt/settle/deploy/cron.sh daily
+# Fresh tennis results every hour
+5 * * * * ubuntu /opt/settle/deploy/cron.sh tennis

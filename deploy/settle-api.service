@@ -1,0 +1,19 @@
+# The FastAPI server, kept running by systemd. One worker on purpose: the app
+# runs its own background loops (tennis news, badminton sync, catch-up jobs) in
+# the process, and a second worker would run every one of them twice.
+[Unit]
+Description=Settle API (FastAPI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/opt/settle/backend
+EnvironmentFile=/etc/settle/api.env
+ExecStart=/opt/settle/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --workers 1 --proxy-headers --forwarded-allow-ips 127.0.0.1
+Restart=always
+RestartSec=5
+# Logs: journalctl -u settle-api -f
+
+[Install]
+WantedBy=multi-user.target
