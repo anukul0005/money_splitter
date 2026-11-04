@@ -314,6 +314,65 @@ def google_flights(frm: str, to: str, out_date: str, back_date: str | None) -> d
     return out
 
 
+_train_cache: dict[tuple, dict | None] = {}
+
+
+def _rail(path: str, params: dict) -> dict | None:
+    from database import get_settings
+    key = get_settings().api_sh_key
+    if not key:
+        return None
+    req = urllib.request.Request(f"https://api.api.sh/indian-rail/v1/{path}?{urllib.parse.urlencode(params)}",
+                                 headers={"x-api-key": key, "User-Agent": UA})
+    try:
+        with urllib.request.urlopen(req, timeout=40) as r:
+            return json.loads(r.read())
+    except Exception as e:
+        print(f"[trip] rail {path}: {type(e).__name__}")
+        return None
+
+
+def _station(code: str | None, place: str) -> str | None:
+    """The station code: the AI's guess, else API.SH's search for the place."""
+    if code:
+        return code
+    found = (_rail("stations", {"q": place}) or {}).get("stations") or []
+    return found[0]["code"] if found else None
+
+
+def indian_trains(frm: str, to: str, on: str | None, frm_place: str = "", to_place: str = "") -> dict | None:
+    """API.SH Indian Railways: the trains between two stations (running that
+    day when `on`), with timings and indicative adult fares per class in INR.
+    A code that finds nothing is looked up by the place's name once. Cached
+    in this process; None without a key or on failure."""
+    ck = (frm, to, on)
+    if ck in _train_cache:
+        return _train_cache[ck]
+    params = {"from": frm, "to": to} | ({"date": on} if on else {})
+    d = _rail("trains", params) if frm and to and frm != to else None
+    if not (d or {}).get("trains") and (frm_place or to_place):
+        a = _station(None, frm_place) if frm_place else frm
+        b = _station(None, to_place) if to_place else to
+        if a and b and (a, b) != (frm, to) and a != b:
+            d = _rail("trains", {"from": a, "to": b} | ({"date": on} if on else {}))
+    trains = [t for t in (d or {}).get("trains") or [] if t.get("fares") and t.get("runs_on_date", True)]
+    if not trains:
+        _train_cache[ck] = None
+        return None
+    trains.sort(key=lambda t: t.get("duration_min") or 9999)
+    names = (d["from"].get("name") or d["from"]["code"], d["to"].get("name") or d["to"]["code"])
+    out = {"from": d["from"], "to": d["to"], "date": on, "checked": datetime.now(IST).date().isoformat(),
+           "url": "https://www.google.com/search?q=" + urllib.parse.quote("trains from %s to %s" % names),
+           "trains": [{"number": t["number"], "name": t.get("full_name") or t.get("name"), "type": t.get("category"),
+                       "depart": t.get("departure"), "arrive": t.get("arrival"),
+                       "next_day": t.get("arrival_day_offset") or 0, "hours": round((t.get("duration_min") or 0) / 60, 1),
+                       "runs": t.get("run_days"),
+                       "fares": {c: f.get("adult") for c, f in t["fares"].items() if f.get("adult")}}
+                      for t in trains[:8]]}
+    _train_cache[ck] = out
+    return out
+
+
 def _km(a: dict, b: dict) -> float:
     la1, lo1, la2, lo2 = map(math.radians, (a["lat"], a["lon"], b["lat"], b["lon"]))
     h = math.sin((la2 - la1) / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin((lo2 - lo1) / 2) ** 2
@@ -397,7 +456,9 @@ Respond with ONLY a JSON object:
   "budget_per_person": null, "budget_total": null,
   "transport_pref": "", "stay_pref": "", "interests": [], "food": "", "notes": "",
   "airports": {{"origin": "IATA code of the origin's main airport", "destinations": ["IATA code nearest each
-  destination, same order; null where there's none within ~150 km"]}}}}
+  destination, same order; null where there's none within ~150 km"]}},
+  "stations": {{"origin": "Indian Railways code of the origin's main station (NDLS, JP, BCT...)", "destinations":
+  ["Indian Railways code of each destination's main station, same order; null outside India or with no railway"]}}}}
 Rules: a date without a year is the next one after today. "4-day trip between 20-24 December" means 4 days from
 the 20th (days wins over the range). When only a month, a span of months or a season is given ("March-April 2027",
 "next winter"), pick real dates inside it - the best time to go when the request asks, else a sensible start -
@@ -445,6 +506,11 @@ Rules:
   those options (say which airline in the title) - `per` "person", `currency` "INR", source "found" with its id.
   A round-trip fare goes half on the flight out and half on the flight back, each saying so in `basis`
   ("half of the Rs 165,800 British Airways round trip").
+- Indian Railways sources are real timetables with each class's fare for ONE adult in INR: when going by train,
+  pick a train from them - number and name in the title, the class and times in `detail`, the departure as `time`,
+  `cost` that class's fare, `per` "person", source "found" with its id. A night train (arriving the next day)
+  covers that night - no stay needed. Choose the class by the budget and preference (SL cheapest, 3A the usual
+  comfortable choice). Booked close to the date, Tatkal costs more - say so in a tip when the trip is soon.
 - When a source gives a fare or rate, use it - don't replace it with a lower guess. An estimate is a realistic
   market price for those dates, never shaded down to fit the budget.
 - When a per-person budget is given, fit it by choosing cheaper things (sleeper or 3AC trains, buses, guest
@@ -505,6 +571,11 @@ def normalise_spec(raw: dict, members: int) -> dict:
     code = lambda c: str(c).strip().upper() if c and re.fullmatch(r"[A-Za-z]{3}", str(c).strip()) else None
     dests = [code(c) for c in (air.get("destinations") or [])][:len(spec["destinations"])]
     spec["airports"] = {"origin": code(air.get("origin")),
+                        "destinations": dests + [None] * (len(spec["destinations"]) - len(dests))}
+    rail = raw.get("stations") if isinstance(raw.get("stations"), dict) else {}
+    stn = lambda c: str(c).strip().upper() if c and re.fullmatch(r"[A-Za-z]{1,5}", str(c).strip()) else None
+    dests = [stn(c) for c in (rail.get("destinations") or [])][:len(spec["destinations"])]
+    spec["stations"] = {"origin": stn(rail.get("origin")),
                         "destinations": dests + [None] * (len(spec["destinations"]) - len(dests))}
     return spec
 
@@ -753,6 +824,35 @@ def _flights(spec: dict, pts: list[dict], step) -> list[dict]:
     return [f for f in found if f]
 
 
+def _trains(spec: dict, pts: list[dict], step) -> list[dict]:
+    """Indian Railways for each leg within India over ~60 km: home to the first
+    place on the start date, between places (any day - the plan picks the day),
+    and back home from the last on the end date."""
+    from database import get_settings
+    if not get_settings().api_sh_key or not spec["destinations"]:
+        return []
+    by_name = {p["name"]: p for p in pts}
+    rail = spec.get("stations") or {}
+    names = ([spec["origin"]] if spec["origin"] else []) + spec["destinations"]
+    codes = ([rail.get("origin")] if spec["origin"] else []) + list(rail.get("destinations") or [])
+    code = dict(zip(names, codes + [None] * len(names)))
+    stops = list(zip(names, names[1:])) + ([(names[-1], spec["origin"])] if spec["origin"] and len(names) > 1 else [])
+    legs = []
+    for i, (a, b) in enumerate(stops):
+        pa, pb = by_name.get(a), by_name.get(b)
+        if not (pa and pb and pa["label"].endswith("India") and pb["label"].endswith("India") and _km(pa, pb) > 60):
+            continue
+        on = spec["start_date"] if i == 0 and spec["origin"] else spec["end_date"] if i == len(stops) - 1 and spec["origin"] else None
+        legs.append((_station(code.get(a), a), _station(code.get(b), b), on, a, b))
+    legs = [l for l in legs if l[0] and l[1]][:5]
+    if not legs:
+        return []
+    step("Checking Indian Railways: " + " · ".join(f"{a} → {b}" for *_, a, b in legs))
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        found = list(pool.map(lambda l: indian_trains(*l), legs))
+    return [f for f in found if f]
+
+
 def _research(spec: dict, step) -> dict:
     places = ([spec["origin"]] if spec["origin"] else []) + spec["destinations"]
     step("Finding the places on the map")
@@ -785,6 +885,26 @@ def _research(spec: dict, step) -> dict:
                                     "title": f"Google Flights: {f['from']} → {f['to']}" + (" and back" if f["back"] else ""),
                                     "text": "\n".join(lines)})
         research["flights"].append({k: f[k] for k in ("from", "to", "date", "back", "lowest", "level", "typical")})
+
+    research["trains"] = []
+    for t in _trains(spec, pts, step):
+        n += 1
+        frm, to = f"{t['from']['name']} ({t['from']['code']})", f"{t['to']['name']} ({t['to']['code']})"
+        lines = [f"Indian Railways timetable, {frm} -> {to}" + (f", trains running on {t['date']}" if t["date"] else "")
+                 + ": indicative fares for ONE adult in INR by class (SL sleeper, 3A/2A/1A AC sleeper, CC/EC chair car,"
+                 " 2S second sitting, GN unreserved); Tatkal costs more"]
+        lines += [f"- {x['number']} {x['name']} ({x['type']}): departs {x['depart']}, arrives {x['arrive']}"
+                  + (f" (+{x['next_day']} day)" if x["next_day"] else "") + f", {x['hours']} h"
+                  + ("" if t["date"] else f", runs {'/'.join(x['runs'] or [])}") + "; fares "
+                  + ", ".join(f"{c} Rs {v}" for c, v in x["fares"].items()) for x in t["trains"]]
+        research["sources"].append({"id": f"S{n}", "kind": "trains", "checked": t["checked"], "url": t["url"],
+                                    "title": f"Indian Railways: {t['from']['name']} → {t['to']['name']}",
+                                    "text": "\n".join(lines)})
+        reserved = [v for x in t["trains"] for c, v in x["fares"].items() if c != "GN"]      # not unreserved
+        cheapest = min(reserved) if reserved else None
+        research["trains"].append({"from": t["from"]["name"], "to": t["to"]["name"], "date": t["date"],
+                                   "count": len(t["trains"]), "fastest": t["trains"][0]["name"],
+                                   "fastest_hours": t["trains"][0]["hours"], "lowest": cheapest})
 
     step("Reading Wikivoyage: " + ", ".join(spec["destinations"]))
     with ThreadPoolExecutor(max_workers=4) as pool:

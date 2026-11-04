@@ -282,7 +282,7 @@ function PlanView({ p, me, name, onRevise, onRetry, onDelete, busy }) {
         </p>
       </div>
 
-      {(p.weather?.length > 0 || p.legs?.length > 0 || p.flights?.length > 0) && (
+      {(p.weather?.length > 0 || p.legs?.length > 0 || p.flights?.length > 0 || p.trains?.length > 0) && (
         <div className="bg-white border border-amber-200 p-3 space-y-2">
           {(p.flights || []).map((f) => (
             <p key={`${f.from}${f.to}`} className="text-[11px] text-gray-700">
@@ -290,6 +290,13 @@ function PlanView({ p, me, name, onRevise, onRetry, onDelete, busy }) {
               {f.back ? ' round trip' : ''}
               {f.level && <span className={`ml-1 text-[10px] font-bold ${f.level === 'low' ? 'text-green-700' : f.level === 'high' ? 'text-red-600' : 'text-gray-500'}`}>· {f.level} for these dates</span>}
               {f.typical && <span className="text-[10px] text-gray-400"> (usually {INR(f.typical[0])}–{INR(f.typical[1])})</span>}
+            </p>
+          ))}
+          {(p.trains || []).map((t) => (
+            <p key={`${t.from}${t.to}`} className="text-[11px] text-gray-700">
+              🚆 <b>{t.from} → {t.to}</b>: {t.count} train{t.count > 1 ? 's' : ''}{t.date ? ` on ${day(t.date, { day: 'numeric', month: 'short' })}` : ''}
+              {t.lowest != null && <> from <b>{INR(t.lowest)}</b> a person</>}
+              <span className="text-[10px] text-gray-400"> (fastest {t.fastest}, {t.fastest_hours} h)</span>
             </p>
           ))}
           {p.weather.map((w) => (

@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     # Qrail (trip_planner.py) - free plan, 100 requests a day: trains between
     # stations and schedules (fares aren't in the free plan).
     qrail_api_key: str = ""
+    # API.SH Indian Railways (trip_planner.py) - free 1,000 credits a month, 1
+    # a call: trains between stations with timings and per-class fares.
+    api_sh_key: str = ""
 
     # Gmail OAuth (routers/gmail_auth.py) - a Google Cloud OAuth client,
     # read-only Gmail scope, used to find and download credit card
