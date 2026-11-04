@@ -34,14 +34,14 @@ self.addEventListener('push', (event) => {
 
 // Tapping a notification opens the app on the page it is about.
 //
-// The app moves itself there (App.jsx's NotificationLinks, its own router -
-// no reload): client.navigate() is refused for a page this worker didn't
-// load, and unreliable on iPhone. And an iPhone home-screen app started by
-// the tap may open on its start page whatever was asked (then RememberPage
-// takes it to the last page seen), so the page is handed over again when the
-// app says it is up - `pending`, kept for a short while.
-let pending = null                         // { path, at, done }
-const PENDING_MS = 20000
+// The app moves itself there (components/NotificationLinks.jsx, its own
+// router - no reload): client.navigate() is refused for a page this worker
+// didn't load, and unreliable on iPhone. The page is also written down where
+// the app reads it however it starts (TAP_CACHE): an iPhone home-screen app
+// opened by the tap may start on its usual page, and iPhone may stop this
+// worker before the app is up - so a message alone can be lost.
+const TAP_CACHE = 'settle-notification-tap'
+const TAP_KEY = '/__notification-tap'
 
 // Always a page on this site: a notification may carry a full address,
 // from a server that knows the site by another name
@@ -57,30 +57,17 @@ self.addEventListener('notificationclick', (event) => {
   const path = pathOf(event.notification.data?.url)
 
   event.waitUntil((async () => {
+    try {
+      const c = await caches.open(TAP_CACHE)
+      await c.put(TAP_KEY, new Response(JSON.stringify({ path, at: Date.now() })))
+    } catch { /* storage refused - the message below still works when the app is open */ }
     const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
     const open = wins.find((c) => new URL(c.url).origin === self.location.origin)
-    await new Promise((resolve) => {
-      if (pending) pending.done()
-      pending = { path, at: Date.now(), done: resolve }
-      setTimeout(resolve, PENDING_MS)
-      if (open) {
-        open.postMessage({ type: 'open', url: path })
-        open.focus().catch(() => {})
-      } else {
-        self.clients.openWindow(new URL(path, self.location.origin).href).catch(() => {})
-      }
-    })
+    if (open) {
+      open.postMessage({ type: 'open', url: path })
+      try { await open.focus() } catch { /* iPhone brings it up itself */ }
+    } else {
+      try { await self.clients.openWindow(new URL(path, self.location.origin).href) } catch { /* ditto */ }
+    }
   })())
-})
-
-// The app, on starting or coming back to the screen: "anything to open?" -
-// and "opened", once it is on the page
-self.addEventListener('message', (event) => {
-  if (!pending) return
-  if (event.data?.type === 'ready' && Date.now() - pending.at < PENDING_MS) {
-    event.source?.postMessage({ type: 'open', url: pending.path })
-  } else if (event.data?.type === 'opened') {
-    pending.done()
-    pending = null
-  }
 })

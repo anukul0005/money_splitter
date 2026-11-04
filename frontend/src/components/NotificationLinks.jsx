@@ -2,35 +2,53 @@ import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 /**
- * A tapped notification's page. The push worker (public/sw.js) posts
- * { type: 'open', url } to the app; this moves there with the router. On
- * starting, and each time the app comes back to the screen, it asks the
- * worker whether a tap is waiting - an iPhone home-screen app opened by a
- * tap can start on its usual page, and this is how it still gets there.
+ * A tapped notification's page. The push worker (public/sw.js) writes the
+ * page down (TAP_CACHE) and, when the app is open, also posts it. This moves
+ * there with the router - on the message, on starting, and each time the
+ * app comes back to the screen - so it arrives however the tap started the
+ * app: an iPhone home-screen app may open on its usual page (then
+ * RememberPage takes it to the last page seen), and iPhone may stop the
+ * worker before the app is up. Signed out, it waits here until after login.
  */
+const TAP_CACHE = 'settle-notification-tap'
+const TAP_KEY = '/__notification-tap'
+const FRESH_MS = 2 * 60 * 1000             // an older tap isn't what's being opened now
+
+async function takeTap() {
+  if (!('caches' in window)) return null
+  try {
+    const c = await caches.open(TAP_CACHE)
+    const r = await c.match(TAP_KEY)
+    if (!r) return null
+    await c.delete(TAP_KEY)
+    const { path, at } = await r.json()
+    return typeof path === 'string' && Date.now() - at < FRESH_MS ? path : null
+  } catch { return null }
+}
+
 export default function NotificationLinks() {
   const nav = useNavigate()
 
   useEffect(() => {
-    const sw = navigator.serviceWorker
-    if (!sw) return
+    const go = (path) => {
+      if (path && path.startsWith('/') && path !== window.location.pathname + window.location.search) nav(path)
+    }
+    const check = () => {
+      if (document.visibilityState === 'visible') takeTap().then(go)
+    }
     const onMessage = (e) => {
-      const url = e.data?.type === 'open' && typeof e.data.url === 'string' ? e.data.url : null
-      if (!url || !url.startsWith('/')) return
-      if (url !== window.location.pathname + window.location.search) nav(url)
-      e.source?.postMessage?.({ type: 'opened' })          // the worker can forget it
+      if (e.data?.type === 'open' && typeof e.data.url === 'string') takeTap().then(() => go(e.data.url))
     }
-    const ask = () => {
-      if (document.visibilityState !== 'visible') return
-      sw.ready.then((reg) => reg.active?.postMessage({ type: 'ready' })).catch(() => {})
-    }
-    sw.addEventListener('message', onMessage)
-    sw.startMessages?.()
-    document.addEventListener('visibilitychange', ask)
-    ask()
+    const sw = navigator.serviceWorker
+    sw?.addEventListener('message', onMessage)
+    sw?.startMessages?.()
+    document.addEventListener('visibilitychange', check)
+    window.addEventListener('focus', check)
+    check()
     return () => {
-      sw.removeEventListener('message', onMessage)
-      document.removeEventListener('visibilitychange', ask)
+      sw?.removeEventListener('message', onMessage)
+      document.removeEventListener('visibilitychange', check)
+      window.removeEventListener('focus', check)
     }
   }, [nav])
 
