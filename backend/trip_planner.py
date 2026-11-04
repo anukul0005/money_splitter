@@ -302,6 +302,8 @@ def google_flights(frm: str, to: str, out_date: str, back_date: str | None) -> d
     if not options:
         _flight_cache[ck] = None
         return None
+    cheapest = min(o["price"] for o in options)
+    options = [o for o in options if o["price"] <= 3 * cheapest]      # not a 2-stop Etihad for a 1-hour hop
     pi = d.get("price_insights") or {}
     out = {"from": frm, "to": to, "date": out_date, "back": back_date, "options": options[:8],
            "lowest": pi.get("lowest_price") or min(o["price"] for o in options),
@@ -727,7 +729,7 @@ def write_plan(spec: dict, research: dict, facts: str, step) -> tuple[dict, dict
 
 def _flights(spec: dict, pts: list[dict], step) -> list[dict]:
     """Google Flights for the long legs: when the first place is far (over
-    ~700 km) or flying was asked for, and the dates and airports are known.
+    ~350 km - Delhi-Jodhpur is a flight route) or flying was asked for, and the dates and airports are known.
     One destination: a round trip. Several: out to the first, back from the last."""
     from database import get_settings
     air = spec.get("airports") or {}
@@ -737,7 +739,7 @@ def _flights(spec: dict, pts: list[dict], step) -> list[dict]:
         return []
     by_name = {p["name"]: p for p in pts}
     a, b = by_name.get(spec["origin"]), by_name.get(spec["destinations"][0])
-    far = a and b and _km(a, b) > 700
+    far = a and b and _km(a, b) > 350
     if not (far or re.search(r"fl(y|ight)|air", spec.get("transport_pref") or "", re.I)):
         return []
     last = next((c for c in reversed(dests) if c), None)
