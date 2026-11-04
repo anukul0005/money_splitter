@@ -10,7 +10,7 @@ export DEBIAN_FRONTEND=noninteractive
 
 echo "== packages"
 sudo apt-get update -q
-sudo apt-get install -yq git python3 python3-venv python3-dev build-essential libpq-dev curl rsync \
+sudo apt-get install -yq git python3 python3-venv python3-dev build-essential libpq-dev curl rsync nano procps \
   gnupg debian-keyring debian-archive-keyring apt-transport-https netfilter-persistent iptables-persistent
 
 echo "== node 20"
@@ -33,9 +33,11 @@ if [ "$(free -m | awk '/Mem:/{print $2}')" -lt 4000 ] && ! swapon --show | grep 
 fi
 
 echo "== firewall: Oracle's Ubuntu image only lets SSH in"
+# At the top of INPUT, so they come before the image's catch-all REJECT (the
+# Minimal image has fewer rules, so no fixed position would fit both)
 for port in 443 80; do
   sudo iptables -C INPUT -p tcp --dport $port -m state --state NEW -j ACCEPT 2>/dev/null \
-    || sudo iptables -I INPUT 6 -p tcp --dport $port -m state --state NEW -j ACCEPT
+    || sudo iptables -I INPUT 1 -p tcp --dport $port -m state --state NEW -j ACCEPT
 done
 sudo netfilter-persistent save
 
