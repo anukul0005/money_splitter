@@ -1228,17 +1228,22 @@ function QuoteNotes({ q, d, name, onChanged }) {
     try { await setQuoteOpinion(d.id, q.id, value, polished); setEditing(false); await onChanged() }
     catch (e) { setErr(errText(e, "Couldn't save it.")) } finally { setBusy('') }
   }
+  const [noteOpen, setNoteOpen] = useState(false)
   const who = (n) => (n.toLowerCase() === me ? 'You' : name(n))
   const opinions = (q.opinions || []).filter((o) => !(o.author.toLowerCase() === me && editing))
   return (
     <div className="whitespace-normal">
       {q.note && (
         <div className="mt-2 pt-2 border-t border-amber-100">
-          <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-1">Note</p>
-          <div className="bg-gray-50 border-l-2 border-gray-300 px-2 py-1.5">
+          {/* folded - the AI summary above already covers it */}
+          <button onClick={() => setNoteOpen((v) => !v)} aria-expanded={noteOpen}
+            className="block text-[9px] font-bold text-gray-400 hover:text-gray-700 uppercase tracking-wide">
+            {noteOpen ? '▾' : '▸'} Note
+          </button>
+          {noteOpen && <div className="bg-gray-50 border-l-2 border-gray-300 px-2 py-1.5 mt-1">
             <p className="text-[11px] text-gray-700 whitespace-pre-line"><Rich text={q.note} /></p>
             <p className="text-[9px] text-gray-400 mt-0.5">{who(q.entered_by)}, with the quote</p>
-          </div>
+          </div>}
         </div>
       )}
       <div className="mt-2 pt-2 border-t border-amber-100 space-y-1.5">
