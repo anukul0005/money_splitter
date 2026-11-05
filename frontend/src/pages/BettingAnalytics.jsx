@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { badmintonSummary, tennisDay, tennisEarlyBreak, tennisLive, tennisLivePoints, tennisPatterns, tennisPlayer, tennisPlayers, tennisRankings, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
 import RankingList, { RankingSwitch } from '../components/RankingList'
 import Badminton, { B_TABS } from './Badminton'
+import Hockey, { H_TABS } from './Hockey'
 import DatePicker from '../components/DatePicker'
 
 /**
@@ -1241,10 +1242,14 @@ export default function BettingAnalytics() {
   const nav = useNavigate()
   // the tab and the open player live in the address, so Back from a match page returns to them
   const [params, setParams] = useSearchParams()
-  // 🎾 tennis or 🏸 badminton (pages/Badminton.jsx), each with its own tabs
-  const sport = params.get('sport') === 'badminton' ? 'badminton' : 'tennis'
+  // 🎾 tennis, 🏸 badminton (pages/Badminton.jsx) or 🏑 hockey (pages/Hockey.jsx), each with its own tabs
+  const sport = ['badminton', 'hockey'].includes(params.get('sport')) ? params.get('sport') : 'tennis'
   const tab = params.get('tab') || 'results'
   const btab = params.get('btab') || 'live'
+  const htab = params.get('htab') || 'live'
+  const setHtab = (t) => startTransition(() => go({ htab: t, he: null }))
+  const [hOpened, setHOpened] = useState(() => new Set([htab]))
+  useEffect(() => { setHOpened((s) => (s.has(htab) ? s : new Set([...s, htab]))) }, [htab])
   const bp = params.get('bp') ? +params.get('bp') : null
   const pl = params.get('player')
   const sel = pl && pl.includes(':') ? { tour: pl.split(':')[0], id: +pl.split(':')[1] } : null
@@ -1257,7 +1262,7 @@ export default function BettingAnalytics() {
   const [, startTransition] = useTransition()
   const setTab = (t) => startTransition(() => go({ tab: t }))
   const setSel = (x) => go({ player: x ? `${x.tour}:${x.id}` : null })
-  const setSport = (k) => startTransition(() => go({ sport: k === 'badminton' ? k : null }))
+  const setSport = (k) => startTransition(() => go({ sport: k === 'tennis' ? null : k, he: null }))
   const setBtab = (t) => startTransition(() => go({ btab: t }))
   const setBp = (id) => go({ btab: id ? 'players' : btab, bp: id || null })
   const [bOpened, setBOpened] = useState(() => new Set([btab]))
@@ -1300,10 +1305,10 @@ export default function BettingAnalytics() {
       <div className="px-5 pt-10 md:pt-6 pb-3 bg-cream sticky top-0 z-10 border-b border-amber-100/60">
         <button onClick={() => nav(-1)} className="text-xs font-bold text-gray-400 mb-2">← Back</button>
         <div className="flex items-center gap-2">
-          <h1 className="text-xl font-black tracking-tight flex-1">{sport === 'badminton' ? 'Badminton' : 'Betting analytics'}</h1>
+          <h1 className="text-xl font-black tracking-tight flex-1">{{ badminton: 'Badminton', hockey: 'Hockey' }[sport] || 'Betting analytics'}</h1>
           <div className="flex rounded-md border border-amber-300 overflow-hidden">
-            {[['tennis', '🎾'], ['badminton', '🏸']].map(([k, l]) => (
-              <button key={k} onClick={() => setSport(k)} aria-label={k} title={k === 'tennis' ? 'Tennis' : 'Badminton'}
+            {[['tennis', '🎾'], ['badminton', '🏸'], ['hockey', '🏑']].map(([k, l]) => (
+              <button key={k} onClick={() => setSport(k)} aria-label={k} title={k[0].toUpperCase() + k.slice(1)}
                 className={`px-2.5 py-1 text-sm ${sport === k ? 'bg-field-950' : 'bg-white'}`}>{l}</button>
             ))}
           </div>
@@ -1311,7 +1316,23 @@ export default function BettingAnalytics() {
             My bets ›
           </button>
         </div>
-        {sport === 'badminton' ? (
+        {sport === 'hockey' ? (
+          <>
+            <p className="mt-1 text-[11px] leading-snug text-gray-400">
+              FIH tournaments, Pro League, World Cup & Olympics
+              <br />
+              live scores, tables and world rankings from fih.hockey
+            </p>
+            <div className="grid grid-cols-4 mt-2.5 rounded-md border border-amber-300 overflow-hidden">
+              {H_TABS.map(([k, l]) => (
+                <button key={k} onClick={() => setHtab(k)}
+                  className={`py-1.5 text-[11px] font-bold ${htab === k ? 'bg-brand-400 text-white' : 'bg-white text-gray-600'}`}>
+                  {k === 'live' && <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 mr-1 align-middle" />}{l}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : sport === 'badminton' ? (
           <>
             <p className="mt-1 text-[11px] leading-snug text-gray-400">
               {bsum?.matches ? `${Number(bsum.matches).toLocaleString('en-IN')} BWF matches · ${fmtShort(bsum.first)} – ${fmtShort(bsum.last)}` : 'BWF World Tour, Worlds & Olympics from 2018'}
@@ -1354,6 +1375,13 @@ export default function BettingAnalytics() {
         </>)}
       </div>
       <div className="px-5 mt-4 max-w-2xl">
+        {sport === 'hockey' && [...hOpened].map((k) => (
+          <Pane key={`h-${k}`} hidden={k !== htab} deps={`${k === htab}|${params.get('he') || ''}`}>
+            <Safe what="this tab">
+              <Hockey tab={k} active={k === htab} />
+            </Safe>
+          </Pane>
+        ))}
         {sport === 'badminton' && [...bOpened].map((k) => (
           <Pane key={`b-${k}`} hidden={k !== btab} deps={`${k === btab}|${k === 'players' ? bp : ''}|${k === 'results' ? bsum?.matches : ''}`}>
             <Safe what="this tab">

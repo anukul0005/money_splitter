@@ -69,6 +69,7 @@ class User(Base):
     news_tennis = Column(Boolean, nullable=False, default=True, server_default="true")
     news_football = Column(Boolean, nullable=False, default=True, server_default="true")
     news_badminton = Column(Boolean, nullable=False, default=True, server_default="true")     # for everyone
+    news_hockey = Column(Boolean, nullable=False, default=True, server_default="true")        # for everyone
     # An admin's own switch for the Drinks section of Recommend (Account page)
     show_drinks = Column(Boolean, nullable=False, default=True, server_default="true")
     # Take-home pay and when it lands - for the spending analysis ("does

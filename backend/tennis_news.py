@@ -1,8 +1,9 @@
-"""Sports news - tennis, football and badminton headlines, newest first.
+"""Sports news - tennis, football, badminton and hockey headlines, newest first.
 
 Read from the publishers' own RSS feeds (tennis: the Guardian, BBC Sport,
 Sky Sports, ESPN, Tennis365; football: the Guardian, ESPN; badminton:
-Sportstar, Indian Express, BBC Sport, Hindustan Times, the Guardian), every
+Sportstar, Indian Express, BBC Sport, Hindustan Times, the Guardian;
+hockey: Sportstar, Indian Express, The Hindu, Hindustan Times, BBC Sport), every
 POLL_EVERY while the app is up and
 whenever the News page asks after that long. Each story links back to its
 publisher; only the headline, a line of summary and the thumbnail the feed
@@ -47,8 +48,14 @@ FEEDS = [
     ("badminton", "BBC Sport", "https://feeds.bbci.co.uk/sport/badminton/rss.xml"),
     ("badminton", "Hindustan Times", "https://www.hindustantimes.com/feeds/rss/sports/badminton/rssfeed.xml"),
     ("badminton", "The Guardian", "https://www.theguardian.com/sport/badminton/rss"),
+    # field hockey (the Guardian's "hockey" is ice hockey - left out)
+    ("hockey", "Sportstar", "https://sportstar.thehindu.com/hockey/feeder/default.rss"),
+    ("hockey", "Indian Express", "https://indianexpress.com/section/sports/hockey/feed/"),
+    ("hockey", "The Hindu", "https://www.thehindu.com/sport/hockey/feeder/default.rss"),
+    ("hockey", "Hindustan Times", "https://www.hindustantimes.com/feeds/rss/sports/hockey/rssfeed.xml"),
+    ("hockey", "BBC Sport", "https://feeds.bbci.co.uk/sport/hockey/rss.xml"),
 ]
-SPORTS = {"tennis": "🎾", "football": "⚽", "badminton": "🏸"}
+SPORTS = {"tennis": "🎾", "football": "⚽", "badminton": "🏸", "hockey": "🏑"}
 # Sports whose news - the page and the pushes - is for every app user, not
 # just the sports-section people (routers.tennis.ANALYTICS_USERS): all of them;
 # each person picks theirs with the switches in Account
@@ -69,7 +76,7 @@ HEADLINE_WORDS = 20
 REPEAT_WINDOW = timedelta(hours=12)   # a story about the same names as one notified this recently isn't pushed
 _MEDIA = "{http://search.yahoo.com/mrss/}"
 _STOP = {"after", "with", "from", "that", "this", "have", "will", "into", "over", "about", "their", "says",
-         "said", "what", "when", "they", "been", "were", "more", "than", "tennis", "open", "badminton"}
+         "said", "what", "when", "they", "been", "were", "more", "than", "tennis", "open", "badminton", "hockey"}
 
 _lock = threading.Lock()
 _last = 0.0
@@ -104,7 +111,7 @@ grand slam super series watch exclusive report video highlights photos preview r
 day round quarterfinal quarterfinals semifinal semifinals semi semis how why what who when where the and
 for after his her she they says vs wins beats win beat star stars new top first second third players player
 men women mens womens singles doubles mixed match matches season year live blog analysis opinion explained
-bwf atp wta itf india indian british american spanish french german italian chinese japanese korean danish
+bwf atp wta itf fih hockey trophy league pro india indian british american spanish french german italian chinese japanese korean danish
 indonesian malaysian thai australian canadian russian serbian swiss polish czech kazakh filipino
 monday tuesday wednesday thursday friday saturday sunday january february march april may june july august
 september october november december
@@ -207,6 +214,10 @@ def parse(source: str, xml: bytes, sport: str = "tennis") -> list[dict]:
         title, link = _text(it.findtext("title")), (it.findtext("link") or "").strip()
         if not (title and link):
             continue
+        letters = [c for c in title if c.isalpha()]
+        if letters and sum(c.isascii() for c in letters) < len(letters) / 2:
+            continue        # Sportstar's hockey feed mixes in its Hindi stories
+
         image = None
         for tag in (f"{_MEDIA}content", f"{_MEDIA}thumbnail", "enclosure"):
             for el in it.iter(tag):

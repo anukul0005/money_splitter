@@ -4,8 +4,8 @@ import { tennisNews } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 
 const SEEN_KEY = 'tennisNewsSeen'
-const LABEL = { tennis: '🎾 Tennis', football: '⚽ Football', badminton: '🏸 Badminton' }
-const ICON = { tennis: '🎾', football: '⚽', badminton: '🏸' }
+const LABEL = { tennis: '🎾 Tennis', football: '⚽ Football', badminton: '🏸 Badminton', hockey: '🏑 Hockey' }
+const ICON = { tennis: '🎾', football: '⚽', badminton: '🏸', hockey: '🏑' }
 
 // "12m ago", "3h ago", "2d ago"
 function ago(iso) {
