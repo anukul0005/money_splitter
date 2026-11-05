@@ -608,7 +608,13 @@ Rules:
   `basis` says so ("lowest fare on the page, for early Nov - December fares may differ"). Fares and hotel rates
   usually rise around Christmas, New Year, Diwali and long weekends - say so where it applies.
 - Cover everything the trip costs: getting there and back, between places, local transport, stays, food (one
-  item a day per person is fine), entry fees and activities. Free things cost 0.
+  item a day per person is fine), entry fees and activities. Free things cost 0 - but meals are never free: every
+  lunch and dinner has a realistic price; only a breakfast that comes with the stay costs 0 (say "included").
+- Choosing how to travel: when a journey has both train and flight sources, weigh them - a train is usually far
+  cheaper, and a night train saves a night's stay; a flight saves a long day. Take the train when it's well under
+  the fare and takes up to ~12 h (or runs overnight), unless the request asks to fly or time is short; take the
+  flight when the train is very long. Either way put the other option in `detail` ("Or by train: 14088 Runicha
+  Exp, 3A Rs 1,205, 19:00-10:35").
 - Include each place's main sights and the experience it is known for (the reason people go there), unless the
   request rules it out.
 - Tickets (flights, trains, buses, entry fees) are per person: `cost` is ONE person's fare, `per` "person". A return
@@ -858,6 +864,25 @@ def fill_stays(plan: dict, spec: dict) -> dict:
     return plan
 
 
+_INCLUDED = re.compile(r"includ|complimentary|free breakfast|with (?:the )?(?:stay|room|camp)", re.I)
+
+
+def price_meals(plan: dict) -> dict:
+    """A lunch or dinner the AI left at 0 gets the typical price of the plan's
+    other meals (an estimate saying so) - only a meal included with the stay is free."""
+    items = [it for d in plan["days"] for it in d["items"] if it["category"] == "food"]
+    paid = sorted(it["cost"] for it in items if it["cost"] > 0 and it["per"] == "person")
+    if not paid:
+        return plan
+    typical = paid[len(paid) // 2]
+    for it in items:
+        if it["cost"] <= 0 and not _INCLUDED.search(f"{it['title']} {it.get('detail', '')} {it.get('basis', '')}"):
+            it.update(cost=typical, per="person", currency="INR", source="estimate", source_ids=[],
+                      basis="a meal costs about what the plan's other meals do (the AI had it free)")
+            it.pop("cost_local", None)
+    return plan
+
+
 def gaps(plan: dict, spec: dict) -> list[str]:
     """What a plan leaves out that the trip needs: days, the way home."""
     missing = []
@@ -906,10 +931,41 @@ def _groq_plan(user: str) -> dict:
                              extra={"max_completion_tokens": room, "reasoning_effort": "low"})
 
 
-def _write_ai(compact: str, full: str) -> dict:
-    """Groq (GPT-OSS 120B) on the compact facts first, Gemini on the full ones after."""
+# OpenRouter's free models that take a long prompt (a plan change carries the whole plan)
+OPENROUTER_FREE = ["nvidia/nemotron-3-ultra-550b-a55b:free", "nvidia/nemotron-3.5-super-vl:free"]
+
+
+def _openrouter(system: str, user: str, max_tokens: int = 12000) -> dict:
+    from database import get_settings
+    key = get_settings().openrouter_api_key
+    if not key:
+        raise RuntimeError("no OpenRouter key")
     last: Exception | None = None
-    for name, ask in (("groq", lambda: _groq_plan(compact)), ("gemini", lambda: _gemini(_PLAN, full, 12000))):
+    for model in OPENROUTER_FREE:
+        body = {"model": model, "temperature": 0.3, "max_tokens": max_tokens, "response_format": {"type": "json_object"},
+                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+        try:
+            d = _post_json("https://openrouter.ai/api/v1/chat/completions", body, {
+                "Authorization": f"Bearer {key}", "HTTP-Referer": "https://www.settle0.in.net", "X-Title": "Settle"},
+                timeout=120)
+            text = d["choices"][0]["message"]["content"] or ""
+            m = re.search(r"\{.*\}", text, re.S)
+            out = json.loads(m.group(0) if m else text)
+            if isinstance(out, dict):
+                return out
+            last = ValueError("not an object")
+        except Exception as e:
+            last = e
+            print(f"[trip] openrouter {model}: {getattr(e, 'code', type(e).__name__)}")
+    raise last or RuntimeError("OpenRouter didn't answer")
+
+
+def _write_ai(compact: str, full: str) -> dict:
+    """Groq (GPT-OSS 120B) on the compact facts first; then the full facts to
+    OpenRouter's free Nemotron, then Gemini."""
+    last: Exception | None = None
+    for name, ask in (("groq", lambda: _groq_plan(compact)), ("openrouter", lambda: _openrouter(_PLAN, full)),
+                      ("gemini", lambda: _gemini(_PLAN, full, 12000))):
         try:
             out = ask()
             print(f"[trip] plan written by {name}")
@@ -929,7 +985,8 @@ def write_plan(spec: dict, research: dict, facts: str, step, compact: str | None
     compact = compact or facts
 
     def write(more: str = "") -> dict:
-        return fill_stays(to_rupees(clean_plan(_write_ai(compact + more, facts + more), sources, spec)), spec)
+        plan = to_rupees(clean_plan(_write_ai(compact + more, facts + more), sources, spec))
+        return price_meals(fill_stays(plan, spec))
     step("Writing the day-by-day plan")
     result = write()
 
