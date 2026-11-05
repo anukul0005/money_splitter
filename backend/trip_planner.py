@@ -840,7 +840,7 @@ def for_ai(plan: dict) -> str:
     return json.dumps({k: v for k, v in {**plan, "days": days}.items() if k not in ("fx", "fx_date")})[:12000]
 
 
-_OVERNIGHT = re.compile(r"overnight|night (?:train|bus|flight)|sleeper", re.I)
+_OVERNIGHT = re.compile(r"overnight|night (?:train|bus|flight)|sleeper|arrives [\d:]+ next day", re.I)
 
 
 def fill_stays(plan: dict, spec: dict) -> dict:
@@ -861,6 +861,47 @@ def fill_stays(plan: dict, spec: dict) -> dict:
             stay = before[1]
             items.append({**stay, "time": "22:00", "title": f"Another night: {stay['title']}".replace(
                 "Check-in ", "").replace("Check‑in ", ""), "detail": "Same stay as the night before"})
+    return plan
+
+
+def _letters(s: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z]+", s.lower()) if w not in ("exp", "express", "sf", "sup", "the", "train")}
+
+
+def name_trains(plan: dict, sources: dict[str, dict]) -> dict:
+    """A train the plan takes, written exactly as the railway lists it: matched
+    to the cited timetable by its number, else its name, else its departure
+    time, else its fare - then titled "14088 Runicha Express" with the class and
+    times added to the detail when the AI left them out."""
+    for d in plan["days"]:
+        for it in d["items"]:
+            if it["category"] != "transport":
+                continue
+            cited = [sources[i] for i in it.get("source_ids") or [] if sources.get(i, {}).get("kind") == "trains"]
+            pool = [(s, t) for s in cited for t in s.get("trains") or []]
+            if not pool:
+                continue
+            text = f"{it['title']} {it.get('detail', '')}"
+            num = re.search(r"\b(\d{5})\b", text)
+            words = _letters(it["title"])
+            fare = round(it.get("cost_local", it["cost"]) or 0)
+            named = lambda t: (tn := _letters(t["name"] or "")) and len(tn & words) >= max(1, len(tn) - 1)
+            match = (next((p for p in pool if num and p[1]["number"] == num.group(1)), None)
+                     or next((p for p in pool if named(p[1])), None)
+                     or next((p for p in pool if it.get("time") and p[1]["depart"] == it["time"]), None)
+                     or next((p for p in pool if fare and fare in p[1]["fares"].values()), None))
+            if not match:
+                continue
+            src, t = match
+            # "RUNICHA EXP" -> "Runicha Express"; short codes ("SBIB", "JU") stay as they are
+            name = " ".join(w.capitalize() if w.isupper() and len(w) > 4 else w for w in str(t["name"]).split())
+            name = re.sub(r"\bExp\b", "Express", name).replace("EXP", "Express")
+            it["title"] = f"Train {t['number']} {name} ({src['route'][0]} → {src['route'][1]})"
+            it["time"] = t["depart"] or it.get("time")
+            cls = next((c for c, v in t["fares"].items() if v == fare), None)
+            if not re.search(r"\b(?:SL|1A|2A|3A|3E|CC|EC|2S|GN)\b", it.get("detail") or ""):
+                when = f"departs {t['depart']}, arrives {t['arrive']}" + (" next day" if t["next_day"] else "") + f", {t['hours']} h"
+                it["detail"] = (f"{cls} · {when}" if cls else when) + (f". {it['detail']}" if it.get("detail") else "")
     return plan
 
 
@@ -906,7 +947,7 @@ def gaps(plan: dict, spec: dict) -> list[str]:
     items = [it for d in plan["days"] for it in d["items"]]
     stays = sum(1 for it in items if it["category"] == "stay")
     overnight = sum(1 for it in items if it["category"] == "transport"
-                    and re.search(r"overnight|night (?:train|bus|flight)|sleeper", f"{it['title']} {it['detail']}", re.I))
+                    and _OVERNIGHT.search(f"{it['title']} {it['detail']}"))
     if nights > 0 and stays + overnight < nights:
         missing.append(f"The trip has {nights} night{'s' if nights > 1 else ''} but only {stays} stay item"
                        f"{'s' if stays != 1 else ''}: add one stay (per room per night) for every night not spent on an "
@@ -986,7 +1027,7 @@ def write_plan(spec: dict, research: dict, facts: str, step, compact: str | None
 
     def write(more: str = "") -> dict:
         plan = to_rupees(clean_plan(_write_ai(compact + more, facts + more), sources, spec))
-        return price_meals(fill_stays(plan, spec))
+        return price_meals(fill_stays(name_trains(plan, sources), spec))
     step("Writing the day-by-day plan")
     result = write()
 
@@ -1158,7 +1199,8 @@ def _research(spec: dict, step) -> dict:
                   + ", ".join(f"{c} Rs {v}" for c, v in x["fares"].items()) for x in t["trains"]]
         research["sources"].append({"id": f"S{n}", "kind": "trains", "checked": t["checked"], "url": t["url"],
                                     "title": f"Indian Railways: {t['from']['name']} → {t['to']['name']}",
-                                    "text": "\n".join(lines)})
+                                    "text": "\n".join(lines), "trains": t["trains"],
+                                    "route": [t["from"]["name"], t["to"]["name"]]})
         reserved = [v for x in t["trains"] for c, v in x["fares"].items() if c != "GN"]      # not unreserved
         cheapest = min(reserved) if reserved else None
         research["trains"].append({"from": t["from"]["name"], "to": t["to"]["name"], "date": t["date"],
