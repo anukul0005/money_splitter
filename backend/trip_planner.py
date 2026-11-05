@@ -954,12 +954,14 @@ def fix_journeys(plan: dict, spec: dict, sources: dict[str, dict]) -> dict:
     ends = [(plan["days"][0], spec["start_date"], f"{home} → {dests[0]}")]
     if len(plan["days"]) > 1:
         ends.append((plan["days"][-1], spec["end_date"], f"{dests[-1]} → {home}"))
+    no_flights = not any(s.get("kind") == "flights" for s in sources.values())   # short trip, or trains asked for
+    is_flight = lambda it: any(sources.get(s, {}).get("kind") == "flights" for s in it.get("source_ids") or []) or (
+        no_flights and re.search(r"\bfl(?:y|ight)|airline|IndiGo|Air India|SpiceJet|Akasa", f"{it['title']} {it['detail']}", re.I))
     for day, when, route in ends:
         for i, it in enumerate(day["items"]):
-            if it["category"] != "transport" or not any(sources.get(s, {}).get("kind") == "flights"
-                                                        for s in it.get("source_ids") or []):
+            if it["category"] != "transport" or not is_flight(it):
                 continue
-            src = trains_on(when) if by in ("train", "cheapest") and when else None
+            src = trains_on(when) if (by in ("train", "cheapest") or no_flights) and when else None
             train = _train_item(src, by) if src else None
             if train:
                 train["detail"] += f". Or fly: {it['title']}, Rs {it['cost']:,}"
@@ -1145,10 +1147,10 @@ def write_plan(spec: dict, research: dict, facts: str, step, compact: str | None
 
 
 def _flights(spec: dict, pts: list[dict], step) -> list[dict]:
-    """Flight fares for the long legs (Skyscanner, else Google Flights): when
-    flying was asked for, or the first place is over 550 km away as the crow
-    flies (Delhi-Jodhpur is ~490: trains) and trains weren't asked for; the
-    dates and airports must be known.
+    """Flight fares for the long legs (Skyscanner, else Google Flights): only
+    when the first place is over 550 km away as the crow flies (Delhi-Jodhpur
+    is ~490: trains) and trains weren't asked for; the dates and airports must
+    be known.
     One destination: a round trip. Several: out to the first, back from the last."""
     from database import get_settings
     air = spec.get("airports") or {}
@@ -1160,8 +1162,7 @@ def _flights(spec: dict, pts: list[dict], step) -> list[dict]:
     by_name = {p["name"]: p for p in pts}
     a, b = by_name.get(spec["origin"]), by_name.get(spec["destinations"][0])
     far = a and b and _km(a, b) > 550
-    by = spec.get("travel_by") or "any"
-    if not (by == "flight" or (far and by != "train")):
+    if not far or spec.get("travel_by") == "train":
         return []
     last = next((c for c in reversed(dests) if c), None)
     if last == dests[0]:
@@ -1360,7 +1361,10 @@ def _facts(spec: dict, research: dict, compact: bool = False) -> str:
     else:
         out = [f"Trip spec: {json.dumps(spec)}",
                f"Travellers: {spec['travellers']} - rooms: {spec['rooms']} (stays are priced per room per night)"]
-    if spec.get("travel_by") in _TRAVEL_BY:
+    if spec.get("origin") and not research.get("flights"):
+        out.append("How to travel: no flights on this trip (the places are under 550 km apart, or trains were asked "
+                   "for) - go by train wherever the railway sources have one, else bus or cab.")
+    elif spec.get("travel_by") in _TRAVEL_BY:
         out.append("How to travel: " + _TRAVEL_BY[spec["travel_by"]])
     if research["legs"]:
         out.append("Road distances (OSRM): " + "; ".join(
