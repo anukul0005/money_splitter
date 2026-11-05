@@ -190,6 +190,8 @@ function PlanCard({ p, isOpen, onToggle, onDelete }) {
 
 function PlanView({ p, me, name, onRevise, onRetry, onDelete, busy }) {
   const [change, setChange] = useState('')
+  const [showCost, setShowCost] = useState(false)       // the cost breakdown, folded away until asked for
+  const [showChecked, setShowChecked] = useState(false) // fares, stays, weather and roads the plan was made from
   // `name` turns a username into the name to show (DiscussionDetail's dn); `me` is the caller's username
   const mine = (p.created_by || '').toLowerCase() === (me || '').toLowerCase()
   const shown = (u) => (typeof name === 'function' ? name(u) : u)
@@ -236,6 +238,14 @@ function PlanView({ p, me, name, onRevise, onRetry, onDelete, busy }) {
         <div className="mt-2">{asked}</div>
       </div>
 
+      <button onClick={() => setShowCost((v) => !v)}
+        className="w-full bg-white border border-amber-200 px-3 py-2 flex items-center justify-between text-left">
+        <span className="text-[11px] font-bold text-gray-700">{showCost ? '▾' : '▸'} Cost breakdown</span>
+        <span className="text-[11px] text-gray-500 tabular-nums">
+          {INR(b.group_total)}{b.budget_per_person ? (b.over_by ? ' · over budget' : ' · within budget') : ''}
+        </span>
+      </button>
+      {showCost && (
       <div className="bg-white border border-amber-200 p-3">
         <div className="flex items-end justify-between gap-3">
           <div>
@@ -281,8 +291,19 @@ function PlanView({ p, me, name, onRevise, onRetry, onDelete, busy }) {
           {b.travellers > 1 ? `Amounts are for all ${b.travellers}, with each person's share under each. ` : ''} {b.found_share}% of this cost comes from a source; the rest are estimates. Totals are added up by the app, not the AI. Stays are shared {b.rooms} room{b.rooms > 1 ? 's' : ''}.
         </p>
       </div>
+      )}
 
       {(p.weather?.length > 0 || p.legs?.length > 0 || p.flights?.length > 0 || p.trains?.length > 0 || p.stays?.length > 0) && (
+        <button onClick={() => setShowChecked((v) => !v)}
+          className="w-full bg-white border border-amber-200 px-3 py-2 flex items-center justify-between text-left">
+          <span className="text-[11px] font-bold text-gray-700">{showChecked ? '▾' : '▸'} What was checked</span>
+          <span className="text-[10px] text-gray-400">
+            {[p.flights?.length && 'flights', p.trains?.length && 'trains', p.stays?.length && 'stays',
+              p.weather?.length && 'weather', p.legs?.length && 'roads'].filter(Boolean).join(' · ')}
+          </span>
+        </button>
+      )}
+      {showChecked && (p.weather?.length > 0 || p.legs?.length > 0 || p.flights?.length > 0 || p.trains?.length > 0 || p.stays?.length > 0) && (
         <div className="bg-white border border-amber-200 p-3 space-y-2">
           {(p.flights || []).map((f) => (
             <p key={`${f.from}${f.to}`} className="text-[11px] text-gray-700">
