@@ -957,7 +957,16 @@ def fix_journeys(plan: dict, spec: dict, sources: dict[str, dict]) -> dict:
     no_flights = not any(s.get("kind") == "flights" for s in sources.values())   # short trip, or trains asked for
     is_flight = lambda it: any(sources.get(s, {}).get("kind") == "flights" for s in it.get("source_ids") or []) or (
         no_flights and re.search(r"\bfl(?:y|ight)|airline|IndiGo|Air India|SpiceJet|Akasa", f"{it['title']} {it['detail']}", re.I))
+    flights_on = lambda when: next((s for s in sources.values() if s.get("kind") == "flights" and s.get("options")
+                                    and when in (s.get("date"), s.get("back"))), None)
     for day, when, route in ends:
+        src = flights_on(when) if by not in ("train", "cheapest") and when else None
+        for i, it in enumerate(day["items"]):
+            # over 550 km (flights were checked) and trains weren't asked for: fly, not a 37-hour train
+            if src and it["category"] == "transport" and not is_flight(it) and re.search(
+                    r"\btrain|rail|express|rajdhani|shatabdi|duronto|vande|sleeper", f"{it['title']} {it['detail']}", re.I):
+                day["items"][i] = _flight_item(src, when, route, it)
+                break
         for i, it in enumerate(day["items"]):
             if it["category"] != "transport" or not is_flight(it):
                 continue
@@ -971,11 +980,32 @@ def fix_journeys(plan: dict, spec: dict, sources: dict[str, dict]) -> dict:
     last = plan["days"][-1]
     if len(plan["days"]) > 1 and not any(it["category"] == "transport" and home.lower() in
                                          f"{it['title']} {it['detail']}".lower() for it in last["items"]):
-        src = trains_on(spec["end_date"]) if by != "flight" else None
+        fly = flights_on(spec["end_date"]) if by not in ("train", "cheapest") else None
+        src = trains_on(spec["end_date"]) if by != "flight" and not fly else None
         train = _train_item(src, by) if src else None
-        if train:
+        if fly:
+            last["items"].append(_flight_item(fly, spec["end_date"], f"{dests[-1]} → {home}"))
+        elif train:
             last["items"].append(train)
     return plan
+
+
+def _flight_item(src: dict, when: str, route: str, instead: dict | None = None) -> dict:
+    """The flight to take from a flight source, for the day `when`: its
+    cheapest option; the way home of a round trip is in the fare paid going out."""
+    frm, to = src["airports"]
+    if src.get("back") and when == src["back"]:
+        return {"time": "", "title": f"Flight {to}-{frm} ({route})", "detail": "The way home of the round trip - "
+                "in the fare paid on day 1", "category": "transport", "cost": 0, "currency": "INR", "per": "person",
+                "source": "found", "source_ids": [src["id"]], "basis": "included in the round-trip fare"}
+    o = min(src["options"], key=lambda o: o["price"])
+    detail = f"{o['airlines']}, {o['stops']} stop(s), {o['hours']} h, departs {o['depart']}" + (
+        "; round trip - the flight home is included" if src.get("back") else "")
+    if instead:
+        detail += f". Or by train: {instead['title']}, Rs {instead['cost']:,}"
+    return {"time": o["depart"] or "", "title": f"Flight {frm}-{to} ({route})", "detail": detail,
+            "category": "transport", "cost": o["price"], "currency": "INR", "per": "person", "source": "found",
+            "source_ids": [src["id"]], "basis": "lowest fare for one adult" + (", round trip" if src.get("back") else "")}
 
 
 _INCLUDED = re.compile(r"includ|complimentary|free breakfast|with (?:the )?(?:stay|room|camp)", re.I)
@@ -1175,13 +1205,16 @@ def _flights(spec: dict, pts: list[dict], step) -> list[dict]:
     return [f for f in found if f]
 
 
-def _trains(spec: dict, pts: list[dict], step) -> list[dict]:
+def _trains(spec: dict, pts: list[dict], step, flown: bool = False) -> list[dict]:
     """Indian Railways for each leg within India over ~60 km: home to the first
     place on the start date, between places (any day - the plan picks the day),
-    and back home from the last on the end date."""
+    and back home from the last on the end date. A leg over 550 km is flown
+    when flights were found (`flown`), so its trains aren't checked - unless
+    the request asks for trains or a cheaper, budget trip."""
     from database import get_settings
     if not get_settings().api_sh_key or not spec["destinations"]:
         return []
+    by_air = flown and spec.get("travel_by") not in ("train", "cheapest")
     by_name = {p["name"]: p for p in pts}
     rail = spec.get("stations") or {}
     names = ([spec["origin"]] if spec["origin"] else []) + spec["destinations"]
@@ -1192,6 +1225,8 @@ def _trains(spec: dict, pts: list[dict], step) -> list[dict]:
     for i, (a, b) in enumerate(stops):
         pa, pb = by_name.get(a), by_name.get(b)
         if not (pa and pb and pa["label"].endswith("India") and pb["label"].endswith("India") and _km(pa, pb) > 60):
+            continue
+        if by_air and _km(pa, pb) > 550:
             continue
         on = spec["start_date"] if i == 0 and spec["origin"] else spec["end_date"] if i == len(stops) - 1 and spec["origin"] else None
         legs.append((_station(code.get(a), a), _station(code.get(b), b), on, a, b))
@@ -1256,12 +1291,13 @@ def _research(spec: dict, step) -> dict:
                   for o in f["options"]]
         research["sources"].append({"id": f"S{n}", "kind": "flights", "checked": f["checked"], "url": f["url"],
                                     "title": f"{site}: {f['from']} → {f['to']}" + (" and back" if f["back"] else ""),
-                                    "text": "\n".join(lines)})
+                                    "text": "\n".join(lines), "options": f["options"], "airports": [f["from"], f["to"]],
+                                    "date": f["date"], "back": f["back"]})
         research["flights"].append({"site": site} | {k: f[k] for k in ("from", "to", "date", "back", "lowest",
                                                                          "level", "typical")})
 
     research["trains"] = []
-    for t in _trains(spec, pts, step):
+    for t in _trains(spec, pts, step, flown=bool(research["flights"])):
         n += 1
         frm, to = f"{t['from']['name']} ({t['from']['code']})", f"{t['to']['name']} ({t['to']['code']})"
         lines = [f"Indian Railways timetable, {frm} -> {to}" + (f", trains running on {t['date']}" if t["date"] else "")
@@ -1364,8 +1400,11 @@ def _facts(spec: dict, research: dict, compact: bool = False) -> str:
     if spec.get("origin") and not research.get("flights"):
         out.append("How to travel: no flights on this trip (the places are under 550 km apart, or trains were asked "
                    "for) - go by train wherever the railway sources have one, else bus or cab.")
-    elif spec.get("travel_by") in _TRAVEL_BY:
+    elif spec.get("travel_by") in ("train", "cheapest"):
         out.append("How to travel: " + _TRAVEL_BY[spec["travel_by"]])
+    elif spec.get("origin"):
+        out.append("How to travel: the journeys over 550 km go by air - take a flight from the flight sources (no "
+                   "long train rides); go by train, bus or cab only between places closer than that.")
     if research["legs"]:
         out.append("Road distances (OSRM): " + "; ".join(
             f"{l['from']} -> {l['to']}: {l['km']} km, about {l['hours']} h by road" for l in research["legs"]))
