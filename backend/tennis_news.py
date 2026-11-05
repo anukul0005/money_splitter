@@ -2,8 +2,8 @@
 
 Read from the publishers' own RSS feeds (tennis: the Guardian, BBC Sport,
 Sky Sports, ESPN, Tennis365; football: the Guardian, ESPN; badminton:
-Sportstar, Indian Express, BBC Sport, Hindustan Times, the Guardian;
-hockey: Sportstar, Indian Express, The Hindu, Hindustan Times, BBC Sport), every
+Sportstar, News18, BBC Sport, Hindustan Times, the Guardian;
+hockey: Sportstar, News18, The Hindu, Hindustan Times, BBC Sport), every
 POLL_EVERY while the app is up and
 whenever the News page asks after that long. Each story links back to its
 publisher; only the headline, a line of summary and the thumbnail the feed
@@ -44,13 +44,14 @@ FEEDS = [
     ("football", "The Guardian", "https://www.theguardian.com/football/rss"),
     ("football", "ESPN", "https://www.espn.com/espn/rss/soccer/news"),
     ("badminton", "Sportstar", "https://sportstar.thehindu.com/badminton/feeder/default.rss"),
-    ("badminton", "Indian Express", "https://indianexpress.com/section/sports/badminton/feed/"),
+    # Indian Express answers the server 403 (it blocks the cloud host) - News18 instead
+    ("badminton", "News18", "https://www.news18.com/commonfeeds/v1/eng/rss/sports/badminton.xml"),
     ("badminton", "BBC Sport", "https://feeds.bbci.co.uk/sport/badminton/rss.xml"),
     ("badminton", "Hindustan Times", "https://www.hindustantimes.com/feeds/rss/sports/badminton/rssfeed.xml"),
     ("badminton", "The Guardian", "https://www.theguardian.com/sport/badminton/rss"),
     # field hockey (the Guardian's "hockey" is ice hockey - left out)
     ("hockey", "Sportstar", "https://sportstar.thehindu.com/hockey/feeder/default.rss"),
-    ("hockey", "Indian Express", "https://indianexpress.com/section/sports/hockey/feed/"),
+    ("hockey", "News18", "https://www.news18.com/commonfeeds/v1/eng/rss/sports/hockey.xml"),
     ("hockey", "The Hindu", "https://www.thehindu.com/sport/hockey/feeder/default.rss"),
     ("hockey", "Hindustan Times", "https://www.hindustantimes.com/feeds/rss/sports/hockey/rssfeed.xml"),
     ("hockey", "BBC Sport", "https://feeds.bbci.co.uk/sport/hockey/rss.xml"),
