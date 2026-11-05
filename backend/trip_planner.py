@@ -612,6 +612,7 @@ Rules:
 - Cover everything the trip costs: getting there and back, between places, local transport, stays, food (one
   item a day per person is fine), entry fees and activities. Free things cost 0 - but meals are never free: every
   lunch and dinner has a realistic price; only a breakfast that comes with the stay costs 0 (say "included").
+  Dinner is at 20:00 or later, never earlier.
 - Choosing how to travel: when a journey has both train and flight sources, weigh them - a train is usually far
   cheaper, and a night train saves a night's stay; a flight saves a long day. Take the train when it's well under
   the fare and takes up to ~12 h (or runs overnight), unless the request asks to fly or time is short; take the
@@ -1011,6 +1012,30 @@ def _flight_item(src: dict, when: str, route: str, instead: dict | None = None) 
 _INCLUDED = re.compile(r"includ|complimentary|free breakfast|with (?:the )?(?:stay|room|camp)", re.I)
 
 
+DINNER_FROM = "20:00"
+
+
+def late_dinners(plan: dict) -> dict:
+    """A dinner timed before 20:00 moves to 20:00, and the day is put back in
+    time order (an item with no time stays after the one before it)."""
+    for d in plan["days"]:
+        moved = False
+        for it in d["items"]:
+            t = it.get("time") or ""
+            if it["category"] == "food" and re.search(r"dinner|supper", it["title"], re.I) \
+                    and re.fullmatch(r"\d{1,2}:\d{2}", t) and t.zfill(5) < DINNER_FROM:
+                it["time"], moved = DINNER_FROM, True
+        if not moved:
+            continue
+        keys, last = [], ""
+        for it in d["items"]:
+            t = it.get("time") or ""
+            last = t.zfill(5) if re.fullmatch(r"\d{1,2}:\d{2}", t) else last
+            keys.append(last)
+        d["items"] = [it for _, _, it in sorted(zip(keys, range(len(keys)), d["items"]), key=lambda x: (x[0], x[1]))]
+    return plan
+
+
 def price_meals(plan: dict) -> dict:
     """A lunch or dinner the AI left at 0 gets the typical price of the plan's
     other meals (an estimate saying so) - only a meal included with the stay is free."""
@@ -1130,7 +1155,7 @@ def write_plan(spec: dict, research: dict, facts: str, step, compact: str | None
 
     def write(more: str = "") -> dict:
         plan = to_rupees(clean_plan(_write_ai(compact + more, facts + more), sources, spec))
-        return price_meals(fill_stays(name_trains(fix_journeys(plan, spec, sources), sources), spec))
+        return late_dinners(price_meals(fill_stays(name_trains(fix_journeys(plan, spec, sources), sources), spec)))
     step("Writing the day-by-day plan")
     result = write()
 

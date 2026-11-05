@@ -1387,6 +1387,9 @@ def _trip_out(p: TripPlan, full: bool) -> dict:
            "end_date": spec.get("end_date"), "origin": spec.get("origin"), "destinations": spec.get("destinations")}
     if full:
         research = _loads(p.research_json, {}) or {}
+        if plan and plan.get("days"):
+            from trip_planner import late_dinners
+            plan = late_dinners(plan)          # plans saved before dinner moved to 20:00 show it there too
         out.update(steps=_loads(p.steps_json, []), spec=_loads(p.spec_json, None), plan=plan, budget=money,
                    legs=research.get("legs", []), weather=research.get("weather", []),
                    flights=research.get("flights", []), trains=research.get("trains", []),
