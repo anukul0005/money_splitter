@@ -565,6 +565,8 @@ Respond with ONLY a JSON object:
   "travellers": 0, "rooms": null,
   "budget_per_person": null, "budget_total": null,
   "transport_pref": "", "stay_pref": "", "interests": [], "food": "", "notes": "",
+  "travel_by": "train|flight|cheapest|any - train or flight when the request asks for one; cheapest when it asks for
+  cheaper, budget or low-cost options; else any",
   "airports": {{"origin": "IATA code of the origin's main airport", "destinations": ["IATA code nearest each
   destination, same order; null where there's none within ~150 km"]}},
   "stations": {{"origin": "Indian Railways code of the origin's main station (NDLS New Delhi, JP Jaipur, JU Jodhpur,
@@ -688,6 +690,14 @@ def normalise_spec(raw: dict, members: int) -> dict:
     spec["budget_total"] = round(bpp * spec["travellers"]) if bpp else None
     for k in ("transport_pref", "stay_pref", "food", "notes"):
         spec[k] = str(spec[k] or "")[:200]
+    # How to travel: what the AI read, checked against the words themselves
+    by = str(raw.get("travel_by") or "").strip().lower()
+    words = f"{spec['transport_pref']} {spec['notes']}"
+    if by not in ("train", "flight", "cheapest"):
+        by = ("train" if re.search(r"\btrains?\b|\brail", words, re.I) else
+              "flight" if re.search(r"\bfl(?:y|ight)", words, re.I) else
+              "cheapest" if re.search(r"cheap|budget|low[- ]cost|economical|affordable", words, re.I) else "any")
+    spec["travel_by"] = by
     air = raw.get("airports") if isinstance(raw.get("airports"), dict) else {}
     code = lambda c: str(c).strip().upper() if c and re.fullmatch(r"[A-Za-z]{3}", str(c).strip()) else None
     dests = [code(c) for c in (air.get("destinations") or [])][:len(spec["destinations"])]
@@ -859,8 +869,9 @@ def fill_stays(plan: dict, spec: dict) -> dict:
                        if it["category"] == "stay"), None)
         if before and sleeps_in(days[i]) and sleeps_in(before[0]) == sleeps_in(days[i]):
             stay = before[1]
-            items.append({**stay, "time": "22:00", "title": f"Another night: {stay['title']}".replace(
-                "Check-in ", "").replace("Check‑in ", ""), "detail": "Same stay as the night before"})
+            name = re.sub(r"^(?:Another night: |Check[-‑ ]in:? )+", "", stay["title"])
+            items.append({**stay, "time": "22:00", "title": f"Another night: {name}",
+                          "detail": "Same stay as the night before"})
     return plan
 
 
@@ -902,6 +913,66 @@ def name_trains(plan: dict, sources: dict[str, dict]) -> dict:
             if not re.search(r"\b(?:SL|1A|2A|3A|3E|CC|EC|2S|GN)\b", it.get("detail") or ""):
                 when = f"departs {t['depart']}, arrives {t['arrive']}" + (" next day" if t["next_day"] else "") + f", {t['hours']} h"
                 it["detail"] = (f"{cls} · {when}" if cls else when) + (f". {it['detail']}" if it.get("detail") else "")
+    return plan
+
+
+def _train_item(src: dict, travel_by: str) -> dict | None:
+    """The train to take from a timetable source: sleeper on a "cheapest" trip,
+    else 3A (else the cheapest reserved class); the cheapest such train on a
+    "cheapest" trip, else the quickest."""
+    want = ["SL", "3A", "2S", "CC"] if travel_by == "cheapest" else ["3A", "CC", "2A", "SL", "2S"]
+    best = None
+    for cls in want:
+        rows = [t for t in src.get("trains") or [] if t["fares"].get(cls)]
+        if rows:
+            t = min(rows, key=lambda t: t["fares"][cls]) if travel_by == "cheapest" else rows[0]
+            best = (t, cls)
+            break
+    if not best:
+        return None
+    t, cls = best
+    return {"time": t["depart"] or "", "title": f"Train {t['number']} {t['name']} ({src['route'][0]} → {src['route'][1]})",
+            "detail": f"{cls} · departs {t['depart']}, arrives {t['arrive']}" + (" next day" if t["next_day"] else "")
+                      + f", {t['hours']} h", "category": "transport", "cost": t["fares"][cls], "currency": "INR",
+            "per": "person", "source": "found", "source_ids": [src["id"]],
+            "basis": f"{cls} fare from the railway timetable"}
+
+
+def fix_journeys(plan: dict, spec: dict, sources: dict[str, dict]) -> dict:
+    """The journeys out and home, made right in code:
+    - a flight's title names where it goes ("Flight DEL-GOI" on the last day
+      becomes "... (Goa → Delhi)"), so the way home is recognised;
+    - on a train or "cheapest" trip, a flight out or home is swapped for the
+      train on that day when the railway has one;
+    - a last day with no way home gets the train home when there is one."""
+    home, dests = spec["origin"], spec["destinations"]
+    if not home or not plan["days"] or not dests:
+        return plan
+    by = spec.get("travel_by") or "any"
+    trains_on = lambda when: next((s for s in sources.values() if s.get("kind") == "trains" and s.get("trains")
+                                   and s.get("date") == when), None)
+    ends = [(plan["days"][0], spec["start_date"], f"{home} → {dests[0]}")]
+    if len(plan["days"]) > 1:
+        ends.append((plan["days"][-1], spec["end_date"], f"{dests[-1]} → {home}"))
+    for day, when, route in ends:
+        for i, it in enumerate(day["items"]):
+            if it["category"] != "transport" or not any(sources.get(s, {}).get("kind") == "flights"
+                                                        for s in it.get("source_ids") or []):
+                continue
+            src = trains_on(when) if by in ("train", "cheapest") and when else None
+            train = _train_item(src, by) if src else None
+            if train:
+                train["detail"] += f". Or fly: {it['title']}, Rs {it['cost']:,}"
+                day["items"][i] = train
+            elif home.lower() not in it["title"].lower():
+                it["title"] = f"{it['title']} ({route})"
+    last = plan["days"][-1]
+    if len(plan["days"]) > 1 and not any(it["category"] == "transport" and home.lower() in
+                                         f"{it['title']} {it['detail']}".lower() for it in last["items"]):
+        src = trains_on(spec["end_date"]) if by != "flight" else None
+        train = _train_item(src, by) if src else None
+        if train:
+            last["items"].append(train)
     return plan
 
 
@@ -988,7 +1059,7 @@ def _openrouter(system: str, user: str, max_tokens: int = 12000) -> dict:
         try:
             d = _post_json("https://openrouter.ai/api/v1/chat/completions", body, {
                 "Authorization": f"Bearer {key}", "HTTP-Referer": "https://www.settle0.in.net", "X-Title": "Settle"},
-                timeout=120)
+                timeout=100)                             # free models can be slow; Gemini is next
             text = d["choices"][0]["message"]["content"] or ""
             m = re.search(r"\{.*\}", text, re.S)
             out = json.loads(m.group(0) if m else text)
@@ -1027,7 +1098,7 @@ def write_plan(spec: dict, research: dict, facts: str, step, compact: str | None
 
     def write(more: str = "") -> dict:
         plan = to_rupees(clean_plan(_write_ai(compact + more, facts + more), sources, spec))
-        return price_meals(fill_stays(name_trains(plan, sources), spec))
+        return price_meals(fill_stays(name_trains(fix_journeys(plan, spec, sources), sources), spec))
     step("Writing the day-by-day plan")
     result = write()
 
@@ -1074,9 +1145,10 @@ def write_plan(spec: dict, research: dict, facts: str, step, compact: str | None
 
 
 def _flights(spec: dict, pts: list[dict], step) -> list[dict]:
-    """Flight fares for the long legs (Skyscanner, else Google Flights): when the
-    first place is far (over ~350 km - Delhi-Jodhpur is a flight route) or flying
-    was asked for, and the dates and airports are known.
+    """Flight fares for the long legs (Skyscanner, else Google Flights): when
+    flying was asked for, or the first place is over 550 km away as the crow
+    flies (Delhi-Jodhpur is ~490: trains) and trains weren't asked for; the
+    dates and airports must be known.
     One destination: a round trip. Several: out to the first, back from the last."""
     from database import get_settings
     air = spec.get("airports") or {}
@@ -1087,8 +1159,9 @@ def _flights(spec: dict, pts: list[dict], step) -> list[dict]:
         return []
     by_name = {p["name"]: p for p in pts}
     a, b = by_name.get(spec["origin"]), by_name.get(spec["destinations"][0])
-    far = a and b and _km(a, b) > 350
-    if not (far or re.search(r"fl(y|ight)|air", spec.get("transport_pref") or "", re.I)):
+    far = a and b and _km(a, b) > 550
+    by = spec.get("travel_by") or "any"
+    if not (by == "flight" or (far and by != "train")):
         return []
     last = next((c for c in reversed(dests) if c), None)
     if last == dests[0]:
@@ -1200,7 +1273,7 @@ def _research(spec: dict, step) -> dict:
         research["sources"].append({"id": f"S{n}", "kind": "trains", "checked": t["checked"], "url": t["url"],
                                     "title": f"Indian Railways: {t['from']['name']} → {t['to']['name']}",
                                     "text": "\n".join(lines), "trains": t["trains"],
-                                    "route": [t["from"]["name"], t["to"]["name"]]})
+                                    "route": [t["from"]["name"], t["to"]["name"]], "date": t["date"]})
         reserved = [v for x in t["trains"] for c, v in x["fares"].items() if c != "GN"]      # not unreserved
         cheapest = min(reserved) if reserved else None
         research["trains"].append({"from": t["from"]["name"], "to": t["to"]["name"], "date": t["date"],
@@ -1267,6 +1340,15 @@ _COMPACT_LINES = {"flights": 5, "trains": 5, "stays": 6}
 _COMPACT_CHARS = {"wikivoyage": 700, "web": 380}
 
 
+_TRAVEL_BY = {
+    "train": "The request asks for trains: go by train wherever the railway sources have one; a bus or cab only "
+             "where there's no train, and a flight only if there's no train or bus at all.",
+    "cheapest": "The request asks for cheaper, budget options: go by train (sleeper or 3A) wherever the railway "
+                "sources have one - a night train saves a stay - else bus; no flights unless nothing else goes there.",
+    "flight": "The request asks to fly: take the flights from the flight sources for the long journeys.",
+}
+
+
 def _facts(spec: dict, research: dict, compact: bool = False) -> str:
     """The research handed to the AI. `compact`: about a third of the size -
     the spec without its empty fields, a weather line a place, fewer options in
@@ -1278,6 +1360,8 @@ def _facts(spec: dict, research: dict, compact: bool = False) -> str:
     else:
         out = [f"Trip spec: {json.dumps(spec)}",
                f"Travellers: {spec['travellers']} - rooms: {spec['rooms']} (stays are priced per room per night)"]
+    if spec.get("travel_by") in _TRAVEL_BY:
+        out.append("How to travel: " + _TRAVEL_BY[spec["travel_by"]])
     if research["legs"]:
         out.append("Road distances (OSRM): " + "; ".join(
             f"{l['from']} -> {l['to']}: {l['km']} km, about {l['hours']} h by road" for l in research["legs"]))
