@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { getGroups, createExpense, scanReceipt, understandExpense } from '../api'
-import ExpenseChat from '../components/ExpenseChat'
+import { getGroups, createExpense, scanReceipt } from '../api'
 import { useStatementUpload, ANY_STATEMENT, MailSyncWide } from '../components/StatementUpload'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ReceiptCropper from '../components/ReceiptCropper'
@@ -68,17 +67,10 @@ export default function AddExpense() {
     notes:        '',
     payment_mode: defaultPayment,
     txn_time:     '',
-    participants: null,   // the chat's "with X" in a bigger group: who shares it
   })
   const [savedNoTitle, setSavedNoTitle] = useState(false)
 
   const amountRef = useRef(null)
-  // The chat can pick another group; its payer and sharers wait here until
-  // that group's members have loaded (the effect below resets both).
-  const pendingFill = useRef(null)
-  const formRef     = useRef(form)
-  formRef.current   = form
-  const offeredRef  = useRef([])
 
   useEffect(() => {
     getGroups()
@@ -94,14 +86,7 @@ export default function AddExpense() {
         const ms = r.data.members || []
         setMembers(ms)
         const autoPaidBy = ms.length === 1 ? ms[0].name : ''
-        const fill = pendingFill.current
-        pendingFill.current = null
-        setForm((f) => ({
-          ...f,
-          divider:      String(fill?.participants?.length || ms.length || 2),
-          paid_by:      fill?.paid_by || autoPaidBy,
-          participants: fill?.participants || null,
-        }))
+        setForm((f) => ({ ...f, divider: String(ms.length || 2), paid_by: autoPaidBy }))
         setSplitMode('equal')
         setGentlemanFlipped(false)
         setCustomPcts(Object.fromEntries(ms.map((m) => [m.name, ''])))
@@ -114,40 +99,6 @@ export default function AddExpense() {
   }, [form.group_id, groups])
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
-
-  // The chat box: one message read into the form (a follow-up sees what's
-  // already filled in), resolving to the line it answers with.
-  const askChat = async (text) => {
-    const f = formRef.current
-    const { data } = await understandExpense({
-      text,
-      group_id:  f.group_id ? Number(f.group_id) : null,
-      group_ids: offeredRef.current,
-      draft: {
-        amount: f.amount || null, title: f.title || null, paid_by: f.paid_by || null,
-        split_with: f.participants, payment_mode: f.payment_mode || null,
-        date: f.date || null, notes: f.notes || null,
-      },
-    })
-    const moved = data.group_id && String(data.group_id) !== String(f.group_id)
-    if (moved) pendingFill.current = { paid_by: data.paid_by, participants: data.participants }
-    setForm((p) => ({
-      ...p,
-      group_id:     data.group_id ? String(data.group_id) : p.group_id,
-      amount:       data.amount != null ? String(data.amount) : p.amount,
-      title:        data.title ?? p.title,
-      date:         data.date || p.date,
-      notes:        data.notes ?? p.notes,
-      payment_mode: data.payment_mode || p.payment_mode,
-      ...(moved ? {} : {
-        paid_by:      data.paid_by || p.paid_by,
-        participants: data.participants,
-        divider:      data.participants ? String(data.participants.length) : (p.participants ? String(members.length || 2) : p.divider),
-      }),
-    }))
-    if (data.participants) setSplitMode('equal')
-    return data.reply
-  }
 
   const setPaymentMode = (val) => {
     setForm((f) => ({ ...f, payment_mode: val }))
@@ -303,7 +254,6 @@ export default function AddExpense() {
       notes:        '',
       payment_mode: prev.payment_mode,  // persist the payment mode
       txn_time:     '',
-      participants: null,
     }))
     setReceipt(null)
     setScanInfo(null)
@@ -335,7 +285,6 @@ export default function AddExpense() {
         amount:       parseFloat(form.amount),
         paid_by:      form.paid_by,
         divider:      splitMode === 'equal' ? (Number(form.divider) || members.length || 2) : members.length,
-        participants: splitMode === 'equal' && form.participants?.length ? form.participants.join(',') : null,
         notes:        form.notes || null,
         split_json:   buildSplitJson(),
         payment_mode: form.payment_mode || null,
@@ -367,7 +316,6 @@ export default function AddExpense() {
   const userGroups = originGroup
     ? myGroups.filter((g) => pairKey(g.member_names ?? []) === pairKey(originGroup.member_names ?? []))
     : myGroups
-  offeredRef.current = userGroups.map((g) => g.id)
   const selectedGroup = groups.find((g) => String(g.id) === String(form.group_id))
   const isMonthly = !!selectedGroup?.name?.toUpperCase().startsWith('MONTHLY EXPENSES')
 
@@ -413,10 +361,6 @@ export default function AddExpense() {
       )}
 
       <form onSubmit={handleSubmit} className="px-5 mt-5 space-y-4 max-w-2xl">
-        {/* Chat / mic - fills the fields below (group included); a fresh
-            conversation for each expense saved */}
-        <ExpenseChat key={successCount} ask={askChat} />
-
         {/* Group */}
         <div>
           <div className="flex items-center justify-between">
@@ -650,7 +594,7 @@ export default function AddExpense() {
                   <button
                     type="button"
                     key={n}
-                    onClick={() => setForm((f) => ({ ...f, divider: String(n), participants: null }))}
+                    onClick={() => setForm((f) => ({ ...f, divider: String(n) }))}
                     className={`w-12 h-12 text-sm font-bold transition-colors border ${
                       String(form.divider) === String(n)
                         ? 'bg-brand-400 text-white border-brand-400'
@@ -666,18 +610,9 @@ export default function AddExpense() {
                   min="1"
                   placeholder="Other"
                   value={[2,3,4,5].includes(Number(form.divider)) ? '' : form.divider}
-                  onChange={(e) => setForm((f) => ({ ...f, divider: e.target.value, participants: null }))}
+                  onChange={set('divider')}
                 />
               </div>
-              {form.participants?.length > 0 && (
-                <p className="text-xs text-gray-600 mt-1.5 flex items-center gap-1.5 flex-wrap">
-                  Shared by: <span className="font-bold">{form.participants.map((n) => dn(n, members.map((x) => x.name))).join(', ')}</span>
-                  <button type="button" className="text-[11px] font-bold text-brand-600 underline"
-                    onClick={() => setForm((f) => ({ ...f, participants: null, divider: String(members.length || 2) }))}>
-                    everyone instead
-                  </button>
-                </p>
-              )}
               {form.amount && form.divider && (
                 <p className="text-xs text-gray-500 mt-1.5">
                   Each pays: <span className="font-black text-brand-600">₹{(parseFloat(form.amount) / parseInt(form.divider)).toFixed(2)}</span>
