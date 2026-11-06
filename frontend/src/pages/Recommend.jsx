@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   getRecommendMeta, getRecommendation, getFriends, searchRecommend, listBrands,
   logRecommendShown, getRecommendEventsSummary, getMyBottles,
@@ -257,8 +257,17 @@ export default function Recommend() {
   return <DrinksRecommend />
 }
 
+// The tab lives in the address (?tab=recipes): coming back from a dish's own
+// page lands on the tab it was opened from
+function useTab(fallback) {
+  const [params, setParams] = useSearchParams()
+  const tab = params.get('tab') || fallback
+  const setTab = (t) => setParams((p) => { const n = new URLSearchParams(p); n.set('tab', t); return n }, { replace: true })
+  return [tab, setTab]
+}
+
 function BasicRecommend() {
-  const [tab, setTab] = useState('food')
+  const [tab, setTab] = useTab('food')
   if (tab === 'recipes') return <Recipes tab={tab} setTab={setTab} />
   return <RecommendFood tab={tab} setTab={setTab} />
 }
@@ -269,7 +278,7 @@ function DrinksRecommend() {
 
   // Drinks and food are two tables answering the same question, so they share
   // a route and a tab rather than being two entries in the nav.
-  const [tab, setTab]         = useState('drinks')
+  const [tab, setTab]         = useTab('drinks')
   const [meta, setMeta]       = useState(null)
   const [friends, setFriends] = useState([])
   const [state, setState]     = useState('')

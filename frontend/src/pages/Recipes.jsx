@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { askRecipes, planRecipes, recipeDish, recipesMe, saveRecipesMe } from '../api'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { askRecipes, planRecipes, recipesMe, saveRecipesMe } from '../api'
 import RecommendTabs from '../components/RecommendTabs'
 import { Typewriter } from '../components/ExpenseChat'
 import { useVoice, canRecord as micWorks } from '../components/useVoice'
@@ -35,19 +35,51 @@ const r0 = (n) => Math.round(n || 0)
 const r1 = (n) => Math.round((n || 0) * 10) / 10
 const chip = (on) => `px-2.5 py-1 text-[11px] font-bold border rounded-md ${on ? 'bg-brand-400 text-white border-brand-400' : 'bg-white text-gray-600 border-amber-200'}`
 
+// Kept on this device: the last answer (plan or recipes) and your details,
+// so Recipes opens straight onto them - the server keeps both too
+const LAST_KEY = 'recipes_last'
+const ME_KEY = 'recipes_me'
+const load = (k) => { try { return JSON.parse(localStorage.getItem(k) || 'null') } catch { return null } }
+const keep = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)) } catch { /* storage full or blocked */ } }
+
+// A recipe the AI wrote travels to its own page by a key, kept on this device
+export function readRecipe(key) { return key ? load(`recipe_r_${key}`) : null }
+function dishHref({ name, servings = 1, unit, recipe }) {
+  const p = new URLSearchParams({ name, s: String(servings) })
+  if (unit) p.set('u', unit)
+  if (recipe) {
+    const key = [...JSON.stringify(recipe)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7).toString(36)
+    keep(`recipe_r_${key}`, recipe)
+    p.set('r', key)
+  }
+  return `/recipes/dish?${p}`
+}
+
 export default function Recipes({ tab, setTab }) {
   const nav = useNavigate()
-  const [me, setMe]         = useState(null)     // { profile, pantry, targets, sources }
+  const last = load(LAST_KEY)
+  const [me, setMe]         = useState(() => load(ME_KEY))     // { profile, pantry, targets, sources, plan }
   const [q, setQ]           = useState('')
   const [focused, setFocused] = useState(false)
   const [busy, setBusy]     = useState('')        // what's being worked out
   const [err, setErr]       = useState('')
-  const [result, setResult] = useState(null)
-  const [asked, setAsked]   = useState('')
+  const [result, setResult] = useState(last?.result || null)
+  const [asked, setAsked]   = useState(last?.asked || '')
   const [showMe, setShowMe] = useState(false)
-  const [opened, setOpened] = useState(null)    // { name, servings, unit?, recipe? } - the dish page open
 
-  useEffect(() => { recipesMe().then((r) => setMe(r.data)).catch(() => setMe({ profile: {}, pantry: [] })) }, [])
+  useEffect(() => {
+    recipesMe().then((r) => {
+      setMe(r.data); keep(ME_KEY, { ...r.data, plan: undefined })
+      // Nothing kept on this device (or an older answer): the plan saved on the server
+      const saved = r.data.plan
+      if (saved && (!last || (last.result?.mode === 'plan' && (last.result.made_at || '') < saved.made_at))) {
+        setResult(saved); setAsked('Your saved plan')
+      }
+    }).catch(() => setMe((m) => m || { profile: {}, pantry: [] }))
+  }, [])
+
+  // Every answer kept, so coming back shows it again
+  useEffect(() => { if (result && !result.need_profile) keep(LAST_KEY, { result, asked }) }, [result])
 
   const voice = useVoice({
     onText: (said) => { setErr(''); setQ((p) => (p.trim() ? `${p.trim()} ${said}` : said)) },
@@ -82,7 +114,7 @@ export default function Recipes({ tab, setTab }) {
 
   const save = async (patch) => {
     const { data } = await saveRecipesMe(patch)
-    setMe((m) => ({ ...m, ...data }))
+    setMe((m) => { const next = { ...m, ...data }; keep(ME_KEY, { ...next, plan: undefined }); return next })
     return data
   }
 
@@ -147,8 +179,7 @@ export default function Recipes({ tab, setTab }) {
           </div>
         )}
 
-        {result && !busy && <Result r={result} asked={asked} onPlan={plan} onProfile={() => setShowMe(true)} onOpen={setOpened} />}
-        {opened && <DishSheet open={opened} onClose={() => setOpened(null)} />}
+        {result && !busy && <Result r={result} asked={asked} onPlan={plan} onProfile={() => setShowMe(true)} />}
 
         {/* You, and your kitchen */}
         {me && <Profile me={me} open={showMe} setOpen={setShowMe} save={save} onPlan={plan} busy={!!busy} />}
@@ -160,163 +191,15 @@ export default function Recipes({ tab, setTab }) {
   )
 }
 
-// A dish's own page, over the list: photo, the full breakdown for a serving
-// and for the portion eaten, effective cost, priced ingredients, method
-function DishSheet({ open, onClose }) {
-  const [servings, setServings] = useState(open.servings || 1)
-  const [d, setD] = useState(null)
-  const [err, setErr] = useState('')
-  useEffect(() => {
-    setD(null); setErr('')
-    recipeDish(open.name, 1, open.recipe || null).then((r) => setD(r.data))
-      .catch((e) => setErr(e?.response?.data?.detail || "Couldn't open that dish - try again."))
-  }, [open.name])
-  useEffect(() => {
-    const k = (e) => e.key === 'Escape' && onClose()
-    window.addEventListener('keydown', k)
-    return () => window.removeEventListener('keydown', k)
-  }, [onClose])
-
-  const n = d?.nutrition
-  const s = servings
-  const rows = [['Calories', 'kcal', ''], ['Protein', 'protein', 'g'], ['Carbs', 'carbs', 'g'], ['Fat', 'fat', 'g'],
-                ['Fibre', 'fibre', 'g'], ['Sugar', 'sugar', 'g'], ['Sodium', 'sodium_mg', 'mg']]
-  const fmt = (k, v) => (k === 'kcal' || k === 'sodium_mg' ? r0(v) : r1(v))
-  const cost = d?.cost?.total
-  const unitOf = d?.indb?.serving?.unit || open.unit || 'serving'
-  return (
-    <div className="fixed inset-0 z-[200] flex items-end md:items-center justify-center bg-black/50"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="bg-cream w-full md:max-w-lg max-h-[92svh] overflow-y-auto overscroll-contain border border-amber-100/60 shadow-2xl rounded-t-xl md:rounded-xl">
-        {d?.photo && (
-          <div className="relative">
-            <img src={d.photo.url} alt={open.name} className="w-full h-52 object-cover rounded-t-xl" loading="lazy" />
-            <a href={d.photo.page} target="_blank" rel="noreferrer"
-              className="absolute bottom-1.5 right-2 text-[9px] text-white/90 bg-black/40 rounded px-1.5 py-0.5">Photo: {d.photo.title} · Wikipedia</a>
-          </div>
-        )}
-        <div className="px-5 py-4 space-y-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h2 className="text-lg font-black text-gray-900 leading-tight">{open.name}</h2>
-              {d?.indb && d.indb.name !== open.name && <p className="text-[11px] text-gray-400 mt-0.5">INDB: {d.indb.name}</p>}
-              {d?.time_min && <p className="text-[11px] text-gray-500 mt-0.5">{d.time_min} min</p>}
-            </div>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-700 p-1 -mr-1" aria-label="Close">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-            </button>
-          </div>
-
-          {!d && !err && <div className="py-8 text-center"><div className="w-6 h-6 mx-auto border-2 border-brand-400 border-t-transparent rounded-full animate-spin" /><p className="text-xs text-gray-500 mt-2">Working out the numbers…</p></div>}
-          {err && <p className="text-xs text-red-600">{err}</p>}
-
-          {d && (
-            <>
-              {/* Portion */}
-              <div className="flex items-center justify-between bg-white border border-amber-200 rounded-md px-3 py-2">
-                <span className="text-xs font-bold text-gray-700">Your portion</span>
-                <span className="flex items-center gap-2">
-                  <button onClick={() => setServings((x) => Math.max(0.5, x - 0.5))} className="w-7 h-7 border border-amber-300 rounded-md font-bold text-gray-700">−</button>
-                  <span className="text-sm font-black text-gray-900 tabular-nums w-24 text-center">{s} {unitOf}</span>
-                  <button onClick={() => setServings((x) => Math.min(6, x + 0.5))} className="w-7 h-7 border border-amber-300 rounded-md font-bold text-gray-700">+</button>
-                </span>
-              </div>
-
-              {/* Calories and where they come from */}
-              <div>
-                <p className="text-3xl font-black text-gray-900 leading-none">{r0(n.kcal * s)} <span className="text-sm font-bold text-gray-400">kcal</span></p>
-                <div className="flex h-2.5 rounded-full overflow-hidden mt-2.5 bg-gray-100">
-                  <div className="bg-green-500" style={{ width: `${d.split.protein}%` }} />
-                  <div className="bg-amber-400" style={{ width: `${d.split.carbs}%` }} />
-                  <div className="bg-red-400" style={{ width: `${d.split.fat}%` }} />
-                </div>
-                <div className="flex justify-between text-[10px] font-bold mt-1">
-                  <span className="text-green-700">Protein {d.split.protein}%</span>
-                  <span className="text-amber-700">Carbs {d.split.carbs}%</span>
-                  <span className="text-red-600">Fat {d.split.fat}%</span>
-                </div>
-                <p className="text-[10px] text-gray-400 mt-0.5">Share of the calories (protein and carbs 4 kcal a gram, fat 9)</p>
-              </div>
-
-              {/* The breakdown */}
-              <table className="w-full text-xs">
-                <thead><tr className="text-[10px] text-gray-400 text-left"><th className="font-bold pb-1" /><th className="font-bold text-right pb-1">1 {unitOf}</th><th className="font-bold text-right pb-1">Your {s}</th>{d.indb && <th className="font-bold text-right pb-1">Per 100 g</th>}</tr></thead>
-                <tbody>
-                  {rows.map(([label, k, u]) => (
-                    <tr key={k} className="border-t border-amber-100">
-                      <td className="py-1.5 text-gray-600">{label}</td>
-                      <td className="text-right tabular-nums text-gray-800">{fmt(k, n[k])}{u}</td>
-                      <td className="text-right tabular-nums font-black text-gray-900">{fmt(k, n[k] * s)}{u}</td>
-                      {d.indb && <td className="text-right tabular-nums text-gray-500">{fmt(k, d.indb.per100[k])}{u}</td>}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              {/* Effective cost */}
-              <div className="bg-white border border-amber-200 rounded-md px-3 py-2.5">
-                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Effective cost</p>
-                {cost != null ? (
-                  <>
-                    <p className="text-lg font-black text-gray-900 mt-0.5">₹{r0(cost * s)} <span className="text-xs font-bold text-gray-500">for your {s} {unitOf} · ₹{r1(cost)} each</span></p>
-                    <div className="grid grid-cols-2 gap-2 mt-1.5">
-                      <div className="bg-amber-50 rounded-md px-2 py-1.5"><p className="text-sm font-black text-gray-900">{d.effective.per_100_kcal != null ? `₹${d.effective.per_100_kcal}` : '-'}</p><p className="text-[10px] text-gray-500">a 100 kcal</p></div>
-                      <div className="bg-amber-50 rounded-md px-2 py-1.5"><p className="text-sm font-black text-gray-900">{d.effective.per_10g_protein != null ? `₹${d.effective.per_10g_protein}` : '-'}</p><p className="text-[10px] text-gray-500">a 10 g of protein</p></div>
-                    </div>
-                    <p className="text-[10px] text-gray-400 mt-1.5">
-                      {d.cost.basis === 'estimate' ? 'At typical Delhi shop prices (estimates).' : 'At today’s mandi prices where there are any (wholesale).'}
-                      {d.cost.unpriced?.length > 0 && ` Not priced: ${d.cost.unpriced.join(', ')}.`}
-                    </p>
-                  </>
-                ) : <p className="text-xs text-gray-500 mt-0.5">Couldn't price its ingredients.</p>}
-              </div>
-
-              {/* Ingredients */}
-              {d.ingredients?.length > 0 && (
-                <div>
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Ingredients · for your {s} {unitOf}</p>
-                  <table className="w-full text-[11px]">
-                    <tbody>
-                      {d.ingredients.map((l, i) => (
-                        <tr key={i} className="border-t border-amber-100">
-                          <td className="py-1 pr-2 text-gray-800">{l.item}</td>
-                          <td className="text-right tabular-nums text-gray-500">{r0(l.grams * s)} g</td>
-                          <td className="text-right tabular-nums font-bold text-gray-800 w-14">{l.cost != null ? `₹${r1(l.cost * s)}` : '-'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {d.steps?.length > 0 && (
-                <div>
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Method</p>
-                  <ol className="list-decimal list-inside space-y-1 text-xs text-gray-700">{d.steps.map((x, i) => <li key={i}>{x}</li>)}</ol>
-                </div>
-              )}
-
-              <div className="text-[10px] text-gray-400">
-                <SourceLine s={d.nutrition_source} />
-                <p className="mt-0.5">Ingredients and method: suggested by AI. Every number above: worked out from the data, not by the AI.</p>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function Result({ r, asked, onPlan, onProfile, onOpen }) {
-  if (r.mode === 'plan') return <Plan r={r} onProfile={onProfile} onOpen={onOpen} />
+function Result({ r, asked, onPlan, onProfile }) {
+  if (r.mode === 'plan') return <Plan r={r} asked={asked} onProfile={onProfile} />
   const recs = r.recipes || []
   if (!recs.length) return <div className="card text-xs text-gray-500">Nothing came back for “{asked}” - try asking another way.</div>
   return (
     <div className="space-y-3">
       <p className="text-[11px] text-gray-500">For “{asked}”{r.want?.max_kcal ? ` · up to ${r.want.max_kcal} kcal` : ''}{r.want?.min_protein_g ? ` · at least ${r.want.min_protein_g} g protein` : ''}{r.want?.max_cost_inr ? ` · up to ₹${r.want.max_cost_inr}` : ''}</p>
       {r.mode === 'compare' && recs.length >= 2 && <Compare a={recs[0]} b={recs[1]} />}
-      {recs.map((x, i) => <RecipeCard key={i} x={x} onOpen={onOpen} />)}
+      {recs.map((x, i) => <RecipeCard key={i} x={x} />)}
       {/plan|week|weight/i.test(asked) && (
         <button onClick={onPlan} className="text-xs font-bold text-brand-600">Make a 7-day weight-loss plan instead →</button>
       )}
@@ -338,7 +221,7 @@ function Numbers({ n }) {
   )
 }
 
-function SourceLine({ s }) {
+export function SourceLine({ s }) {
   if (s.kind === 'indb') {
     return <p className="text-[10px] text-gray-400 mt-1.5">Nutrition: INDB - {s.dishes.map((d) => `${d.name} × ${d.servings} ${d.unit} (~${d.grams} g)`).join(' + ')}</p>
   }
@@ -350,11 +233,11 @@ function SourceLine({ s }) {
   )
 }
 
-function RecipeCard({ x, onOpen }) {
+function RecipeCard({ x }) {
   const [open, setOpen] = useState(false)
   const c = x.cost || {}
-  // The page opens with this recipe as written - its own ingredients and steps
-  const openIt = () => onOpen({
+  // Its own page, with this recipe as written - its own ingredients and steps
+  const href = dishHref({
     name: x.name, servings: 1,
     recipe: { name: x.name, ingredients: x.ingredients.map((l) => ({ item: l.item, grams: l.grams })), steps: x.steps,
               time_min: x.time_min, indb: (x.nutrition_source.dishes || []).map((d) => ({ name: d.name, servings: d.servings })) },
@@ -363,7 +246,7 @@ function RecipeCard({ x, onOpen }) {
     <div className={`card ${x.fits ? '' : 'opacity-90'}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <button onClick={openIt} className="text-sm font-black text-gray-900 text-left underline decoration-amber-300 underline-offset-2">{x.name} ›</button>
+          <Link to={href} className="text-sm font-black text-gray-900 underline decoration-amber-300 underline-offset-2">{x.name} ›</Link>
           <p className="text-[11px] text-gray-500 mt-0.5">{[x.meal, x.time_min ? `${x.time_min} min` : null].filter(Boolean).join(' · ')}{x.why ? ` · ${x.why}` : ''}</p>
         </div>
         <div className="text-right flex-shrink-0">
@@ -378,7 +261,7 @@ function RecipeCard({ x, onOpen }) {
       {x.you_need?.length > 0 && <p className="text-[11px] text-gray-600 mt-0.5">You'd need: {x.you_need.join(', ')}</p>}
       <SourceLine s={x.nutrition_source} />
       <div className="flex gap-4 mt-2">
-        <button onClick={openIt} className="text-[11px] font-bold text-brand-600">Photo and full breakdown →</button>
+        <Link to={href} className="text-[11px] font-bold text-brand-600">Photo and full breakdown →</Link>
         <button onClick={() => setOpen((o) => !o)} className="text-[11px] font-bold text-gray-500">
           {open ? '▾ Hide' : '▸ Ingredients and method'}
         </button>
@@ -445,8 +328,10 @@ function Compare({ a, b }) {
   )
 }
 
-function Plan({ r, onProfile, onOpen }) {
-  const [open, setOpen] = useState(0)
+function Plan({ r, asked, onProfile }) {
+  // Which day is open survives a visit to a dish's page and back
+  const [open, setOpenRaw] = useState(() => load('recipes_plan_day') ?? 0)
+  const setOpen = (i) => { setOpenRaw(i); keep('recipes_plan_day', i) }
   if (r.need_profile) {
     return (
       <div className="card">
@@ -460,6 +345,7 @@ function Plan({ r, onProfile, onOpen }) {
   return (
     <div className="space-y-2">
       <div className="card">
+        {r.made_at && <p className="text-[10px] text-gray-400 mb-1">{asked === 'Your saved plan' ? 'Your saved plan' : 'Saved'} · made {new Date(r.made_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</p>}
         <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Your daily target</p>
         <p className="text-lg font-black text-gray-900 mt-0.5">{t.kcal} kcal · {t.protein_g} g protein</p>
         <p className="text-[11px] text-gray-500 mt-0.5">
@@ -485,11 +371,11 @@ function Plan({ r, onProfile, onOpen }) {
                   <div key={meal}>
                     <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{meal}</p>
                     {xs.map((x, j) => (
-                      <button key={j} onClick={() => onOpen({ name: x.name, servings: x.servings, unit: x.unit })}
+                      <Link key={j} to={dishHref({ name: x.name, servings: x.servings, unit: x.unit })}
                         className="w-full flex items-baseline justify-between gap-2 text-xs py-1 text-left active:bg-amber-50 rounded">
                         <span className="text-gray-800 min-w-0 underline decoration-amber-300 underline-offset-2">{x.name} <span className="text-gray-400 no-underline">× {x.servings} {x.unit}</span></span>
                         <span className="text-gray-500 tabular-nums flex-shrink-0">{r0(x.kcal)} kcal · {r0(x.protein)} g P{x.cost != null ? ` · ₹${x.cost}` : ''} ›</span>
-                      </button>
+                      </Link>
                     ))}
                   </div>
                 ))}
@@ -507,9 +393,25 @@ function Plan({ r, onProfile, onOpen }) {
 function Profile({ me, open, setOpen, save, onPlan, busy }) {
   const [p, setP] = useState(me.profile || {})
   const [saved, setSaved] = useState('')
-  useEffect(() => { setP(me.profile || {}) }, [me.profile])
+  const timer = useRef(null)
+  const edited = useRef(false)
+  useEffect(() => { if (!edited.current) setP(me.profile || {}) }, [me.profile])
   const t = me.targets
-  const set = (k, v) => { setP((x) => ({ ...x, [k]: v })); setSaved('') }
+  // Saved as you go (a moment after the last change) - no button to forget
+  const set = (k, v) => {
+    edited.current = true
+    const next = { ...p, [k]: v }
+    setP(next)
+    setSaved('Saving…')
+    clearTimeout(timer.current)
+    timer.current = setTimeout(async () => {
+      try {
+        const d = await save({ profile: next })
+        setSaved(d.targets ? '✓ Saved' : '✓ Saved - add age, height, weight and sex for a target')
+      } catch { setSaved("Couldn't save - check your connection") }
+    }, 700)
+  }
+  useEffect(() => () => clearTimeout(timer.current), [])
   const num = (k, label, ph) => (
     <label className="block">
       <span className="text-[10px] font-bold text-gray-500">{label}</span>
@@ -548,13 +450,9 @@ function Profile({ me, open, setOpen, save, onPlan, busy }) {
             <p className="text-[10px] font-bold text-gray-500 mb-1">Diet</p>
             <div className="flex flex-wrap gap-1.5">{DIETS.map(([v, l]) => <button key={v} type="button" onClick={() => set('diet', v)} className={chip((p.diet || 'any') === v)}>{l}</button>)}</div>
           </div>
-          <div className="flex items-center gap-2">
-            <button type="button" disabled={busy} className="btn-primary text-xs py-2 px-4 disabled:opacity-50"
-              onClick={async () => { const d = await save({ profile: p }); setSaved(d.targets ? 'Saved' : 'Saved - add age, height, weight and sex for a target') }}>
-              Save
-            </button>
-            {t && <button type="button" disabled={busy} onClick={onPlan} className="text-xs font-bold text-brand-600 disabled:opacity-50">Plan 7 days →</button>}
-            {saved && <span className="text-[11px] text-green-700">{saved}</span>}
+          <div className="flex items-center gap-3">
+            {t && <button type="button" disabled={busy} onClick={onPlan} className="btn-primary text-xs py-2 px-4 disabled:opacity-50">Plan 7 days</button>}
+            <span className="text-[11px] text-green-700">{saved || 'Saved as you type'}</span>
           </div>
         </div>
       )}

@@ -66,8 +66,25 @@ def _sources() -> dict:
 
 @router.get("/me")
 def me(db: Session = Depends(get_db), caller: User = Depends(current_user)):
-    profile, pantry = _read(_kitchen(db, caller))
-    return {"profile": profile, "pantry": pantry, "targets": body.targets(profile), "sources": _sources()}
+    k = _kitchen(db, caller)
+    profile, pantry = _read(k)
+    try:
+        plan = json.loads(k.plan_json) if k.plan_json else None
+    except ValueError:
+        plan = None
+    return {"profile": profile, "pantry": pantry, "targets": body.targets(profile), "sources": _sources(),
+            "plan": plan}
+
+
+def _keep_plan(db: Session, user: User, plan: dict) -> None:
+    """The plan just made, kept - Recipes shows it again next time."""
+    if plan.get("mode") != "plan" or not plan.get("days"):
+        return
+    from datetime import datetime, timezone
+    plan["made_at"] = datetime.now(timezone.utc).isoformat()
+    k = _kitchen(db, user)
+    k.plan_json = json.dumps(plan)
+    db.commit()
 
 
 class KitchenIn(BaseModel):
@@ -100,10 +117,12 @@ def ask(payload: AskIn, db: Session = Depends(get_db), caller: User = Depends(cu
     profile, pantry = _read(_kitchen(db, caller))
     db.rollback()       # nothing to save; don't hold the row while the LLM thinks
     try:
-        return engine.ask(payload.question, pantry, profile)
+        out = engine.ask(payload.question, pantry, profile)
     except Exception as e:
         print(f"[recipes] ask failed: {e!r}")
         raise HTTPException(502, "Couldn't work that out just now - try again in a moment")
+    _keep_plan(db, caller, out)
+    return out
 
 
 class DishIn(BaseModel):
@@ -134,7 +153,9 @@ def make_plan(payload: PlanIn, db: Session = Depends(get_db), caller: User = Dep
     profile, _ = _read(_kitchen(db, caller))
     db.rollback()
     try:
-        return engine.plan(profile, payload.days, payload.diet)
+        out = engine.plan(profile, payload.days, payload.diet)
     except Exception as e:
         print(f"[recipes] plan failed: {e!r}")
         raise HTTPException(502, "Couldn't make the plan just now - try again in a moment")
+    _keep_plan(db, caller, out)
+    return out

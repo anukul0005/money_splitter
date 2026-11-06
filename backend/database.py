@@ -218,6 +218,7 @@ _ADDED_COLUMNS = [
     ("users", "news_football", "BOOLEAN NOT NULL DEFAULT TRUE"),
     ("users", "news_badminton", "BOOLEAN NOT NULL DEFAULT TRUE"),
     ("users", "news_hockey", "BOOLEAN NOT NULL DEFAULT TRUE"),
+    ("recipe_kitchens", "plan_json", "TEXT"),
     ("users", "show_drinks", "BOOLEAN NOT NULL DEFAULT TRUE"),
     ("users", "last_daily_summary_sent", "VARCHAR(10)"),
     ("expenses", "subcategory", "VARCHAR(100)"),

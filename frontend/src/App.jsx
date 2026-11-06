@@ -18,6 +18,7 @@ import BadmintonMatch    from './pages/BadmintonMatch'
 import TennisNews        from './pages/TennisNews'
 import TennisArticle     from './pages/TennisArticle'
 import NewGroup    from './pages/NewGroup'
+import RecipeDish  from './pages/RecipeDish'
 import MonthlyGroup from './pages/MonthlyGroup'
 import EditGroup   from './pages/EditGroup'
 import History     from './pages/History'
@@ -142,6 +143,7 @@ export default function App() {
                 <Route path="/groups/:id/ledger" element={<LedgerImport />} />
                 <Route path="/add"        element={<AddExpense />} />
                 <Route path="/recommend"  element={<Recommend />} />
+                <Route path="/recipes/dish" element={<RecipeDish />} />
                 <Route path="/history"    element={<History />} />
                 <Route path="/salary"     element={<SalaryDashboard />} />
                 <Route path="/discuss"    element={<Discussions />} />

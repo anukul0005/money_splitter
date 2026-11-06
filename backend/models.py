@@ -1538,4 +1538,6 @@ class RecipeKitchen(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     profile_json = Column(Text, nullable=True)
     pantry_json = Column(Text, nullable=True)
+    # The last meal plan made - shown again when Recipes is opened
+    plan_json = Column(Text, nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
