@@ -152,7 +152,7 @@ export default function Recipes({ tab, setTab }) {
   }
 
   // What's been eaten against the plan - kept with your details on this device too
-  const setLog = (log) => setMe((m) => { const next = { ...m, log }; keep(ME_KEY, { ...next, plan: undefined }); return next })
+  const setLog = (log, weeks) => setMe((m) => { const next = { ...m, log, weeks: weeks || m.weeks }; keep(ME_KEY, { ...next, plan: undefined }); return next })
   // A new plan: its log starts empty
   const fresh = (madeAt) => setMe((m) => { const next = { ...m, plan_made_at: madeAt, log: {} }; keep(ME_KEY, { ...next, plan: undefined }); return next })
 
@@ -172,6 +172,19 @@ export default function Recipes({ tab, setTab }) {
       </div>
 
       <div className="px-5 mt-4 space-y-4 max-w-2xl">
+        {/* The week's plan leads - and under it, every week so far against its target */}
+        {weekPlan?.days?.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between pt-1">
+              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Your week's plan</p>
+              <button onClick={plan} disabled={!!busy} className="text-[11px] font-bold text-brand-600 disabled:opacity-50">Make a new one</button>
+            </div>
+            <Plan r={weekPlan} onProfile={() => setShowMe(true)}
+              log={weekPlan.made_at && weekPlan.made_at === me?.plan_made_at ? (me?.log || {}) : {}} setLog={setLog} />
+            <Weeks weeks={me?.weeks || []} />
+          </div>
+        )}
+
         {/* Ask */}
         <div className="bg-amber-50 border border-amber-200 rounded-md px-4 py-3">
           <p className="text-xs font-bold text-gray-700">Ask for a recipe <span className="font-normal text-gray-400">- type it or say it</span></p>
@@ -230,24 +243,69 @@ export default function Recipes({ tab, setTab }) {
           </div>
         )}
 
-        {/* The week's plan - always here once made */}
-        {weekPlan?.days?.length > 0 && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between pt-1">
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Your week's plan</p>
-              <button onClick={plan} disabled={!!busy} className="text-[11px] font-bold text-brand-600 disabled:opacity-50">Make a new one</button>
-            </div>
-            <Plan r={weekPlan} onProfile={() => setShowMe(true)}
-              log={weekPlan.made_at && weekPlan.made_at === me?.plan_made_at ? (me?.log || {}) : {}} setLog={setLog} />
-          </div>
-        )}
-
         {/* You, and your kitchen */}
         {me && <Profile me={me} open={showMe} setOpen={setShowMe} save={save} onPlan={plan} busy={!!busy} />}
         {me && <Kitchen pantry={me.pantry || []} save={save} onUse={() => ask(EXAMPLES[4])} busy={!!busy} />}
 
         <Sources s={me?.sources} />
       </div>
+    </div>
+  )
+}
+
+/**
+ * Every week so far, one row each (6 – 12 Nov, 13 – 19 Nov…): the week's
+ * calorie target, what was eaten (logged meals only - nothing assumed), and
+ * how far off the target it came out on the days fully logged.
+ */
+function Weeks({ weeks }) {
+  if (!weeks.length) return null
+  const range = (w) => {
+    const a = new Date(`${w.starts}T00:00:00`), b = new Date(`${w.ends}T00:00:00`)
+    const m = (d) => d.toLocaleDateString('en-IN', { month: 'short' })
+    return a.getMonth() === b.getMonth() ? `${a.getDate()} – ${b.getDate()} ${m(b)}` : `${a.getDate()} ${m(a)} – ${b.getDate()} ${m(b)}`
+  }
+  const today = isoDay(new Date())
+  return (
+    <div className="card">
+      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Week by week</p>
+      {weeks.map((w) => {
+        const now = w.starts <= today && today <= w.ends
+        const fullTarget = w.target_day * w.off_days
+        return (
+          <div key={w.starts} className={`border-t border-amber-100 first:border-0 py-2 ${now ? '' : 'opacity-80'}`}>
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-sm font-black text-gray-900">{range(w)}{now && <span className="ml-1.5 text-[9px] font-black text-white bg-brand-400 rounded px-1.5 py-0.5 align-middle">THIS WEEK</span>}</span>
+              <span className="text-[11px] text-gray-500">{w.meals_logged} of {w.meals_planned} meals logged</span>
+            </div>
+            <div className="grid grid-cols-3 gap-2 mt-1.5">
+              <div className="bg-amber-50 rounded-md px-2 py-1.5">
+                <p className="text-sm font-black text-gray-900 tabular-nums">{w.target_week.toLocaleString('en-IN')}</p>
+                <p className="text-[9px] text-gray-500">kcal target ({w.target_day.toLocaleString('en-IN')} a day)</p>
+              </div>
+              <div className="bg-amber-50 rounded-md px-2 py-1.5">
+                <p className="text-sm font-black text-gray-900 tabular-nums">{w.eaten.toLocaleString('en-IN')}</p>
+                <p className="text-[9px] text-gray-500">kcal you had (logged)</p>
+              </div>
+              <div className={`rounded-md px-2 py-1.5 ${!w.off_days ? 'bg-gray-50' : Math.abs(w.off) <= fullTarget * 0.05 ? 'bg-green-50' : w.off > 0 ? 'bg-red-50' : 'bg-amber-50'}`}>
+                {w.off_days ? (
+                  <>
+                    <p className={`text-sm font-black tabular-nums ${Math.abs(w.off) <= fullTarget * 0.05 ? 'text-green-700' : w.off > 0 ? 'text-red-600' : 'text-amber-700'}`}>
+                      {w.off === 0 ? 'On target' : `${Math.abs(w.off).toLocaleString('en-IN')} ${w.off > 0 ? 'over' : 'under'}`}
+                    </p>
+                    <p className="text-[9px] text-gray-500">on {w.off_days} fully logged day{w.off_days === 1 ? '' : 's'}</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm font-black text-gray-400">-</p>
+                    <p className="text-[9px] text-gray-500">log every meal of a day to see</p>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -274,14 +332,14 @@ export function MealLog({ day, meal, planned, entry, onLog, add = false, quickLa
     setBusy(true); setErr('')
     try {
       const { data } = await logMeal({ day, meal, ...payload })
-      onLog(data.log); setText(''); setEditing(false)
+      onLog(data.log, data.weeks); setText(''); setEditing(false)
     } catch (e) {
       setErr(e?.response?.data?.detail || "Couldn't log that - try again.")
     } finally { setBusy(false) }
   }
   const remove = async () => {
     setBusy(true)
-    try { const { data } = await unlogMeal(day, meal); onLog(data.log) } catch { setErr("Couldn't remove it.") } finally { setBusy(false) }
+    try { const { data } = await unlogMeal(day, meal); onLog(data.log, data.weeks) } catch { setErr("Couldn't remove it.") } finally { setBusy(false) }
   }
   const plannedKcal = (planned || []).reduce((t, x) => t + (x.kcal || 0), 0)
 
@@ -591,7 +649,7 @@ function Plan({ r, asked, onProfile, log = {}, setLog }) {
                     ))}
                     {(eaten[meal] || logging === `${d.day}:${meal}`) && (
                       <MealLog day={d.day} meal={meal} planned={xs} entry={eaten[meal]}
-                        onLog={(l) => { setLog(l); setLogging(null) }} />
+                        onLog={(l, w) => { setLog(l, w); setLogging(null) }} />
                     )}
                   </div>
                 ))}

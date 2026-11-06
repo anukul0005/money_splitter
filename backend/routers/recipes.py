@@ -72,8 +72,63 @@ def me(db: Session = Depends(get_db), caller: User = Depends(current_user)):
         plan = json.loads(k.plan_json) if k.plan_json else None
     except ValueError:
         plan = None
+    log = _log(k, plan)
     return {"profile": profile, "pantry": pantry, "targets": body.targets(profile), "sources": _sources(),
-            "plan": plan, "log": _log(k, plan)}
+            "plan": plan, "log": log, "weeks": _weeks(k, plan, log)}
+
+
+def _starts(plan: dict):
+    """The Friday the plan's week begins (older plans: the Friday on or before they were made)."""
+    from datetime import date, datetime, timedelta
+    if plan.get("starts"):
+        return date.fromisoformat(plan["starts"])
+    made = datetime.fromisoformat(plan["made_at"]) + timedelta(hours=5, minutes=30) if plan.get("made_at") else datetime.now()
+    d = made.date()
+    return d - timedelta(days=(d.weekday() - 4) % 7)
+
+
+def _week(plan: dict, days_log: dict) -> dict:
+    """One week in numbers: the calorie target, what was eaten (logged meals
+    only - nothing is assumed for the rest), and how far off the target the
+    days with something logged came out."""
+    from datetime import date, timedelta
+    start = _starts(plan)
+    t = plan.get("targets") or {}
+    per_day = t.get("kcal") or 0
+    days, eaten_all, logged_all, planned_all, off, off_days = [], 0.0, 0, 0, 0.0, 0
+    for d in plan.get("days") or []:
+        n = d["day"]
+        meals = {m: xs for m, xs in (d.get("meals") or {}).items() if xs}
+        got = (days_log or {}).get(str(n)) or {}
+        eaten = sum(e["totals"]["kcal"] for e in got.values())
+        planned_m, logged_m = len(meals), len([m for m in got if m in meals or got[m]])
+        eaten_all += eaten
+        logged_all += logged_m
+        planned_all += planned_m
+        # A day counts against the target once every one of its meals is logged
+        full = planned_m and logged_m >= planned_m
+        if full:
+            off += eaten - per_day
+            off_days += 1
+        days.append({"day": n, "date": (start + timedelta(days=n - 1)).isoformat(), "target": per_day,
+                     "eaten": round(eaten), "meals_logged": logged_m, "meals_planned": planned_m, "complete": bool(full)})
+    return {
+        "starts": start.isoformat(), "ends": (start + timedelta(days=len(days) - 1 if days else 6)).isoformat(),
+        "made_at": plan.get("made_at"), "target_day": per_day, "target_week": per_day * len(days),
+        "eaten": round(eaten_all), "meals_logged": logged_all, "meals_planned": planned_all,
+        "off": round(off), "off_days": off_days, "days": days,
+    }
+
+
+def _weeks(k: RecipeKitchen, plan: dict | None, days_log: dict) -> list[dict]:
+    """Every week so far, oldest first: those kept, and the current one live."""
+    try:
+        past = json.loads(k.weeks_json) if k.weeks_json else []
+    except ValueError:
+        past = []
+    now = _week(plan, days_log) if plan and plan.get("days") else None
+    out = [w for w in past if not now or w["starts"] != now["starts"]] + ([now] if now else [])
+    return sorted(out, key=lambda w: w["starts"])
 
 
 def _log(k: RecipeKitchen, plan: dict | None) -> dict:
@@ -134,7 +189,7 @@ def log_meal(payload: LogIn, db: Session = Depends(get_db), caller: User = Depen
     day[payload.meal] = entry
     k.log_json = json.dumps({"plan": plan.get("made_at"), "days": days})
     db.commit()
-    return {"log": days, "entry": entry}
+    return {"log": days, "entry": entry, "weeks": _weeks(k, plan, days)}
 
 
 class UnlogIn(BaseModel):
@@ -150,7 +205,7 @@ def unlog_meal(payload: UnlogIn, db: Session = Depends(get_db), caller: User = D
     days.get(str(payload.day), {}).pop(payload.meal, None)
     k.log_json = json.dumps({"plan": (plan or {}).get("made_at"), "days": days})
     db.commit()
-    return {"log": days}
+    return {"log": days, "weeks": _weeks(k, plan, days)}
 
 
 def _keep_plan(db: Session, user: User, plan: dict) -> None:
@@ -164,6 +219,15 @@ def _keep_plan(db: Session, user: User, plan: dict) -> None:
     today = datetime.now(timezone(timedelta(hours=5, minutes=30))).date()
     plan["starts"] = (today - timedelta(days=(today.weekday() - 4) % 7)).isoformat()
     k = _kitchen(db, user)
+    # The plan being replaced is kept as its week's summary - unless the new
+    # one is for the same week (a re-plan), which takes its place
+    try:
+        old = json.loads(k.plan_json) if k.plan_json else None
+    except ValueError:
+        old = None
+    if old and old.get("days") and _starts(old).isoformat() != plan["starts"]:
+        past = [w for w in _weeks(k, old, _log(k, old))]
+        k.weeks_json = json.dumps(past[-26:])
     k.plan_json = json.dumps(plan)
     db.commit()
 

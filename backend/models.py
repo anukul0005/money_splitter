@@ -1543,4 +1543,7 @@ class RecipeKitchen(Base):
     # What was actually eaten against that plan: {"plan": its made_at,
     # "days": {"1": {"breakfast": <cookbook.engine.read_meal answer>}}}
     log_json = Column(Text, nullable=True)
+    # Weeks gone by: each plan's summary (target, eaten, meals logged), kept
+    # when a new plan replaces it - routers/recipes._week
+    weeks_json = Column(Text, nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

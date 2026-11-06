@@ -10,6 +10,7 @@ import MasterGroupCard from '../components/MasterGroupCard'
 import SpendingPatterns from '../components/SpendingPatterns'
 import GroupCard from '../components/GroupCard'
 import NotificationBell from '../components/NotificationBell'
+import MealCheck from '../components/MealCheck'
 import { MONEY_CHANGED } from '../components/PaymentClaimsInbox'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
@@ -175,6 +176,9 @@ export default function Home() {
       </div>
 
       <div className="px-5 mt-5 space-y-5">
+        {/* A meal of this week's plan that's over and not logged yet */}
+        <MealCheck />
+
         {fridayAsk && (
           <button onClick={() => nav('/my-bets')}
             className="w-full card text-left bg-amber-50 border-brand-400 flex items-center gap-3 active:scale-[0.99] transition-transform">
