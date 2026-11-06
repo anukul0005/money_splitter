@@ -197,11 +197,6 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
       setError('Amount must be a positive number.')
       return
     }
-    if (!title.trim()) {
-      setError('Add a description - the category is worked out from it.')
-      return
-    }
-
     let payload
     if (splitMode === 'equal') {
       payload = {
@@ -293,9 +288,10 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
 
           {/* Title */}
           <div>
-            <label className="label">Description *</label>
+            <label className="label">Description</label>
             <input
-              className="input"
+              className={`input ${!title.trim() ? 'ring-2 ring-amber-400' : ''}`}
+              autoFocus={!expense.title}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="e.g. Dinner, Taxi"

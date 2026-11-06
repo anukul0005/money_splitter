@@ -190,6 +190,14 @@ export const getExpenses   = (groupId)   => api.get(`/expenses/group/${groupId}`
 export const createExpense = (data)      => api.post('/expenses/', data)
 export const updateExpense = (id, data)  => api.put(`/expenses/${id}`, data)
 export const deleteExpense = (id)        => api.delete(`/expenses/${id}`)
+// Add Expense's chat box and mic: a message read into the form's fields
+export const understandExpense  = (data) => api.post('/expenses/understand', data)
+export const transcribeExpense  = (blob) => {
+  const fd = new FormData()
+  const ext = blob.type.includes('mp4') ? 'm4a' : blob.type.includes('ogg') ? 'ogg' : 'webm'
+  fd.append('file', blob, `speech.${ext}`)
+  return api.post('/expenses/transcribe', fd)
+}
 
 // ── Settlements ───────────────────────────────────────────────────────────────
 export const getSettlement = (groupId)   => api.get(`/settlements/${groupId}`)

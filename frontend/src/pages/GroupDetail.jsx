@@ -239,8 +239,19 @@ export default function GroupDetail() {
               </button>
             </div>
           )}
+          {(() => {
+            const n = group.expenses.filter((e) => !e.title?.trim()).length
+            return n > 0 && (
+              <p className="md:col-span-2 text-xs font-bold text-amber-800 bg-amber-100 border border-amber-300 rounded-md px-3 py-2">
+                {n === 1 ? '1 expense needs' : `${n} expenses need`} a description - tap "Add description" on {n === 1 ? 'it' : 'each'} below.
+              </p>
+            )
+          })()}
           {[...group.expenses]
             .sort((a, b) => {
+              // Ones still waiting for a description stay on top until they get one
+              const wa = !a.title?.trim(), wb = !b.title?.trim()
+              if (wa !== wb) return wa ? -1 : 1
               if (!a.date && !b.date) return 0
               if (!a.date) return 1
               if (!b.date) return -1
@@ -286,7 +297,7 @@ export default function GroupDetail() {
             }
 
             return (
-              <div key={e.id} className="card">
+              <div key={e.id} className={`card ${!e.title?.trim() ? 'ring-2 ring-amber-400 bg-amber-50' : ''}`}>
                 <div className="flex items-start gap-3">
                   <div className="w-8 h-8 bg-amber-50 border border-amber-100 flex items-center justify-center flex-shrink-0 mt-0.5">
                     <svg className="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -298,6 +309,12 @@ export default function GroupDetail() {
                     <p className="text-sm font-bold text-gray-900 leading-tight" style={{ wordBreak: 'break-word' }}>
                       {e.title || e.category || 'Expense'}
                     </p>
+                    {!e.title?.trim() && (
+                      <button onClick={() => setEditingExp(e)}
+                        className="mt-1 text-[11px] font-black text-amber-800 bg-amber-200 border border-amber-400 rounded px-2 py-0.5 animate-pulse">
+                        ✎ Add description
+                      </button>
+                    )}
                     <p className="text-xs text-gray-400 mt-0.5">
                       {d(e.paid_by)} · {e.date || '—'}{e.txn_time ? ` · ${e.txn_time}` : ''}
                       {e.payment_mode && (

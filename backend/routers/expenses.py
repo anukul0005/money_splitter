@@ -105,27 +105,73 @@ def list_expenses(group_id: int, db: Session = Depends(get_db),
     return db.query(Expense).filter(Expense.group_id == group_id).order_by(Expense.date, Expense.id).all()
 
 
+class UnderstandIn(BaseModel):
+    text: str
+    group_id: int | None = None        # the group picked on the form, if any
+    group_ids: list[int] | None = None  # the groups the form offers
+    draft: dict | None = None          # what the form already holds
+
+
+@router.post("/understand")
+def understand_expense(payload: UnderstandIn, db: Session = Depends(get_db),
+                       caller: User = Depends(current_user)):
+    """Add Expense's chat box: one message read into the form's fields
+    (expense_chat). Nothing is saved here."""
+    import expense_chat
+    if not payload.text.strip():
+        raise HTTPException(400, "Say what was spent")
+    offered = set(payload.group_ids or [])
+    groups = [{"id": g.id, "name": g.name, "members": [m.name for m in g.members]}
+              for g in caller_groups(db, caller, history=False, active_only=True)
+              if not offered or g.id in offered]
+    try:
+        return expense_chat.understand(payload.text, caller.name, groups[:60],
+                                       payload.group_id, payload.draft or {})
+    except Exception as e:
+        print(f"[expense_chat] understand failed: {e}")
+        raise HTTPException(502, "Couldn't read that just now - try again, or fill the form in")
+
+
+@router.post("/transcribe")
+def transcribe_expense(file: UploadFile = File(...), caller: User = Depends(current_user)):
+    """Add Expense's mic: a short voice clip turned into text."""
+    import expense_chat
+    audio = file.file.read()
+    if not audio:
+        raise HTTPException(400, "No sound was recorded")
+    if len(audio) > 10 * 1024 * 1024:
+        raise HTTPException(413, "That recording is too long - keep it under a minute")
+    try:
+        text = expense_chat.transcribe(audio, file.content_type or "audio/webm")
+    except Exception as e:
+        print(f"[expense_chat] transcribe failed: {e}")
+        raise HTTPException(502, "Couldn't hear that just now - try again, or type it")
+    return {"text": text}
+
+
 @router.post("/", response_model=ExpenseOut, status_code=201)
 def create_expense(payload: ExpenseCreate, background_tasks: BackgroundTasks,
                    db: Session = Depends(get_db),
                    caller: User = Depends(current_user)):
     group = member_group(payload.group_id, caller, db, with_history=False)
-    if not (payload.title or "").strip():
-        raise HTTPException(400, "Add a description - it's what the expense gets categorised from")
+    title = (payload.title or "").strip() or None
 
     # The form sends no category: the LLM works it out from the description
     # and notes after the response (expense_classifier). One sent anyway -
-    # another client - is kept as the user's.
+    # another client - is kept as the user's. With no description yet (and
+    # no notes) there's nothing to work it out from: it waits uncategorised,
+    # highlighted in the group, until one is added.
     given = bool(payload.category)
+    wordless = not title and not (payload.notes or "").strip()
     individual = payload.individual_amount or _compute_individual(payload.amount, payload.divider)
     expense = Expense(
         group_id=payload.group_id,
         date=payload.date,
         category=payload.category if given else None,
         subcategory=payload.subcategory if given else None,
-        category_source="user" if given else "pending",
+        category_source="user" if given else (None if wordless else "pending"),
         receipt_json=payload.receipt_json,
-        title=payload.title.strip(),
+        title=title,
         amount=payload.amount,
         paid_by=payload.paid_by,
         participants=payload.participants,
@@ -154,7 +200,7 @@ def create_expense(payload: ExpenseCreate, background_tasks: BackgroundTasks,
     background_tasks.add_task(
         notify_group_activity_bg, group.id, expense.paid_by, "added a new expense", summary,
     )
-    if not given:
+    if not given and not wordless:
         background_tasks.add_task(expense_classifier.enqueue, expense.id)
     background_tasks.add_task(_index_bg, expense.id)
     _queue_conversion_check(background_tasks, expense, caller.name)
@@ -171,8 +217,8 @@ def update_expense(expense_id: int, payload: ExpenseCreate, background_tasks: Ba
         raise HTTPException(404, "Expense not found")
     group = member_group(expense.group_id, caller, db, with_history=False)
 
-    if not (payload.title or "").strip():
-        raise HTTPException(400, "Add a description - it's what the expense gets categorised from")
+    title = (payload.title or "").strip() or None
+    wordless = not title and not (payload.notes or "").strip()
 
     individual = payload.individual_amount or _compute_individual(payload.amount, payload.divider)
     expense.date = payload.date
@@ -183,7 +229,13 @@ def update_expense(expense_id: int, payload: ExpenseCreate, background_tasks: Ba
     reclassify = (norm(payload.title) != norm(expense.title)
                   or norm(payload.notes) != norm(expense.notes)
                   or not expense.category)    # never categorised: do it now
-    if reclassify:
+    if wordless:
+        # Still no description: nothing to categorise from yet.
+        reclassify = False
+        if expense.category_source != "user":
+            expense.category = expense.subcategory = expense.category_source = None
+            expense.parts = []
+    elif reclassify:
         # New text, new categorising: old category slices no longer apply.
         expense.category = expense.subcategory = None
         expense.parts = []
@@ -191,7 +243,7 @@ def update_expense(expense_id: int, payload: ExpenseCreate, background_tasks: Ba
     elif "category" in payload.model_fields_set and payload.category != expense.category:
         expense.category, expense.subcategory = payload.category, payload.subcategory
         expense.category_source = "user"
-    expense.title = payload.title.strip()
+    expense.title = title
     # The edit form doesn't resend the scan; only a client that does replaces it.
     if "receipt_json" in payload.model_fields_set:
         expense.receipt_json = payload.receipt_json
