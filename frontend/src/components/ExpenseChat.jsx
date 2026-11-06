@@ -123,26 +123,25 @@ export default function ExpenseChat({ ask, onScan }) {
   const idle = !rec && !typing && !busy && msgs.length === 0
 
   return (
-    <div className="relative rounded-[28px] border border-gray-200/80 shadow-[0_8px_30px_rgba(0,0,0,0.06)] px-6 pt-5 pb-5 flex flex-col min-h-[300px]"
-      style={{ background: 'linear-gradient(160deg, #fafafa 0%, #f0f0f0 100%)' }}>
-      <p className="text-[22px] text-gray-900 leading-tight" style={SERIF}>
-        {msgs.length ? <>Tell me <i className="font-bold">more</i></> : <>Let's get <i className="font-bold">started</i></>}
+    <div className="bg-amber-50 border border-amber-200 rounded-md px-4 pt-3 pb-3 flex flex-col min-h-[220px]">
+      <p className="text-xs font-bold text-gray-700">
+        {msgs.length ? 'Tell me more' : "Let's get started"}
+        <span className="font-normal text-gray-400"> - say it, type it, or scan a bill</span>
       </p>
 
       {/* The middle: suggestions typed out, the conversation, what's being typed, or the mic listening */}
-      <div className="flex-1 flex flex-col justify-center py-4 min-h-[150px]">
+      <div className="flex-1 flex flex-col justify-center py-3 min-h-[110px]">
         {rec ? (
           <div className="text-center">
             <Wave />
-            <p className="text-[28px] text-gray-900 mt-3" style={SERIF}>Listening<i className="font-bold">…</i></p>
-            <p className="text-xs text-gray-500 mt-1">{seconds}s · tap ■ when you're done</p>
+            <p className="text-base font-bold text-gray-900 mt-2">Listening…</p>
+            <p className="text-[11px] text-gray-500 mt-0.5">{seconds}s · tap ■ when you're done</p>
           </div>
         ) : typing ? (
           <textarea
             ref={inputRef}
             rows={3}
-            className="w-full bg-transparent resize-none outline-none text-[26px] leading-snug text-gray-900 placeholder:text-gray-400"
-            style={SERIF}
+            className="w-full bg-white border border-amber-200 rounded-md px-3 py-2 resize-none outline-none focus:border-brand-400 text-base text-gray-900 placeholder:text-gray-400"
             placeholder="Rs 400 with Utkarsh at Nutriobox"
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -152,17 +151,18 @@ export default function ExpenseChat({ ask, onScan }) {
           <div ref={listRef} className="max-h-64 overflow-y-auto space-y-2">
             {msgs.map((m, i) => (
               <div key={i} className={`flex flex-col ${m.who === 'me' ? 'items-end' : 'items-start'}`}>
-                {m.who === 'me' ? (
-                  <p className="text-[19px] text-gray-500 text-right max-w-[90%]" style={SERIF}>“{m.text}”</p>
-                ) : (
-                  <p className={`text-sm max-w-[95%] whitespace-pre-wrap ${m.error ? 'text-red-600' : 'text-gray-900'}`}>{m.text}</p>
-                )}
+                <p className={`text-xs px-2.5 py-1.5 rounded-md max-w-[88%] whitespace-pre-wrap ${
+                  m.who === 'me' ? 'bg-brand-400 text-white'
+                    : m.error ? 'bg-red-50 text-red-700 border border-red-100'
+                    : 'bg-white text-gray-800 border border-amber-200'}`}>
+                  {m.text}
+                </p>
                 {m.actions?.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-2">
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
                     {m.actions.map((a) => (
                       <button key={a.label} type="button" disabled={busy} onClick={() => runAction(a)}
-                        className={`text-xs font-bold px-3 py-1.5 rounded-full border disabled:opacity-50 ${
-                          a.danger ? 'text-red-600 bg-white border-red-200' : 'text-gray-900 bg-white border-gray-300'}`}>
+                        className={`text-[11px] font-bold px-2.5 py-1 rounded-md border disabled:opacity-50 ${
+                          a.danger ? 'text-red-600 bg-white border-red-200' : 'text-brand-700 bg-white border-amber-300'}`}>
                         {a.label}
                       </button>
                     ))}
@@ -170,21 +170,21 @@ export default function ExpenseChat({ ask, onScan }) {
                 )}
               </div>
             ))}
-            {busy && <p className="text-[19px] text-gray-400" style={SERIF}><i>Reading…</i></p>}
+            {busy && <p className="text-[11px] text-gray-400">Reading…</p>}
           </div>
         ) : busy ? (
-          <p className="text-[30px] text-gray-400" style={SERIF}><i>Reading…</i></p>
+          <p className="text-lg font-bold text-gray-400">Reading…</p>
         ) : (
           <Typewriter running={idle} />
         )}
       </div>
 
       {/* Scan · type · speak */}
-      <div className="flex items-end gap-3">
+      <div className="flex items-end gap-2">
         {onScan && (
           <button type="button" onClick={onScan} disabled={busy || !!rec} aria-label="Scan a receipt"
-            className="w-14 h-14 rounded-2xl bg-gray-200/70 border-[3px] border-gray-300 flex items-center justify-center active:scale-95 transition-all disabled:opacity-50">
-            <svg className="w-6 h-6 text-gray-900" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            className="w-12 h-12 rounded-md bg-white border border-amber-300 hover:bg-amber-100 flex items-center justify-center active:scale-95 transition-all disabled:opacity-50">
+            <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V6a2 2 0 012-2h2M16 4h2a2 2 0 012 2v2M20 16v2a2 2 0 01-2 2h-2M8 20H6a2 2 0 01-2-2v-2M9 8h6v8l-1.5-1-1.5 1-1.5-1L9 16V8zM10.5 10.5h3M10.5 13h3" />
             </svg>
           </button>
@@ -193,28 +193,28 @@ export default function ExpenseChat({ ask, onScan }) {
         {!rec && (typing ? (
           <button type="button" onClick={text.trim() ? submitTyped : () => setTyping(false)} disabled={busy}
             aria-label={text.trim() ? 'Send' : 'Close'}
-            className={`w-14 h-14 rounded-2xl flex items-center justify-center active:scale-95 transition-all shadow-sm ${text.trim() ? 'bg-gray-900 text-white' : 'bg-white text-gray-900'}`}>
+            className={`w-12 h-12 rounded-md flex items-center justify-center active:scale-95 transition-all border ${text.trim() ? 'bg-brand-400 border-brand-400 text-white' : 'bg-white border-amber-300 text-gray-700'}`}>
             {text.trim() ? (
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M13 6l6 6-6 6" /></svg>
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M13 6l6 6-6 6" /></svg>
             ) : (
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
             )}
           </button>
         ) : (
           <button type="button" onClick={openTyping} disabled={busy} aria-label="Type it"
-            className="w-14 h-14 rounded-2xl bg-white flex items-center justify-center active:scale-95 transition-all shadow-sm disabled:opacity-50">
-            <svg className="w-6 h-6 text-gray-900" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            className="w-12 h-12 rounded-md bg-white border border-amber-300 hover:bg-amber-100 flex items-center justify-center active:scale-95 transition-all disabled:opacity-50">
+            <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.2 5.2l3.6 3.6M4 20l1-4.6L16.4 4a1.8 1.8 0 012.6 0l1 1a1.8 1.8 0 010 2.6L8.6 19 4 20zM13 20h7" />
             </svg>
           </button>
         ))}
         {canRecord && !typing && (
           <button type="button" onClick={rec ? stopMic : startMic} disabled={busy} aria-label={rec ? 'Stop' : 'Speak'}
-            className={`w-14 h-14 rounded-2xl flex items-center justify-center active:scale-95 transition-all disabled:opacity-50 ${rec ? 'bg-red-500' : 'bg-gray-900'}`}>
+            className={`w-12 h-12 rounded-md flex items-center justify-center active:scale-95 transition-all disabled:opacity-50 shadow-sm ${rec ? 'bg-red-500' : 'bg-brand-400'}`}>
             {rec ? (
-              <span className="w-4 h-4 rounded-sm bg-white" />
+              <span className="w-3.5 h-3.5 rounded-sm bg-white" />
             ) : (
-              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" viewBox="0 0 24 24">
+              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" viewBox="0 0 24 24">
                 <path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4" />
               </svg>
             )}
@@ -225,10 +225,8 @@ export default function ExpenseChat({ ask, onScan }) {
   )
 }
 
-const SERIF = { fontFamily: "'Newsreader', Georgia, 'Times New Roman', serif" }
-
 // What could be said, typed out and wiped one after another: a grey lead-in,
-// then the example in bold italic
+// then the example in bold
 const IDEAS = [
   ['Snap a ', 'receipt'],
   ['Say ', '“400 with Utkarsh at Nutriobox”'],
@@ -254,10 +252,10 @@ function Typewriter({ running }) {
     return () => clearTimeout(t)
   }, [running, n, back, full, i])
   return (
-    <p className="text-[32px] leading-tight min-h-[84px]" style={SERIF} aria-label={lead + rest}>
-      <span className="text-gray-500">{lead.slice(0, n)}</span>
-      <i className="font-bold text-gray-900">{rest.slice(0, Math.max(0, n - lead.length))}</i>
-      <span className="inline-block w-[2px] h-[0.9em] bg-gray-700 align-[-0.1em] ml-0.5 animate-pulse" />
+    <p className="text-xl leading-snug min-h-[56px]" aria-label={lead + rest}>
+      <span className="text-gray-400">{lead.slice(0, n)}</span>
+      <span className="font-bold text-gray-900">{rest.slice(0, Math.max(0, n - lead.length))}</span>
+      <span className="inline-block w-[2px] h-[0.9em] bg-brand-400 align-[-0.1em] ml-0.5 animate-pulse" />
     </p>
   )
 }
@@ -265,9 +263,9 @@ function Typewriter({ running }) {
 // The mic's listening bars
 function Wave() {
   return (
-    <div className="flex items-center justify-center gap-1.5 h-12">
+    <div className="flex items-center justify-center gap-1.5 h-9">
       {[0, 1, 2, 3, 4, 5, 6].map((k) => (
-        <span key={k} className="w-1.5 rounded-full bg-gray-900"
+        <span key={k} className="w-1.5 rounded-full bg-brand-400"
           style={{ height: '100%', animation: `expchat-wave 0.9s ease-in-out ${k * 0.11}s infinite` }} />
       ))}
       <style>{'@keyframes expchat-wave{0%,100%{transform:scaleY(.25)}50%{transform:scaleY(1)}}'}</style>
