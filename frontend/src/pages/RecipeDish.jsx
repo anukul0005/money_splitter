@@ -193,7 +193,9 @@ export default function RecipeDish() {
             <div className="card">
               <MealLog day={day} meal={meal} entry={entry} onLog={setLog} />
             </div>
-            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest pt-2">The planned dish</p>
+            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest pt-2">
+              {planned.some((x) => x.name === name) ? 'This dish, as planned' : 'This dish - one of what you had'}
+            </p>
           </>
         )}
 

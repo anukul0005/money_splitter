@@ -320,7 +320,7 @@ function Weeks({ weeks }) {
  * the numbers are worked out there like everything else. `add`: the quick
  * button adds to the meal (a dish's own page) rather than replacing it.
  */
-export function MealLog({ day, meal, planned, entry, onLog, add = false, quickLabel }) {
+export function MealLog({ day, meal, planned, entry, onLog, add = false, quickLabel, links = false }) {
   const [text, setText] = useState('')
   const [editing, setEditing] = useState(!entry)
   const [busy, setBusy] = useState(false)
@@ -351,12 +351,19 @@ export function MealLog({ day, meal, planned, entry, onLog, add = false, quickLa
       {entry && !editing && (
         <>
           <p className="text-[10px] font-black text-green-700 uppercase tracking-widest">✓ What you had</p>
-          {entry.items.map((i, k) => (
-            <div key={k} className="flex items-baseline justify-between gap-2 text-xs py-0.5">
-              <span className="text-gray-800 min-w-0">{i.name}{i.servings ? <span className="text-gray-400"> × {i.servings} {i.unit}</span> : i.grams ? <span className="text-gray-400"> · {i.grams} g</span> : ''}</span>
-              <span className="text-gray-500 tabular-nums flex-shrink-0">{i.nutrition ? `${r0(i.nutrition.kcal)} kcal · ${r0(i.nutrition.protein)} g P` : '-'}</span>
-            </div>
-          ))}
+          {entry.items.map((i, k) => {
+            const label = <span className="text-gray-800 min-w-0">{i.name}{i.servings ? <span className="text-gray-400"> × {i.servings} {i.unit}</span> : i.grams ? <span className="text-gray-400"> · {i.grams} g</span> : ''}</span>
+            const nums = <span className="text-gray-500 tabular-nums flex-shrink-0">{i.nutrition ? `${r0(i.nutrition.kcal)} kcal · ${r0(i.nutrition.protein)} g P` : '-'}{links ? ' ›' : ''}</span>
+            // Its own page: the meal as had, beside what was planned
+            return links && i.nutrition ? (
+              <Link key={k} to={dishHref({ name: i.name, servings: i.servings || 1, unit: i.unit, day, meal })}
+                className="flex items-baseline justify-between gap-2 text-xs py-1 active:bg-amber-100 rounded [&>span:first-child]:underline [&>span:first-child]:decoration-amber-300 [&>span:first-child]:underline-offset-2">
+                {label}{nums}
+              </Link>
+            ) : (
+              <div key={k} className="flex items-baseline justify-between gap-2 text-xs py-0.5">{label}{nums}</div>
+            )
+          })}
           {entry.unknown?.length > 0 && <p className="text-[10px] text-amber-700 mt-0.5">Couldn't work out: {entry.unknown.join(', ')} - not in the totals</p>}
           <p className="text-[11px] font-bold text-gray-800 mt-1">
             {r0(entry.totals.kcal)} kcal · {r0(entry.totals.protein)} g protein{entry.cost != null ? ` · ₹${entry.cost}` : ''}
@@ -658,7 +665,8 @@ export function Plan({ r, onProfile, log = {}, setLog }) {
                           className="text-[10px] font-bold text-brand-600">{logging === `${d.day}:${meal}` ? 'Close' : '＋ What I had'}</button>
                       )}
                     </div>
-                    {xs.map((x, j) => (
+                    {/* Logged: only what you had shows - the plan is on each dish's page, compared */}
+                    {!eaten[meal] && xs.map((x, j) => (
                       <Link key={j} to={dishHref({ name: x.name, servings: x.servings, unit: x.unit, day: d.day, meal })}
                         className="w-full flex items-baseline justify-between gap-2 text-xs py-1 text-left active:bg-amber-50 rounded">
                         <span className="text-gray-800 min-w-0 underline decoration-amber-300 underline-offset-2">{x.name} <span className="text-gray-400 no-underline">× {x.servings} {x.unit}</span></span>
@@ -666,7 +674,7 @@ export function Plan({ r, onProfile, log = {}, setLog }) {
                       </Link>
                     ))}
                     {(eaten[meal] || logging === `${d.day}:${meal}`) && (
-                      <MealLog day={d.day} meal={meal} planned={xs} entry={eaten[meal]}
+                      <MealLog day={d.day} meal={meal} planned={xs} entry={eaten[meal]} links
                         onLog={(l, w) => { setLog(l, w); setLogging(null) }} />
                     )}
                   </div>
