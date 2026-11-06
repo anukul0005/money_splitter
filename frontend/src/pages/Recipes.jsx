@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { askRecipes, logMeal, planRecipes, recipesMe, saveRecipesMe, unlogMeal } from '../api'
+import { askRecipes, logMeal, planRecipes, recipeDish, recipesMe, saveRecipesMe, unlogMeal } from '../api'
 import RecommendTabs from '../components/RecommendTabs'
 import { Typewriter } from '../components/ExpenseChat'
 import { useVoice, canRecord as micWorks } from '../components/useVoice'
@@ -41,6 +41,29 @@ const LAST_KEY = 'recipes_last'
 const ME_KEY = 'recipes_me'
 const load = (k) => { try { return JSON.parse(localStorage.getItem(k) || 'null') } catch { return null } }
 const keep = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)) } catch { /* storage full or blocked */ } }
+
+// The plan's week runs Friday to Thursday - day 1 is the Friday it starts on
+// (older plans: the Friday on or before the day they were made)
+const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+export function planDate(plan, day) {
+  let start
+  if (plan?.starts) start = new Date(`${plan.starts}T00:00:00`)
+  else {
+    const made = plan?.made_at ? new Date(plan.made_at) : new Date()
+    start = new Date(made.getFullYear(), made.getMonth(), made.getDate())
+    start.setDate(start.getDate() - ((start.getDay() - 5 + 7) % 7))
+  }
+  const d = new Date(start)
+  d.setDate(d.getDate() + (day - 1))
+  return d
+}
+export const dayLabel = (d) => d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
+export const isToday = (d) => isoDay(d) === isoDay(new Date())
+
+// Dish pages kept on this device: opened instantly (and offline), refreshed when online
+const DISH_KEY = (name, r) => `recipe_dish_${name}|${r || ''}`
+export const cachedDish = (name, r) => load(DISH_KEY(name, r))
+export const keepDish = (name, r, data) => keep(DISH_KEY(name, r), data)
 
 // A recipe the AI wrote travels to its own page by a key, kept on this device
 export function readRecipe(key) { return key ? load(`recipe_r_${key}`) : null }
@@ -437,8 +460,30 @@ function Compare({ a, b }) {
 function Plan({ r, asked, onProfile, log = {}, setLog }) {
   const [logging, setLogging] = useState(null)     // "day:meal" whose log box is open
   // Which day is open survives a visit to a dish's page and back
-  const [open, setOpenRaw] = useState(() => load('recipes_plan_day') ?? 0)
-  const setOpen = (i) => { setOpenRaw(i); keep('recipes_plan_day', i) }
+  // Today's day opens by itself; one opened by hand stays open (that day, this plan)
+  const todayAt = (r.days || []).findIndex((d) => isToday(planDate(r, d.day)))
+  const [open, setOpenRaw] = useState(() => {
+    const s = load('recipes_plan_day')
+    return s && s.plan === r.made_at && s.on === isoDay(new Date()) ? s.i : Math.max(0, todayAt)
+  })
+  const setOpen = (i) => { setOpenRaw(i); keep('recipes_plan_day', { i, plan: r.made_at, on: isoDay(new Date()) }) }
+
+  // Every dish of the week saved on this device in the background, a couple
+  // at a time - so each card opens straight away, even offline
+  useEffect(() => {
+    if (!r.days?.length) return
+    const names = [...new Set(r.days.flatMap((d) => Object.values(d.meals || {}).flat().map((x) => x.name)))]
+      .filter((n) => !cachedDish(n))
+    let stop = false
+    const next = async () => {
+      while (!stop && names.length) {
+        const n = names.shift()
+        try { keepDish(n, null, (await recipeDish(n, 1)).data) } catch { /* tried again next visit */ }
+      }
+    }
+    next(); next()
+    return () => { stop = true }
+  }, [r.made_at])
   if (r.need_profile) {
     return (
       <div className="card">
@@ -452,7 +497,16 @@ function Plan({ r, asked, onProfile, log = {}, setLog }) {
   return (
     <div className="space-y-2">
       <div className="card">
-        {r.made_at && <p className="text-[10px] text-gray-400 mb-1">{asked === 'Your saved plan' ? 'Your saved plan' : 'Saved'} · made {new Date(r.made_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</p>}
+        {r.days?.length > 0 && (() => {
+          const first = planDate(r, 1), last = planDate(r, r.days.length)
+          const over = isoDay(new Date()) > isoDay(last)
+          return (
+            <p className={`text-[11px] font-bold mb-1 ${over ? 'text-amber-700' : 'text-gray-700'}`}>
+              Week of {dayLabel(first)} – {dayLabel(last)}{over ? ' · over - make next week’s plan' : ''}
+              {r.made_at && <span className="font-normal text-gray-400"> · saved {new Date(r.made_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>}
+            </p>
+          )
+        })()}
         <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Your daily target</p>
         <p className="text-lg font-black text-gray-900 mt-0.5">{t.kcal} kcal · {t.protein_g} g protein</p>
         <p className="text-[11px] text-gray-500 mt-0.5">
@@ -472,7 +526,12 @@ function Plan({ r, asked, onProfile, log = {}, setLog }) {
         return (
           <div key={d.day} className="card">
             <button onClick={() => setOpen(open === i ? -1 : i)} className="w-full flex items-center justify-between gap-2 text-left">
-              <span className="text-sm font-black text-gray-900">Day {d.day}{logged.length > 0 && <span className="ml-1.5 text-[10px] font-bold text-green-700 align-middle">✓ {logged.length} logged</span>}</span>
+              <span className="text-sm font-black text-gray-900">
+                {dayLabel(planDate(r, d.day))}
+                {isToday(planDate(r, d.day)) && <span className="ml-1.5 text-[9px] font-black text-white bg-brand-400 rounded px-1.5 py-0.5 align-middle">TODAY</span>}
+                {logged.length > 0 && <span className="ml-1.5 text-[10px] font-bold text-green-700 align-middle">✓ {logged.length} logged</span>}
+                <span className="block text-[10px] font-bold text-gray-400">Day {d.day}</span>
+              </span>
               <span className="text-[11px] text-gray-600">
                 <b className={Math.abs(off) <= t.kcal * 0.1 ? 'text-green-700' : 'text-amber-700'}>{r0(d.totals.kcal)} kcal</b>
                 {' · '}{r0(d.totals.protein)} g protein{d.cost != null ? ` · ₹${d.cost}${d.cost_partial ? '+' : ''}` : ''} {open === i ? '▾' : '▸'}

@@ -159,6 +159,10 @@ def _keep_plan(db: Session, user: User, plan: dict) -> None:
         return
     from datetime import datetime, timezone
     plan["made_at"] = datetime.now(timezone.utc).isoformat()
+    # The week runs Friday to Thursday: day 1 is the Friday on or before today (India time)
+    from datetime import timedelta
+    today = datetime.now(timezone(timedelta(hours=5, minutes=30))).date()
+    plan["starts"] = (today - timedelta(days=(today.weekday() - 4) % 7)).isoformat()
     k = _kitchen(db, user)
     k.plan_json = json.dumps(plan)
     db.commit()

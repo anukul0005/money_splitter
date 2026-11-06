@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { recipeDish, recipesMe } from '../api'
-import { MealLog, SourceLine, readRecipe } from './Recipes'
+import { MealLog, SourceLine, cachedDish, dayLabel, keepDish, planDate, readRecipe } from './Recipes'
 
 const r0 = (n) => Math.round(n || 0)
 const r1 = (n) => Math.round((n || 0) * 10) / 10
@@ -51,14 +51,14 @@ function PlannedList({ items, day, meal, current }) {
 }
 
 /** The meal as eaten, first: its numbers, then side by side with the plan's. */
-function EatenMeal({ day, meal, entry, planned }) {
+function EatenMeal({ day, meal, entry, planned, when }) {
   const had = entry.totals
   const plan = Object.fromEntries(ROWS.map(([, k]) => [k, total(planned, k)]))
   const planCost = planned.some((x) => x.cost != null) ? total(planned, 'cost') : null
   const hasPlan = planned.length > 0
   return (
     <div className="card">
-      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Day {day} · {meal} - what you had</p>
+      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{when || `Day ${day}`} · {meal} - what you had</p>
       <p className="text-3xl font-black text-gray-900 leading-none mt-2">{r0(had.kcal)} <span className="text-sm font-bold text-gray-400">kcal</span>
         {hasPlan && (() => {
           const diff = r0(had.kcal - plan.kcal)
@@ -135,20 +135,26 @@ export default function RecipeDish() {
   const meal = params.get('meal') || null
   const [log, setLog] = useState(null)
   const [planned, setPlanned] = useState([])      // what the plan has for this meal
+  const [when, setWhen] = useState(day ? `Day ${day}` : '')   // the plan's date for that day
   useEffect(() => {
     if (!day || !meal) return
     recipesMe().then((r) => {
       setLog(r.data.log || {})
       setPlanned(r.data.plan?.days?.find((x) => x.day === day)?.meals?.[meal] || [])
+      if (r.data.plan) setWhen(dayLabel(planDate(r.data.plan, day)))
     }).catch(() => setLog({}))
   }, [day, meal])
   const entry = day && meal ? log?.[String(day)]?.[meal] : null
 
   useEffect(() => {
-    setD(null); setErr('')
+    setErr('')
     if (!name) { setErr('Which dish?'); return }
-    recipeDish(name, 1, recipe).then((r) => setD(r.data))
-      .catch((e) => setErr(e?.response?.data?.detail || "Couldn't open that dish - try again."))
+    // The copy kept on this device shows at once; the server's replaces it
+    const rKey = params.get('r')
+    const kept = cachedDish(name, rKey)
+    setD(kept)
+    recipeDish(name, 1, recipe).then((r) => { setD(r.data); keepDish(name, rKey, r.data) })
+      .catch((e) => { if (!kept) setErr(e?.response?.data?.detail || "Couldn't open that dish - try again.") })
   }, [name])
 
   const back = () => (window.history.length > 1 ? nav(-1) : nav('/recommend?tab=recipes'))
@@ -183,7 +189,7 @@ export default function RecipeDish() {
         {/* Logged: the meal as eaten leads - its numbers, beside what was planned */}
         {entry && (
           <>
-            <EatenMeal day={day} meal={meal} entry={entry} planned={planned} />
+            <EatenMeal day={day} meal={meal} entry={entry} planned={planned} when={when} />
             <div className="card">
               <MealLog day={day} meal={meal} entry={entry} onLog={setLog} />
             </div>
@@ -214,7 +220,7 @@ export default function RecipeDish() {
             {/* Not logged yet: what the plan has for this meal, and the box to log it */}
             {day && meal && log && !entry && (
               <div className="card">
-                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Day {day} · {meal} - planned</p>
+                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{when} · {meal} - planned</p>
                 <PlannedList items={planned} day={day} meal={meal} current={d.indb?.name || name} />
                 <MealLog day={day} meal={meal} entry={null} onLog={setLog} add
                   planned={[{ name: d.indb?.name || name, servings: s }]}
