@@ -228,6 +228,11 @@ def _keep_plan(db: Session, user: User, plan: dict) -> None:
     if old and old.get("days") and _starts(old).isoformat() != plan["starts"]:
         past = [w for w in _weeks(k, old, _log(k, old))]
         k.weeks_json = json.dumps(past[-26:])
+    elif old and old.get("days"):
+        # Same week, planned again: meals already eaten stay logged
+        days = _log(k, old)
+        if days:
+            k.log_json = json.dumps({"plan": plan["made_at"], "days": days})
     k.plan_json = json.dumps(plan)
     db.commit()
 

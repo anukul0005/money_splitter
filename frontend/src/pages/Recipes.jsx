@@ -118,6 +118,12 @@ export default function Recipes({ tab, setTab }) {
     if (data.mode === 'plan' && !data.need_profile) {
       setWeekPlan(data); setResult(null)
       if (data.made_at) fresh(data.made_at)
+      // The same week planned again keeps what's logged - and the weeks change
+      recipesMe().then((r) => setMe((m) => {
+        const next = { ...m, log: r.data.log || {}, weeks: r.data.weeks, plan_made_at: r.data.plan?.made_at || m.plan_made_at }
+        keep(ME_KEY, { ...next, plan: undefined })
+        return next
+      })).catch(() => {})
     } else setResult(data)
     if (data.need_profile) setShowMe(true)
   }
