@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { transcribeExpense } from '../api'
-
-const MAX_SECONDS = 45
+import { useVoice, canRecord as micWorks } from './useVoice'
 
 // New expense's chat box: type or say what was spent ("rs 400 spent with
 // utkarsh at xyz store") and `ask` fills the form, resolving to the line
@@ -13,35 +11,27 @@ export default function ExpenseChat({ ask, onScan }) {
   const [text, setText]       = useState('')
   const [typing, setTyping]   = useState(false)
   const inputRef = useRef(null)
-  const [busy, setBusy]       = useState(false)
-  const [rec, setRec]         = useState(null) // { recorder, started }
-  const [seconds, setSeconds] = useState(0)
+  const [asking, setAsking]   = useState(false)
   const listRef = useRef(null)
   const askRef  = useRef(ask)               // a recording ends in an older render's closure
   askRef.current = ask
-  const canRecord = typeof window !== 'undefined' && !!window.MediaRecorder && !!navigator.mediaDevices?.getUserMedia
+  const canRecord = micWorks()
+  const oops = (text) => setMsgs((m) => [...m, { who: 'ai', error: true, text }])
+  const voice = useVoice({ onText: (said) => send(said), onError: oops })
+  const rec = voice.recording
+  const seconds = voice.seconds
+  const busy = asking || voice.hearing
+  const startMic = voice.start
+  const stopMic = voice.stop
 
   useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight }) }, [msgs, busy])
 
-  useEffect(() => {
-    if (!rec) return
-    const t = setInterval(() => {
-      const s = Math.floor((Date.now() - rec.started) / 1000)
-      setSeconds(s)
-      if (s >= MAX_SECONDS && rec.recorder.state === 'recording') rec.recorder.stop()
-    }, 250)
-    return () => clearInterval(t)
-  }, [rec])
-
-  // Stop the mic if the page is left mid-recording
-  useEffect(() => () => { if (rec?.recorder.state === 'recording') rec.recorder.stop() }, [rec])
-
   const send = async (said) => {
     const line = said.trim()
-    if (!line || busy) return
+    if (!line || asking) return
     setMsgs((m) => [...m, { who: 'me', text: line }])
     setText('')
-    setBusy(true)
+    setAsking(true)
     try {
       const reply = await askRef.current(line)
       const { text: said, actions, error } = typeof reply === 'object' && reply ? reply : { text: reply }
@@ -51,62 +41,13 @@ export default function ExpenseChat({ ask, onScan }) {
     } catch (err) {
       setMsgs((m) => [...m, { who: 'ai', error: true, text: err?.response?.data?.detail || "Couldn't read that just now - try again, or fill the form in." }])
     } finally {
-      setBusy(false)
+      setAsking(false)
     }
   }
-
-  const startMic = async () => {
-    let stream
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    } catch {
-      setMsgs((m) => [...m, { who: 'ai', error: true, text: 'The microphone is blocked - allow it for this site, or type instead.' }])
-      return
-    }
-    const type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg']
-      .find((t) => window.MediaRecorder.isTypeSupported?.(t))
-    const oops = (text) => setMsgs((m) => [...m, { who: 'ai', error: true, text }])
-    let recorder
-    try {
-      recorder = new window.MediaRecorder(stream, type ? { mimeType: type } : undefined)
-    } catch {
-      stream.getTracks().forEach((t) => t.stop())
-      return oops("This browser can't record here - type it instead.")
-    }
-    const chunks = []
-    const started = Date.now()
-    recorder.ondataavailable = (e) => { if (e.data?.size) chunks.push(e.data) }
-    recorder.onerror = () => oops('The recording stopped with an error - try again, or type it.')
-    recorder.onstop = async () => {
-      stream.getTracks().forEach((t) => t.stop())
-      setRec(null); setSeconds(0)
-      const blob = new Blob(chunks, { type: recorder.mimeType || type || 'audio/webm' })
-      if (Date.now() - started < 700) return     // a tap, not speech
-      if (blob.size < 500) {
-        // An iPhone on a phone call hands the mic to the call: nothing records
-        return oops("Nothing was recorded - the mic may be in use (a call?). Try again, or type it.")
-      }
-      setBusy(true)
-      let said = ''
-      try {
-        said = (await transcribeExpense(blob)).data.text || ''
-        if (!said.trim()) oops("Didn't catch any words - try again a little closer to the mic, or type it.")
-      } catch (err) {
-        oops(err?.response?.data?.detail || "Couldn't hear that - try again, or type it.")
-      }
-      setBusy(false)
-      if (said.trim()) send(said)
-    }
-    // In 1s slices: some iPhones hand over nothing when asked only at the end
-    recorder.start(1000)
-    setRec({ recorder, started })
-  }
-
-  const stopMic = () => { if (rec?.recorder.state === 'recording') rec.recorder.stop() }
 
   const runAction = async (a) => {
     setMsgs((m) => m.map((x) => ({ ...x, actions: undefined })))
-    setBusy(true)
+    setAsking(true)
     try {
       const out = await a.run()
       if (out === 'reset') return setMsgs([])
@@ -114,7 +55,7 @@ export default function ExpenseChat({ ask, onScan }) {
     } catch (err) {
       setMsgs((m) => [...m, { who: 'ai', error: true, text: err?.response?.data?.detail || 'That didn\'t work - try again.' }])
     } finally {
-      setBusy(false)
+      setAsking(false)
     }
   }
 
@@ -235,11 +176,12 @@ const IDEAS = [
   ['Try ', '“petrol 1500 yesterday, card”'],
 ]
 
-function Typewriter({ running }) {
+// Also the trip planner's empty box, with its own ideas and size
+export function Typewriter({ running, ideas = IDEAS, className = 'text-xl leading-snug min-h-[56px]' }) {
   const [i, setI] = useState(0)
   const [n, setN] = useState(0)        // characters showing
   const [back, setBack] = useState(false)
-  const [lead, rest] = IDEAS[i]
+  const [lead, rest] = ideas[i % ideas.length]
   const full = lead.length + rest.length
   useEffect(() => {
     if (!running) return
@@ -247,12 +189,12 @@ function Typewriter({ running }) {
       if (!back && n < full) setN(n + 1)
       else if (!back) setBack(true)
       else if (n > 0) setN(n - 1)
-      else { setBack(false); setI((i + 1) % IDEAS.length) }
+      else { setBack(false); setI((i + 1) % ideas.length) }
     }, !back && n === full ? 1700 : back ? 22 : 55)
     return () => clearTimeout(t)
   }, [running, n, back, full, i])
   return (
-    <p className="text-xl leading-snug min-h-[56px]" aria-label={lead + rest}>
+    <p className={className} aria-label={lead + rest}>
       <span className="text-gray-400">{lead.slice(0, n)}</span>
       <span className="font-bold text-gray-900">{rest.slice(0, Math.max(0, n - lead.length))}</span>
       <span className="inline-block w-[2px] h-[0.9em] bg-brand-400 align-[-0.1em] ml-0.5 animate-pulse" />

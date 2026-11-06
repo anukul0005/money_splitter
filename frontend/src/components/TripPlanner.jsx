@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { listTripPlans, createTripPlan, getTripPlan, deleteTripPlan } from '../api/index.js'
+import { useVoice, canRecord as micWorks } from './useVoice'
+import { Typewriter } from './ExpenseChat'
 
 /**
  * A discussion's Plan tab: the AI trip planner (backend trip_planner.py).
@@ -19,6 +21,14 @@ function money(n, cur) {
 const CAT = { transport: 'Getting there & between', stay: 'Stays', food: 'Food', activity: 'Sights & activities', local: 'Local transport', other: 'Other' }
 const PER = { person: 'each', group: 'for the group', room: 'a room' }
 const EXAMPLE = 'Plan a 4-day Jodhpur and Jaisalmer trip for 5 friends from Delhi, 20–24 December. Under ₹12,000 per person, with transport, stays, sightseeing, food and activities.'
+// Typed out in the empty box: a grey lead-in, then the ask in bold
+const TRIP_IDEAS = [
+  ['Plan a ', '4-day Jodhpur and Jaisalmer trip for 5 friends from Delhi, 20–24 December, under ₹12,000 each'],
+  ['Plan ', 'a weekend in Rishikesh for 2 from Delhi, by train, around ₹8,000 in all'],
+  ['Plan ', 'Kerala for 6 days in January for a family of 4, flying from Delhi'],
+  ['Plan ', 'a 3-day Goa trip for 4 friends from Mumbai - the cheapest way'],
+  ['Or tap the mic and ', 'say where, when, who and the budget'],
+]
 const errText = (e, fallback) => (typeof e?.response?.data?.detail === 'string' ? e.response.data.detail : fallback)
 
 function day(iso, opts = { weekday: 'short', day: 'numeric', month: 'short' }) {
@@ -34,6 +44,14 @@ export default function TripPlanner({ d, name, onChanged }) {
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [focused, setFocused] = useState(false)
+  const [micErr, setMicErr] = useState('')
+  // Said, not typed: the words go into the box (added to what's there), to
+  // check before Plan it
+  const voice = useVoice({
+    onText: (said) => { setMicErr(''); setPrompt((p) => (p.trim() ? `${p.trim()} ${said}` : said)) },
+    onError: setMicErr,
+  })
 
   const loadList = useCallback(async () => {
     try {
@@ -98,14 +116,42 @@ export default function TripPlanner({ d, name, onChanged }) {
       <div className="bg-white border border-amber-200 p-3">
         <p className="text-sm font-black text-gray-900">✨ Plan a trip with AI</p>
         <p className="text-[11px] text-gray-500 mt-0.5">Say where, when, how many people and the budget - it finds places, weather, road times and prices, and works out the cost.</p>
-        <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3} placeholder={EXAMPLE}
-          className="input text-xs mt-2" />
+        {/* Empty and not being typed in: ideas of what to ask, typed out */}
+        <div className="relative mt-2">
+          <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3}
+            onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+            placeholder={focused ? EXAMPLE : ''} aria-label="What trip to plan"
+            className="input text-xs" />
+          {!prompt && !focused && (
+            <div className="absolute inset-0 px-4 py-3 pointer-events-none overflow-hidden">
+              {voice.recording ? (
+                <p className="text-xs font-bold text-brand-600">● Listening… {voice.seconds}s - tap ■ when you're done</p>
+              ) : voice.hearing ? (
+                <p className="text-xs text-gray-400">Writing down what you said…</p>
+              ) : (
+                <Typewriter running ideas={TRIP_IDEAS} className="text-xs leading-relaxed" />
+              )}
+            </div>
+          )}
+        </div>
         <div className="flex items-center gap-3 mt-2">
           <button onClick={() => run(prompt.trim())} disabled={busy || running || prompt.trim().length < 8}
             className="btn-primary text-xs py-1.5 px-4 disabled:opacity-50">{busy ? 'Starting…' : 'Plan it'}</button>
-          {!prompt && <button onClick={() => setPrompt(EXAMPLE)} className="text-[11px] font-bold text-gray-500">Use the example</button>}
+          {micWorks() && (
+            <button type="button" onClick={voice.recording ? voice.stop : voice.start} disabled={voice.hearing}
+              aria-label={voice.recording ? 'Stop' : 'Say it'}
+              className={`w-9 h-9 flex-shrink-0 rounded-md flex items-center justify-center active:scale-95 transition-all disabled:opacity-50 ${voice.recording ? 'bg-red-500' : 'bg-white border border-amber-300 hover:bg-amber-100'}`}>
+              {voice.recording ? <span className="w-3 h-3 rounded-sm bg-white" /> : (
+                <svg className="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" viewBox="0 0 24 24">
+                  <path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4" />
+                </svg>
+              )}
+            </button>
+          )}
+          {!prompt && !voice.recording && <button onClick={() => setPrompt(EXAMPLE)} className="text-[11px] font-bold text-gray-500">Use the example</button>}
           {running && <span className="text-[11px] text-gray-500">A plan is being made…</span>}
         </div>
+        {micErr && <p className="text-[11px] text-red-600 mt-2">{micErr}</p>}
         {!webSearch && (
           <p className="text-[10px] text-gray-400 mt-2">Live web search is off: prices come from Wikivoyage where it lists them, the rest are marked as estimates.</p>
         )}
