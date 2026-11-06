@@ -659,7 +659,8 @@ export function Plan({ r, onProfile, log = {}, setLog }) {
                 {Object.entries(d.meals).filter(([, xs]) => xs.length).map(([meal, xs]) => (
                   <div key={meal}>
                     <div className="flex items-center justify-between">
-                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{meal}</p>
+                      <Link to={`/recipes/meal?day=${d.day}&meal=${meal}`}
+                        className="text-[11px] font-black text-brand-600 uppercase tracking-widest underline decoration-amber-300 underline-offset-2">{meal} ›</Link>
                       {!eaten[meal] && (
                         <button onClick={() => setLogging(logging === `${d.day}:${meal}` ? null : `${d.day}:${meal}`)}
                           className="text-[10px] font-bold text-brand-600">{logging === `${d.day}:${meal}` ? 'Close' : '＋ What I had'}</button>
@@ -667,14 +668,13 @@ export function Plan({ r, onProfile, log = {}, setLog }) {
                     </div>
                     {/* Logged: only what you had shows - the plan is on each dish's page, compared */}
                     {!eaten[meal] && xs.map((x, j) => (
-                      <Link key={j} to={dishHref({ name: x.name, servings: x.servings, unit: x.unit, day: d.day, meal })}
-                        className="w-full flex items-baseline justify-between gap-2 text-xs py-1 text-left active:bg-amber-50 rounded">
-                        <span className="text-gray-800 min-w-0 underline decoration-amber-300 underline-offset-2">{x.name} <span className="text-gray-400 no-underline">× {x.servings} {x.unit}</span></span>
-                        <span className="text-gray-500 tabular-nums flex-shrink-0">{r0(x.kcal)} kcal · {r0(x.protein)} g P{x.cost != null ? ` · ₹${x.cost}` : ''} ›</span>
-                      </Link>
+                      <div key={j} className="flex items-baseline justify-between gap-2 text-xs py-1">
+                        <span className="text-gray-800 min-w-0">{x.name} <span className="text-gray-400">× {x.servings} {x.unit}</span></span>
+                        <span className="text-gray-500 tabular-nums flex-shrink-0">{r0(x.kcal)} kcal · {r0(x.protein)} g P{x.cost != null ? ` · ₹${x.cost}` : ''}</span>
+                      </div>
                     ))}
                     {(eaten[meal] || logging === `${d.day}:${meal}`) && (
-                      <MealLog day={d.day} meal={meal} planned={xs} entry={eaten[meal]} links
+                      <MealLog day={d.day} meal={meal} planned={xs} entry={eaten[meal]}
                         onLog={(l, w) => { setLog(l, w); setLogging(null) }} />
                     )}
                   </div>

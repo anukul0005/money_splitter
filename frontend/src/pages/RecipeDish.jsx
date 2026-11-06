@@ -5,13 +5,13 @@ import { MealLog, SourceLine, cachedDish, dayLabel, keepDish, planDate, readReci
 
 const r0 = (n) => Math.round(n || 0)
 const r1 = (n) => Math.round((n || 0) * 10) / 10
-const ROWS = [['Calories', 'kcal', ''], ['Protein', 'protein', 'g'], ['Carbs', 'carbs', 'g'], ['Fat', 'fat', 'g'],
+export const ROWS = [['Calories', 'kcal', ''], ['Protein', 'protein', 'g'], ['Carbs', 'carbs', 'g'], ['Fat', 'fat', 'g'],
               ['Fibre', 'fibre', 'g'], ['Sugar', 'sugar', 'g'], ['Sodium', 'sodium_mg', 'mg']]
-const fmtN = (k, v) => (k === 'kcal' || k === 'sodium_mg' ? r0(v) : r1(v))
+export const fmtN = (k, v) => (k === 'kcal' || k === 'sodium_mg' ? r0(v) : r1(v))
 const total = (items, k) => items.reduce((t, x) => t + (x[k] || 0), 0)
 
 // Share of the calories from protein, carbs and fat (4, 4 and 9 kcal a gram)
-function SplitBar({ n }) {
+export function SplitBar({ n }) {
   const p = 4 * (n.protein || 0), c = 4 * (n.carbs || 0), f = 9 * (n.fat || 0)
   const all = p + c + f || 1
   const pct = { protein: r0(p / all * 100), carbs: r0(c / all * 100), fat: r0(f / all * 100) }
@@ -31,7 +31,7 @@ function SplitBar({ n }) {
   )
 }
 
-function PlannedList({ items, day, meal, current }) {
+export function PlannedList({ items, day, meal, current }) {
   if (!items?.length) return null
   return (
     <div className="mt-1 mb-1">
@@ -51,7 +51,7 @@ function PlannedList({ items, day, meal, current }) {
 }
 
 /** The meal as eaten, first: its numbers, then side by side with the plan's. */
-function EatenMeal({ day, meal, entry, planned, when }) {
+export function EatenMeal({ day, meal, entry, planned, when }) {
   const had = entry.totals
   const plan = Object.fromEntries(ROWS.map(([, k]) => [k, total(planned, k)]))
   const planCost = planned.some((x) => x.cost != null) ? total(planned, 'cost') : null
