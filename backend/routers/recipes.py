@@ -171,6 +171,7 @@ def _keep_plan(db: Session, user: User, plan: dict) -> None:
 class KitchenIn(BaseModel):
     profile: dict | None = None
     pantry: list[str] | None = None
+    confirm: bool = False       # "still the same" - the details checked, unchanged
 
 
 @router.put("/me")
@@ -178,7 +179,14 @@ def save_me(payload: KitchenIn, db: Session = Depends(get_db), caller: User = De
     k = _kitchen(db, caller)
     if payload.profile is not None:
         keep = ("age", "sex", "height_cm", "weight_kg", "activity", "pace", "diet")
-        k.profile_json = json.dumps({x: payload.profile.get(x) for x in keep if payload.profile.get(x) not in (None, "")})
+        from datetime import datetime, timezone
+        old, _ = _read(k)
+        new = {x: payload.profile.get(x) for x in keep if payload.profile.get(x) not in (None, "")}
+        # When the numbers last changed - Recipes asks for an update a fortnight on
+        changed = any(str(new.get(x)) != str(old.get(x)) for x in keep)
+        fresh = changed or payload.confirm or not old.get("updated_at")
+        new["updated_at"] = datetime.now(timezone.utc).isoformat() if fresh else old["updated_at"]
+        k.profile_json = json.dumps(new)
     if payload.pantry is not None:
         items = list(dict.fromkeys(" ".join(str(p).split())[:40] for p in payload.pantry if str(p).strip()))
         k.pantry_json = json.dumps(items[:80])

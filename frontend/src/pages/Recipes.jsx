@@ -38,6 +38,7 @@ const chip = (on) => `px-2.5 py-1 text-[11px] font-bold border rounded-md ${on ?
 // Kept on this device: the last answer (plan or recipes) and your details,
 // so Recipes opens straight onto them - the server keeps both too
 const LAST_KEY = 'recipes_last'
+const PLAN_KEY = 'recipes_week_plan'
 const ME_KEY = 'recipes_me'
 const load = (k) => { try { return JSON.parse(localStorage.getItem(k) || 'null') } catch { return null } }
 const keep = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)) } catch { /* storage full or blocked */ } }
@@ -87,24 +88,39 @@ export default function Recipes({ tab, setTab }) {
   const [focused, setFocused] = useState(false)
   const [busy, setBusy]     = useState('')        // what's being worked out
   const [err, setErr]       = useState('')
-  const [result, setResult] = useState(last?.result || null)
+  // The latest answer to a question (recipes, a comparison) - the week's plan
+  // has its own place below it, so asking something never hides the plan
+  const [result, setResult] = useState(last?.result?.mode === 'plan' ? null : last?.result || null)
   const [asked, setAsked]   = useState(last?.asked || '')
+  const [weekPlan, setWeekPlanRaw] = useState(() => load(PLAN_KEY) || (last?.result?.mode === 'plan' ? last.result : null))
+  const setWeekPlan = (p) => { setWeekPlanRaw(p); keep(PLAN_KEY, p) }
   const [showMe, setShowMe] = useState(false)
 
   useEffect(() => {
     recipesMe().then((r) => {
       const data = { ...r.data, plan_made_at: r.data.plan?.made_at || null }
       setMe(data); keep(ME_KEY, { ...data, plan: undefined })
-      // Nothing kept on this device (or an older answer): the plan saved on the server
+      // The plan saved on your account, unless this device has a newer one
       const saved = r.data.plan
-      if (saved && (!last || (last.result?.mode === 'plan' && (last.result.made_at || '') < saved.made_at))) {
-        setResult(saved); setAsked('Your saved plan')
-      }
+      setWeekPlanRaw((cur) => {
+        const next = saved && (!cur || (cur.made_at || '') <= saved.made_at) ? saved : cur
+        keep(PLAN_KEY, next)
+        return next
+      })
     }).catch(() => setMe((m) => m || { profile: {}, pantry: [] }))
   }, [])
 
-  // Every answer kept, so coming back shows it again
+  // The latest answer kept, so coming back shows it again
   useEffect(() => { if (result && !result.need_profile) keep(LAST_KEY, { result, asked }) }, [result])
+
+  // An answer that's a plan becomes the week's plan
+  const took = (data) => {
+    if (data.mode === 'plan' && !data.need_profile) {
+      setWeekPlan(data); setResult(null)
+      if (data.made_at) fresh(data.made_at)
+    } else setResult(data)
+    if (data.need_profile) setShowMe(true)
+  }
 
   const voice = useVoice({
     onText: (said) => { setErr(''); setQ((p) => (p.trim() ? `${p.trim()} ${said}` : said)) },
@@ -118,22 +134,18 @@ export default function Recipes({ tab, setTab }) {
     setBusy(/plan|week|days/i.test(question) ? 'Planning the week - picking dishes and working out each day…' : 'Finding recipes and working out their numbers…')
     try {
       const { data } = await askRecipes(question)
-      setResult(data)
-      if (data.made_at) fresh(data.made_at)
-      if (data.need_profile) setShowMe(true)
+      took(data)
     } catch (e) {
       setErr(e?.response?.data?.detail || "Couldn't work that out just now - try again.")
     } finally { setBusy('') }
   }
 
   const plan = async () => {
-    setErr(''); setResult(null); setAsked('A week of meals for weight loss')
+    setErr('')
     setBusy('Planning the week - picking dishes and working out each day…')
     try {
       const { data } = await planRecipes(7, me?.profile?.diet || 'any')
-      setResult(data)
-      if (data.made_at) fresh(data.made_at)
-      if (data.need_profile) setShowMe(true)
+      took(data)
     } catch (e) {
       setErr(e?.response?.data?.detail || "Couldn't make the plan just now - try again.")
     } finally { setBusy('') }
@@ -211,8 +223,24 @@ export default function Recipes({ tab, setTab }) {
           </div>
         )}
 
-        {result && !busy && <Result r={result} asked={asked} onPlan={plan} onProfile={() => setShowMe(true)}
-          log={result.made_at && result.made_at === me?.plan_made_at ? (me?.log || {}) : {}} setLog={setLog} />}
+        {result && !busy && (
+          <div className="relative">
+            <button onClick={() => { setResult(null); keep(LAST_KEY, null) }} className="absolute -top-1 right-0 text-[11px] font-bold text-gray-400">Clear ×</button>
+            <Result r={result} asked={asked} onPlan={plan} onProfile={() => setShowMe(true)} />
+          </div>
+        )}
+
+        {/* The week's plan - always here once made */}
+        {weekPlan?.days?.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between pt-1">
+              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Your week's plan</p>
+              <button onClick={plan} disabled={!!busy} className="text-[11px] font-bold text-brand-600 disabled:opacity-50">Make a new one</button>
+            </div>
+            <Plan r={weekPlan} onProfile={() => setShowMe(true)}
+              log={weekPlan.made_at && weekPlan.made_at === me?.plan_made_at ? (me?.log || {}) : {}} setLog={setLog} />
+          </div>
+        )}
 
         {/* You, and your kitchen */}
         {me && <Profile me={me} open={showMe} setOpen={setShowMe} save={save} onPlan={plan} busy={!!busy} />}
@@ -606,15 +634,33 @@ function Profile({ me, open, setOpen, save, onPlan, busy }) {
       <input type="number" inputMode="decimal" className="input text-sm py-2" placeholder={ph} value={p[k] ?? ''} onChange={(e) => set(k, e.target.value)} />
     </label>
   )
+  // A fortnight since the numbers were last checked: time to ask again
+  const since = me.profile?.updated_at ? (Date.now() - new Date(me.profile.updated_at).getTime()) / 86400000 : null
+  const due = t && since != null && since >= 14
+  const still = async () => {
+    setSaved('Saving…')
+    try { await save({ profile: me.profile, confirm: true }); setSaved('✓ Thanks - asked again in two weeks') } catch { setSaved("Couldn't save") }
+  }
   return (
-    <div className="card">
+    <div className={`card ${due ? 'border-amber-300 bg-amber-50/40' : ''}`}>
       <button onClick={() => setOpen(!open)} className="w-full flex items-center justify-between text-left">
         <span>
-          <span className="text-sm font-bold text-gray-800">You, for weight-loss plans</span>
-          <span className="block text-[11px] text-gray-500">{t ? `Target ${t.kcal} kcal and ${t.protein_g} g protein a day` : 'Age, height, weight - to work out your daily target'}</span>
+          <span className="text-sm font-bold text-gray-800">Your details</span>
+          <span className="block text-[11px] text-gray-500">
+            {t ? `${me.profile.weight_kg} kg · ${me.profile.height_cm} cm · target ${t.kcal} kcal and ${t.protein_g} g protein a day`
+               : 'Age, height, weight - to work out your daily target'}
+          </span>
         </span>
-        <span className="text-gray-400 text-xs">{open ? '▾' : '▸'}</span>
+        <span className="text-gray-400 text-xs">{open ? '▾ Hide' : '▸ Edit'}</span>
       </button>
+      {due && !open && (
+        <div className="mt-2 flex items-center gap-2 flex-wrap">
+          <p className="text-[11px] font-bold text-amber-800 flex-1 min-w-[160px]">It's been {Math.floor(since / 7)} weeks - still {me.profile.weight_kg} kg? An up-to-date weight keeps the target right.</p>
+          <button onClick={() => setOpen(true)} className="text-[11px] font-bold text-white bg-brand-400 rounded-md px-2.5 py-1">Update</button>
+          <button onClick={still} className="text-[11px] font-bold text-gray-600 bg-white border border-amber-200 rounded-md px-2.5 py-1">Still the same</button>
+        </div>
+      )}
+      {!open && saved && <p className="text-[11px] text-green-700 mt-1">{saved}</p>}
       {open && (
         <div className="mt-3 space-y-3">
           <div className="grid grid-cols-3 gap-2">
@@ -639,7 +685,8 @@ function Profile({ me, open, setOpen, save, onPlan, busy }) {
             <div className="flex flex-wrap gap-1.5">{DIETS.map(([v, l]) => <button key={v} type="button" onClick={() => set('diet', v)} className={chip((p.diet || 'any') === v)}>{l}</button>)}</div>
           </div>
           <div className="flex items-center gap-3">
-            {t && <button type="button" disabled={busy} onClick={onPlan} className="btn-primary text-xs py-2 px-4 disabled:opacity-50">Plan 7 days</button>}
+            {t && <button type="button" disabled={busy} onClick={() => { setOpen(false); onPlan() }} className="btn-primary text-xs py-2 px-4 disabled:opacity-50">Plan 7 days</button>}
+            <button type="button" onClick={() => setOpen(false)} className="text-xs font-bold text-gray-500">Done</button>
             <span className="text-[11px] text-green-700">{saved || 'Saved as you type'}</span>
           </div>
         </div>
