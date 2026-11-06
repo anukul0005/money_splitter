@@ -58,26 +58,41 @@ export default function ExpenseChat({ ask }) {
     }
     const type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg']
       .find((t) => window.MediaRecorder.isTypeSupported?.(t))
-    const recorder = new window.MediaRecorder(stream, type ? { mimeType: type } : undefined)
+    const oops = (text) => setMsgs((m) => [...m, { who: 'ai', error: true, text }])
+    let recorder
+    try {
+      recorder = new window.MediaRecorder(stream, type ? { mimeType: type } : undefined)
+    } catch {
+      stream.getTracks().forEach((t) => t.stop())
+      return oops("This browser can't record here - type it instead.")
+    }
     const chunks = []
+    const started = Date.now()
     recorder.ondataavailable = (e) => { if (e.data?.size) chunks.push(e.data) }
+    recorder.onerror = () => oops('The recording stopped with an error - try again, or type it.')
     recorder.onstop = async () => {
       stream.getTracks().forEach((t) => t.stop())
       setRec(null); setSeconds(0)
       const blob = new Blob(chunks, { type: recorder.mimeType || type || 'audio/webm' })
-      if (blob.size < 1200) return               // a tap, not speech
+      if (Date.now() - started < 700) return     // a tap, not speech
+      if (blob.size < 500) {
+        // An iPhone on a phone call hands the mic to the call: nothing records
+        return oops("Nothing was recorded - the mic may be in use (a call?). Try again, or type it.")
+      }
       setBusy(true)
       let said = ''
       try {
         said = (await transcribeExpense(blob)).data.text || ''
+        if (!said.trim()) oops("Didn't catch any words - try again a little closer to the mic, or type it.")
       } catch (err) {
-        setMsgs((m) => [...m, { who: 'ai', error: true, text: err?.response?.data?.detail || "Couldn't hear that - try again, or type it." }])
+        oops(err?.response?.data?.detail || "Couldn't hear that - try again, or type it.")
       }
       setBusy(false)
       if (said.trim()) send(said)
     }
-    recorder.start()
-    setRec({ recorder, started: Date.now() })
+    // In 1s slices: some iPhones hand over nothing when asked only at the end
+    recorder.start(1000)
+    setRec({ recorder, started })
   }
 
   const stopMic = () => { if (rec?.recorder.state === 'recording') rec.recorder.stop() }
