@@ -73,7 +73,84 @@ def me(db: Session = Depends(get_db), caller: User = Depends(current_user)):
     except ValueError:
         plan = None
     return {"profile": profile, "pantry": pantry, "targets": body.targets(profile), "sources": _sources(),
-            "plan": plan}
+            "plan": plan, "log": _log(k, plan)}
+
+
+def _log(k: RecipeKitchen, plan: dict | None) -> dict:
+    """What's been eaten against the current plan ({} for a new plan)."""
+    try:
+        log = json.loads(k.log_json) if k.log_json else {}
+    except ValueError:
+        log = {}
+    if not plan or log.get("plan") != plan.get("made_at"):
+        return {}
+    return log.get("days") or {}
+
+
+MEALS = ("breakfast", "lunch", "dinner", "snack")
+
+
+class LogIn(BaseModel):
+    day: int
+    meal: str
+    text: str | None = None            # what was eaten, in any words
+    planned: list[dict] | None = None  # [{name, servings}] - eaten as planned
+    add: bool = False                  # add to what's logged for the meal, rather than replace it
+
+
+@router.post("/log")
+def log_meal(payload: LogIn, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """A meal of the plan as actually eaten - worked out and kept."""
+    if payload.meal not in MEALS or not 1 <= payload.day <= 7:
+        raise HTTPException(400, "Which day and meal?")
+    if not (payload.text or "").strip() and not payload.planned:
+        raise HTTPException(400, "Say what you had")
+    k = _kitchen(db, caller)
+    plan = json.loads(k.plan_json) if k.plan_json else None
+    if not plan:
+        raise HTTPException(400, "Make a plan first - meals are tracked against it")
+    db.rollback()
+    try:
+        entry = engine.read_meal(payload.text, payload.planned)
+    except Exception as e:
+        print(f"[recipes] read meal failed: {e!r}")
+        raise HTTPException(502, "Couldn't read that just now - try again")
+    if not entry["items"]:
+        raise HTTPException(400, "Couldn't tell what was eaten - try naming the dishes")
+    k = _kitchen(db, caller)
+    days = _log(k, plan)
+    day = days.setdefault(str(payload.day), {})
+    old = day.get(payload.meal)
+    if payload.add and old:
+        # This dish replaces itself if it was there; the rest of the meal stays
+        names = {i["name"] for i in entry["items"]}
+        items = [i for i in old["items"] if i["name"] not in names] + entry["items"]
+        known = [i["nutrition"] for i in items if i.get("nutrition")]
+        costs = [i["cost"] for i in items if i.get("cost") is not None]
+        entry = {"text": old.get("text"), "items": items, "unknown": [i["said"] for i in items if not i.get("nutrition")],
+                 "totals": engine._sum(known), "cost": round(sum(costs)) if costs else None}
+    from datetime import datetime, timezone
+    entry["logged_at"] = datetime.now(timezone.utc).isoformat()
+    day[payload.meal] = entry
+    k.log_json = json.dumps({"plan": plan.get("made_at"), "days": days})
+    db.commit()
+    return {"log": days, "entry": entry}
+
+
+class UnlogIn(BaseModel):
+    day: int
+    meal: str
+
+
+@router.post("/log/remove")
+def unlog_meal(payload: UnlogIn, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    k = _kitchen(db, caller)
+    plan = json.loads(k.plan_json) if k.plan_json else None
+    days = _log(k, plan)
+    days.get(str(payload.day), {}).pop(payload.meal, None)
+    k.log_json = json.dumps({"plan": (plan or {}).get("made_at"), "days": days})
+    db.commit()
+    return {"log": days}
 
 
 def _keep_plan(db: Session, user: User, plan: dict) -> None:

@@ -265,6 +265,120 @@ def dish(name: str, servings: float = 1.0, recipe: dict | None = None) -> dict:
     }
 
 
+# ── what was actually eaten ──
+_READ_MEAL = """The user says what they ate for one meal - in English, Hindi (Devanagari) or Hinglish. Return ONLY JSON:
+{"items": [{"said": the user's words for this item, exactly as written,
+            "name": the food's usual name in Latin script ("Besan chilla", "Masala chai", "Roti", "Dal", "Banana"),
+            "count": number or null, "unit": "piece" | "bowl" | "katori" | "plate" | "cup" | "glass" | "spoon" | "g" | "ml" | null,
+            "grams": your best estimate of how many grams (or ml) of it were eaten in all}]}
+"ek" = 1, "do" = 2, "teen" = 3, "aadha" = 0.5. Split a meal into its foods ("dal chawal" = dal, rice). Never give calories, protein or prices."""
+
+_MATCH_MEAL = """Match each food to one dish from the list of known dishes.
+- A general food takes its most ordinary version: "dal" -> a plain everyday dal (arhar/toor or moong); "rice" / "chawal" -> plain boiled rice; "sabzi" -> a plain mixed vegetable; "roti" -> chapati.
+- Never a different dish made from it: a banana is not a banana milkshake, an apple not apple pie, milk not kheer, an egg not an egg curry. A plain fruit, nut, milk, egg or drink that isn't itself in the list -> null.
+- null when nothing in the list is that same food.
+Return ONLY JSON: {"matches": {"<food name exactly as given>": "<known dish name copied exactly>" or null}}"""
+
+# Bought raw, eaten cooked: their USDA figures are for the dry grain or dal,
+# about three times a cooked portion's - so a meal never falls back to them
+_RAW_ONLY = {"rice", "basmati rice", "brown rice", "atta", "maida", "besan", "suji", "poha", "ragi", "bajra", "jowar",
+             "daliya", "quinoa", "vermicelli", "toor dal", "moong dal", "whole moong", "masoor dal", "chana dal",
+             "urad dal", "rajma", "chickpeas", "kala chana", "soya chunks", "oats"}
+
+
+def _eaten_item(it: dict, dish_name: str | None) -> dict:
+    """One thing eaten, worked out: an INDB dish by its servings, else a
+    single ingredient by its grams (USDA)."""
+    said = str(it.get("said") or it.get("name") or "")[:80]
+    name = str(it.get("name") or said)[:80]
+    try:
+        count = float(it["count"]) if it.get("count") not in (None, "") else None
+    except (TypeError, ValueError):
+        count = None
+    try:
+        grams = float(it["grams"]) if it.get("grams") not in (None, "") else None
+    except (TypeError, ValueError):
+        grams = None
+    unit = str(it.get("unit") or "").lower()
+    d = indb.find(dish_name, min_score=0.9) if dish_name else None
+    if d and d["serving"]:
+        s = d["serving"]
+        # A count of the dish's own unit ("2 cheela", "1 bowl") is servings;
+        # otherwise the grams say how many servings it was
+        if count and (not unit or unit in ("piece", "serving", s["unit"].lower()) or unit in s["unit"].lower()):
+            servings = count
+        elif grams:
+            servings = grams / s["grams"]
+        else:
+            servings = count or 1
+        servings = round(min(10.0, max(0.1, servings)), 2)
+        n = {k: round(s[k] * servings, 1) for k in NUTRIENTS}
+        return {"said": said, "name": d["name"], "source": "indb", "servings": servings, "unit": s["unit"],
+                "grams": round(s["grams"] * servings), "nutrition": n}
+    k = foods.identify(name)
+    entry = foods.CATALOGUE.get(k) if k else None
+    if k and entry and entry[1] and k not in _RAW_ONLY:
+        g = grams or (count * entry[3] if count and entry[3] else None) or 100
+        per = foods.nutrition(k)
+        p = prices.price(k)
+        out = {"said": said, "name": k, "source": "usda", "grams": round(g),
+               "cost": round(g / 1000 * p["per_kg"], 1) if p else None}
+        if per:
+            out["nutrition"] = {kk: round(per.get(kk, 0) * g / 100, 1) for kk in NUTRIENTS}
+            return out
+    return {"said": said, "name": name, "source": None, "nutrition": None}
+
+
+def read_meal(text: str | None = None, planned: list[dict] | None = None) -> dict:
+    """What was eaten at one meal, worked out. `text`: in the user's words,
+    any language; `planned`: [{name, servings}] eaten as planned (INDB
+    dishes, no reading needed). Costs come from each dish's ingredients."""
+    items: list[dict] = []
+    if planned:
+        for p in planned[:8]:
+            d = indb.find(str(p.get("name") or ""), min_score=0.9)
+            if d:
+                items.append(_eaten_item({"said": d["name"], "name": d["name"], "count": p.get("servings") or 1,
+                                          "unit": d["serving"]["unit"] if d["serving"] else None}, d["name"]))
+    if text and text.strip():
+        got = chat_json(_READ_MEAL, text.strip()[:600], temperature=0, timeout=30, extra={"reasoning_effort": "low"})
+        raw = [x for x in got.get("items") or [] if isinstance(x, dict) and (x.get("name") or x.get("said"))][:10]
+        # Known dishes whose names share a word with what was eaten - the LLM picks among them
+        words = [w for x in raw for w in str(x.get("name") or "").lower().split()]
+        # The everyday forms a general word means, so they're among the choices
+        extra = {"dal": ["arhar", "moong", "toor"], "rice": ["boiled"], "chawal": ["rice", "boiled"],
+                 "sabzi": ["vegetable", "mixed"], "roti": ["chapati"], "chai": ["tea"]}
+        words += [e for w in list(words) for e in extra.get(w, [])]
+        cands = indb.named(words, "any", limit=50) if words else []
+        matches = {}
+        if cands:
+            listing = "\n".join(f"- {d['name']}" for d in cands)
+            foods_ = "\n".join(f"- {x.get('name')}" for x in raw)
+            try:
+                matches = chat_json(_MATCH_MEAL, f"Foods eaten:\n{foods_}\n\nKnown dishes:\n{listing}", temperature=0,
+                                    timeout=30, prefer=1, extra={"reasoning_effort": "low"}).get("matches") or {}
+            except Exception:
+                matches = {}
+        low = {str(k).strip().lower(): v for k, v in matches.items()}
+        items += [_eaten_item(x, low.get(str(x.get("name") or "").strip().lower())) for x in raw]
+
+    # What each INDB dish cost: its ingredients (remembered per dish), times the servings eaten
+    dishes = [indb.find(i["name"], min_score=0.9) for i in items if i["source"] == "indb"]
+    ing = _dish_ingredients([d for d in dishes if d and d["serving"]]) if dishes else {}
+    for i in items:
+        if i["source"] == "indb" and i["name"] in ing:
+            i["cost"] = round(_price_serving(ing[i["name"]])["total"] * i["servings"], 1)
+    known = [i for i in items if i.get("nutrition")]
+    costs = [i["cost"] for i in items if i.get("cost") is not None]
+    return {
+        "text": (text or "").strip()[:600] or None,
+        "items": items,
+        "unknown": [i["said"] for i in items if not i.get("nutrition")],
+        "totals": _sum([i["nutrition"] for i in known]),
+        "cost": round(sum(costs)) if costs else None,
+    }
+
+
 # ── meal plans ──
 _dish_ing_lock = threading.Lock()
 _DISH_ING = DATA_DIR / "dish_ingredients.json"

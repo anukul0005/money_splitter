@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { recipeDish } from '../api'
-import { SourceLine, readRecipe } from './Recipes'
+import { recipeDish, recipesMe } from '../api'
+import { MealLog, SourceLine, readRecipe } from './Recipes'
 
 const r0 = (n) => Math.round(n || 0)
 const r1 = (n) => Math.round((n || 0) * 10) / 10
@@ -21,6 +21,11 @@ export default function RecipeDish() {
   const [servings, setServings] = useState(() => Math.max(0.5, parseFloat(params.get('s')) || 1))
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
+  // Opened from a meal of the plan: what was actually had there can be logged here
+  const day = parseInt(params.get('day')) || null
+  const meal = params.get('meal') || null
+  const [log, setLog] = useState(null)
+  useEffect(() => { if (day && meal) recipesMe().then((r) => setLog(r.data.log || {})).catch(() => setLog({})) }, [day, meal])
 
   useEffect(() => {
     setD(null); setErr('')
@@ -77,6 +82,17 @@ export default function RecipeDish() {
                 <button onClick={() => setServings((x) => Math.min(6, x + 0.5))} className="w-8 h-8 border border-amber-300 rounded-md font-bold text-gray-700">+</button>
               </span>
             </div>
+
+            {/* What was actually had at this meal */}
+            {day && meal && log && (
+              <div className="card">
+                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Day {day} · {meal} - what you had</p>
+                <MealLog day={day} meal={meal} entry={log[String(day)]?.[meal]} onLog={setLog} add
+                  planned={[{ name: d.indb?.name || name, servings: s }]}
+                  quickLabel={`I had this - ${s} ${unitOf}`} />
+                <p className="text-[10px] text-gray-400 mt-1">The quick button adds this dish to the meal; writing it out replaces the whole meal with what you write.</p>
+              </div>
+            )}
 
             {/* Calories and where they come from */}
             <div className="card">

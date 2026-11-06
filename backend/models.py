@@ -1540,4 +1540,7 @@ class RecipeKitchen(Base):
     pantry_json = Column(Text, nullable=True)
     # The last meal plan made - shown again when Recipes is opened
     plan_json = Column(Text, nullable=True)
+    # What was actually eaten against that plan: {"plan": its made_at,
+    # "days": {"1": {"breakfast": <cookbook.engine.read_meal answer>}}}
+    log_json = Column(Text, nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

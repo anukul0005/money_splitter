@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { askRecipes, planRecipes, recipesMe, saveRecipesMe } from '../api'
+import { askRecipes, logMeal, planRecipes, recipesMe, saveRecipesMe, unlogMeal } from '../api'
 import RecommendTabs from '../components/RecommendTabs'
 import { Typewriter } from '../components/ExpenseChat'
 import { useVoice, canRecord as micWorks } from '../components/useVoice'
@@ -44,9 +44,10 @@ const keep = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)) } catc
 
 // A recipe the AI wrote travels to its own page by a key, kept on this device
 export function readRecipe(key) { return key ? load(`recipe_r_${key}`) : null }
-function dishHref({ name, servings = 1, unit, recipe }) {
+function dishHref({ name, servings = 1, unit, recipe, day, meal }) {
   const p = new URLSearchParams({ name, s: String(servings) })
   if (unit) p.set('u', unit)
+  if (day && meal) { p.set('day', String(day)); p.set('meal', meal) }
   if (recipe) {
     const key = [...JSON.stringify(recipe)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7).toString(36)
     keep(`recipe_r_${key}`, recipe)
@@ -69,7 +70,8 @@ export default function Recipes({ tab, setTab }) {
 
   useEffect(() => {
     recipesMe().then((r) => {
-      setMe(r.data); keep(ME_KEY, { ...r.data, plan: undefined })
+      const data = { ...r.data, plan_made_at: r.data.plan?.made_at || null }
+      setMe(data); keep(ME_KEY, { ...data, plan: undefined })
       // Nothing kept on this device (or an older answer): the plan saved on the server
       const saved = r.data.plan
       if (saved && (!last || (last.result?.mode === 'plan' && (last.result.made_at || '') < saved.made_at))) {
@@ -94,6 +96,7 @@ export default function Recipes({ tab, setTab }) {
     try {
       const { data } = await askRecipes(question)
       setResult(data)
+      if (data.made_at) fresh(data.made_at)
       if (data.need_profile) setShowMe(true)
     } catch (e) {
       setErr(e?.response?.data?.detail || "Couldn't work that out just now - try again.")
@@ -106,11 +109,17 @@ export default function Recipes({ tab, setTab }) {
     try {
       const { data } = await planRecipes(7, me?.profile?.diet || 'any')
       setResult(data)
+      if (data.made_at) fresh(data.made_at)
       if (data.need_profile) setShowMe(true)
     } catch (e) {
       setErr(e?.response?.data?.detail || "Couldn't make the plan just now - try again.")
     } finally { setBusy('') }
   }
+
+  // What's been eaten against the plan - kept with your details on this device too
+  const setLog = (log) => setMe((m) => { const next = { ...m, log }; keep(ME_KEY, { ...next, plan: undefined }); return next })
+  // A new plan: its log starts empty
+  const fresh = (madeAt) => setMe((m) => { const next = { ...m, plan_made_at: madeAt, log: {} }; keep(ME_KEY, { ...next, plan: undefined }); return next })
 
   const save = async (patch) => {
     const { data } = await saveRecipesMe(patch)
@@ -179,7 +188,8 @@ export default function Recipes({ tab, setTab }) {
           </div>
         )}
 
-        {result && !busy && <Result r={result} asked={asked} onPlan={plan} onProfile={() => setShowMe(true)} />}
+        {result && !busy && <Result r={result} asked={asked} onPlan={plan} onProfile={() => setShowMe(true)}
+          log={result.made_at && result.made_at === me?.plan_made_at ? (me?.log || {}) : {}} setLog={setLog} />}
 
         {/* You, and your kitchen */}
         {me && <Profile me={me} open={showMe} setOpen={setShowMe} save={save} onPlan={plan} busy={!!busy} />}
@@ -191,8 +201,104 @@ export default function Recipes({ tab, setTab }) {
   )
 }
 
-function Result({ r, asked, onPlan, onProfile }) {
-  if (r.mode === 'plan') return <Plan r={r} asked={asked} onProfile={onProfile} />
+/**
+ * One meal of the plan as actually eaten: "had it as planned" in a tap, or
+ * typed / said in any words - English, Hindi, Hinglish ("2 besan chilla
+ * aur chai", "दो रोटी और दाल"). The server reads which foods and how much;
+ * the numbers are worked out there like everything else. `add`: the quick
+ * button adds to the meal (a dish's own page) rather than replacing it.
+ */
+export function MealLog({ day, meal, planned, entry, onLog, add = false, quickLabel }) {
+  const [text, setText] = useState('')
+  const [editing, setEditing] = useState(!entry)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const voice = useVoice({
+    onText: (said) => { setErr(''); setText((p) => (p.trim() ? `${p.trim()} ${said}` : said)) },
+    onError: setErr,
+  })
+  useEffect(() => { if (!entry) setEditing(true) }, [entry])
+
+  const send = async (payload) => {
+    setBusy(true); setErr('')
+    try {
+      const { data } = await logMeal({ day, meal, ...payload })
+      onLog(data.log); setText(''); setEditing(false)
+    } catch (e) {
+      setErr(e?.response?.data?.detail || "Couldn't log that - try again.")
+    } finally { setBusy(false) }
+  }
+  const remove = async () => {
+    setBusy(true)
+    try { const { data } = await unlogMeal(day, meal); onLog(data.log) } catch { setErr("Couldn't remove it.") } finally { setBusy(false) }
+  }
+  const plannedKcal = (planned || []).reduce((t, x) => t + (x.kcal || 0), 0)
+
+  return (
+    <div className="mt-1.5 bg-amber-50/70 border border-amber-200 rounded-md px-3 py-2">
+      {entry && !editing && (
+        <>
+          <p className="text-[10px] font-black text-green-700 uppercase tracking-widest">✓ What you had</p>
+          {entry.items.map((i, k) => (
+            <div key={k} className="flex items-baseline justify-between gap-2 text-xs py-0.5">
+              <span className="text-gray-800 min-w-0">{i.name}{i.servings ? <span className="text-gray-400"> × {i.servings} {i.unit}</span> : i.grams ? <span className="text-gray-400"> · {i.grams} g</span> : ''}</span>
+              <span className="text-gray-500 tabular-nums flex-shrink-0">{i.nutrition ? `${r0(i.nutrition.kcal)} kcal · ${r0(i.nutrition.protein)} g P` : '-'}</span>
+            </div>
+          ))}
+          {entry.unknown?.length > 0 && <p className="text-[10px] text-amber-700 mt-0.5">Couldn't work out: {entry.unknown.join(', ')} - not in the totals</p>}
+          <p className="text-[11px] font-bold text-gray-800 mt-1">
+            {r0(entry.totals.kcal)} kcal · {r0(entry.totals.protein)} g protein{entry.cost != null ? ` · ₹${entry.cost}` : ''}
+            {plannedKcal > 0 && (() => {
+              const diff = r0(entry.totals.kcal - plannedKcal)
+              return <span className={`font-normal ${Math.abs(diff) <= plannedKcal * 0.1 ? 'text-green-700' : diff > 0 ? 'text-red-600' : 'text-amber-700'}`}> · {diff === 0 ? 'as planned' : `${diff > 0 ? '+' : ''}${diff} vs plan`}</span>
+            })()}
+          </p>
+          {entry.text && <p className="text-[10px] text-gray-400 mt-0.5">“{entry.text}”</p>}
+          <div className="flex gap-3 mt-1">
+            <button onClick={() => setEditing(true)} disabled={busy} className="text-[11px] font-bold text-brand-600">Change</button>
+            <button onClick={remove} disabled={busy} className="text-[11px] font-bold text-gray-400">Remove</button>
+          </div>
+        </>
+      )}
+      {editing && (
+        <>
+          {planned?.length > 0 && (
+            <button onClick={() => send({ planned: planned.map((x) => ({ name: x.name, servings: x.servings })), add })} disabled={busy}
+              className="w-full text-left text-[11px] font-bold text-green-800 bg-white border border-green-200 rounded-md px-2.5 py-1.5 mb-1.5 disabled:opacity-50">
+              ✓ {quickLabel || 'Had it as planned'}
+            </button>
+          )}
+          <div className="relative">
+            <textarea rows={2} value={text} onChange={(e) => setText(e.target.value)} disabled={busy}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (text.trim()) send({ text }) } }}
+              placeholder={voice.recording ? `Listening… ${voice.seconds}s` : 'Or what you actually had - “2 besan chilla aur chai”, “दो रोटी और दाल”'}
+              className="w-full bg-white border border-amber-200 rounded-md px-2.5 py-1.5 text-xs outline-none focus:border-brand-400 resize-none" />
+          </div>
+          <div className="flex items-center gap-2 mt-1">
+            <button onClick={() => send({ text })} disabled={busy || !text.trim()} className="btn-primary text-[11px] py-1.5 px-3 disabled:opacity-50">
+              {busy ? 'Working it out…' : 'Log it'}
+            </button>
+            {micWorks() && (
+              <button type="button" onClick={voice.recording ? voice.stop : voice.start} disabled={voice.hearing || busy}
+                aria-label={voice.recording ? 'Stop' : 'Say it'}
+                className={`w-8 h-8 rounded-md flex items-center justify-center disabled:opacity-50 ${voice.recording ? 'bg-red-500' : 'bg-white border border-amber-300'}`}>
+                {voice.recording ? <span className="w-2.5 h-2.5 rounded-sm bg-white" /> : (
+                  <svg className="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" viewBox="0 0 24 24"><path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4" /></svg>
+                )}
+              </button>
+            )}
+            {voice.hearing && <span className="text-[10px] text-gray-400">Writing it down…</span>}
+            {entry && <button onClick={() => setEditing(false)} className="text-[11px] font-bold text-gray-400 ml-auto">Cancel</button>}
+          </div>
+        </>
+      )}
+      {err && <p className="text-[10px] text-red-600 mt-1">{err}</p>}
+    </div>
+  )
+}
+
+function Result({ r, asked, onPlan, onProfile, log, setLog }) {
+  if (r.mode === 'plan') return <Plan r={r} asked={asked} onProfile={onProfile} log={log} setLog={setLog} />
   const recs = r.recipes || []
   if (!recs.length) return <div className="card text-xs text-gray-500">Nothing came back for “{asked}” - try asking another way.</div>
   return (
@@ -328,7 +434,8 @@ function Compare({ a, b }) {
   )
 }
 
-function Plan({ r, asked, onProfile }) {
+function Plan({ r, asked, onProfile, log = {}, setLog }) {
+  const [logging, setLogging] = useState(null)     // "day:meal" whose log box is open
   // Which day is open survives a visit to a dish's page and back
   const [open, setOpenRaw] = useState(() => load('recipes_plan_day') ?? 0)
   const setOpen = (i) => { setOpenRaw(i); keep('recipes_plan_day', i) }
@@ -356,27 +463,49 @@ function Plan({ r, asked, onProfile }) {
       </div>
       {r.days.map((d, i) => {
         const off = d.totals.kcal - t.kcal
+        // Tracked: what was eaten for the meals logged, the plan for the rest
+        const eaten = log[String(d.day)] || {}
+        const logged = Object.keys(eaten).filter((m) => d.meals[m]?.length || eaten[m])
+        const sumMeal = (xs, k) => xs.reduce((s, x) => s + (x[k] || 0), 0)
+        const tracked = Object.entries(d.meals).reduce((s, [m, xs]) => s + (eaten[m] ? eaten[m].totals.kcal : sumMeal(xs, 'kcal')), 0)
+        const trackedP = Object.entries(d.meals).reduce((s, [m, xs]) => s + (eaten[m] ? eaten[m].totals.protein : sumMeal(xs, 'protein')), 0)
         return (
           <div key={d.day} className="card">
             <button onClick={() => setOpen(open === i ? -1 : i)} className="w-full flex items-center justify-between gap-2 text-left">
-              <span className="text-sm font-black text-gray-900">Day {d.day}</span>
+              <span className="text-sm font-black text-gray-900">Day {d.day}{logged.length > 0 && <span className="ml-1.5 text-[10px] font-bold text-green-700 align-middle">✓ {logged.length} logged</span>}</span>
               <span className="text-[11px] text-gray-600">
                 <b className={Math.abs(off) <= t.kcal * 0.1 ? 'text-green-700' : 'text-amber-700'}>{r0(d.totals.kcal)} kcal</b>
                 {' · '}{r0(d.totals.protein)} g protein{d.cost != null ? ` · ₹${d.cost}${d.cost_partial ? '+' : ''}` : ''} {open === i ? '▾' : '▸'}
               </span>
             </button>
+            {logged.length > 0 && (
+              <p className="text-[11px] mt-1 text-gray-600">
+                With what you had: <b className={Math.abs(tracked - t.kcal) <= t.kcal * 0.1 ? 'text-green-700' : tracked > t.kcal ? 'text-red-600' : 'text-amber-700'}>{r0(tracked)} kcal</b>
+                {' · '}{r0(trackedP)} g protein · target {t.kcal} ({tracked > t.kcal ? `${r0(tracked - t.kcal)} over` : `${r0(t.kcal - tracked)} to spare`})
+              </p>
+            )}
             {open === i && (
               <div className="mt-2 space-y-2">
                 {Object.entries(d.meals).filter(([, xs]) => xs.length).map(([meal, xs]) => (
                   <div key={meal}>
-                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{meal}</p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{meal}</p>
+                      {!eaten[meal] && (
+                        <button onClick={() => setLogging(logging === `${d.day}:${meal}` ? null : `${d.day}:${meal}`)}
+                          className="text-[10px] font-bold text-brand-600">{logging === `${d.day}:${meal}` ? 'Close' : '＋ What I had'}</button>
+                      )}
+                    </div>
                     {xs.map((x, j) => (
-                      <Link key={j} to={dishHref({ name: x.name, servings: x.servings, unit: x.unit })}
+                      <Link key={j} to={dishHref({ name: x.name, servings: x.servings, unit: x.unit, day: d.day, meal })}
                         className="w-full flex items-baseline justify-between gap-2 text-xs py-1 text-left active:bg-amber-50 rounded">
                         <span className="text-gray-800 min-w-0 underline decoration-amber-300 underline-offset-2">{x.name} <span className="text-gray-400 no-underline">× {x.servings} {x.unit}</span></span>
                         <span className="text-gray-500 tabular-nums flex-shrink-0">{r0(x.kcal)} kcal · {r0(x.protein)} g P{x.cost != null ? ` · ₹${x.cost}` : ''} ›</span>
                       </Link>
                     ))}
+                    {(eaten[meal] || logging === `${d.day}:${meal}`) && (
+                      <MealLog day={d.day} meal={meal} planned={xs} entry={eaten[meal]}
+                        onLog={(l) => { setLog(l); setLogging(null) }} />
+                    )}
                   </div>
                 ))}
                 {d.cost_partial && <p className="text-[10px] text-amber-700">Some dishes couldn't be priced yet - the day's cost is a minimum (+).</p>}

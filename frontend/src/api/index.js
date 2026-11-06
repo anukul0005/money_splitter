@@ -195,7 +195,9 @@ export const recipesMe     = ()       => api.get('/recipes/me')
 export const saveRecipesMe = (data)   => api.put('/recipes/me', data)
 export const askRecipes    = (question) => api.post('/recipes/ask', { question })
 export const planRecipes   = (days = 7, diet = 'any') => api.post('/recipes/plan', { days, diet })
-export const recipeDish    = (name, servings = 1, recipe = null) => api.post('/recipes/dish', { name, servings, recipe })
+export const logMeal       = (data)   => api.post('/recipes/log', data)
+export const unlogMeal     = (day, meal) => api.post('/recipes/log/remove', { day, meal })
+export const recipeDish    =(name, servings = 1, recipe = null) => api.post('/recipes/dish', { name, servings, recipe })
 // Add Expense's chat box and mic: a message read into the form's fields
 export const understandExpense  = (data) => api.post('/expenses/understand', data)
 export const transcribeExpense  = (blob) => {
