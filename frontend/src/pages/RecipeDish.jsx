@@ -1,10 +1,117 @@
 import { useEffect, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { recipeDish, recipesMe } from '../api'
 import { MealLog, SourceLine, readRecipe } from './Recipes'
 
 const r0 = (n) => Math.round(n || 0)
 const r1 = (n) => Math.round((n || 0) * 10) / 10
+const ROWS = [['Calories', 'kcal', ''], ['Protein', 'protein', 'g'], ['Carbs', 'carbs', 'g'], ['Fat', 'fat', 'g'],
+              ['Fibre', 'fibre', 'g'], ['Sugar', 'sugar', 'g'], ['Sodium', 'sodium_mg', 'mg']]
+const fmtN = (k, v) => (k === 'kcal' || k === 'sodium_mg' ? r0(v) : r1(v))
+const total = (items, k) => items.reduce((t, x) => t + (x[k] || 0), 0)
+
+// Share of the calories from protein, carbs and fat (4, 4 and 9 kcal a gram)
+function SplitBar({ n }) {
+  const p = 4 * (n.protein || 0), c = 4 * (n.carbs || 0), f = 9 * (n.fat || 0)
+  const all = p + c + f || 1
+  const pct = { protein: r0(p / all * 100), carbs: r0(c / all * 100), fat: r0(f / all * 100) }
+  return (
+    <>
+      <div className="flex h-2.5 rounded-full overflow-hidden mt-3 bg-gray-100">
+        <div className="bg-green-500" style={{ width: `${pct.protein}%` }} />
+        <div className="bg-amber-400" style={{ width: `${pct.carbs}%` }} />
+        <div className="bg-red-400" style={{ width: `${pct.fat}%` }} />
+      </div>
+      <div className="flex justify-between text-[10px] font-bold mt-1">
+        <span className="text-green-700">Protein {pct.protein}%</span>
+        <span className="text-amber-700">Carbs {pct.carbs}%</span>
+        <span className="text-red-600">Fat {pct.fat}%</span>
+      </div>
+    </>
+  )
+}
+
+function PlannedList({ items, day, meal, current }) {
+  if (!items?.length) return null
+  return (
+    <div className="mt-1 mb-1">
+      {items.map((x, i) => {
+        const here = x.name === current
+        const href = `/recipes/dish?${new URLSearchParams({ name: x.name, s: String(x.servings), u: x.unit || '', day: String(day), meal })}`
+        return (
+          <div key={i} className="flex items-baseline justify-between gap-2 text-xs py-0.5">
+            {here ? <span className="text-gray-800 font-bold min-w-0">{x.name} <span className="font-normal text-gray-400">× {x.servings} {x.unit} · this page</span></span>
+              : <Link to={href} className="text-gray-800 min-w-0 underline decoration-amber-300 underline-offset-2">{x.name} <span className="text-gray-400">× {x.servings} {x.unit}</span></Link>}
+            <span className="text-gray-500 tabular-nums flex-shrink-0">{r0(x.kcal)} kcal · {r0(x.protein)} g P</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/** The meal as eaten, first: its numbers, then side by side with the plan's. */
+function EatenMeal({ day, meal, entry, planned }) {
+  const had = entry.totals
+  const plan = Object.fromEntries(ROWS.map(([, k]) => [k, total(planned, k)]))
+  const planCost = planned.some((x) => x.cost != null) ? total(planned, 'cost') : null
+  const hasPlan = planned.length > 0
+  return (
+    <div className="card">
+      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Day {day} · {meal} - what you had</p>
+      <p className="text-3xl font-black text-gray-900 leading-none mt-2">{r0(had.kcal)} <span className="text-sm font-bold text-gray-400">kcal</span>
+        {hasPlan && (() => {
+          const diff = r0(had.kcal - plan.kcal)
+          return <span className={`ml-2 text-sm font-bold ${Math.abs(diff) <= plan.kcal * 0.1 ? 'text-green-700' : diff > 0 ? 'text-red-600' : 'text-amber-700'}`}>{diff === 0 ? 'as planned' : `${diff > 0 ? '+' : ''}${diff} vs plan`}</span>
+        })()}
+      </p>
+      <SplitBar n={had} />
+      <p className="text-[10px] text-gray-400 mt-0.5">Share of the calories (protein and carbs 4 kcal a gram, fat 9)</p>
+
+      <table className="w-full text-xs mt-3">
+        <thead><tr className="text-[10px] text-gray-400 text-left">
+          <th className="font-bold pb-1" /><th className="font-bold text-right pb-1 text-gray-900">You had</th>
+          {hasPlan && <><th className="font-bold text-right pb-1">Planned</th><th className="font-bold text-right pb-1">Difference</th></>}
+        </tr></thead>
+        <tbody>
+          {ROWS.map(([label, k, u]) => {
+            const diff = (had[k] || 0) - (plan[k] || 0)
+            // More protein and fibre is the good way round; for the rest, less
+            const good = ['protein', 'fibre'].includes(k) ? diff >= 0 : diff <= 0
+            return (
+              <tr key={k} className="border-t border-amber-100">
+                <td className="py-1.5 text-gray-600">{label}</td>
+                <td className="text-right tabular-nums font-black text-gray-900">{fmtN(k, had[k])}{u}</td>
+                {hasPlan && <>
+                  <td className="text-right tabular-nums text-gray-500">{fmtN(k, plan[k])}{u}</td>
+                  <td className={`text-right tabular-nums font-bold ${Math.abs(diff) < 0.5 ? 'text-gray-400' : good ? 'text-green-700' : 'text-red-600'}`}>
+                    {Math.abs(diff) < 0.5 ? '-' : `${diff > 0 ? '+' : '−'}${fmtN(k, Math.abs(diff))}${u}`}
+                  </td>
+                </>}
+              </tr>
+            )
+          })}
+          <tr className="border-t border-amber-100">
+            <td className="py-1.5 text-gray-600">Cost</td>
+            <td className="text-right tabular-nums font-black text-gray-900">{entry.cost != null ? `₹${entry.cost}` : '-'}</td>
+            {hasPlan && <>
+              <td className="text-right tabular-nums text-gray-500">{planCost != null ? `₹${r0(planCost)}` : '-'}</td>
+              <td className="text-right tabular-nums font-bold text-gray-500">{entry.cost != null && planCost != null ? `${entry.cost - planCost >= 0 ? '+' : '−'}₹${r0(Math.abs(entry.cost - planCost))}` : '-'}</td>
+            </>}
+          </tr>
+        </tbody>
+      </table>
+      {entry.unknown?.length > 0 && <p className="text-[10px] text-amber-700 mt-1">Not in these numbers (couldn't work out): {entry.unknown.join(', ')}</p>}
+
+      {hasPlan && (
+        <div className="mt-3">
+          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">What was planned</p>
+          <PlannedList items={planned} day={day} meal={meal} />
+        </div>
+      )}
+    </div>
+  )
+}
 
 /**
  * /recipes/dish?name=…&s=1.5&u=bowl - one dish on its own page: photo, the
@@ -19,13 +126,23 @@ export default function RecipeDish() {
   const unit = params.get('u') || ''
   const recipe = readRecipe(params.get('r'))
   const [servings, setServings] = useState(() => Math.max(0.5, parseFloat(params.get('s')) || 1))
+  // Another dish of the meal opened from here: its own portion
+  useEffect(() => { setServings(Math.max(0.5, parseFloat(params.get('s')) || 1)) }, [params.get('name'), params.get('s')])
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
   // Opened from a meal of the plan: what was actually had there can be logged here
   const day = parseInt(params.get('day')) || null
   const meal = params.get('meal') || null
   const [log, setLog] = useState(null)
-  useEffect(() => { if (day && meal) recipesMe().then((r) => setLog(r.data.log || {})).catch(() => setLog({})) }, [day, meal])
+  const [planned, setPlanned] = useState([])      // what the plan has for this meal
+  useEffect(() => {
+    if (!day || !meal) return
+    recipesMe().then((r) => {
+      setLog(r.data.log || {})
+      setPlanned(r.data.plan?.days?.find((x) => x.day === day)?.meals?.[meal] || [])
+    }).catch(() => setLog({}))
+  }, [day, meal])
+  const entry = day && meal ? log?.[String(day)]?.[meal] : null
 
   useEffect(() => {
     setD(null); setErr('')
@@ -63,6 +180,17 @@ export default function RecipeDish() {
         )}
         {err && <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-md px-4 py-3">{err}</p>}
 
+        {/* Logged: the meal as eaten leads - its numbers, beside what was planned */}
+        {entry && (
+          <>
+            <EatenMeal day={day} meal={meal} entry={entry} planned={planned} />
+            <div className="card">
+              <MealLog day={day} meal={meal} entry={entry} onLog={setLog} />
+            </div>
+            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest pt-2">The planned dish</p>
+          </>
+        )}
+
         {d && (
           <>
             {d.photo && (
@@ -83,11 +211,12 @@ export default function RecipeDish() {
               </span>
             </div>
 
-            {/* What was actually had at this meal */}
-            {day && meal && log && (
+            {/* Not logged yet: what the plan has for this meal, and the box to log it */}
+            {day && meal && log && !entry && (
               <div className="card">
-                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Day {day} · {meal} - what you had</p>
-                <MealLog day={day} meal={meal} entry={log[String(day)]?.[meal]} onLog={setLog} add
+                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Day {day} · {meal} - planned</p>
+                <PlannedList items={planned} day={day} meal={meal} current={d.indb?.name || name} />
+                <MealLog day={day} meal={meal} entry={null} onLog={setLog} add
                   planned={[{ name: d.indb?.name || name, servings: s }]}
                   quickLabel={`I had this - ${s} ${unitOf}`} />
                 <p className="text-[10px] text-gray-400 mt-1">The quick button adds this dish to the meal; writing it out replaces the whole meal with what you write.</p>
