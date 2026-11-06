@@ -457,14 +457,15 @@ export default function NewGroup() {
             <div className="bg-amber-50 border border-amber-200 rounded-md px-4 py-3">
               <p className="text-xs font-bold text-gray-700 mb-2">Upload it <span className="font-normal text-gray-400">- or type it in below</span></p>
               <div className="grid grid-cols-2 gap-2">
-                {[['📷', 'Take photo', cameraRef], ['🖼️', 'Gallery', galleryRef], ['📄', 'PDF bill', pdfRef]].map(([icon, text, ref]) => (
+                {/* Taking a photo is the chat card's scan button (cameraRef below) */}
+                {[['🖼️', 'Gallery', galleryRef], ['📄', 'PDF bill', pdfRef]].map(([icon, text, ref]) => (
                   <button key={text} type="button" disabled={scan.busy} onClick={() => ref.current?.click()}
                     className="py-2.5 text-xs font-bold text-gray-700 bg-white border border-amber-300 rounded-md hover:bg-amber-100 active:scale-[0.98] transition-all disabled:opacity-50">
                     {icon} {text}
                   </button>
                 ))}
                 <button type="button" disabled={statement.busy} onClick={() => statement.pick(ANY_STATEMENT)}
-                  className="py-2.5 text-xs font-bold text-gray-700 bg-white border border-amber-300 rounded-md hover:bg-amber-100 active:scale-[0.98] transition-all disabled:opacity-50">
+                  className="col-span-2 py-2.5 text-xs font-bold text-gray-700 bg-white border border-amber-300 rounded-md hover:bg-amber-100 active:scale-[0.98] transition-all disabled:opacity-50">
                   🏦 Bank statement
                 </button>
                 <MailSyncWide className="col-span-2" busy={statement.busy}
