@@ -604,16 +604,13 @@ function Compare({ a, b }) {
   )
 }
 
-export function Plan({ r, onProfile, log = {}, setLog }) {
+/**
+ * The week's days. On the week page each day is a card of its numbers that
+ * opens the day's own page; there (`only`: that day), its meals - planned,
+ * or what you had - and "other" for anything had beyond them.
+ */
+export function Plan({ r, onProfile, log = {}, setLog, only = null }) {
   const [logging, setLogging] = useState(null)     // "day:meal" whose log box is open
-  // Which day is open survives a visit to a dish's page and back
-  // Today's day opens by itself; one opened by hand stays open (that day, this plan)
-  const todayAt = (r.days || []).findIndex((d) => isToday(planDate(r, d.day)))
-  const [open, setOpenRaw] = useState(() => {
-    const s = load('recipes_plan_day')
-    return s && s.plan === r.made_at && s.on === isoDay(new Date()) ? s.i : Math.max(0, todayAt)
-  })
-  const setOpen = (i) => { setOpenRaw(i); keep('recipes_plan_day', { i, plan: r.made_at, on: isoDay(new Date()) }) }
 
   // Every dish of the week saved on this device in the background, a couple
   // at a time - so each card opens straight away, even offline
@@ -643,7 +640,7 @@ export function Plan({ r, onProfile, log = {}, setLog }) {
   const t = r.targets
   return (
     <div className="space-y-2">
-      <div className="card">
+      {!only && <div className="card">
         {r.days?.length > 0 && (() => {
           const first = planDate(r, 1), last = planDate(r, r.days.length)
           const over = isoDay(new Date()) > isoDay(last)
@@ -661,10 +658,11 @@ export function Plan({ r, onProfile, log = {}, setLog }) {
           {t.floored && ' Kept at the safe minimum - a slower pace would be gentler.'}
         </p>
         <p className="text-[10px] text-gray-400 mt-1">A guide worked out from your numbers (Mifflin-St Jeor), not medical advice. Portions are scaled to land near the target.</p>
-      </div>
-      {r.days.map((d, i) => {
+      </div>}
+      {r.days.filter((d) => !only || d.day === only).map((d) => {
         const eaten = log[String(d.day)] || {}
-        const logged = Object.keys(eaten).filter((m) => d.meals[m]?.length || eaten[m])
+        // Meals logged counts the planned ones; what you had counts everything, "other" too
+        const logged = Object.keys(eaten).filter((m) => d.meals[m]?.length)
         const sumMeal = (xs, k) => xs.reduce((s, x) => s + (x[k] || 0), 0)
         // The day as logged: what was had, against the plan and the target
         const date = planDate(r, d.day)
@@ -680,16 +678,20 @@ export function Plan({ r, onProfile, log = {}, setLog }) {
           : logged.length
             ? { text: `${logged.length} of ${mealsPlanned} meals logged - ${r0(hadK - plannedForLogged) === 0 ? 'as planned so far' : `${r0(Math.abs(hadK - plannedForLogged))} kcal ${hadK > plannedForLogged ? 'more' : 'less'} than planned so far`}`, cls: tone(hadK, plannedForLogged) }
             : { text: future ? 'Coming up' : 'Nothing logged', cls: 'text-gray-400' }
+        const head = (
+          <>
+            <span className="text-sm font-black text-gray-900">
+              {dayLabel(date)}
+              {isToday(date) && <span className="ml-1.5 text-[9px] font-black text-white bg-brand-400 rounded px-1.5 py-0.5 align-middle">TODAY</span>}
+              <span className="block text-[10px] font-bold text-gray-400">Day {d.day}</span>
+            </span>
+            {!only && <span className="text-[11px] font-bold text-brand-600">Meals ›</span>}
+          </>
+        )
         return (
-          <div key={d.day} className={`card ${isToday(date) ? 'border-brand-400/60' : ''}`}>
-            <button onClick={() => setOpen(open === i ? -1 : i)} className="w-full flex items-center justify-between gap-2 text-left">
-              <span className="text-sm font-black text-gray-900">
-                {dayLabel(date)}
-                {isToday(date) && <span className="ml-1.5 text-[9px] font-black text-white bg-brand-400 rounded px-1.5 py-0.5 align-middle">TODAY</span>}
-                <span className="block text-[10px] font-bold text-gray-400">Day {d.day}</span>
-              </span>
-              <span className="text-[11px] font-bold text-brand-600">{open === i ? 'Hide meals ▾' : 'Meals ▸'}</span>
-            </button>
+          <div key={d.day} className={`card ${isToday(date) && !only ? 'border-brand-400/60' : ''}`}>
+            {only ? <div className="flex items-center justify-between gap-2">{head}</div>
+              : <Link to={`/recipes/day?day=${d.day}`} className="w-full flex items-center justify-between gap-2 text-left">{head}</Link>}
             <div className="grid grid-cols-3 gap-1.5 mt-2">
               <div className="bg-amber-50 rounded-md px-2 py-1.5">
                 <p className="text-sm font-black text-gray-900 tabular-nums">{r0(d.totals.kcal)}</p>
@@ -705,8 +707,8 @@ export function Plan({ r, onProfile, log = {}, setLog }) {
               </div>
             </div>
             <p className={`text-[11px] font-bold mt-1.5 ${verdict.cls}`}>{verdict.text}{complete ? ` · target ${t.kcal}` : ''}</p>
-            {open === i && (
-              <div className="mt-2 space-y-2">
+            {only && (
+              <div className="mt-3 space-y-3">
                 {Object.entries(d.meals).filter(([, xs]) => xs.length).map(([meal, xs]) => (
                   <div key={meal}>
                     <div className="flex items-center justify-between">
@@ -730,6 +732,20 @@ export function Plan({ r, onProfile, log = {}, setLog }) {
                     )}
                   </div>
                 ))}
+                {/* Anything had beyond the plan's meals - optional */}
+                <div>
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] font-black text-gray-500 uppercase tracking-widest">Other <span className="normal-case tracking-normal font-bold text-gray-400 text-[10px]">- anything else you had (optional)</span></p>
+                    {!eaten.other && (
+                      <button onClick={() => setLogging(logging === `${d.day}:other` ? null : `${d.day}:other`)}
+                        className="text-[10px] font-bold text-brand-600">{logging === `${d.day}:other` ? 'Close' : '＋ Add'}</button>
+                    )}
+                  </div>
+                  {(eaten.other || logging === `${d.day}:other`) && (
+                    <MealLog day={d.day} meal="other" planned={[]} entry={eaten.other}
+                      onLog={(l, w) => { setLog(l, w); setLogging(null) }} />
+                  )}
+                </div>
                 {d.cost_partial && <p className="text-[10px] text-amber-700">Some dishes couldn't be priced yet - the day's cost is a minimum (+).</p>}
               </div>
             )}

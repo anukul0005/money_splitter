@@ -79,7 +79,13 @@ export default function RecipeMeal() {
           </>
         )}
 
-        {me && !entry && !planned.length && <p className="text-sm text-gray-500">Nothing planned for this meal.</p>}
+        {/* Nothing planned - "other", anything had beyond the plan's meals */}
+        {me && !entry && !planned.length && (
+          <div className="card">
+            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{meal === 'other' ? 'Anything else you had' : 'Nothing planned - what you had'}</p>
+            <MealLog day={day} meal={meal} entry={null} planned={[]} onLog={setLog} />
+          </div>
+        )}
       </div>
     </div>
   )

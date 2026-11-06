@@ -101,7 +101,8 @@ def _week(plan: dict, days_log: dict) -> dict:
         meals = {m: xs for m, xs in (d.get("meals") or {}).items() if xs}
         got = (days_log or {}).get(str(n)) or {}
         eaten = sum(e["totals"]["kcal"] for e in got.values())
-        planned_m, logged_m = len(meals), len([m for m in got if m in meals or got[m]])
+        # Meals logged counts the planned ones; what was eaten counts everything, "other" too
+        planned_m, logged_m = len(meals), len([m for m in got if m in meals])
         eaten_all += eaten
         logged_all += logged_m
         planned_all += planned_m
@@ -142,7 +143,8 @@ def _log(k: RecipeKitchen, plan: dict | None) -> dict:
     return log.get("days") or {}
 
 
-MEALS = ("breakfast", "lunch", "dinner", "snack")
+# "other": anything had beyond the plan's meals (an extra snack, a drink) - never planned
+MEALS = ("breakfast", "lunch", "dinner", "snack", "other")
 
 
 class LogIn(BaseModel):
