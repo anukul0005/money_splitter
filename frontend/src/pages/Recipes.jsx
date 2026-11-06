@@ -421,7 +421,11 @@ export function MealLog({ day, meal, planned, entry, onLog, add = false, quickLa
           </p>
           {entry.text && <p className="text-[10px] text-gray-400 mt-0.5">“{entry.text}”</p>}
           <div className="flex gap-3 mt-1">
-            <button onClick={() => setEditing(true)} disabled={busy} className="text-[11px] font-bold text-brand-600">Change</button>
+            {/* What you wrote last time, ready to correct - not typed again from scratch */}
+            <button onClick={() => {
+              setText(entry.text || entry.items.map((i) => (i.servings ? `${i.servings} ${i.unit} ${i.name}` : i.said || i.name)).join(', '))
+              setEditing(true)
+            }} disabled={busy} className="text-[11px] font-bold text-brand-600">Change</button>
             <button onClick={remove} disabled={busy} className="text-[11px] font-bold text-gray-400">Remove</button>
           </div>
         </>
@@ -442,7 +446,7 @@ export function MealLog({ day, meal, planned, entry, onLog, add = false, quickLa
           </div>
           <div className="flex items-center gap-2 mt-1">
             <button onClick={() => send({ text })} disabled={busy || !text.trim()} className="btn-primary text-[11px] py-1.5 px-3 disabled:opacity-50">
-              {busy ? 'Working it out…' : 'Log it'}
+              {busy ? 'Working it out…' : entry ? 'Save changes' : 'Log it'}
             </button>
             {micWorks() && (
               <button type="button" onClick={voice.recording ? voice.stop : voice.start} disabled={voice.hearing || busy}
@@ -454,7 +458,7 @@ export function MealLog({ day, meal, planned, entry, onLog, add = false, quickLa
               </button>
             )}
             {voice.hearing && <span className="text-[10px] text-gray-400">Writing it down…</span>}
-            {entry && <button onClick={() => setEditing(false)} className="text-[11px] font-bold text-gray-400 ml-auto">Cancel</button>}
+            {entry && <button onClick={() => { setEditing(false); setText('') }} className="text-[11px] font-bold text-gray-400 ml-auto">Cancel</button>}
           </div>
         </>
       )}
