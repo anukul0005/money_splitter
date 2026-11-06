@@ -15,6 +15,7 @@ import uuid
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from difflib import SequenceMatcher
 
 import ai_text
 from database import get_settings
@@ -44,7 +45,42 @@ def _today() -> str:
     return datetime.now(IST).date().isoformat()
 
 
-def understand(text: str, me: str, groups: list[dict], current: int | None, draft: dict) -> dict:
+def _key(s: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def canon_title(title: str | None, places: list[str]) -> str | None:
+    """The description in the user's own spelling of a place they've spent
+    at before: "Neutrio Box" (as heard) -> "Nutriobox". Any run of up to four
+    words is compared with each known place, spaces and case ignored; a close
+    enough one is swapped for it, the rest of the description kept."""
+    if not title or not places:
+        return title
+    words = title.split()
+    known = [(p, _key(p)) for p in places if len(_key(p)) >= 4]
+    best = None     # (score, start, end, place)
+    for i in range(len(words)):
+        for j in range(i + 1, min(len(words), i + 4) + 1):
+            k = _key(" ".join(words[i:j]))
+            if len(k) < 4:
+                continue
+            for place, pk in known:
+                if abs(len(pk) - len(k)) > max(3, len(pk) // 3):
+                    continue
+                m = SequenceMatcher(None, k, pk)
+                if m.real_quick_ratio() < 0.8 or m.quick_ratio() < 0.8:
+                    continue
+                score = m.ratio()
+                if score >= (0.8 if len(pk) >= 8 else 0.86) and (best is None or score > best[0]):
+                    best = (score, i, j, place)
+    if not best:
+        return title
+    _, i, j, place = best
+    return " ".join(words[:i] + [place] + words[j:])
+
+
+def understand(text: str, me: str, groups: list[dict], current: int | None, draft: dict,
+               places: list[str] | None = None) -> dict:
     """`groups`: [{id, name, members, last}] the user may add to, `last`
     being how recently each was used (higher = more recent). The model reads
     the message; the group is then picked here, by rule - with 150+ groups
@@ -52,6 +88,10 @@ def understand(text: str, me: str, groups: list[dict], current: int | None, draf
     known = sorted({m for g in groups for m in g["members"] if m.lower() != me.lower()})
     lines = [f"Today: {_today()} ({datetime.now(IST):%A})", f"The user: {me}",
              "People the user knows: " + ", ".join(known)]
+    if places:
+        # Speech-to-text mangles names ("Neutrio Box"): their own spelling wins
+        lines.append("Places and descriptions the user has used before (use this spelling when the "
+                     "message means one, even misheard): " + ", ".join(places[:120]))
     kept = {k: v for k, v in (draft or {}).items() if v not in (None, "", [])}
     if "split_with" in kept:
         kept["people"] = [n for n in kept.pop("split_with") if n.lower() != me.lower()]
@@ -60,7 +100,9 @@ def understand(text: str, me: str, groups: list[dict], current: int | None, draf
     lines.append("\nMessage: " + text.strip()[:600])
     out = ai_text.chat_json(_SYSTEM, "\n".join(lines), temperature=0, timeout=30,
                             extra={"reasoning_effort": "low"})
-    return _check(out, me, groups, current)
+    res = _check(out, me, groups, current)
+    res["title"] = canon_title(res["title"], places or [])
+    return res
 
 
 def _same(a: str, b: str) -> bool:
@@ -153,8 +195,9 @@ def _check(out: dict, me: str, groups: list[dict], current: int | None) -> dict:
     }
 
 
-def transcribe(audio: bytes, content_type: str) -> str:
-    """Speech to text on Groq's Whisper, trying each Groq key in turn."""
+def transcribe(audio: bytes, content_type: str, vocabulary: list[str] | None = None) -> str:
+    """Speech to text on Groq's Whisper, trying each Groq key in turn.
+    `vocabulary`: the user's people and places, so they're spelt their way."""
     s = get_settings()
     keys = [k for k in (s.groq_api_key, s.groq_api_key_2) if k]
     if not keys:
@@ -164,7 +207,8 @@ def transcribe(audio: bytes, content_type: str) -> str:
            "audio/ogg": "ogg", "audio/wav": "wav", "audio/x-wav": "wav"}.get(kind, "webm")
     fields = {"model": WHISPER_MODEL, "temperature": "0", "response_format": "json",
               # Nudges the spelling (₹ amounts, Latin script for Hinglish)
-              "prompt": "Rs 400 spent with Utkarsh at XYZ store, paid by UPI."}
+              "prompt": ("Rs 400 spent with Utkarsh at XYZ store, paid by UPI. "
+                         + ", ".join((vocabulary or [])[:40]))[:800]}
     edge = uuid.uuid4().hex
     body = b"".join(
         f"--{edge}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n".encode()

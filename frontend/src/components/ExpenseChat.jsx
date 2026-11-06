@@ -3,11 +3,13 @@ import { transcribeExpense } from '../api'
 
 const MAX_SECONDS = 45
 
-// Add Expense's chat box: type or say what was spent ("rs 400 spent with
+// New expense's chat box: type or say what was spent ("rs 400 spent with
 // utkarsh at xyz store") and `ask` fills the form, resolving to the line
-// shown back. Follow-ups ("it was groceries") go through the same `ask`.
+// shown back - or to { text, actions: [{ label, run }] }, buttons under it
+// (a `run` may resolve to a line of its own). Follow-ups ("it was
+// groceries") go through the same `ask`.
 export default function ExpenseChat({ ask }) {
-  const [msgs, setMsgs]       = useState([])   // { who: 'me' | 'ai', text, error? }
+  const [msgs, setMsgs]       = useState([])   // { who: 'me' | 'ai', text, error?, actions? }
   const [text, setText]       = useState('')
   const [busy, setBusy]       = useState(false)
   const [rec, setRec]         = useState(null) // { recorder, started }
@@ -40,7 +42,10 @@ export default function ExpenseChat({ ask }) {
     setBusy(true)
     try {
       const reply = await askRef.current(line)
-      setMsgs((m) => [...m, { who: 'ai', text: reply || 'Filled in below - check it before saving.' }])
+      const { text: said, actions, error } = typeof reply === 'object' && reply ? reply : { text: reply }
+      // Buttons only ever on the latest reply
+      setMsgs((m) => [...m.map((x) => ({ ...x, actions: undefined })),
+        { who: 'ai', error, actions, text: said || 'Filled in below - check it before saving.' }])
     } catch (err) {
       setMsgs((m) => [...m, { who: 'ai', error: true, text: err?.response?.data?.detail || "Couldn't read that just now - try again, or fill the form in." }])
     } finally {
@@ -97,6 +102,20 @@ export default function ExpenseChat({ ask }) {
 
   const stopMic = () => { if (rec?.recorder.state === 'recording') rec.recorder.stop() }
 
+  const runAction = async (a) => {
+    setMsgs((m) => m.map((x) => ({ ...x, actions: undefined })))
+    setBusy(true)
+    try {
+      const out = await a.run()
+      if (out === 'reset') return setMsgs([])
+      if (out) setMsgs((m) => [...m, { who: 'ai', text: out }])
+    } catch (err) {
+      setMsgs((m) => [...m, { who: 'ai', error: true, text: err?.response?.data?.detail || 'That didn\'t work - try again.' }])
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="bg-amber-50 border border-amber-200 rounded-md px-4 py-3">
       <p className="text-xs font-bold text-gray-700">Tell it what you spent</p>
@@ -105,13 +124,24 @@ export default function ExpenseChat({ ask }) {
       {msgs.length > 0 && (
         <div ref={listRef} className="max-h-48 overflow-y-auto space-y-1.5 mb-2">
           {msgs.map((m, i) => (
-            <div key={i} className={`flex ${m.who === 'me' ? 'justify-end' : 'justify-start'}`}>
+            <div key={i} className={`flex flex-col ${m.who === 'me' ? 'items-end' : 'items-start'}`}>
               <p className={`text-xs px-2.5 py-1.5 rounded-md max-w-[85%] whitespace-pre-wrap ${
                 m.who === 'me' ? 'bg-brand-400 text-white'
                   : m.error ? 'bg-red-50 text-red-700 border border-red-100'
                   : 'bg-white text-gray-800 border border-amber-200'}`}>
                 {m.text}
               </p>
+              {m.actions?.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  {m.actions.map((a) => (
+                    <button key={a.label} type="button" disabled={busy} onClick={() => runAction(a)}
+                      className={`text-[11px] font-bold px-2.5 py-1 rounded-md border disabled:opacity-50 ${
+                        a.danger ? 'text-red-600 bg-white border-red-200' : 'text-brand-700 bg-white border-amber-300'}`}>
+                      {a.label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
           {busy && <p className="text-[11px] text-gray-400">Reading…</p>}

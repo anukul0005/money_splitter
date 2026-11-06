@@ -105,6 +105,29 @@ def list_expenses(group_id: int, db: Session = Depends(get_db),
     return db.query(Expense).filter(Expense.group_id == group_id).order_by(Expense.date, Expense.id).all()
 
 
+def _places(db: Session, group_ids: list[int], limit: int = 300) -> list[str]:
+    """The descriptions and venues the user's expenses use, commonest first -
+    what the chat box matches a misheard name against. Statement-import
+    noise ("UPI/DR/4512...") is left out: long, numbery strings."""
+    if not group_ids:
+        return []
+    rows = []
+    for col in (Expense.venue, Expense.title):
+        rows += (db.query(col, func.count()).filter(Expense.group_id.in_(group_ids), col.isnot(None))
+                 .group_by(col).order_by(func.count().desc()).limit(limit).all())
+    tally: dict[str, list] = {}
+    for name, n in rows:
+        s = " ".join(str(name).split())
+        if not s or len(s) > 40 or len(s.split()) > 5 or sum(c.isdigit() for c in s) > 2 or "/" in s:
+            continue
+        key = s.lower()
+        if key in tally:
+            tally[key][1] += n
+        else:
+            tally[key] = [s, n]
+    return [s for s, _ in sorted(tally.values(), key=lambda x: -x[1])][:limit]
+
+
 class UnderstandIn(BaseModel):
     text: str
     group_id: int | None = None        # the group picked on the form, if any
@@ -130,14 +153,16 @@ def understand_expense(payload: UnderstandIn, db: Session = Depends(get_db),
                "last": last.get(g.id) or 0} for g in mine]
     try:
         return expense_chat.understand(payload.text, caller.name, groups,
-                                       payload.group_id, payload.draft or {})
+                                       payload.group_id, payload.draft or {},
+                                       _places(db, [g.id for g in mine]))
     except Exception as e:
         print(f"[expense_chat] understand failed: {e}")
         raise HTTPException(502, "Couldn't read that just now - try again, or fill the form in")
 
 
 @router.post("/transcribe")
-def transcribe_expense(file: UploadFile = File(...), caller: User = Depends(current_user)):
+def transcribe_expense(file: UploadFile = File(...), db: Session = Depends(get_db),
+                       caller: User = Depends(current_user)):
     """Add Expense's mic: a short voice clip turned into text."""
     import expense_chat
     audio = file.file.read()
@@ -145,8 +170,16 @@ def transcribe_expense(file: UploadFile = File(...), caller: User = Depends(curr
         raise HTTPException(400, "No sound was recorded")
     if len(audio) > 10 * 1024 * 1024:
         raise HTTPException(413, "That recording is too long - keep it under a minute")
+    # Their people and places, so the transcript spells them their way
+    mine = caller_groups(db, caller, history=False, active_only=True)
+    people = {}
+    for g in mine:
+        for m in g.members:
+            if m.name.lower() != caller.name.lower():
+                people[m.name] = people.get(m.name, 0) + 1
+    words = sorted(people, key=lambda n: -people[n])[:15] + _places(db, [g.id for g in mine], 60)[:25]
     try:
-        text = expense_chat.transcribe(audio, file.content_type or "audio/webm")
+        text = expense_chat.transcribe(audio, file.content_type or "audio/webm", words)
     except Exception as e:
         print(f"[expense_chat] transcribe failed: {e}")
         raise HTTPException(502, "Couldn't hear that just now - try again, or type it")

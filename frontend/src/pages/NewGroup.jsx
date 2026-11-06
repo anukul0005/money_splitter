@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { createExpense, createGroup, getGroup, getGroups, listUsersBasic, scanReceipt, understandExpense } from '../api'
+import { createExpense, createGroup, deleteExpense, deleteGroup, getGroup, getGroups, listUsersBasic, scanReceipt, understandExpense, updateExpense } from '../api'
 import ExpenseChat from '../components/ExpenseChat'
 import { useUser } from '../UserContext'
 import { buildMasterGroups, pairKey } from '../utils/masterGroups'
@@ -87,6 +87,13 @@ export default function NewGroup() {
   const [receipt, setReceipt]     = useState(null)
   const [scan, setScan]           = useState({ busy: false, error: '', note: '' })
   const [cropFile, setCropFile]   = useState(null)
+  // What the chat saved by itself: { gid, id, name, created } - a follow-up
+  // updates it, Discard takes it back out
+  const [saved, setSaved]         = useState(null)
+  const savedRef                  = useRef(null)
+  const pendingSave               = useRef(null)
+  const [saveTick, setSaveTick]   = useState(0)
+  const [chatKey, setChatKey]     = useState(0)
   const cameraRef = useRef(null)
   const galleryRef = useRef(null)
   const pdfRef = useRef(null)
@@ -284,80 +291,145 @@ export default function NewGroup() {
       setPaidBy(me)
     }
     setError('')
-    return data.reply
+
+    const total = data.amount != null ? data.amount : parseFloat(amount)
+    if (!(total > 0)) return data.reply
+    // An amount is all it takes: saved straight away (the save runs after
+    // this render - see the effect by persist)
+    const result = await new Promise((resolve) => { pendingSave.current = resolve; setSaveTick((t) => t + 1) })
+    if (result.err) {
+      return { error: true, text: `${data.reply || ''}\nCouldn't save it: ${result.err?.response?.data?.detail || 'something went wrong'} - check the form and tap Save.`.trim() }
+    }
+    const s = result.saved
+    const what = data.title || title
+    return {
+      text: `${data.reply || ''}\n✓ Saved to ${s.name}${what ? '' : ' - with no description yet, so it stays highlighted there until you add one'}.`.trim(),
+      actions: [
+        { label: 'Discard', danger: true, run: async () => { await discard(); return 'reset' } },
+        { label: `Open ${s.name}`, run: async () => { nav(`/groups/${s.gid}`) } },
+        { label: '+ Another', run: async () => { savedRef.current = null; setSaved(null); clearForm(); return 'reset' } },
+      ],
+    }
   }
 
-  const saveMonthly = async () => {
-    if (!(amt > 0)) return setError('Enter the amount.')
-    // No description is fine - saved, and highlighted in the group until it gets one
-    setSubmitting(true)
-    try {
-      let gid = monthly?.id
+  // A group made here goes straight into the list, so the next save (a chat
+  // follow-up) finds it instead of making another
+  const makeGroup = async (data) => {
+    const r = await createGroup(data)
+    setAllGroups((gs) => [...gs, { ...r.data, member_names: data.members }])
+    return r.data.id
+  }
+
+  // The expense as the form holds it, into its group: yours into the month's
+  // personal group, split into the group with those people - either made if
+  // it isn't there. Already saved (by the chat) -> that one is updated, or
+  // moved when it now belongs in another group. No description is fine -
+  // saved, and highlighted in the group until it gets one.
+  const persist = async () => {
+    const prev = savedRef.current
+    let gid, name, created = false, payload
+    if (whose === 'me') {
+      gid = monthly?.id; name = monthlyName(date)
       if (!gid) {
-        const r = await createGroup({
-          name: monthlyName(date), description: '', category: 'personal', emoji: '💰',
-          members: [me], created_by: me,
-        })
-        gid = r.data.id
+        gid = await makeGroup({ name, description: '', category: 'personal', emoji: '💰', members: [me], created_by: me })
+        created = true
       }
-      await createExpense({
+      payload = {
         group_id: Number(gid), date: date || null, title: title.trim() || null, amount: amt,
         paid_by: me, divider: 1, notes: notes || null, split_json: null,
         payment_mode: payMode, receipt_json: receipt ? JSON.stringify(receipt) : null,
         recorded_by: me || null,
-      })
-      nav(`/groups/${gid}`)
-    } catch (err) {
-      setError(err?.response?.data?.detail || 'Something went wrong')
-      setSubmitting(false)
+      }
+    } else {
+      gid = target?.id; name = target?.name || todayName()
+      if (!gid) {
+        gid = await makeGroup({ name, description: '', category: usualCategory, emoji: '', members: groupNames, created_by: me })
+        created = true
+      }
+      // Balances match names exactly: use the group's own spelling of each
+      const names = ((await getGroup(gid)).data.members || []).map((m) => m.name)
+      const canon = (n) => names.find((x) => lc(x) === lc(n)) || n
+      const plainEqual = splitMode === 'equal' && sharing.length === everyone.length
+      const split = shares(canon)
+      payload = {
+        group_id: Number(gid), date: date || null, title: title.trim() || null, amount: amt,
+        paid_by: canon(paidBy || me),
+        divider: plainEqual ? everyone.length : Math.max(1, Object.keys(split).length),
+        notes: notes || null,
+        split_json: plainEqual ? null : JSON.stringify(split),
+        payment_mode: payMode,
+        receipt_json: receipt ? JSON.stringify(receipt) : null,
+        recorded_by: me || null,
+      }
     }
+    let id
+    if (prev && prev.gid === gid) {
+      await updateExpense(prev.id, payload)
+      id = prev.id; created = prev.created
+    } else {
+      if (prev) await unsave(prev)
+      id = (await createExpense(payload)).data.id
+    }
+    const s = { gid, id, name, created }
+    savedRef.current = s; setSaved(s)
+    return s
+  }
+
+  // Take a saved expense back out - and the group, when it was made just for it
+  const unsave = async (s) => {
+    await deleteExpense(s.id)
+    if (s.created) {
+      await deleteGroup(s.gid).catch(() => {})
+      setAllGroups((gs) => gs.filter((g) => g.id !== s.gid))
+    }
+    if (savedRef.current?.id === s.id) { savedRef.current = null; setSaved(null) }
+  }
+
+  const clearForm = () => {
+    setAmount(''); setTitle(''); setNotes(''); setReceipt(null); setScan({ busy: false, error: '', note: '' })
+    setMembers([]); setLeft([]); setSplitMode('equal'); setWhose('me'); setPaidBy(me); setPicked('')
+    setDate(new Date().toISOString().split('T')[0]); setError('')
+  }
+
+  const discard = async () => {
+    if (savedRef.current) await unsave(savedRef.current)
+    clearForm()
+    setChatKey((k) => k + 1)
   }
 
   const save = async () => {
     setError('')
-    if (whose === 'me') return saveMonthly()
-    if (!members.length) return setError('Add at least one person to split it with.')
-    const withExpense = amount !== ''
+    if (whose === 'split' && !members.length) return setError('Add at least one person to split it with.')
+    const withExpense = whose === 'me' || amount !== ''
     if (withExpense) {
-      if (!(amt > 0)) return setError('Enter a valid amount.')
-      if (splitMode === 'equal' && !sharing.length) return setError('Pick at least one person to share it.')
-      if (splitMode === 'custom' && Math.abs(pctTotal - 100) > 0.5) return setError(`The split adds up to ${r2(pctTotal)}% - it needs to be 100%.`)
+      if (!(amt > 0)) return setError(whose === 'me' ? 'Enter the amount.' : 'Enter a valid amount.')
+      if (whose === 'split' && splitMode === 'equal' && !sharing.length) return setError('Pick at least one person to share it.')
+      if (whose === 'split' && splitMode === 'custom' && Math.abs(pctTotal - 100) > 0.5) return setError(`The split adds up to ${r2(pctTotal)}% - it needs to be 100%.`)
     } else if (target) {
       return nav(`/groups/${target.id}`)
     }
     setSubmitting(true)
     try {
-      let gid = target?.id
-      if (!gid) {
-        const r = await createGroup({
-          name: todayName(), description: '', category: usualCategory, emoji: '',
-          members: groupNames, created_by: me,
-        })
-        gid = r.data.id
-      }
       if (withExpense) {
-        // Balances match names exactly: use the group's own spelling of each
-        const names = ((await getGroup(gid)).data.members || []).map((m) => m.name)
-        const canon = (n) => names.find((x) => lc(x) === lc(n)) || n
-        const plainEqual = splitMode === 'equal' && sharing.length === everyone.length
-        const split = shares(canon)
-        await createExpense({
-          group_id: Number(gid), date: date || null, title: title.trim() || null, amount: amt,
-          paid_by: canon(paidBy || me),
-          divider: plainEqual ? everyone.length : Math.max(1, Object.keys(split).length),
-          notes: notes || null,
-          split_json: plainEqual ? null : JSON.stringify(split),
-          payment_mode: payMode,
-          receipt_json: receipt ? JSON.stringify(receipt) : null,
-          recorded_by: me || null,
-        })
+        const s = await persist()
+        return nav(`/groups/${s.gid}`)
       }
+      const gid = await makeGroup({ name: todayName(), description: '', category: usualCategory, emoji: '', members: groupNames, created_by: me })
       nav(`/groups/${gid}`)
     } catch (err) {
       setError(err?.response?.data?.detail || 'Something went wrong')
       setSubmitting(false)
     }
   }
+
+  // The chat saves by itself: askChat fills the form, then asks for a save
+  // here - after the render, so the save sees the form as just filled in
+  useEffect(() => {
+    const done = pendingSave.current
+    if (!done) return
+    pendingSave.current = null
+    persist().then((s) => done({ saved: s }), (err) => done({ err }))
+  }, [saveTick])
 
   const chip = (on) => `px-3 py-1.5 text-xs font-bold border rounded-md ${on ? 'bg-brand-400 text-white border-brand-400' : 'bg-amber-50 text-gray-600 border-amber-200'}`
 
@@ -379,7 +451,7 @@ export default function NewGroup() {
 
       <div className="px-5 mt-5 space-y-5 max-w-2xl">
             {/* Say it or type it - fills everything below, people included */}
-            <ExpenseChat ask={askChat} />
+            <ExpenseChat key={chatKey} ask={askChat} />
 
             {/* Read it from a bill */}
             <div className="bg-amber-50 border border-amber-200 rounded-md px-4 py-3">
@@ -664,10 +736,22 @@ export default function NewGroup() {
 
         {error && <p className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-md px-4 py-3">{error}</p>}
 
+        {saved && (
+          <div className="flex items-center gap-2 text-xs bg-green-50 border border-green-200 rounded-md px-3 py-2">
+            <span className="flex-1 text-green-800 font-bold">✓ Saved to {saved.name} - changes here update it</span>
+            <button type="button" onClick={() => discard().catch((err) => setError(err?.response?.data?.detail || "Couldn't discard it"))}
+              className="font-bold text-red-600 bg-white border border-red-200 rounded-md px-2.5 py-1">
+              Discard
+            </button>
+          </div>
+        )}
+
         <button type="button" onClick={save} className="btn-primary disabled:opacity-50"
           disabled={submitting || (whose === 'split' && members.length === 0)}>
           {submitting
             ? 'Saving…'
+            : saved
+              ? `Done - open ${saved.name}`
             : whose === 'me'
               ? `Save ${amt > 0 ? inr(amt) : 'expense'} to ${monthLabel(date)}`
               : members.length === 0
