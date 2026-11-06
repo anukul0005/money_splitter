@@ -7,6 +7,7 @@ import {
 import { useUser, isAdmin, hasFullAccess } from '../UserContext'
 import UnlockAccess from '../components/UnlockAccess'
 import FullNameCard from '../components/FullNameCard'
+import FontCard from '../components/FontCard'
 import { ALL_QUESTIONS, RECOVERY_QUESTIONS, KEY_QUESTION, generateKey } from '../utils/security'
 import { pushSupported, getExistingSubscription, enablePush, disablePush } from '../push'
 
@@ -325,6 +326,9 @@ export default function Account() {
 
         {/* ── Full access (only shown until it's unlocked) ── */}
         {!hasFullAccess(user) && <UnlockAccess />}
+
+        {/* ── The app's font ── */}
+        <FontCard />
 
         {/* ── Security question ── */}
         <div className="card">

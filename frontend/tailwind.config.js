@@ -61,7 +61,8 @@ export default {
         },
       },
       fontFamily: {
-        sans: ['Num', '"IBM Plex Sans"', 'system-ui', 'sans-serif'],   // Num: digits in Plex Mono - see index.css
+        // Num: digits in Plex Mono - see index.css. --app-font: the font picked in Account (utils/appFont.js)
+        sans: ['Num', 'var(--app-font, "IBM Plex Sans")', '"IBM Plex Sans"', 'system-ui', 'sans-serif'],
         mono: ['"IBM Plex Mono"', '"Courier New"', 'monospace'],
       },
       fontWeight: {
