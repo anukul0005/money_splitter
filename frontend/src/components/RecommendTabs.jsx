@@ -9,12 +9,16 @@ import { hasFullAccess, useUser } from '../UserContext'
  * between them would read as the page jumping on every switch.
  */
 export default function RecommendTabs({ tab, setTab }) {
-  // Without full access the food page stands alone - no tabs to show.
-  if (!hasFullAccess(useUser())) return null
-  const tabs = [
+  // Without full access: food and recipes only
+  const full = hasFullAccess(useUser())
+  const tabs = full ? [
     ['drinks',   'Drinks'],
     ['food',     'Food'],
+    ['recipes',  'Recipes'],
     ['forecast', 'Forecast'],
+  ] : [
+    ['food',     'Food'],
+    ['recipes',  'Recipes'],
   ]
   return (
     <div className="flex gap-1 mt-3 bg-amber-100/60 rounded-lg p-0.5">

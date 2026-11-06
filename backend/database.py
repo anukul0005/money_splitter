@@ -58,6 +58,12 @@ class Settings(BaseSettings):
     # API.SH Indian Railways (trip_planner.py) - free 1,000 credits a month, 1
     # a call: trains between stations with timings and per-class fares.
     api_sh_key: str = ""
+    # Recipes (cookbook/): USDA FoodData Central for ingredient nutrition -
+    # free key, 1,000 lookups an hour (blank: the shared DEMO_KEY, 30 an
+    # hour); data.gov.in for daily mandi prices - free key (blank: reference
+    # prices, shown as estimates).
+    fdc_api_key: str = ""
+    data_gov_in_key: str = ""
 
     # Gmail OAuth (routers/gmail_auth.py) - a Google Cloud OAuth client,
     # read-only Gmail scope, used to find and download credit card

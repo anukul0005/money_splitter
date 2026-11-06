@@ -13,6 +13,7 @@ import ProductReviewForm from '../components/ProductReviewForm'
 import RecommendTabs from '../components/RecommendTabs'
 import RecommendFood from './RecommendFood'
 import Forecast from './Forecast'
+import Recipes from './Recipes'
 import { useUser, hasFullAccess } from '../UserContext'
 
 // A missing number renders as a dash, never as "₹NaN". Number(undefined) is
@@ -247,13 +248,19 @@ function YourBottles() {
   )
 }
 
-/** Drinks, food and the party forecast for people with full access;
- *  everyone else gets the food recommender on its own (no tabs, no mention
- *  of the rest) - see UserContext.hasFullAccess. */
+/** Drinks, food, recipes and the party forecast for people with full access;
+ *  everyone else gets food and recipes (no mention of the rest) - see
+ *  UserContext.hasFullAccess. */
 export default function Recommend() {
   const user = useUser()
-  if (!hasFullAccess(user)) return <RecommendFood tab="food" setTab={() => {}} />
+  if (!hasFullAccess(user)) return <BasicRecommend />
   return <DrinksRecommend />
+}
+
+function BasicRecommend() {
+  const [tab, setTab] = useState('food')
+  if (tab === 'recipes') return <Recipes tab={tab} setTab={setTab} />
+  return <RecommendFood tab={tab} setTab={setTab} />
 }
 
 function DrinksRecommend() {
@@ -522,6 +529,7 @@ function DrinksRecommend() {
   // doesn't use.
   if (tab === 'food') return <RecommendFood tab={tab} setTab={setTab} />
   if (tab === 'forecast') return <Forecast tab={tab} setTab={setTab} />
+  if (tab === 'recipes') return <Recipes tab={tab} setTab={setTab} />
 
   if (!meta) return <LoadingSpinner />
 

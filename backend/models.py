@@ -1526,3 +1526,16 @@ class CreditCardStatement(Base):
     source = Column(String(10), nullable=True)           # "email" (amount in the email) | "pdf"
     details_json = Column(Text, nullable=True)           # the PDF's breakup - see card_details.py
     extracted_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class RecipeKitchen(Base):
+    """Recipes (cookbook/): one person's numbers for meal planning
+    (`profile_json`: age, sex, height, weight, activity, pace, diet) and
+    what's in their kitchen (`pantry_json`: a list of ingredient names)."""
+
+    __tablename__ = "recipe_kitchens"
+
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    profile_json = Column(Text, nullable=True)
+    pantry_json = Column(Text, nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

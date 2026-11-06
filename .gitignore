@@ -1,6 +1,8 @@
 venv/
 __pycache__/
 *.pyc
+# Downloaded data (INDB, USDA lookups, mandi prices) - fetched by the server, not shipped
+backend/.cache/
 .env
 *.db
 *.sqlite3

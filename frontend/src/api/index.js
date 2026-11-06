@@ -190,6 +190,11 @@ export const getExpenses   = (groupId)   => api.get(`/expenses/group/${groupId}`
 export const createExpense = (data)      => api.post('/expenses/', data)
 export const updateExpense = (id, data)  => api.put(`/expenses/${id}`, data)
 export const deleteExpense = (id)        => api.delete(`/expenses/${id}`)
+// Recipes (Recommend → Recipes): ask, plan, and your profile and kitchen
+export const recipesMe     = ()       => api.get('/recipes/me')
+export const saveRecipesMe = (data)   => api.put('/recipes/me', data)
+export const askRecipes    = (question) => api.post('/recipes/ask', { question })
+export const planRecipes   = (days = 7, diet = 'any') => api.post('/recipes/plan', { days, diet })
 // Add Expense's chat box and mic: a message read into the form's fields
 export const understandExpense  = (data) => api.post('/expenses/understand', data)
 export const transcribeExpense  = (blob) => {
