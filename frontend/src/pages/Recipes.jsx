@@ -45,7 +45,7 @@ const keep = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)) } catc
 
 // The plan's week runs Friday to Thursday - day 1 is the Friday it starts on
 // (older plans: the Friday on or before the day they were made)
-const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+export const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 export function planDate(plan, day) {
   let start
   if (plan?.starts) start = new Date(`${plan.starts}T00:00:00`)
@@ -118,6 +118,7 @@ export default function Recipes({ tab, setTab }) {
     if (data.mode === 'plan' && !data.need_profile) {
       setWeekPlan(data); setResult(null)
       if (data.made_at) fresh(data.made_at)
+      if (data.starts) nav(`/recipes/week?w=${data.starts}`)
       // The same week planned again keeps what's logged - and the weeks change
       recipesMe().then((r) => setMe((m) => {
         const next = { ...m, log: r.data.log || {}, weeks: r.data.weeks, plan_made_at: r.data.plan?.made_at || m.plan_made_at }
@@ -178,16 +179,11 @@ export default function Recipes({ tab, setTab }) {
       </div>
 
       <div className="px-5 mt-4 space-y-4 max-w-2xl">
-        {/* The week's plan leads - and under it, every week so far against its target */}
-        {weekPlan?.days?.length > 0 && (
+        {/* Every week so far against its target - each opens its own page of 7 day cards */}
+        {(weekPlan?.days?.length > 0 || me?.weeks?.length > 0) && (
           <div className="space-y-2">
-            <div className="flex items-center justify-between pt-1">
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Your week's plan</p>
-              <button onClick={plan} disabled={!!busy} className="text-[11px] font-bold text-brand-600 disabled:opacity-50">Make a new one</button>
-            </div>
-            <Plan r={weekPlan} onProfile={() => setShowMe(true)}
-              log={weekPlan.made_at && weekPlan.made_at === me?.plan_made_at ? (me?.log || {}) : {}} setLog={setLog} />
             <Weeks weeks={me?.weeks || []} />
+            <button onClick={plan} disabled={!!busy} className="text-[11px] font-bold text-brand-600 disabled:opacity-50">＋ Make a new plan</button>
           </div>
         )}
 
@@ -279,7 +275,7 @@ function Weeks({ weeks }) {
         const now = w.starts <= today && today <= w.ends
         const fullTarget = w.target_day * w.off_days
         return (
-          <div key={w.starts} className={`border-t border-amber-100 first:border-0 py-2 ${now ? '' : 'opacity-80'}`}>
+          <Link key={w.starts} to={`/recipes/week?w=${w.starts}`} className={`block border-t border-amber-100 first:border-0 py-2 active:bg-amber-50 ${now ? '' : 'opacity-80'}`}>
             <div className="flex items-baseline justify-between gap-2">
               <span className="text-sm font-black text-gray-900">{range(w)}{now && <span className="ml-1.5 text-[9px] font-black text-white bg-brand-400 rounded px-1.5 py-0.5 align-middle">THIS WEEK</span>}</span>
               <span className="text-[11px] text-gray-500">{w.meals_logged} of {w.meals_planned} meals logged</span>
@@ -309,7 +305,8 @@ function Weeks({ weeks }) {
                 )}
               </div>
             </div>
-          </div>
+            <p className="text-[10px] font-bold text-brand-600 mt-1.5">Day by day, and how each went →</p>
+          </Link>
         )
       })}
     </div>
@@ -549,7 +546,7 @@ function Compare({ a, b }) {
   )
 }
 
-function Plan({ r, asked, onProfile, log = {}, setLog }) {
+export function Plan({ r, onProfile, log = {}, setLog }) {
   const [logging, setLogging] = useState(null)     // "day:meal" whose log box is open
   // Which day is open survives a visit to a dish's page and back
   // Today's day opens by itself; one opened by hand stays open (that day, this plan)
@@ -608,33 +605,48 @@ function Plan({ r, asked, onProfile, log = {}, setLog }) {
         <p className="text-[10px] text-gray-400 mt-1">A guide worked out from your numbers (Mifflin-St Jeor), not medical advice. Portions are scaled to land near the target.</p>
       </div>
       {r.days.map((d, i) => {
-        const off = d.totals.kcal - t.kcal
-        // Tracked: what was eaten for the meals logged, the plan for the rest
         const eaten = log[String(d.day)] || {}
         const logged = Object.keys(eaten).filter((m) => d.meals[m]?.length || eaten[m])
         const sumMeal = (xs, k) => xs.reduce((s, x) => s + (x[k] || 0), 0)
-        const tracked = Object.entries(d.meals).reduce((s, [m, xs]) => s + (eaten[m] ? eaten[m].totals.kcal : sumMeal(xs, 'kcal')), 0)
-        const trackedP = Object.entries(d.meals).reduce((s, [m, xs]) => s + (eaten[m] ? eaten[m].totals.protein : sumMeal(xs, 'protein')), 0)
+        // The day as logged: what was had, against the plan and the target
+        const date = planDate(r, d.day)
+        const mealsPlanned = Object.values(d.meals).filter((xs) => xs.length).length
+        const hadK = Object.values(eaten).reduce((s, e) => s + e.totals.kcal, 0)
+        const hadP = Object.values(eaten).reduce((s, e) => s + e.totals.protein, 0)
+        const plannedForLogged = Object.entries(d.meals).reduce((s, [m, xs]) => s + (eaten[m] ? sumMeal(xs, 'kcal') : 0), 0)
+        const complete = mealsPlanned > 0 && logged.length >= mealsPlanned
+        const future = isoDay(date) > isoDay(new Date())
+        const tone = (v, ref) => (Math.abs(v - ref) <= ref * 0.1 ? 'text-green-700' : v > ref ? 'text-red-600' : 'text-amber-700')
+        const verdict = complete
+          ? { text: hadK > t.kcal ? `${r0(hadK - t.kcal)} kcal over target` : hadK < t.kcal ? `${r0(t.kcal - hadK)} kcal under target` : 'On target', cls: tone(hadK, t.kcal) }
+          : logged.length
+            ? { text: `${logged.length} of ${mealsPlanned} meals logged - ${r0(hadK - plannedForLogged) === 0 ? 'as planned so far' : `${r0(Math.abs(hadK - plannedForLogged))} kcal ${hadK > plannedForLogged ? 'more' : 'less'} than planned so far`}`, cls: tone(hadK, plannedForLogged) }
+            : { text: future ? 'Coming up' : 'Nothing logged', cls: 'text-gray-400' }
         return (
-          <div key={d.day} className="card">
+          <div key={d.day} className={`card ${isToday(date) ? 'border-brand-400/60' : ''}`}>
             <button onClick={() => setOpen(open === i ? -1 : i)} className="w-full flex items-center justify-between gap-2 text-left">
               <span className="text-sm font-black text-gray-900">
-                {dayLabel(planDate(r, d.day))}
-                {isToday(planDate(r, d.day)) && <span className="ml-1.5 text-[9px] font-black text-white bg-brand-400 rounded px-1.5 py-0.5 align-middle">TODAY</span>}
-                {logged.length > 0 && <span className="ml-1.5 text-[10px] font-bold text-green-700 align-middle">✓ {logged.length} logged</span>}
+                {dayLabel(date)}
+                {isToday(date) && <span className="ml-1.5 text-[9px] font-black text-white bg-brand-400 rounded px-1.5 py-0.5 align-middle">TODAY</span>}
                 <span className="block text-[10px] font-bold text-gray-400">Day {d.day}</span>
               </span>
-              <span className="text-[11px] text-gray-600">
-                <b className={Math.abs(off) <= t.kcal * 0.1 ? 'text-green-700' : 'text-amber-700'}>{r0(d.totals.kcal)} kcal</b>
-                {' · '}{r0(d.totals.protein)} g protein{d.cost != null ? ` · ₹${d.cost}${d.cost_partial ? '+' : ''}` : ''} {open === i ? '▾' : '▸'}
-              </span>
+              <span className="text-[11px] font-bold text-brand-600">{open === i ? 'Hide meals ▾' : 'Meals ▸'}</span>
             </button>
-            {logged.length > 0 && (
-              <p className="text-[11px] mt-1 text-gray-600">
-                With what you had: <b className={Math.abs(tracked - t.kcal) <= t.kcal * 0.1 ? 'text-green-700' : tracked > t.kcal ? 'text-red-600' : 'text-amber-700'}>{r0(tracked)} kcal</b>
-                {' · '}{r0(trackedP)} g protein · target {t.kcal} ({tracked > t.kcal ? `${r0(tracked - t.kcal)} over` : `${r0(t.kcal - tracked)} to spare`})
-              </p>
-            )}
+            <div className="grid grid-cols-3 gap-1.5 mt-2">
+              <div className="bg-amber-50 rounded-md px-2 py-1.5">
+                <p className="text-sm font-black text-gray-900 tabular-nums">{r0(d.totals.kcal)}</p>
+                <p className="text-[9px] text-gray-500">kcal planned{d.cost != null ? ` · ₹${d.cost}${d.cost_partial ? '+' : ''}` : ''}</p>
+              </div>
+              <div className="bg-amber-50 rounded-md px-2 py-1.5">
+                <p className={`text-sm font-black tabular-nums ${logged.length ? 'text-gray-900' : 'text-gray-300'}`}>{logged.length ? r0(hadK) : '-'}</p>
+                <p className="text-[9px] text-gray-500">kcal you had ({logged.length}/{mealsPlanned} meals)</p>
+              </div>
+              <div className="bg-amber-50 rounded-md px-2 py-1.5">
+                <p className={`text-sm font-black tabular-nums ${logged.length ? tone(hadP, t.protein_g * (complete ? 1 : logged.length / mealsPlanned)) : 'text-gray-300'}`}>{logged.length ? `${r0(hadP)} g` : '-'}</p>
+                <p className="text-[9px] text-gray-500">protein of {t.protein_g} g</p>
+              </div>
+            </div>
+            <p className={`text-[11px] font-bold mt-1.5 ${verdict.cls}`}>{verdict.text}{complete ? ` · target ${t.kcal}` : ''}</p>
             {open === i && (
               <div className="mt-2 space-y-2">
                 {Object.entries(d.meals).filter(([, xs]) => xs.length).map(([meal, xs]) => (
