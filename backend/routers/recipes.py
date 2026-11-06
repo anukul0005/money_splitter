@@ -192,6 +192,73 @@ def log_meal(payload: LogIn, db: Session = Depends(get_db), caller: User = Depen
     return {"log": days, "entry": entry, "weeks": _weeks(k, plan, days)}
 
 
+def _logged(db: Session, caller: User, day: int, meal: str):
+    k = _kitchen(db, caller)
+    plan = json.loads(k.plan_json) if k.plan_json else None
+    days = _log(k, plan)
+    entry = days.get(str(day), {}).get(meal)
+    if not entry:
+        raise HTTPException(404, "Nothing logged for that meal")
+    return k, plan, days, entry
+
+
+def _save_entry(db, k, plan, days, day, meal, entry):
+    days[str(day)][meal] = entry
+    k.log_json = json.dumps({"plan": plan.get("made_at"), "days": days})
+    db.commit()
+    return {"log": days, "entry": entry, "weeks": _weeks(k, plan, days)}
+
+
+class MealRef(BaseModel):
+    day: int
+    meal: str
+
+
+@router.post("/log/rework")
+def rework_meal(payload: MealRef, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """A logged meal's unknown items given another go - from their
+    ingredients or the closest INDB dish, and learnt for next time."""
+    k, plan, days, entry = _logged(db, caller, payload.day, payload.meal)
+    db.rollback()
+    try:
+        entry = engine.rework(entry)
+    except Exception as e:
+        print(f"[recipes] rework failed: {e!r}")
+        raise HTTPException(502, "Couldn't work it out just now - try again")
+    k, plan, days, _ = _logged(db, caller, payload.day, payload.meal)
+    return _save_entry(db, k, plan, days, payload.day, payload.meal, entry)
+
+
+class FixIn(BaseModel):
+    day: int
+    meal: str
+    index: int
+    kcal: float
+    protein: float | None = None
+
+
+@router.post("/log/fix")
+def fix_item(payload: FixIn, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Your own figure for something you had - used, and remembered for
+    that food from now on."""
+    if not 0 < payload.kcal <= 5000:
+        raise HTTPException(400, "Calories for what you had, e.g. 450")
+    k, plan, days, entry = _logged(db, caller, payload.day, payload.meal)
+    items = list(entry.get("items") or [])
+    if not 0 <= payload.index < len(items):
+        raise HTTPException(400, "Which item?")
+    it = dict(items[payload.index])
+    g = it.get("grams") or 250
+    n = {x: 0.0 for x in engine.NUTRIENTS}
+    n["kcal"] = round(payload.kcal, 1)
+    if payload.protein is not None:
+        n["protein"] = round(payload.protein, 1)
+    it.update({"nutrition": n, "source": "you", "grams": g, "basis": "your own figure"})
+    items[payload.index] = it
+    engine.remember_food(it["name"], {x: v / g * 100 for x, v in n.items()}, "you", "your own figure", g)
+    return _save_entry(db, k, plan, days, payload.day, payload.meal, {**entry, **engine.meal_totals(items)})
+
+
 class UnlogIn(BaseModel):
     day: int
     meal: str

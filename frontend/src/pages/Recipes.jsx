@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { askRecipes, logMeal, planRecipes, recipeDish, recipesMe, saveRecipesMe, unlogMeal } from '../api'
+import { askRecipes, fixMealItem, logMeal, planRecipes, recipeDish, recipesMe, reworkMeal, saveRecipesMe, unlogMeal } from '../api'
 import RecommendTabs from '../components/RecommendTabs'
 import { Typewriter } from '../components/ExpenseChat'
 import { useVoice, canRecord as micWorks } from '../components/useVoice'
@@ -314,6 +314,49 @@ function Weeks({ weeks }) {
 }
 
 /**
+ * Something you had that couldn't be worked out: have another go (from its
+ * ingredients, or the closest dish INDB has - learnt for next time), or put
+ * in your own figure, which is remembered for that food too.
+ */
+function UnknownItem({ day, meal, index, item, onLog }) {
+  const [busy, setBusy] = useState(false)
+  const [own, setOwn] = useState(false)
+  const [kcal, setKcal] = useState('')
+  const [protein, setProtein] = useState('')
+  const [err, setErr] = useState('')
+  const run = async (f) => {
+    setBusy(true); setErr('')
+    try { const { data } = await f(); onLog(data.log, data.weeks); if (!data.entry?.items?.[index]?.nutrition) setErr("Still couldn't - put in your own figure") }
+    catch (e) { setErr(e?.response?.data?.detail || "Couldn't - try again") }
+    finally { setBusy(false) }
+  }
+  return (
+    <div className="bg-white border border-amber-200 rounded-md px-2.5 py-1.5 mt-0.5 mb-1">
+      <p className="text-[10px] text-amber-800 font-bold">Couldn't work out {item.said || item.name} - not in the totals yet</p>
+      {!own ? (
+        <div className="flex gap-3 mt-1">
+          <button disabled={busy} onClick={() => run(() => reworkMeal(day, meal))} className="text-[11px] font-bold text-brand-600 disabled:opacity-50">
+            {busy ? 'Working it out…' : 'Work it out'}
+          </button>
+          <button disabled={busy} onClick={() => setOwn(true)} className="text-[11px] font-bold text-gray-600">Enter calories myself</button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+          <input type="number" inputMode="decimal" placeholder="kcal" value={kcal} onChange={(e) => setKcal(e.target.value)}
+            className="w-20 border border-amber-200 rounded-md px-2 py-1 text-xs" />
+          <input type="number" inputMode="decimal" placeholder="protein g" value={protein} onChange={(e) => setProtein(e.target.value)}
+            className="w-24 border border-amber-200 rounded-md px-2 py-1 text-xs" />
+          <button disabled={busy || !(parseFloat(kcal) > 0)} className="btn-primary text-[11px] py-1 px-2.5 disabled:opacity-50"
+            onClick={() => run(() => fixMealItem(day, meal, index, parseFloat(kcal), protein === '' ? null : parseFloat(protein)))}>Save</button>
+          <button onClick={() => setOwn(false)} className="text-[11px] font-bold text-gray-400">Cancel</button>
+        </div>
+      )}
+      {err && <p className="text-[10px] text-red-600 mt-0.5">{err}</p>}
+    </div>
+  )
+}
+
+/**
  * One meal of the plan as actually eaten: "had it as planned" in a tap, or
  * typed / said in any words - English, Hindi, Hinglish ("2 besan chilla
  * aur chai", "दो रोटी और दाल"). The server reads which foods and how much;
@@ -354,17 +397,21 @@ export function MealLog({ day, meal, planned, entry, onLog, add = false, quickLa
           {entry.items.map((i, k) => {
             const label = <span className="text-gray-800 min-w-0">{i.name}{i.servings ? <span className="text-gray-400"> × {i.servings} {i.unit}</span> : i.grams ? <span className="text-gray-400"> · {i.grams} g</span> : ''}</span>
             const nums = <span className="text-gray-500 tabular-nums flex-shrink-0">{i.nutrition ? `${r0(i.nutrition.kcal)} kcal · ${r0(i.nutrition.protein)} g P` : '-'}{links ? ' ›' : ''}</span>
-            // Its own page: the meal as had, beside what was planned
-            return links && i.nutrition ? (
-              <Link key={k} to={dishHref({ name: i.name, servings: i.servings || 1, unit: i.unit, day, meal })}
-                className="flex items-baseline justify-between gap-2 text-xs py-1 active:bg-amber-100 rounded [&>span:first-child]:underline [&>span:first-child]:decoration-amber-300 [&>span:first-child]:underline-offset-2">
-                {label}{nums}
-              </Link>
-            ) : (
-              <div key={k} className="flex items-baseline justify-between gap-2 text-xs py-0.5">{label}{nums}</div>
+            // How a food not known by name was worked out - an estimate, said so
+            const how = { ingredients: `≈ added up from ${i.basis || 'its ingredients'}`, similar: `≈ estimated from ${(i.basis || '').replace('the closest dish INDB has: ', 'a similar dish, ')}`, you: 'your own figure' }[i.source]
+            return (
+              <div key={k}>
+                {links && i.nutrition ? (
+                  <Link to={dishHref({ name: i.name, servings: i.servings || 1, unit: i.unit, day, meal })}
+                    className="flex items-baseline justify-between gap-2 text-xs py-1 active:bg-amber-100 rounded [&>span:first-child]:underline [&>span:first-child]:decoration-amber-300 [&>span:first-child]:underline-offset-2">
+                    {label}{nums}
+                  </Link>
+                ) : <div className="flex items-baseline justify-between gap-2 text-xs py-0.5">{label}{nums}</div>}
+                {how && <p className="text-[10px] text-gray-400 -mt-0.5 mb-0.5">{how}</p>}
+                {!i.nutrition && <UnknownItem day={day} meal={meal} index={k} item={i} onLog={onLog} />}
+              </div>
             )
           })}
-          {entry.unknown?.length > 0 && <p className="text-[10px] text-amber-700 mt-0.5">Couldn't work out: {entry.unknown.join(', ')} - not in the totals</p>}
           <p className="text-[11px] font-bold text-gray-800 mt-1">
             {r0(entry.totals.kcal)} kcal · {r0(entry.totals.protein)} g protein{entry.cost != null ? ` · ₹${entry.cost}` : ''}
             {plannedKcal > 0 && (() => {

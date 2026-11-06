@@ -13,6 +13,7 @@ from INDB, portions scaled here to land on the target.
 from __future__ import annotations
 
 import json
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
@@ -326,7 +327,119 @@ def _eaten_item(it: dict, dish_name: str | None) -> dict:
         if per:
             out["nutrition"] = {kk: round(per.get(kk, 0) * g / 100, 1) for kk in NUTRIENTS}
             return out
+    # Neither knows it by name: worked out from its ingredients or the closest dish, and learnt
+    learnt = _learnt_item(it, said, name, grams, count)
+    if learnt:
+        return learnt
     return {"said": said, "name": name, "source": None, "nutrition": None}
+
+
+def rework(entry: dict) -> dict:
+    """A logged meal again, its unknown items given another go (USDA may
+    answer now, or the food has been learnt since)."""
+    items = []
+    for i in entry.get("items") or []:
+        if i.get("nutrition"):
+            items.append(i)
+            continue
+        again = _learnt_item({}, i.get("said") or i["name"], i["name"], i.get("grams"), None)
+        items.append(again or i)
+    return {**entry, **meal_totals(items)}
+
+
+def meal_totals(items: list[dict]) -> dict:
+    known = [i["nutrition"] for i in items if i.get("nutrition")]
+    costs = [i["cost"] for i in items if i.get("cost") is not None]
+    return {"items": items, "unknown": [i["said"] for i in items if not i.get("nutrition")],
+            "totals": _sum(known), "cost": round(sum(costs)) if costs else None}
+
+
+# ── foods neither INDB nor the ingredient list knows, learnt once ──
+_LEARNED = DATA_DIR / "learned_foods.json"
+_learn_lock = threading.Lock()
+
+_INGREDIENTS_OF = """Give the ingredients of ONE ordinary serving of this dish, as made in India. Return ONLY JSON:
+{"serving_grams": number (the cooked serving's weight), "ingredients": [{"item": plain ingredient name, "grams": number (raw)}]}
+No calories or nutrition - only what goes in and how much."""
+
+_SIMILAR = """Pick the known dish most like this food - the same kind of dish, made in a similar way (noodles for noodles, a curry for a curry). Return ONLY JSON: {"dish": "<known dish name copied exactly>" or null}"""
+
+
+def _food_key(name: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9 ]", " ", (name or "").lower()).split())
+
+
+def _learned() -> dict:
+    try:
+        return json.loads(_LEARNED.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def remember_food(name: str, per100: dict, source: str, basis: str, serving_grams: float | None = None) -> None:
+    with _learn_lock:
+        known = _learned()
+        known[_food_key(name)] = {"name": name, "per100": {k: round(per100.get(k, 0), 2) for k in NUTRIENTS},
+                                  "source": source, "basis": basis, "serving_grams": serving_grams}
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        _LEARNED.write_text(json.dumps(known, ensure_ascii=False), encoding="utf-8")
+
+
+def learn_food(name: str) -> dict | None:
+    """Per 100 g of a food nothing knows by name, worked out - and remembered:
+      1. its ingredients (the LLM's recipe knowledge), each from USDA, added
+         up here - when most of its weight has figures;
+      2. else the closest INDB dish (the LLM picks it from INDB's own list),
+         its figures - marked as an estimate from a similar dish.
+    The LLM never gives a number."""
+    key = _food_key(name)
+    if not key:
+        return None
+    hit = _learned().get(key)
+    if hit:
+        return hit
+    try:
+        got = chat_json(_INGREDIENTS_OF, f"Dish: {name}", temperature=0.2, timeout=40, prefer=1,
+                        extra={"reasoning_effort": "low", "max_completion_tokens": 1200})
+        items = [x for x in got.get("ingredients") or [] if isinstance(x, dict)][:20]
+        serving = float(got.get("serving_grams") or 0)
+    except Exception:
+        items, serving = [], 0
+    if items:
+        w = work_out({"name": name, "ingredients": items, "indb": []})
+        raw = sum(l["grams"] for l in w["ingredients"])
+        known = sum(l["grams"] for l in w["ingredients"] if "nutrition" in l or l["as"] in foods.STAPLES)
+        if raw and known / raw >= 0.75 and w["nutrition"]["kcal"] > 0:
+            cooked = serving if serving > 0 else raw
+            per100 = {k: w["nutrition"][k] / cooked * 100 for k in NUTRIENTS}
+            basis = "its ingredients: " + ", ".join(f"{l['item']} {l['grams']} g" for l in w["ingredients"][:8])
+            remember_food(name, per100, "ingredients", basis, cooked)
+            return _learned().get(key)
+    # The closest dish INDB has
+    words = [x for x in key.split() if len(x) > 2]
+    cands = indb.named(words, "any", limit=40)
+    if cands:
+        try:
+            pick = chat_json(_SIMILAR, f"Food: {name}\n\nKnown dishes:\n" + "\n".join(f"- {d['name']}" for d in cands),
+                             temperature=0, timeout=30, prefer=1, extra={"reasoning_effort": "low"}).get("dish")
+        except Exception:
+            pick = None
+        d = indb.find(str(pick or ""), min_score=0.9) if pick else None
+        if d:
+            remember_food(name, d["per100"], "similar", f"the closest dish INDB has: {d['name']}",
+                          d["serving"]["grams"] if d["serving"] else None)
+            return _learned().get(key)
+    return None
+
+
+def _learnt_item(it: dict, said: str, name: str, grams: float | None, count: float | None) -> dict | None:
+    """An item worked out from what's been learnt about the food."""
+    got = learn_food(name)
+    if not got:
+        return None
+    g = grams or ((count or 1) * got["serving_grams"] if got.get("serving_grams") else None) or 250
+    return {"said": said, "name": name, "source": got["source"], "grams": round(g), "basis": got["basis"],
+            "nutrition": {k: round(got["per100"][k] * g / 100, 1) for k in NUTRIENTS}}
 
 
 def read_meal(text: str | None = None, planned: list[dict] | None = None) -> dict:
