@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { createExpense, createGroup, getGroup, getGroups, listUsersBasic, scanReceipt } from '../api'
+import { createExpense, createGroup, getGroup, getGroups, listUsersBasic, scanReceipt, understandExpense } from '../api'
+import ExpenseChat from '../components/ExpenseChat'
 import { useUser } from '../UserContext'
 import { buildMasterGroups, pairKey } from '../utils/masterGroups'
 import { compressImage } from '../utils/compressImage'
@@ -239,9 +240,56 @@ export default function NewGroup() {
     try { localStorage.setItem(PAYMENT_KEY, v) } catch { /* private mode */ }
   }
 
+  // A name the chat heard, as this page adds people: someone from your
+  // groups, else the one app user it can mean, else the name as said.
+  const resolve = (said) => {
+    const s = lc(said)
+    const first = s.split(/\s+/)[0]
+    const knownHit = known.find((n) => lc(n) === s) || (() => {
+      const f = known.filter((n) => lc(n).split(/\s+/)[0] === first)
+      return f.length === 1 ? f[0] : null
+    })()
+    if (knownHit) return knownHit
+    const exact = appUsers.find((u) => lc(u.name) === s)
+    if (exact) return exact.name
+    const fits = appUsers.filter((u) => lc(u.name).startsWith(s) || lc(u.full_name).split(/\s+/).some((w) => w && w === first))
+    return fits.length === 1 ? fits[0].name : said
+  }
+
+  // The chat box: a message read into the form - the people named make it a
+  // split with them (the group is then worked out as usual), nobody named
+  // leaves it as it is. Resolves to the line shown back.
+  const askChat = async (text) => {
+    const { data } = await understandExpense({
+      text,
+      draft: {
+        amount: amount || null, title: title || null, notes: notes || null, date: date || null,
+        payment_mode: payMode || null, people: members,
+        paid_by: !paidBy || lc(paidBy) === lc(me) ? 'me' : paidBy,
+      },
+    })
+    if (data.amount != null) setAmount(String(data.amount))
+    if (data.title != null) setTitle(data.title)
+    if (data.notes != null) setNotes(data.notes)
+    if (data.date) setDate(data.date)
+    if (data.payment_mode) setPayMode(data.payment_mode)
+    const people = [...new Set((data.people || []).map(resolve))].filter((n) => lc(n) !== lc(me))
+    if (people.length) {
+      const changed = people.map(lc).sort().join('|') !== members.map(lc).sort().join('|')
+      if (changed) { setMembers(people); setLeft([]); setSplitMode('equal') }
+      setWhose('split')
+      const payer = data.payer ? people.find((p) => lc(p) === lc(resolve(data.payer))) : null
+      setPaidBy(payer || me)
+    } else if (data.payer === null && !members.length) {
+      setPaidBy(me)
+    }
+    setError('')
+    return data.reply
+  }
+
   const saveMonthly = async () => {
     if (!(amt > 0)) return setError('Enter the amount.')
-    if (!title.trim()) return setError('Add a description - the category is worked out from it.')
+    // No description is fine - saved, and highlighted in the group until it gets one
     setSubmitting(true)
     try {
       let gid = monthly?.id
@@ -253,7 +301,7 @@ export default function NewGroup() {
         gid = r.data.id
       }
       await createExpense({
-        group_id: Number(gid), date: date || null, title: title.trim(), amount: amt,
+        group_id: Number(gid), date: date || null, title: title.trim() || null, amount: amt,
         paid_by: me, divider: 1, notes: notes || null, split_json: null,
         payment_mode: payMode, receipt_json: receipt ? JSON.stringify(receipt) : null,
         recorded_by: me || null,
@@ -272,7 +320,6 @@ export default function NewGroup() {
     const withExpense = amount !== ''
     if (withExpense) {
       if (!(amt > 0)) return setError('Enter a valid amount.')
-      if (!title.trim()) return setError('Add a description - the category is worked out from it.')
       if (splitMode === 'equal' && !sharing.length) return setError('Pick at least one person to share it.')
       if (splitMode === 'custom' && Math.abs(pctTotal - 100) > 0.5) return setError(`The split adds up to ${r2(pctTotal)}% - it needs to be 100%.`)
     } else if (target) {
@@ -295,7 +342,7 @@ export default function NewGroup() {
         const plainEqual = splitMode === 'equal' && sharing.length === everyone.length
         const split = shares(canon)
         await createExpense({
-          group_id: Number(gid), date: date || null, title: title.trim(), amount: amt,
+          group_id: Number(gid), date: date || null, title: title.trim() || null, amount: amt,
           paid_by: canon(paidBy || me),
           divider: plainEqual ? everyone.length : Math.max(1, Object.keys(split).length),
           notes: notes || null,
@@ -331,6 +378,9 @@ export default function NewGroup() {
       </div>
 
       <div className="px-5 mt-5 space-y-5 max-w-2xl">
+            {/* Say it or type it - fills everything below, people included */}
+            <ExpenseChat ask={askChat} />
+
             {/* Read it from a bill */}
             <div className="bg-amber-50 border border-amber-200 rounded-md px-4 py-3">
               <p className="text-xs font-bold text-gray-700 mb-2">Upload it <span className="font-normal text-gray-400">- or type it in below</span></p>
@@ -372,6 +422,9 @@ export default function NewGroup() {
               <label className="label">Description</label>
               <input className="input" placeholder="e.g. dinner at Punjab Grill" value={title}
                 onChange={(e) => setTitle(e.target.value)} autoComplete="off" />
+              {!title.trim() && amt > 0 && (
+                <p className="text-[10px] text-gray-400 mt-1">No description yet? Save it anyway - it stays highlighted in the group until you add one.</p>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-3">

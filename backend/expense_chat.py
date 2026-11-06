@@ -112,7 +112,19 @@ def _check(out: dict, me: str, groups: list[dict], current: int | None) -> dict:
         return exact[0] if exact else firsts[0] if len(firsts) == 1 else None
 
     payer = str(out.get("paid_by") or "").strip()
-    paid = member(me if payer.lower() in ("", "me", "i", "myself", "user") else payer) or member(me)
+    by_me = payer.lower() in ("", "me", "i", "myself", "user") or _same(payer, me)
+    paid = member(me if by_me else payer) or member(me)
+
+    # The people as the user knows them (New expense picks people, not a
+    # group): a name from their groups when exactly one fits, else as said
+    known = sorted({m for g in groups for m in g["members"] if not _same(m, me)})
+
+    def person(name):
+        exact = [k for k in known if k.lower() == name.strip().lower()]
+        fits = [k for k in known if _same(k, name)]
+        return exact[0] if exact else fits[0] if len(fits) == 1 else name.strip().title()
+    people_out = list(dict.fromkeys(person(p) for p in said))
+    payer_out = None if by_me else next((p for p in people_out if _same(p, payer)), person(payer))
     sharing = None
     named = [m for m in (member(p) for p in said) if m]
     if named:
@@ -132,6 +144,8 @@ def _check(out: dict, me: str, groups: list[dict], current: int | None) -> dict:
         "title": title,
         "paid_by": paid,
         "participants": sharing,
+        "people": people_out,      # everyone named besides the user
+        "payer": payer_out,        # who paid when it wasn't the user, else null
         "payment_mode": mode if mode in MODES else None,
         "date": date,
         "notes": notes,
