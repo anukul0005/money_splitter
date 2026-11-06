@@ -451,7 +451,7 @@ export default function NewGroup() {
 
       <div className="px-5 mt-5 space-y-5 max-w-2xl">
             {/* Say it or type it - fills everything below, people included */}
-            <ExpenseChat key={chatKey} ask={askChat} />
+            <ExpenseChat key={chatKey} ask={askChat} onScan={() => cameraRef.current?.click()} />
 
             {/* Read it from a bill */}
             <div className="bg-amber-50 border border-amber-200 rounded-md px-4 py-3">
