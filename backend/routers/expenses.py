@@ -121,11 +121,15 @@ def understand_expense(payload: UnderstandIn, db: Session = Depends(get_db),
     if not payload.text.strip():
         raise HTTPException(400, "Say what was spent")
     offered = set(payload.group_ids or [])
-    groups = [{"id": g.id, "name": g.name, "members": [m.name for m in g.members]}
-              for g in caller_groups(db, caller, history=False, active_only=True)
-              if not offered or g.id in offered]
+    mine = [g for g in caller_groups(db, caller, history=False, active_only=True)
+            if not offered or g.id in offered]
+    # How recently each was used - the latest expense in it (else the group's own id)
+    last = dict(db.query(Expense.group_id, func.max(Expense.id))
+                .filter(Expense.group_id.in_([g.id for g in mine])).group_by(Expense.group_id).all())
+    groups = [{"id": g.id, "name": g.name, "members": [m.name for m in g.members],
+               "last": last.get(g.id) or 0} for g in mine]
     try:
-        return expense_chat.understand(payload.text, caller.name, groups[:60],
+        return expense_chat.understand(payload.text, caller.name, groups,
                                        payload.group_id, payload.draft or {})
     except Exception as e:
         print(f"[expense_chat] understand failed: {e}")

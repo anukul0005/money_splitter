@@ -27,22 +27,15 @@ _SYSTEM = """You fill in an expense form for a money-splitting app, from what th
 
 Return ONLY a JSON object:
 {
-  "group_id": number or null - which of the user's groups this goes in (rules below),
+  "people": [names] - everyone the message names as being with the user or sharing it, written as in the list of people the user knows when one matches (by first name or nickname, ignoring case), else as said; [] when nobody is named,
   "amount": number or null - the total spent,
   "title": string or null - the description: who the money went to or what it was for ("XYZ Store", "Dinner at Punjab Grill", "Petrol"). Tidy capitalisation. null when the message doesn't say - never invent one, and never use a person's name or the amount as the description,
-  "paid_by": string or null - who paid, exactly as that group's member name. "I paid", "spent", "spent with X" with nobody else named as paying = the user,
-  "split_with": [member names] or null - the people who share it besides the user, exactly as the group's member names; null when the message doesn't narrow it down (everyone in the group shares),
+  "paid_by": string or null - who paid: "me" for the user ("I paid", "spent", "spent with X" with nobody else named as paying), else that person's name; null if unclear,
   "payment_mode": "cash" | "upi" | "credit_card" | "debit_card" | null (gpay/phonepe/paytm = upi; "card" alone = null),
   "date": "YYYY-MM-DD" or null (today/yesterday/"on monday" worked out from today's date given; null when not said),
   "notes": string or null - other detail worth keeping that isn't the description (items bought etc.), else null,
-  "reply": string - one or two short friendly lines back to the user saying what you filled in; when there's no description, ask what it was for; when there's no amount, ask for it
+  "reply": string - one or two short friendly lines back to the user saying what you filled in (don't mention groups - the app picks the group); when there's no description, ask what it was for; when there's no amount, ask for it
 }
-
-Choosing the group:
-- People named ("with utkarsh") are matched to group members by first name or nickname, ignoring case.
-- Prefer the current group when everyone named is in it. Otherwise the group whose members are exactly the user plus the people named; failing that, the smallest group holding all of them.
-- Nobody named: keep the current group; with no current group, use the user's own one-person group (a monthly tracker) if there is one.
-- Only use ids from the list given.
 
 The form may already hold values from earlier messages (shown as "Form so far"). Keep them unless this message changes them - a follow-up like "it was groceries" only sets the description. Return the whole form each time, not just what changed."""
 
@@ -52,19 +45,47 @@ def _today() -> str:
 
 
 def understand(text: str, me: str, groups: list[dict], current: int | None, draft: dict) -> dict:
-    """`groups`: [{id, name, members}] the user may add to. Returns the
-    form's fields, every name and id checked against those groups."""
+    """`groups`: [{id, name, members, last}] the user may add to, `last`
+    being how recently each was used (higher = more recent). The model reads
+    the message; the group is then picked here, by rule - with 150+ groups
+    to choose from, the model's own pick was too often an odd one."""
+    known = sorted({m for g in groups for m in g["members"] if m.lower() != me.lower()})
     lines = [f"Today: {_today()} ({datetime.now(IST):%A})", f"The user: {me}",
-             f"Current group id: {current or 'none'}", "Groups:"]
-    for g in groups:
-        lines.append(f"- id {g['id']}: {g['name']} - members: {', '.join(g['members'])}")
+             "People the user knows: " + ", ".join(known)]
     kept = {k: v for k, v in (draft or {}).items() if v not in (None, "", [])}
+    if "split_with" in kept:
+        kept["people"] = [n for n in kept.pop("split_with") if n.lower() != me.lower()]
     if kept:
         lines.append("Form so far: " + json.dumps(kept, ensure_ascii=False))
     lines.append("\nMessage: " + text.strip()[:600])
     out = ai_text.chat_json(_SYSTEM, "\n".join(lines), temperature=0, timeout=30,
                             extra={"reasoning_effort": "low"})
     return _check(out, me, groups, current)
+
+
+def _same(a: str, b: str) -> bool:
+    """A member name matches a name as said: whole, or by first name."""
+    a, b = a.strip().lower(), b.strip().lower()
+    return bool(a and b) and (a == b or a.split()[0] == b.split()[0])
+
+
+def _pick_group(people: list[str], me: str, groups: list[dict], current: int | None) -> int | None:
+    by_id = {g["id"]: g for g in groups}
+
+    def holds(g):
+        return all(any(_same(m, p) for m in g["members"]) for p in people)
+    if current in by_id and (not people or holds(by_id[current])):
+        return current
+    if not people:
+        # Nobody named and no group picked: the user's own tracker, if any
+        solo = [g for g in groups if len(g["members"]) == 1]
+        return max(solo, key=lambda g: g["last"])["id"] if solo else None
+    fits = [g for g in groups if holds(g)]
+    if not fits:
+        return current if current in by_id else None
+    # Just the user and the people named, else the smallest group holding
+    # them all; among equals, the one used most recently
+    return min(fits, key=lambda g: (len(g["members"]), -g["last"]))["id"]
 
 
 def _num(v) -> float | None:
@@ -76,32 +97,28 @@ def _num(v) -> float | None:
 
 
 def _check(out: dict, me: str, groups: list[dict], current: int | None) -> dict:
-    by_id = {g["id"]: g for g in groups}
-    try:
-        gid = int(out.get("group_id"))
-    except (TypeError, ValueError):
-        gid = None
-    if gid not in by_id:
-        gid = current if current in by_id else None
-    members = by_id[gid]["members"] if gid else []
+    said = [str(p) for p in (out.get("people") or []) if str(p).strip()] \
+        if isinstance(out.get("people"), list) else []
+    said = [p for p in said if not _same(p, me) and p.strip().lower() not in ("me", "i", "myself")]
+    gid = _pick_group(said, me, groups, current)
+    members = next((g["members"] for g in groups if g["id"] == gid), [])
 
     def member(name):
-        n = str(name or "").strip().lower()
+        n = str(name or "").strip()
         if not n or not members:
             return None
-        for m in members:
-            if m.lower() == n:
-                return m
-        firsts = [m for m in members if m.lower().split()[0] == n.split()[0]]
-        return firsts[0] if len(firsts) == 1 else None
+        exact = [m for m in members if m.lower() == n.lower()]
+        firsts = [m for m in members if _same(m, n)]
+        return exact[0] if exact else firsts[0] if len(firsts) == 1 else None
 
-    paid = member(out.get("paid_by")) or member(me)
+    payer = str(out.get("paid_by") or "").strip()
+    paid = member(me if payer.lower() in ("", "me", "i", "myself", "user") else payer) or member(me)
     sharing = None
-    if isinstance(out.get("split_with"), list):
-        named = [m for m in (member(x) for x in out["split_with"]) if m]
+    named = [m for m in (member(p) for p in said) if m]
+    if named:
         mine = member(me)
         people = sorted({*named, *([mine] if mine else [])}, key=members.index)
-        if named and len(people) < len(members):
+        if len(people) < len(members):
             sharing = people
     date = out.get("date")
     if not (isinstance(date, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", date)):
