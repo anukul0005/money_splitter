@@ -199,6 +199,72 @@ def ask(question: str, pantry: list[str] | None = None, profile: dict | None = N
     return {"mode": "compare" if intent == "compare" else "suggest", "want": want, "recipes": worked}
 
 
+# ── one dish, opened ──
+_DETAILS = DATA_DIR / "dish_details.json"
+
+
+def _details(name: str, serving: dict | None) -> dict:
+    """A dish's ingredients (one serving) and method - the LLM's recipe
+    knowledge, remembered per dish."""
+    try:
+        known = json.loads(_DETAILS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        known = {}
+    if name in known:
+        return known[name]
+    size = f" - one serving is 1 {serving['unit']}, about {serving['grams']} g cooked" if serving else ""
+    out = chat_json('Return ONLY JSON: {"ingredients": [{"item": plain ingredient name, "grams": number}], '
+                    '"steps": [up to 7 short steps], "time_min": number}. Indian home cooking, ingredients for ONE '
+                    "serving. No calories or prices.", f"Dish: {name}{size}", temperature=0.2, timeout=45,
+                    prefer=1, extra={"reasoning_effort": "low", "max_completion_tokens": 1500})
+    got = {"ingredients": [x for x in out.get("ingredients") or [] if isinstance(x, dict)][:20],
+           "steps": [str(s) for s in out.get("steps") or []][:7], "time_min": out.get("time_min")}
+    if got["ingredients"]:
+        with _dish_ing_lock:
+            known[name] = got
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            _DETAILS.write_text(json.dumps(known, ensure_ascii=False), encoding="utf-8")
+    return got
+
+
+def dish(name: str, servings: float = 1.0, recipe: dict | None = None) -> dict:
+    """Everything about one dish for its own page: a serving's nutrition
+    (INDB, else its ingredients), each ingredient priced, the method, a
+    photo, and what the portion eaten (`servings`) comes to - its
+    nutrition and its effective cost (₹ for the portion, a 100 kcal, 10 g
+    protein). `recipe`: a suggestion already written (its ingredients and
+    steps are used as they are)."""
+    from . import images
+    servings = min(6.0, max(0.25, float(servings or 1)))
+    d = indb.find(name, min_score=0.9)
+    r = dict(recipe or {})
+    if not r.get("ingredients"):
+        det = _details(d["name"] if d else name, d["serving"] if d else None)
+        r.update({"ingredients": det.get("ingredients"), "steps": r.get("steps") or det.get("steps"),
+                  "time_min": r.get("time_min") or det.get("time_min")})
+    r.setdefault("name", name)
+    if d and not r.get("indb"):
+        r["indb"] = [{"name": d["name"], "servings": 1}]
+    w = work_out(r)
+    n, cost = w["nutrition"], w["cost"]["total"]
+    portion = {k: round(n[k] * servings, 1) for k in NUTRIENTS}
+    kcal_from = {"protein": 4 * n["protein"], "carbs": 4 * n["carbs"], "fat": 9 * n["fat"]}
+    made = sum(kcal_from.values()) or 1
+    portion_cost = round(cost * servings, 1) if cost is not None else None
+    return {
+        **w, "servings": servings,
+        "indb": {"name": d["name"], "per100": d["per100"], "serving": d["serving"], "diet": d["diet"]} if d else None,
+        "portion": portion,
+        "split": {k: round(v / made * 100) for k, v in kcal_from.items()},     # % of calories
+        "effective": {
+            "portion": portion_cost,
+            "per_100_kcal": round(cost / n["kcal"] * 100, 1) if cost and n["kcal"] else None,
+            "per_10g_protein": round(cost / n["protein"] * 10, 1) if cost and n["protein"] >= 1 else None,
+        },
+        "photo": images.photo(d["name"] if d else name),
+    }
+
+
 # ── meal plans ──
 _dish_ing_lock = threading.Lock()
 _DISH_ING = DATA_DIR / "dish_ingredients.json"
@@ -211,6 +277,11 @@ def _dish_ingredients(dishes: list[dict]) -> dict[str, list]:
         known = json.loads(_DISH_ING.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         known = {}
+    try:      # dishes opened on their own page already have theirs
+        for k, v in json.loads(_DETAILS.read_text(encoding="utf-8")).items():
+            known.setdefault(k, v.get("ingredients") or [])
+    except (OSError, ValueError, AttributeError):
+        pass
     todo = [d for d in dishes if d["name"] not in known]
 
     def ask_some(i_batch):

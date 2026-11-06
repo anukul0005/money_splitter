@@ -106,6 +106,24 @@ def ask(payload: AskIn, db: Session = Depends(get_db), caller: User = Depends(cu
         raise HTTPException(502, "Couldn't work that out just now - try again in a moment")
 
 
+class DishIn(BaseModel):
+    name: str
+    servings: float = 1.0
+    recipe: dict | None = None     # a suggestion already written - its ingredients and steps
+
+
+@router.post("/dish")
+def dish(payload: DishIn, caller: User = Depends(current_user)):
+    """One dish's own page: breakdown, priced ingredients, method, photo."""
+    if not payload.name.strip():
+        raise HTTPException(400, "Which dish?")
+    try:
+        return engine.dish(payload.name.strip()[:200], payload.servings, payload.recipe)
+    except Exception as e:
+        print(f"[recipes] dish failed: {e!r}")
+        raise HTTPException(502, "Couldn't open that dish just now - try again")
+
+
 class PlanIn(BaseModel):
     days: int = 7
     diet: str = "any"
