@@ -22,15 +22,17 @@ from models import RecipeKitchen, User
 router = APIRouter(prefix="/recipes", tags=["recipes"])
 
 cookbook.configure(ai_text.chat_json, lambda name: getattr(get_settings(), name, ""))
-# INDB is downloaded and parsed once; started now so the first question doesn't wait on it
-threading.Thread(target=lambda: _safe(indb.dishes), daemon=True).start()
 
 
-def _safe(f):
+def _warm():
     try:
-        f()
+        indb.dishes()
     except Exception as e:  # pragma: no cover - retried on first use
         print(f"[recipes] INDB not loaded yet: {e}")
+
+
+# INDB is downloaded and parsed once; started now so the first question doesn't wait on it
+threading.Thread(target=_warm, daemon=True).start()
 
 
 def _kitchen(db: Session, user: User) -> RecipeKitchen:
