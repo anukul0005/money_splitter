@@ -62,6 +62,46 @@ def chat_json(system: str, user: str, temperature: float = 0.3, prefer: int = 0,
     raise last or RuntimeError("No AI key configured")
 
 
+# The one model on the Groq keys that reads images
+VISION_MODEL = "qwen/qwen3.8-27b"
+
+
+def vision_json(system: str, text: str, image: str, timeout: int = 60) -> dict:
+    """One JSON answer about a picture (`image`: a data: URL), from Groq's
+    vision model - each Groq key in turn. Qwen thinks before it answers; the
+    thinking is asked to be hidden, and cut off if it comes anyway."""
+    import re
+    payload = json.dumps({
+        "model": VISION_MODEL, "temperature": 0.2, "max_completion_tokens": 2500, "reasoning_format": "hidden",
+        "messages": [{"role": "system", "content": system},
+                     {"role": "user", "content": [{"type": "text", "text": text},
+                                                  {"type": "image_url", "image_url": {"url": image}}]}],
+    }).encode()
+    last: Exception | None = None
+    for url, key, extra in [c for c in _candidates() if "groq.com" in c[0]]:
+        req = urllib.request.Request(url, data=payload, method="POST", headers={
+            "Authorization": f"Bearer {key}", "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                          "Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "application/json", **extra,
+        })
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                said = json.loads(resp.read().decode())["choices"][0]["message"]["content"] or ""
+            said = said.split("</think>")[-1]
+            m = re.search(r"\{.*\}", said, re.S)
+            reply = json.loads(m.group(0)) if m else None
+            if isinstance(reply, dict):
+                return reply
+            raise ValueError("no JSON in the reply")
+        except urllib.error.HTTPError as e:
+            last = e
+            print(f"[vision] {e.code}: {e.read().decode()[:200]}")
+        except (urllib.error.URLError, KeyError, ValueError, TimeoutError) as e:
+            last = e
+    raise last or RuntimeError("No Groq key configured")
+
+
 def chat_json_tandem(jobs: list[tuple[str, str]], temperature: float = 0.3) -> list[dict | Exception]:
     """Several (system, user) prompts at once, each started on a different
     key - the two Groq keys working in tandem instead of one after the

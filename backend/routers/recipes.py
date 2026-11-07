@@ -228,6 +228,42 @@ def log_meal(payload: LogIn, db: Session = Depends(get_db), caller: User = Depen
     return {"log": days, "entry": entry, "weeks": _weeks(k, plan, days)}
 
 
+_SEE_MEAL = """You look at a photo of food an Indian user ate (or is about to eat) and say what's in it, for logging the meal.
+Return ONLY JSON: {"items": [{"food": str, "amount": str}], "note": str|null}
+- food: the dish's usual Indian name, as specific as the photo shows - "bhatura" not "naan" when it's puffed and fried,
+  "chole", "dal tadka", "jeera rice", "aloo gobi", "paneer butter masala", "roti", "raita", "gulab jamun", "masala dosa".
+  Packaged food or a drink: what it is ("Kingfisher beer", "masala chai", "Amul lassi").
+- amount: what's on the plate in household units - "2 pieces", "1 katori", "1 bowl", "1 plate", "1 glass", "1 cup", "3 spoons", or grams.
+- Count what's there; a half-eaten dish is the part eaten if that's clear, else the full portion.
+- Leave out plates, cutlery, garnish, and anything that isn't food.
+- note: one short line only if something is unclear (what a dish is, how much), else null.
+No calories, nutrition or prices."""
+
+
+class PhotoIn(BaseModel):
+    image: str        # a data: URL - made small on the phone first
+
+
+@router.post("/photo")
+def read_photo(payload: PhotoIn, caller: User = Depends(current_user)):
+    """What's in a photo of a meal, in words - put in the meal's box to be
+    checked and logged like anything typed; the calories come from INDB
+    then, never from the picture's reader."""
+    img = payload.image or ""
+    if not img.startswith("data:image/") or len(img) > 5_000_000:
+        raise HTTPException(400, "Send a photo (under about 3 MB)")
+    try:
+        got = ai_text.vision_json(_SEE_MEAL, "What food is in this photo, and how much?", img)
+    except Exception as e:
+        print(f"[recipes] photo read failed: {e!r}")
+        raise HTTPException(502, "Couldn't read the photo just now - try again")
+    items = [x for x in got.get("items") or [] if isinstance(x, dict) and str(x.get("food") or "").strip()][:10]
+    if not items:
+        raise HTTPException(400, "Couldn't see any food in that photo - try another, or type it")
+    text = ", ".join(" ".join(f"{str(x.get('amount') or '').strip()} {str(x['food']).strip()}".split()) for x in items)
+    return {"text": text, "note": (str(got.get("note")).strip() or None) if got.get("note") else None}
+
+
 def _foods(k: RecipeKitchen) -> dict:
     try:
         f = json.loads(k.foods_json) if k.foods_json else {}

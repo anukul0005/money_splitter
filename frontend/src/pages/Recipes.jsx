@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { askRecipes, fixMealItem, logMeal, myFoods, planRecipes, recipeDish, recipesMe, reworkMeal, saveRecipesMe, unlogMeal } from '../api'
+import { askRecipes, fixMealItem, logMeal, myFoods, readMealPhoto, planRecipes, recipeDish, recipesMe, reworkMeal, saveRecipesMe, unlogMeal } from '../api'
 import RecommendTabs from '../components/RecommendTabs'
 import { Typewriter } from '../components/ExpenseChat'
 import { useVoice, canRecord as micWorks } from '../components/useVoice'
@@ -379,6 +379,69 @@ function OwnFigure({ day, meal, index, item, onLog, onClose }) {
   )
 }
 
+// A phone photo made small enough to send (longest side 1280 px, JPEG) -
+// also turns an iPhone's HEIC into something the reader takes
+function shrinkPhoto(file, max = 1280) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      const s = Math.min(1, max / Math.max(img.width, img.height))
+      const c = document.createElement('canvas')
+      c.width = Math.round(img.width * s); c.height = Math.round(img.height * s)
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height)
+      URL.revokeObjectURL(url)
+      resolve(c.toDataURL('image/jpeg', 0.85))
+    }
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Couldn't open that photo")) }
+    img.src = url
+  })
+}
+
+/**
+ * Take a photo of the meal, or pick one from the gallery: what's in it comes
+ * back in words, put in the box to check before logging - the calories are
+ * then worked out from INDB like anything typed.
+ */
+function MealPhoto({ disabled, onRead, setErr }) {
+  const camRef = useRef(null)
+  const galRef = useRef(null)
+  const [busy, setBusy] = useState(false)
+  const [thumb, setThumb] = useState(null)
+  const pick = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setBusy(true); setErr('')
+    try {
+      const img = await shrinkPhoto(file)
+      setThumb(img)
+      const { data } = await readMealPhoto(img)
+      onRead(data.text, data.note)
+    } catch (err) {
+      setErr(err?.response?.data?.detail || err?.message || "Couldn't read the photo - try again.")
+    } finally { setBusy(false) }
+  }
+  const btn = 'h-8 px-2 rounded-md flex items-center gap-1 bg-white border border-amber-300 text-[11px] font-bold text-gray-700 disabled:opacity-50'
+  return (
+    <>
+      <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={pick} />
+      <input ref={galRef} type="file" accept="image/*" className="hidden" onChange={pick} />
+      <button type="button" onClick={() => camRef.current?.click()} disabled={disabled || busy} aria-label="Take a photo of the meal" className={btn}>
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M3 8a2 2 0 0 1 2-2h2l2-2h6l2 2h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><circle cx="12" cy="13" r="3.5" /></svg>
+      </button>
+      <button type="button" onClick={() => galRef.current?.click()} disabled={disabled || busy} aria-label="Pick a photo from the gallery" className={btn}>
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="1.8" /><path d="m21 16-5-5-9 9" /></svg>
+      </button>
+      {busy && (
+        <span className="flex items-center gap-1.5 text-[10px] text-gray-400">
+          {thumb && <img src={thumb} alt="" className="w-7 h-7 rounded object-cover" />}Looking at your photo…
+        </span>
+      )}
+    </>
+  )
+}
+
 // What you've had before - fetched once a minute at most, for suggestions as you type
 let foodsCache = null
 const forgetMyFoods = () => { foodsCache = null }
@@ -448,6 +511,7 @@ export function MealLog({ day, meal, planned, entry, onLog, add = false, quickLa
   const [err, setErr] = useState('')
   const [focused, setFocused] = useState(false)
   const [fixing, setFixing] = useState(null)     // which item's calories are being put right
+  const [seen, setSeen] = useState(null)         // { note } - the box was filled from a photo, to check
   const foods = useMyFoods(editing)
   const voice = useVoice({
     onText: (said) => { setErr(''); setText((p) => (p.trim() ? `${p.trim()} ${said}` : said)) },
@@ -459,7 +523,7 @@ export function MealLog({ day, meal, planned, entry, onLog, add = false, quickLa
     setBusy(true); setErr('')
     try {
       const { data } = await logMeal({ day, meal, ...payload })
-      forgetMyFoods(); onLog(data.log, data.weeks); setText(''); setEditing(false)
+      forgetMyFoods(); onLog(data.log, data.weeks); setText(''); setSeen(null); setEditing(false)
     } catch (e) {
       setErr(e?.response?.data?.detail || "Couldn't log that - try again.")
     } finally { setBusy(false) }
@@ -533,6 +597,11 @@ export function MealLog({ day, meal, planned, entry, onLog, add = false, quickLa
               placeholder={voice.recording ? `Listening… ${voice.seconds}s` : 'Or what you actually had - “2 besan chilla aur chai”, “दो रोटी और दाल”'}
               className="w-full bg-white border border-amber-200 rounded-md px-2.5 py-1.5 text-xs outline-none focus:border-brand-400 resize-none" />
           </div>
+          {seen && (
+            <p className="text-[10px] text-amber-800 mt-0.5">
+              📷 Read from your photo - fix anything it got wrong, then {entry ? 'save' : 'log it'}.{seen.note ? ` ${seen.note}` : ''}
+            </p>
+          )}
           <FoodHints text={text} setText={setText} foods={foods} focused={focused} />
           <div className="flex items-center gap-2 mt-1">
             <button onClick={() => send({ text })} disabled={busy || !text.trim()} className="btn-primary text-[11px] py-1.5 px-3 disabled:opacity-50">
@@ -547,8 +616,10 @@ export function MealLog({ day, meal, planned, entry, onLog, add = false, quickLa
                 )}
               </button>
             )}
+            <MealPhoto disabled={busy || voice.recording} setErr={setErr}
+              onRead={(said, note) => { setText((p) => (p.trim() ? `${p.trim().replace(/,$/, '')}, ${said}` : said)); setSeen({ note }) }} />
             {voice.hearing && <span className="text-[10px] text-gray-400">Writing it down…</span>}
-            {entry && <button onClick={() => { setEditing(false); setText('') }} className="text-[11px] font-bold text-gray-400 ml-auto">Cancel</button>}
+            {entry && <button onClick={() => { setEditing(false); setText(''); setSeen(null) }} className="text-[11px] font-bold text-gray-400 ml-auto">Cancel</button>}
           </div>
         </>
       )}
