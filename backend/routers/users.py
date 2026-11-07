@@ -595,6 +595,24 @@ def _admin(caller: User) -> None:
         raise HTTPException(403, "Only an admin can change this")
 
 
+@router.get("/admin/new-members", response_model=list)
+def new_members(limit: int = 10, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Admin only: the latest people to join the app, newest first - when
+    they joined, how many groups they're in, and when they last did anything
+    (the activity feed)."""
+    _admin(caller)
+    from sqlalchemy import func
+    from models import Activity, Member
+    rows = db.query(User).order_by(User.created_at.desc().nullslast(), User.id.desc()).limit(max(1, min(limit, 50))).all()
+    names = [u.name.lower() for u in rows]
+    groups = dict(db.query(func.lower(Member.name), func.count(func.distinct(Member.group_id)))
+                  .filter(func.lower(Member.name).in_(names)).group_by(func.lower(Member.name)).all())
+    seen = dict(db.query(func.lower(Activity.actor), func.max(Activity.created_at))
+                .filter(func.lower(Activity.actor).in_(names)).group_by(func.lower(Activity.actor)).all())
+    return [{"name": u.name, "full_name": u.full_name, "joined": u.created_at,
+             "groups": groups.get(u.name.lower(), 0), "last_active": seen.get(u.name.lower())} for u in rows]
+
+
 @router.get("/admin/drinks-access", response_model=list)
 def drinks_access(db: Session = Depends(get_db), caller: User = Depends(current_user)):
     _admin(caller)

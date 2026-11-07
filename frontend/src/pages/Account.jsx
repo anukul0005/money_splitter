@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   changePassword, setRecovery, getRecoveryQuestion, getMe, setMyEmail, setMyBirthday,
-  setMyDailySummary, setMyNewsAlerts, setMySalary, listMyUpiIds, addUpiId, deleteUpiId, listDrinksAccess, setDrinksAccess,
+  setMyDailySummary, setMyNewsAlerts, setMySalary, listMyUpiIds, addUpiId, deleteUpiId, listDrinksAccess, setDrinksAccess, listNewMembers,
 } from '../api'
 import { useUser, isAdmin, hasFullAccess } from '../UserContext'
 import UnlockAccess from '../components/UnlockAccess'
@@ -809,11 +809,61 @@ export default function Account() {
             </button>
           </div>
         )}
+
+        {/* ── Admin: who joined the app most recently ── */}
+        {isAdmin(user) && <NewMembers />}
       </div>
     </div>
   )
 }
 
+
+/**
+ * Admin only: the latest people to join the app, newest first - when they
+ * joined, how many groups they're in, and when they last did anything.
+ */
+function NewMembers() {
+  const [rows, setRows] = useState(null)
+  const [all, setAll] = useState(false)
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    listNewMembers(all ? 50 : 5).then((r) => setRows(r.data)).catch(() => setErr("Couldn't load the members."))
+  }, [all])
+  const when = (d) => (d ? new Date(d).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '-')
+  const ago = (d) => {
+    if (!d) return 'never'
+    const days = Math.floor((Date.now() - new Date(d).getTime()) / 86400000)
+    return days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`
+  }
+  return (
+    <div className="card">
+      <h2 className="text-sm font-bold text-gray-800">Newest members</h2>
+      <p className="text-xs text-gray-500 leading-relaxed mt-1 mb-2">Who joined the app most recently - admins only.</p>
+      {err && <p className="text-xs text-red-600">{err}</p>}
+      {!rows && !err && <p className="text-xs text-gray-400">Loading…</p>}
+      {rows && (
+        <div className="divide-y divide-amber-100">
+          {rows.map((u, i) => (
+            <div key={u.name} className="py-2 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-gray-900">
+                  {u.name}{u.full_name && <span className="font-normal text-gray-500"> · {u.full_name}</span>}
+                  {i === 0 && <span className="ml-1.5 text-[9px] font-black text-white bg-brand-400 rounded px-1.5 py-0.5 align-middle">LATEST</span>}
+                </p>
+                <p className="text-[11px] text-gray-500">Joined {when(u.joined)}</p>
+              </div>
+              <div className="text-right flex-shrink-0">
+                <p className="text-[11px] font-bold text-gray-700">{u.groups} group{u.groups === 1 ? '' : 's'}</p>
+                <p className="text-[10px] text-gray-400">active {ago(u.last_active)}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {rows && <button onClick={() => setAll((a) => !a)} className="text-[11px] font-bold text-brand-600 mt-1">{all ? 'Show the latest 5' : 'Show more →'}</button>}
+    </div>
+  )
+}
 
 /**
  * Admin only: every user, with a switch for the drinks side - the Drinks
