@@ -372,6 +372,10 @@ def _eaten_item(it: dict, dish_name: str | None) -> dict:
         if per:
             out["nutrition"] = {kk: round(per.get(kk, 0) * g / 100, 1) for kk in NUTRIENTS}
             return out
+        # A plain food USDA has, but couldn't be reached just now (the demo
+        # key's hourly limit): left to be worked out again, not learnt from
+        # some other dish - curd isn't curd rice
+        return {"said": said, "name": k, "source": None, "grams": round(g), "nutrition": None}
     # Neither knows it by name: worked out from its ingredients or the closest dish, and learnt
     learnt = _learnt_item(it, said, name, grams, count)
     if learnt:
@@ -416,6 +420,16 @@ _INGREDIENTS_OF = """Give the ingredients of ONE ordinary serving of this dish, 
 No calories or nutrition - only what goes in and how much."""
 
 _SIMILAR = """Pick the known dish most like this food - the same kind of dish, made in a similar way (noodles for noodles, a curry for a curry). Return ONLY JSON: {"dish": "<known dish name copied exactly>" or null}"""
+
+
+# The words INDB names a food by, for the words people use: the everyday
+# forms a general word means, and INDB's own spellings (it writes "channa",
+# "poori"), so they're among the dishes to choose from
+ALSO_CALLED = {"dal": ["arhar", "moong", "toor"], "rice": ["boiled"], "chawal": ["rice", "boiled"],
+               "sabzi": ["vegetable", "mixed"], "roti": ["chapati"], "chai": ["tea"],
+               "chole": ["channa", "chickpeas"], "chana": ["channa"], "chhole": ["channa", "chickpeas"],
+               "bhatura": ["poori"], "bhature": ["poori"], "bhatoora": ["poori"], "puri": ["poori"],
+               "dahi": ["curd"], "paratha": ["parantha"], "parantha": ["paratha"]}
 
 
 def _food_key(name: str) -> str:
@@ -470,6 +484,7 @@ def learn_food(name: str) -> dict | None:
             return _learned().get(key)
     # The closest dish INDB has
     words = [x for x in key.split() if len(x) > 2]
+    words += [e for w in list(words) for e in ALSO_CALLED.get(w, [])]
     cands = indb.named(words, "any", limit=40)
     if cands:
         try:
@@ -534,10 +549,7 @@ def read_meal(text: str | None = None, planned: list[dict] | None = None, mine: 
         raw = [x for x in got.get("items") or [] if isinstance(x, dict) and (x.get("name") or x.get("said"))][:10]
         # Known dishes whose names share a word with what was eaten - the LLM picks among them
         words = [w for x in raw for w in str(x.get("name") or "").lower().split()]
-        # The everyday forms a general word means, so they're among the choices
-        extra = {"dal": ["arhar", "moong", "toor"], "rice": ["boiled"], "chawal": ["rice", "boiled"],
-                 "sabzi": ["vegetable", "mixed"], "roti": ["chapati"], "chai": ["tea"]}
-        words += [e for w in list(words) for e in extra.get(w, [])]
+        words += [e for w in list(words) for e in ALSO_CALLED.get(w, [])]
         cands = indb.named(words, "any", limit=50) if words else []
         matches = {}
         if cands:
