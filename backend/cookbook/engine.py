@@ -380,7 +380,7 @@ def _eaten_item(it: dict, dish_name: str | None) -> dict:
     learnt = _learnt_item(it, said, name, grams, count)
     if learnt:
         return learnt
-    return {"said": said, "name": name, "source": None, "nutrition": None}
+    return {"said": said, "name": name, "source": None, "nutrition": None, "grams": round(grams) if grams else None}
 
 
 def rework(entry: dict) -> dict:
@@ -512,6 +512,48 @@ def _learnt_item(it: dict, said: str, name: str, grams: float | None, count: flo
             "nutrition": {k: round(got["per100"][k] * g / 100, 1) for k in NUTRIENTS}}
 
 
+_GUESS = """Estimate the nutrition of each food an Indian user ate, for the amount given, as eaten (cooked, as usually made in India).
+Return ONLY JSON: {"foods": {"<food exactly as given>": {"grams": number, "kcal": number, "protein": g, "carbs": g, "fat": g,
+"fibre": g, "sugar": g, "sodium_mg": mg}}}
+Use typical published values for that dish. If you don't know what a food is, leave it out."""
+
+
+def _ai_guess(unknown: list[dict]) -> None:
+    """The last resort, for what INDB, USDA and learning all couldn't work
+    out: the LLM's own estimate (the user asked for it), checked for sense
+    and marked as such. Not remembered - the real sources get another go
+    next time (USDA's demo key may simply have been used up)."""
+    if not unknown:
+        return
+    asked = {}
+    for i in unknown[:10]:
+        g = i.get("grams") or (how_many(i) * 100 if i.get("count") else None)
+        asked[f"{i['said'] or i['name']}"] = (i, g)
+    lines = "\n".join(f"- {k}" + (f" (about {round(g)} g)" if g else "") for k, (_, g) in asked.items())
+    try:
+        got = chat_json(_GUESS, lines, temperature=0, timeout=30, prefer=1,
+                        extra={"reasoning_effort": "low"}).get("foods") or {}
+    except Exception as e:
+        print(f"[recipes] AI estimate failed: {e!r}")
+        return
+    low = {str(k).strip().lower(): v for k, v in got.items() if isinstance(v, dict)}
+    for said, (i, g) in asked.items():
+        v = low.get(said.strip().lower())
+        try:
+            n = {k: max(0.0, round(float(v.get(k) or 0), 1)) for k in NUTRIENTS} if v else None
+            grams = float(v.get("grams") or g or 0) if v else 0
+        except (TypeError, ValueError):
+            n = None
+        if not n or not 0 < n["kcal"] <= 3000:
+            continue
+        # Sense checks: no more than 9 kcal a gram, and the calories near what its protein, carbs and fat add up to
+        from_macros = 4 * n["protein"] + 4 * n["carbs"] + 9 * n["fat"]
+        if (grams and n["kcal"] / grams > 9) or (from_macros and abs(from_macros - n["kcal"]) > 0.35 * n["kcal"]):
+            continue
+        i.update({"nutrition": n, "source": "ai", "grams": round(grams) if grams else i.get("grams"),
+                  "basis": f"Groq's estimate{f' for {round(grams)} g' if grams else ''} - no data source had it"})
+
+
 def how_many(item: dict) -> float:
     """How many of the food an item is - its servings, else the count said, else one."""
     try:
@@ -571,6 +613,8 @@ def read_meal(text: str | None = None, planned: list[dict] | None = None, mine: 
                 except (TypeError, ValueError):
                     pass
             items.append(_yours(it, [x.get("said"), x.get("name")], mine))
+
+    _ai_guess([i for i in items if not i.get("nutrition")])
 
     # What each INDB dish cost: its ingredients (remembered per dish), times the servings eaten
     is_dish = lambda i: "indb" in (i["source"], i.get("was"))     # noqa: E731 - your own figure for an INDB dish is still priced as one
