@@ -158,17 +158,35 @@ def create_tables():
     # what is actually missing (ADD COLUMN IF NOT EXISTS takes the exclusive
     # lock even when the column is already there), one short transaction per
     # change, with a lock timeout and retries.
+    #
+    # Only ever *tried* for, never waited on without end: the database sits
+    # behind a pooler (pgbouncer), which can run the lock and the unlock on
+    # two different server connections - the unlock then misses, and the
+    # lock stays held by an idle pooled connection for good. Waiting on it
+    # left the app stuck at "Waiting for application startup" after a
+    # deploy (7 Nov). So: up to 15 s of tries, then on without it - every
+    # migration is already IF NOT EXISTS, short and retried, which is what
+    # actually keeps two passes safe.
+    import time as _time
     with get_engine().connect() as conn:
-        conn.execute(text("SELECT pg_advisory_lock(:id)"), {"id": MIGRATION_LOCK_ID})
-        conn.commit()
+        got = False
+        for _ in range(15):
+            got = bool(conn.execute(text("SELECT pg_try_advisory_lock(:id)"), {"id": MIGRATION_LOCK_ID}).scalar())
+            conn.commit()
+            if got:
+                break
+            _time.sleep(1)
+        if not got:
+            print("[startup] migration lock busy (a stale pooled holder?) - migrating without it")
         try:
             _run_migrations(conn, text)
         finally:
             # A failed statement leaves the transaction aborted, and the
             # unlock would fail on top of it and hide the real error.
             conn.rollback()
-            conn.execute(text("SELECT pg_advisory_unlock(:id)"), {"id": MIGRATION_LOCK_ID})
-            conn.commit()
+            if got:
+                conn.execute(text("SELECT pg_advisory_unlock(:id)"), {"id": MIGRATION_LOCK_ID})
+                conn.commit()
 
 
 # Every column this app has ever added after create_all(), which only builds
