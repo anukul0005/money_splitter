@@ -398,7 +398,7 @@ export function MealLog({ day, meal, planned, entry, onLog, add = false, quickLa
             const label = <span className="text-gray-800 min-w-0">{i.name}{i.servings ? <span className="text-gray-400"> × {i.servings} {i.unit}</span> : i.grams ? <span className="text-gray-400"> · {i.grams} g</span> : ''}</span>
             const nums = <span className="text-gray-500 tabular-nums flex-shrink-0">{i.nutrition ? `${r0(i.nutrition.kcal)} kcal · ${r0(i.nutrition.protein)} g P` : '-'}{links ? ' ›' : ''}</span>
             // How a food not known by name was worked out - an estimate, said so
-            const how = { ingredients: `≈ added up from ${i.basis || 'its ingredients'}`, similar: `≈ estimated from ${(i.basis || '').replace('the closest dish INDB has: ', 'a similar dish, ')}`, you: 'your own figure' }[i.source]
+            const how = { alcohol: `= ${i.basis}`, ingredients: `≈ added up from ${i.basis || 'its ingredients'}`, similar: `≈ estimated from ${(i.basis || '').replace('the closest dish INDB has: ', 'a similar dish, ')}`, you: 'your own figure' }[i.source]
             return (
               <div key={k}>
                 {links && i.nutrition ? (

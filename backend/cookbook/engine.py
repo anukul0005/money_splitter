@@ -271,8 +271,49 @@ _READ_MEAL = """The user says what they ate for one meal - in English, Hindi (De
 {"items": [{"said": the user's words for this item, exactly as written,
             "name": the food's usual name in Latin script ("Besan chilla", "Masala chai", "Roti", "Dal", "Banana"),
             "count": number or null, "unit": "piece" | "bowl" | "katori" | "plate" | "cup" | "glass" | "spoon" | "g" | "ml" | null,
-            "grams": your best estimate of how many grams (or ml) of it were eaten in all}]}
-"ek" = 1, "do" = 2, "teen" = 3, "aadha" = 0.5. Split a meal into its foods ("dal chawal" = dal, rice). Never give calories, protein or prices."""
+            "grams": your best estimate of how many grams (or ml) of it were eaten in all,
+            "drink": for an alcoholic drink, "whisky" | "rum" | "vodka" | "gin" | "beer" | "wine" | "brandy" | "tequila" | "liqueur"; else null,
+            "brand": the drink's brand as said ("Black & White", "Old Monk", "Kingfisher Ultra") or null,
+            "ml": for an alcoholic drink, the millilitres drunk in all (a small peg 30, a large peg 60, a pint 330, an Indian beer bottle 650, a can 330/500, a glass of wine 150)}]}
+"ek" = 1, "do" = 2, "teen" = 3, "aadha" = 0.5. Split a meal into its foods ("dal chawal" = dal, rice; "whisky with coke" = whisky, coke). Never give calories, protein, prices or alcohol strength."""
+
+# Alcohol's calories: the ml of pure alcohol (ml x ABV) as grams (ethanol is
+# 0.789 g a ml), at 7 kcal a gram
+ETHANOL_DENSITY, KCAL_PER_G_ALCOHOL = 0.789, 7.0
+_TYPICAL_ABV = {"whisky": 42.8, "rum": 42.8, "brandy": 42.8, "vodka": 40.0, "gin": 40.0, "tequila": 40.0,
+                "beer": 5.0, "wine": 12.5, "liqueur": 20.0}
+
+
+def _drink_item(it: dict, said: str) -> dict | None:
+    """An alcoholic drink, worked out from its strength: the brand's ABV from
+    the drinks catalogue (else the kind's usual strength) and the ml drunk."""
+    from . import abv_of
+    kind = str(it.get("drink") or "").lower()
+    if kind not in _TYPICAL_ABV:
+        return None
+    brand = str(it.get("brand") or "").strip()
+    try:
+        ml = float(it.get("ml") or it.get("grams") or 0)
+    except (TypeError, ValueError):
+        ml = 0
+    if ml <= 0:
+        ml = {"beer": 650, "wine": 150}.get(kind, 60)
+    found = abv_of(brand, kind) if brand else None
+    # The catalogue knows what the brand is - its kind wins over the one guessed
+    if found and found.get("kind") in _TYPICAL_ABV:
+        kind = found["kind"]
+    abv = found["abv"] if found else _TYPICAL_ABV[kind]
+    source = found["source"] if found else f"usual {kind} strength"
+    alcohol_g = ml * abv / 100 * ETHANOL_DENSITY
+    kcal = round(alcohol_g * KCAL_PER_G_ALCOHOL, 1)
+    name = f"{brand} {kind}".strip() if brand and kind not in brand.lower() else (brand or kind.title())
+    basis = f"{ml:g} ml × {abv:g}% ABV ({source}) × 0.789 g/ml × 7 kcal/g"
+    if kind in ("beer", "wine"):
+        basis += " - the alcohol's calories; its sugars aren't counted"
+    n = {k: 0.0 for k in NUTRIENTS}
+    n["kcal"] = kcal
+    return {"said": said, "name": name, "source": "alcohol", "ml": round(ml), "abv": abv, "grams": round(ml),
+            "basis": basis, "nutrition": n}
 
 _MATCH_MEAL = """Match each food to one dish from the list of known dishes.
 - A general food takes its most ordinary version: "dal" -> a plain everyday dal (arhar/toor or moong); "rice" / "chawal" -> plain boiled rice; "sabzi" -> a plain mixed vegetable; "roti" -> chapati.
@@ -301,6 +342,10 @@ def _eaten_item(it: dict, dish_name: str | None) -> dict:
     except (TypeError, ValueError):
         grams = None
     unit = str(it.get("unit") or "").lower()
+    if it.get("drink"):
+        drink = _drink_item(it, said)
+        if drink:
+            return drink
     d = indb.find(dish_name, min_score=0.9) if dish_name else None
     if d and d["serving"]:
         s = d["serving"]
@@ -342,8 +387,16 @@ def rework(entry: dict) -> dict:
         if i.get("nutrition"):
             items.append(i)
             continue
-        again = _learnt_item({}, i.get("said") or i["name"], i["name"], i.get("grams"), None)
-        items.append(again or i)
+        # Read again from the words as said (a drink is worked out from its
+        # strength now), else from what's been learnt about the food
+        try:
+            again = [x for x in read_meal(i.get("said") or i["name"])["items"] if x.get("nutrition")]
+        except Exception:
+            again = []
+        if not again:
+            one = _learnt_item({}, i.get("said") or i["name"], i["name"], i.get("grams"), None)
+            again = [one] if one else []
+        items += again or [i]
     return {**entry, **meal_totals(items)}
 
 

@@ -21,7 +21,38 @@ from models import RecipeKitchen, User
 
 router = APIRouter(prefix="/recipes", tags=["recipes"])
 
-cookbook.configure(ai_text.chat_json, lambda name: getattr(get_settings(), name, ""))
+def _abv_lookup(brand: str, kind: str) -> dict | None:
+    """A drink's strength from the app's own drinks knowledge: a product in
+    the catalogue (its label's ABV), a strength someone entered with a price,
+    then the published brand figures (liquor_prices) - None when none has it,
+    and the cookbook uses the kind's usual strength."""
+    from database import get_session_factory
+    from models import PriceOverride, Product
+    import liquor_prices
+    b = " ".join(brand.split())
+    if len(b) < 2:
+        return None
+    db = get_session_factory()()
+    try:
+        like = f"%{b}%"
+        hits = (db.query(Product).filter(Product.abv.isnot(None))
+                .filter((Product.brand.ilike(like)) | (Product.canonical_name.ilike(like))).limit(20).all())
+        # The kind said first ("Old Monk" the rum); else the brand's own product, whatever its kind
+        same = [p for p in hits if not kind or not p.category or kind in p.category.lower() or p.category.lower() in kind]
+        for p in same or hits:
+            return {"abv": float(p.abv), "source": f"{p.canonical_name} in your drinks catalogue",
+                    "kind": (p.category or "").lower() or None}
+        o = (db.query(PriceOverride).filter(PriceOverride.abv.isnot(None), PriceOverride.brand.ilike(like))
+             .order_by(PriceOverride.id.desc()).first())
+        if o:
+            return {"abv": float(o.abv), "source": f"{o.brand}, as entered in Drinks"}
+    finally:
+        db.close()
+    abv, published = liquor_prices.abv_for(b, kind)
+    return {"abv": abv, "source": f"{b}'s published strength"} if published else None
+
+
+cookbook.configure(ai_text.chat_json, lambda name: getattr(get_settings(), name, ""), _abv_lookup)
 
 
 def _warm():

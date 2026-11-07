@@ -25,9 +25,21 @@ DATA_DIR = Path(__file__).resolve().parent.parent / ".cache" / "cookbook"
 _hooks: dict[str, Callable] = {}
 
 
-def configure(chat_json: Callable, get_key: Callable[[str], str]) -> None:
+def configure(chat_json: Callable, get_key: Callable[[str], str], abv_lookup: Callable | None = None) -> None:
+    """`abv_lookup(brand, kind) -> {"abv": %, "source": str} | None`: a
+    drink's strength from the host's own drinks catalogue."""
     _hooks["chat_json"] = chat_json
     _hooks["get_key"] = get_key
+    if abv_lookup:
+        _hooks["abv_lookup"] = abv_lookup
+
+
+def abv_of(brand: str, kind: str) -> dict | None:
+    f = _hooks.get("abv_lookup")
+    try:
+        return f(brand, kind) if f else None
+    except Exception:
+        return None
 
 
 def chat_json(system: str, user: str, **kw) -> dict:
