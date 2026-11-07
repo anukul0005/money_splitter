@@ -540,7 +540,8 @@ def _ai_guess(unknown: list[dict]) -> None:
     for said, (i, g) in asked.items():
         # Keyed as asked, or (as it often answers) by the food's name alone
         s, nm = said.strip().lower(), str(i.get("name") or "").strip().lower()
-        v = low.get(s) or low.get(nm) or next((x for k, x in low.items() if k and (k in s or k == nm)), None)
+        # (or with the "(about 200 g)" it was sent with)
+        v = low.get(s) or low.get(nm) or next((x for k, x in low.items() if k and (k in s or s in k or k == nm)), None)
         try:
             n = {k: max(0.0, round(float(v.get(k) or 0), 1)) for k in NUTRIENTS} if v else None
             grams = float(v.get("grams") or g or 0) if v else 0
