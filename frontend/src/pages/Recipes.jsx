@@ -425,7 +425,9 @@ function FoodHints({ text, setText, foods, focused }) {
       {hits.map((x) => (
         <button key={`${x.name}|${x.said}`} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => put(x)}
           className="text-[11px] bg-white border border-amber-200 rounded-full px-2 py-0.5 text-gray-700 active:bg-amber-100 max-w-full truncate">
-          {qty ? x.name : x.said}{x.kcal != null && <span className="text-gray-400"> · {x.kcal} kcal{x.yours ? ' (yours)' : ''}</span>}
+          {qty ? x.name : x.said}
+          {/* kcal is for one of it - "2 rotis · 73 kcal each" */}
+          {x.kcal != null && <span className="text-gray-400"> · {x.kcal} kcal{/^\s*\d/.test(qty ? '' : x.said) ? ' each' : ''}{x.yours ? ' (yours)' : ''}</span>}
         </button>
       ))}
     </div>
