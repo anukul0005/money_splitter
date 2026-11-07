@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   getRecommendMeta, getRecommendation, getFriends, searchRecommend, listBrands,
-  logRecommendShown, getRecommendEventsSummary, getMyBottles, askRecommend,
+  logRecommendShown, getRecommendEventsSummary, getMyBottles, understandRecommend,
 } from '../api'
 
 import Dropdown from '../components/Dropdown'
@@ -543,7 +543,7 @@ function DrinksRecommend() {
   // The chat box: a recommendation fills the settings and runs; a question
   // about one bottle is answered from the price lists (and searched below)
   const askDrinks = async (text) => {
-    const { data: a } = await askRecommend({ text, mode: 'drinks', places: meta?.states ?? [], friends })
+    const { data: a } = await understandRecommend({ text, mode: 'drinks', places: meta?.states ?? [], friends })
     if (a.intent === 'lookup') {
       setQuery(a.q); setSearchState(a.where || '')
       runSearch({ q: a.q, state: a.where || '' })

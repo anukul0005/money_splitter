@@ -193,7 +193,7 @@ export const createExpense = (data)      => api.post('/expenses/', data)
 export const updateExpense = (id, data)  => api.put(`/expenses/${id}`, data)
 export const deleteExpense = (id)        => api.delete(`/expenses/${id}`)
 // Recommend's chat box (Drinks, Food): a message read into the page's settings, or a lookup answered from the data
-export const askRecommend  = (data) => api.post('/ask/understand', data)
+export const understandRecommend = (data) => api.post('/ask/understand', data)
 // Recipes (Recommend → Recipes): ask, plan, and your profile and kitchen
 export const recipesMe     = ()       => api.get('/recipes/me')
 export const saveRecipesMe = (data)   => api.put('/recipes/me', data)

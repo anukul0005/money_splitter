@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getFoodMeta, getFoodRecommendation, getFriends, searchFood, listPlaceNames, getMyPlaces, askRecommend } from '../api'
+import { getFoodMeta, getFoodRecommendation, getFriends, searchFood, listPlaceNames, getMyPlaces, understandRecommend } from '../api'
 
 import Dropdown from '../components/Dropdown'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -259,7 +259,7 @@ export default function RecommendFood({ tab, setTab }) {
   // The chat box: a recommendation fills the settings and runs; a place by
   // name is looked up in the listings (and searched below)
   const askFood = async (text) => {
-    const { data: a } = await askRecommend({
+    const { data: a } = await understandRecommend({
       text, mode: 'food', places: meta?.cities ?? [], friends,
       cuisines: meta?.cuisines ?? [], kinds: meta?.kinds ?? [],
     })
