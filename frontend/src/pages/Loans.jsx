@@ -374,14 +374,42 @@ export default function Loans() {
         {tab === 'loans' && (
           data.loans.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-8">No loans yet</p>
-          ) : data.loans.map((l) => {
+          ) : <>
+          {/* Each loan is its own card with its own amount; what's owed
+              overall with a person (all their loans and groups together)
+              is shown once per person here instead of on every card */}
+          {(() => {
+            const seen = new Set()
+            const rows = []
+            for (const l of data.loans) {
+              if (l.paid) continue
+              const other = same(l.borrower, me) ? l.lender : l.borrower
+              const key = (other || '').trim().toLowerCase()
+              const o = overall[key]
+              if (seen.has(key) || !o) continue
+              seen.add(key)
+              const open = data.loans.filter((x) => !x.paid && same(same(x.borrower, me) ? x.lender : x.borrower, other)).length
+              if (Math.abs(o.group) > 0.5 || open > 1) rows.push({ name: other, net: o.net, open, group: o.group })
+            }
+            return rows.length > 0 && (
+              <div className="card">
+                <p className="text-xs font-bold text-gray-500 mb-1">Overall with each person · loans and groups together</p>
+                {rows.map((r) => (
+                  <div key={r.name} className="flex items-center justify-between text-xs py-0.5">
+                    <span className="text-gray-700">
+                      {dn(r.name)} <span className="text-gray-400">· {r.open} loan{r.open !== 1 ? 's' : ''}{Math.abs(r.group) > 0.5 ? ' + groups' : ''}</span>
+                    </span>
+                    <span className={`font-bold tabular-nums ${Math.abs(r.net) <= 0.5 ? 'text-gray-400' : r.net > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {Math.abs(r.net) <= 0.5 ? 'Even' : r.net > 0 ? `owes you ${INR(r.net)}` : `you owe ${INR(-r.net)}`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )
+          })()}
+          {data.loans.map((l) => {
             const iOwe = same(l.borrower, me)
             const other = iOwe ? l.lender : l.borrower
-            // Groups with them change what's really owed: Anjali owing you
-            // ₹6,969 in groups takes this ₹8,372 loan down to ₹1,403
-            const o = !l.paid && overall[(other || '').trim().toLowerCase()]
-            const netted = o && Math.abs(o.group) > 0.5 ? o : null
-            const owedOverall = netted ? (iOwe ? -netted.net : netted.net) : null   // > 0: still this loan's way round
             return (
               <div key={l.id} id={`loan-${l.id}`}
                 className={`card scroll-mt-4 transition-shadow ${l.paid ? 'opacity-60' : ''} ${flash === `loan-${l.id}` ? 'ring-2 ring-brand-400' : ''}`}>
@@ -391,24 +419,18 @@ export default function Loans() {
                       {iOwe ? `You owe ${dn(other)}` : `${dn(other)} owes you`}
                     </p>
                     <p className="text-xs text-gray-400 mt-0.5">
-                      Lent {INR(l.principal)}{l.start_date ? ` on ${l.start_date}` : ''} · {l.emi ? `last EMI ${l.due_date}` : `due ${l.due_date}`}
+                      {iOwe ? 'Borrowed' : 'Lent'} {INR(l.principal)}{l.start_date ? ` on ${l.start_date}` : ''} · {l.emi ? `last EMI ${l.due_date}` : `due ${l.due_date}`}
                       {l.has_interest ? ' · interest if late' : ' · no interest'}
                     </p>
                     {l.note && <p className="text-xs text-gray-500 mt-0.5">{l.note}</p>}
                   </div>
                   <div className="text-right shrink-0">
-                    <p className={`text-base font-black ${l.paid ? 'text-gray-400' : netted && owedOverall <= 0.5 ? 'text-gray-400' : iOwe ? 'text-red-600' : 'text-green-600'}`}>
-                      {l.paid ? 'Paid' : netted ? (owedOverall > 0.5 ? INR(owedOverall) : 'Even') : INR(l.total_due)}
+                    <p className={`text-base font-black ${l.paid ? 'text-gray-400' : iOwe ? 'text-red-600' : 'text-green-600'}`}>
+                      {l.paid ? 'Paid' : INR(l.total_due)}
                     </p>
-                    {netted && <p className="text-[10px] text-gray-400">overall</p>}
+                    {!l.paid && <p className="text-[10px] text-gray-400">this loan</p>}
                   </div>
                 </div>
-                {netted && (
-                  <p className="text-[11px] text-gray-500 mt-1 tabular-nums">
-                    Loan {INR(l.total_due)} · Groups {(netted.group > 0) === iOwe ? '−' : '+'}{INR(Math.abs(netted.group))} · Net <b className="text-gray-800">{INR(Math.abs(r2(owedOverall)))}</b>
-                    {owedOverall < -0.5 ? (iOwe ? ` (${dn(other)} owes you)` : ' (you owe)') : ''}
-                  </p>
-                )}
                 {l.interest > 0 && (
                   <p className="text-xs text-amber-700 mt-1">
                     Includes {INR(l.interest)} interest · {l.months_overdue} month{l.months_overdue !== 1 ? 's' : ''} overdue
@@ -437,7 +459,7 @@ export default function Loans() {
                       Record repayment
                     </button>
                   )}
-                  {!l.paid && iOwe && !(netted && owedOverall <= 0.5) && (
+                  {!l.paid && iOwe && (
                     <button onClick={() => togglePay(`loan-${l.id}`, other)} className="flex-1 py-2 text-xs font-bold bg-brand-50 border border-brand-300 text-brand-700 rounded-md">
                       {openPayKey === `loan-${l.id}` ? 'Hide UPI' : 'Pay via UPI'}
                     </button>
@@ -449,12 +471,13 @@ export default function Loans() {
                   </button>
                 </div>
                 {openPayKey === `loan-${l.id}` && (
-                  <PayPanel personName={other} amount={netted ? Math.min(l.total_due, r2(owedOverall)) : l.total_due}
+                  <PayPanel personName={other} amount={l.total_due}
                     note={`Loan repayment to ${dn(other)}`} kind="loan" refId={l.id} />
                 )}
               </div>
             )
-          })
+          })}
+          </>
         )}
 
         {/* ── Bills list ── */}
