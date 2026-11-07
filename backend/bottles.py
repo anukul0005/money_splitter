@@ -35,7 +35,8 @@ _BEER = re.compile(r"beer|lager|ale\b|stout|kingfisher|budweiser|tuborg|carlsber
 # Words that say what kind of drink, not which one: "Magic Moments Vodka" and
 # "Magic Moments" are one bottle.
 _KIND_WORDS = {"vodka", "whisky", "whiskey", "rum", "gin", "beer", "lager", "wine", "brandy", "tequila",
-               "premium", "blended", "scotch", "dry", "bottle", "the"}
+               "premium", "blended", "scotch", "dry", "bottle", "the",
+               "and"}    # "Black & White" is "Black and White" - the & is dropped as punctuation
 
 
 def bottle_key(name: str) -> str:
