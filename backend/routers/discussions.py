@@ -106,7 +106,7 @@ def _feed(db: Session, group: Group, actor: str, verb: str, d: Discussion, detai
 
 @router.get("", response_model=list)
 def list_discussions(db: Session = Depends(get_db), caller: User = Depends(current_user)):
-    groups = {g.id: g for g in caller_groups(db, caller, history=False)}
+    groups = {g.id: g for g in caller_groups(db, caller, history=False, discussions=True)}
     if not groups:
         return []
     rows = (db.query(Discussion).filter(Discussion.group_id.in_(list(groups)))

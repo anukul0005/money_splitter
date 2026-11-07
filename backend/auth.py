@@ -183,7 +183,8 @@ def visible_groups(db: Session, user: User) -> list[Group]:
 
 
 def caller_groups(db: Session, user: User, *, history: bool = True,
-                  shared_only: bool = False, active_only: bool = False) -> list[Group]:
+                  shared_only: bool = False, active_only: bool = False,
+                  discussions: bool = False) -> list[Group]:
     """The caller's groups, picked in SQL rather than by loading every group
     in the database and filtering in Python - which, with Group.expenses and
     Group.payments eager, meant pulling every user's entire expense history
@@ -194,12 +195,17 @@ def caller_groups(db: Session, user: User, *, history: bool = True,
     only need names and members (pair it with expense_totals for sums).
     shared_only drops single-member groups - personal trackers, which can
     never hold a balance, so balance code never needs their expenses.
+    discussions=True keeps the groups made for a discussion (who's in it) -
+    left out otherwise: they aren't money groups, and showed on Home, in
+    Groups and in New expense's choices as if they were.
     """
     from sqlalchemy import func, select
-    from models import Member
+    from models import Discussion, Member
 
     mine = select(Member.group_id).where(func.lower(Member.name) == user.name.lower())
     query = db.query(Group).filter(Group.id.in_(mine))
+    if not discussions:
+        query = query.filter(~Group.id.in_(select(Discussion.group_id)))
     if shared_only:
         shared = select(Member.group_id).group_by(Member.group_id).having(func.count() > 1)
         query = query.filter(Group.id.in_(shared))
