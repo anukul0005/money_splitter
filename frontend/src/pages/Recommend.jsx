@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   getRecommendMeta, getRecommendation, getFriends, searchRecommend, listBrands,
-  logRecommendShown, getRecommendEventsSummary, getMyBottles,
+  logRecommendShown, getRecommendEventsSummary, getMyBottles, askRecommend,
 } from '../api'
 
 import Dropdown from '../components/Dropdown'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PeoplePicker from '../components/PeoplePicker'
+import AskBox from '../components/AskBox'
 import PriceEditForm from '../components/PriceEditForm'
 import ProductReviewForm from '../components/ProductReviewForm'
 import RecommendTabs from '../components/RecommendTabs'
@@ -342,6 +343,8 @@ function DrinksRecommend() {
   // a page nobody expands should never pay for the request.
   const [eventStats, setEventStats] = useState(null)
   const [eventStatsBusy, setEventStatsBusy] = useState(false)
+  // The settings themselves, folded under the chat box - "Edit details" opens them
+  const [showForm, setShowForm] = useState(false)
 
   // Two independent calls, loaded independently. They used to share a
   // Promise.all, so a failure in either left the state dropdown empty with a
@@ -467,17 +470,22 @@ function DrinksRecommend() {
     logRecommendShown({ events: events.map((e) => ({ ...e, source, query })) }).catch(() => {})
   }
 
+  // `over`: settings the chat box just set - state updates haven't landed yet
   const run = async (over = {}) => {
     setError(''); setBusy(true)
     setShowAllPicks(false); setShowAllBeers(false)
+    const v = {
+      people: over.people ?? peopleN, lo: over.lo ?? loN, hi: over.hi ?? hiN,
+      bottles: over.bottles ?? bottles, kinds: over.kinds ?? kinds, withWho: over.withWho ?? withWho,
+    }
     try {
       const r = await getRecommendation({
         state: over.state || state,
-        people: peopleN, budget_min: loN,
-        budget_max: hiN >= BUDGET_MAX ? BUDGET_UNCAPPED : hiN,
-        bottle: bottles.length ? bottles.join(',') : 'any',
-        kind: kinds.join(','),
-        names: withWho.join(','),
+        people: v.people, budget_min: v.lo,
+        budget_max: v.hi >= BUDGET_MAX ? BUDGET_UNCAPPED : v.hi,
+        bottle: v.bottles.length ? v.bottles.join(',') : 'any',
+        kind: v.kinds.join(','),
+        names: v.withWho.join(','),
       })
       setResult(r.data)
       logShown(r.data, 'recommend', null)
@@ -530,6 +538,34 @@ function DrinksRecommend() {
       )
       setSearchResult(null)
     } finally { setSearchBusy(false) }
+  }
+
+  // The chat box: a recommendation fills the settings and runs; a question
+  // about one bottle is answered from the price lists (and searched below)
+  const askDrinks = async (text) => {
+    const { data: a } = await askRecommend({ text, mode: 'drinks', places: meta?.states ?? [], friends })
+    if (a.intent === 'lookup') {
+      setQuery(a.q); setSearchState(a.where || '')
+      runSearch({ q: a.q, state: a.where || '' })
+      setTimeout(() => document.getElementById('bottle-search')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 600)
+      return a.answer || a.reply
+    }
+    const over = {}
+    if (a.where) { setState(a.where); over.state = a.where }
+    if (a.with?.length) { setWithWho(a.with); over.withWho = a.with }
+    const ppl = a.people || (a.with?.length ? a.with.length + 1 : null)
+    if (ppl) { setPeople(String(ppl)); over.people = ppl }
+    if (a.budget_min || a.budget_max) {
+      let lo = a.budget_min ?? Math.max(0, Math.round((a.budget_max * 0.5) / BUDGET_STEP) * BUDGET_STEP)
+      let hi = a.budget_max ?? Math.min(BUDGET_MAX, lo * 1.5)
+      lo = Math.min(lo, BUDGET_MAX - MIN_SPAN); hi = Math.max(Math.min(hi, BUDGET_MAX), lo + MIN_SPAN)
+      setBudgetMin(lo); setBudgetMax(hi); over.lo = lo; over.hi = hi
+    }
+    if (a.bottles?.length) { setBottles(a.bottles); over.bottles = a.bottles }
+    if (a.kinds?.length) { setKinds(a.kinds); over.kinds = a.kinds }
+    await run(over)
+    setTimeout(() => document.getElementById('drink-results')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300)
+    return `${a.reply || 'Here you go.'}\nRecommendations below ↓`
   }
 
   // Below every hook, so switching tabs never changes the hook order. Food
@@ -692,7 +728,30 @@ function DrinksRecommend() {
 
       <div className="px-5 mt-4 space-y-4 max-w-2xl">
         <YourBottles />
-        <div className="card space-y-3">
+
+        {/* Ask in words - or open the details below */}
+        <AskBox title="What are you after?" ask={askDrinks} busy={busy}
+          placeholder="3 of us, around ₹1,500, rum, a full bottle - or: price of Black & White in Delhi?"
+          ideas={[
+            ['Recommend ', 'something for 3 of us around ₹1,500'],
+            ['What does ', 'Black & White cost in Delhi?'],
+            ['Suggest ', 'a half bottle of whisky under ₹800'],
+            ['How strong is ', 'Old Monk?'],
+            ['Beer for ', '4 of us in Gurgaon, about ₹1,200'],
+          ]} />
+
+        <div className="flex items-center justify-between gap-2 text-[11px]">
+          <span className="text-gray-500 min-w-0">
+            {[state, `${peopleN} ${peopleN === 1 ? 'person' : 'people'}`, `${INR(loN)}–${fmtBudgetMax(hiN)}`,
+              bottles.length ? bottles.map((b) => BOTTLES.find((x) => x[0] === b)?.[1]).join(', ') : null,
+              kinds.length ? kinds.join(', ') : null, withWho.length ? `with ${withWho.join(', ')}` : null].filter(Boolean).join(' · ')}
+          </span>
+          <button onClick={() => setShowForm((s) => !s)} className="font-bold text-brand-600 flex-shrink-0">
+            {showForm ? 'Hide details ▴' : 'Edit details ▾'}
+          </button>
+        </div>
+
+        {showForm && <div className="card space-y-3">
           {/* State first: alcohol is taxed per state, so it drives every price.
               Dropdown, not a native <select> - a native one's open list is a
               full-screen system sheet on iOS with no CSS reach at all, which
@@ -862,12 +921,12 @@ function DrinksRecommend() {
               + Add a bottle or price we don&apos;t have
             </button>
           )}
-        </div>
+        </div>}
 
         {/* Checking a specific brand rather than browsing for one - a
             different question from the budget-ranked picks below, so it gets
             its own box and its own results rather than being folded in. */}
-        <div className="card space-y-2">
+        <div id="bottle-search" className="card space-y-2">
           <div className="flex items-center justify-between gap-2">
             <label className="label mb-0">Search a bottle</label>
             {/* Its own state, defaulting to every state at once - see
@@ -1108,7 +1167,7 @@ function DrinksRecommend() {
         )}
 
         {result && (
-          <div className="space-y-2">
+          <div id="drink-results" className="space-y-2">
             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">
               {/* Not "{name} bottles": "Half bottles" reads as half of the
                   bottles, when it means one 375ml bottle. The server names

@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getFoodMeta, getFoodRecommendation, getFriends, searchFood, listPlaceNames, getMyPlaces } from '../api'
+import { getFoodMeta, getFoodRecommendation, getFriends, searchFood, listPlaceNames, getMyPlaces, askRecommend } from '../api'
 
 import Dropdown from '../components/Dropdown'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PeoplePicker from '../components/PeoplePicker'
 import PlaceEditForm from '../components/PlaceEditForm'
 import RecommendTabs from '../components/RecommendTabs'
+import AskBox from '../components/AskBox'
 import { hasFullAccess, useUser } from '../UserContext'
 
 // A missing number renders as a dash, never as "₹NaN" — see the note in
@@ -88,6 +89,8 @@ export default function RecommendFood({ tab, setTab }) {
   const [result, setResult]   = useState(null)
   const [error, setError]     = useState('')
   const [busy, setBusy]       = useState(false)
+  // The settings themselves, folded under the chat box - "Edit details" opens them
+  const [showForm, setShowForm] = useState(false)
   // Which card's form is open, keyed by the card. `'new'` opens the
   // standalone add form. Only one is ever open at a time.
   const [editing, setEditing] = useState(null)
@@ -206,14 +209,16 @@ export default function RecommendFood({ tab, setTab }) {
     }
   }, [city, cuisine, cuisineList])
 
+  // `over`: settings the chat box just set - state updates haven't landed yet
   const run = async (over = {}) => {
     setError(''); setBusy(true)
     setShowAllPicks(false); setShowAllStreet(false)
     try {
       const r = await getFoodRecommendation({
         city: over.city || city,
-        people: peopleN, budget_min: loN, budget_max: hiN,
-        cuisine, kind, veg, names: withWho.join(','),
+        people: over.people ?? peopleN, budget_min: over.lo ?? loN, budget_max: over.hi ?? hiN,
+        cuisine: over.cuisine ?? cuisine, kind: over.kind ?? kind, veg: over.veg ?? veg,
+        names: (over.withWho ?? withWho).join(','),
       })
       setResult(r.data)
     } catch (err) {
@@ -251,6 +256,38 @@ export default function RecommendFood({ tab, setTab }) {
     } finally { setSearchBusy(false) }
   }
 
+  // The chat box: a recommendation fills the settings and runs; a place by
+  // name is looked up in the listings (and searched below)
+  const askFood = async (text) => {
+    const { data: a } = await askRecommend({
+      text, mode: 'food', places: meta?.cities ?? [], friends,
+      cuisines: meta?.cuisines ?? [], kinds: meta?.kinds ?? [],
+    })
+    if (a.intent === 'lookup') {
+      setQuery(a.q); setSearchCity(a.where || '')
+      runSearch({ q: a.q, city: a.where || '' })
+      setTimeout(() => document.getElementById('place-search')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 600)
+      return a.answer || a.reply
+    }
+    const over = {}
+    if (a.where) { setCity(a.where); over.city = a.where }
+    if (a.with?.length) { setWithWho(a.with); over.withWho = a.with }
+    const ppl = a.people || (a.with?.length ? a.with.length + 1 : null)
+    if (ppl) { setPeople(String(ppl)); over.people = ppl }
+    if (a.budget_min || a.budget_max) {
+      let lo = a.budget_min ?? Math.max(0, Math.round((a.budget_max * 0.5) / BUDGET_STEP) * BUDGET_STEP)
+      let hi = a.budget_max ?? Math.min(BUDGET_MAX, lo * 1.5)
+      lo = Math.min(lo, BUDGET_MAX - MIN_SPAN); hi = Math.max(Math.min(hi, BUDGET_MAX), lo + MIN_SPAN)
+      setBudgetMin(lo); setBudgetMax(hi); over.lo = lo; over.hi = hi
+    }
+    if (a.cuisine) { setCuisine(a.cuisine); over.cuisine = a.cuisine }
+    if (a.kind) { setKind(a.kind); over.kind = a.kind }
+    if (a.veg) { setVeg(true); over.veg = true }
+    await run(over)
+    setTimeout(() => document.getElementById('food-results')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300)
+    return `${a.reply || 'Here you go.'}\nPlaces below ↓`
+  }
+
   if (!meta) return <LoadingSpinner />
 
   const hist = result?.history
@@ -268,7 +305,29 @@ export default function RecommendFood({ tab, setTab }) {
 
       <div className="px-5 mt-4 space-y-4 max-w-2xl">
         <YourPlaces />
-        <div className="card space-y-3">
+
+        {/* Ask in words - or open the details below */}
+        <AskBox title="Where do you want to eat?" ask={askFood} busy={busy}
+          placeholder="Veg dinner for 4 around ₹2,000 in Delhi - or: is Nutriobox expensive?"
+          ideas={[
+            ['Suggest ', 'a veg dinner for 4 around ₹2,000'],
+            ['Somewhere ', 'North Indian in Gurgaon for 2, under ₹1,500'],
+            ['Is ', 'Nutriobox expensive?'],
+            ['Street food ', 'for 3 of us, about ₹600'],
+          ]} />
+
+        <div className="flex items-center justify-between gap-2 text-[11px]">
+          <span className="text-gray-500 min-w-0">
+            {[city, `${peopleN} ${peopleN === 1 ? 'person' : 'people'}`, `${INR(loN)}–${INR(hiN)}`,
+              cuisine !== 'any' ? cuisine : null, kind !== 'any' ? (meta?.kinds ?? []).find((k) => k.value === kind)?.name : null,
+              veg ? 'pure veg' : null, withWho.length ? `with ${withWho.join(', ')}` : null].filter(Boolean).join(' · ')}
+          </span>
+          <button onClick={() => setShowForm((s) => !s)} className="font-bold text-brand-600 flex-shrink-0">
+            {showForm ? 'Hide details ▴' : 'Edit details ▾'}
+          </button>
+        </div>
+
+        {showForm && <div className="card space-y-3">
           {/* Same compact, inline layout as "Search a restaurant"'s own city
               picker below - one look for every picker of a value on this
               page. */}
@@ -410,12 +469,12 @@ export default function RecommendFood({ tab, setTab }) {
               + Add a place we don&apos;t have
             </button>
           )}
-        </div>
+        </div>}
 
         {/* Checking a specific restaurant rather than browsing for one - a
             different question from the budget-ranked picks below, so it gets
             its own box and its own results rather than being folded in. */}
-        <div className="card space-y-2">
+        <div id="place-search" className="card space-y-2">
           <div className="flex items-center justify-between gap-2">
             <label className="label mb-0">Search a restaurant</label>
             {/* Its own city, defaulting to every city at once - independent
@@ -617,7 +676,7 @@ export default function RecommendFood({ tab, setTab }) {
         )}
 
         {result && (
-          <div className="space-y-2">
+          <div id="food-results" className="space-y-2">
             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">
               {result.city} · {result.people} people · {INR(result.budget_min)}–{INR(result.budget_max)}
               {result.cuisine !== 'any' && ` · ${result.cuisine}`}
