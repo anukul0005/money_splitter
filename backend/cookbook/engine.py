@@ -485,7 +485,9 @@ def learn_food(name: str) -> dict | None:
     # The closest dish INDB has
     words = [x for x in key.split() if len(x) > 2]
     words += [e for w in list(words) for e in ALSO_CALLED.get(w, [])]
-    cands = indb.named(words, "any", limit=40)
+    # Not a dish denser than 450 kcal per 100 g - only oil, ghee and nuts are, and
+    # an INDB row that is (Bathua poori: 59 g fat in 100 g) has its numbers wrong
+    cands = [d for d in indb.named(words, "any", limit=40) if d["per100"]["kcal"] <= 450]
     if cands:
         try:
             pick = chat_json(_SIMILAR, f"Food: {name}\n\nKnown dishes:\n" + "\n".join(f"- {d['name']}" for d in cands),
