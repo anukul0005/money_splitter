@@ -397,9 +397,6 @@ def rework(entry: dict) -> dict:
             again = [x for x in read_meal(i.get("said") or i["name"])["items"] if x.get("nutrition")]
         except Exception:
             again = []
-        if not again:
-            one = _learnt_item({}, i.get("said") or i["name"], i["name"], i.get("grams"), None)
-            again = [one] if one else []
         items += again or [i]
     return {**entry, **meal_totals(items)}
 
@@ -512,49 +509,61 @@ def _learnt_item(it: dict, said: str, name: str, grams: float | None, count: flo
             "nutrition": {k: round(got["per100"][k] * g / 100, 1) for k in NUTRIENTS}}
 
 
-_GUESS = """Estimate the nutrition of each food an Indian user ate, for the amount given, as eaten (cooked, as usually made in India).
-Return ONLY JSON: {"foods": {"<food exactly as given>": {"grams": number, "kcal": number, "protein": g, "carbs": g, "fat": g,
-"fibre": g, "sugar": g, "sodium_mg": mg}}}
-Use typical published values for that dish. If you don't know what a food is, leave it out."""
+_EAT = """The user says what they ate for one meal - in English, Hindi (Devanagari) or Hinglish. Work out what each food comes to.
+Return ONLY JSON: {"items": [{
+  "said": the user's words for this item, exactly as written, amount included,
+  "name": the food as the USER named it, without the amount - keep their words and spelling ("Rice", "Gobi fry", "Arhar dal",
+          "Raita", "Besan chilla"); never rename it to a textbook name. Devanagari: its usual name in Latin script ("दाल" -> "Dal"),
+  "count": number or null, "unit": "piece" | "bowl" | "katori" | "plate" | "cup" | "glass" | "spoon" | "tbsp" | "g" | "ml" | null,
+  "grams": grams (or ml) eaten - exactly the amount the user gave ("Rice (150g)" = 150), else your estimate for what they said
+           (1 katori about 150 g, 1 bowl 200 g, 1 roti 40 g, 1 tbsp 15 g, 1 plate of rice 250 g),
+  "per100": {"kcal": number, "protein": g, "carbs": g, "fat": g, "fibre": g, "sugar": g, "sodium_mg": mg}
+          - PER 100 g of the food as eaten (cooked, as usually made in an Indian home; published food-composition values),
+  "ingredients": [{"item": plain raw ingredient, "grams": raw grams in this amount}] - its main ingredients, for costing,
+  "drink": for an alcoholic drink, "whisky" | "rum" | "vodka" | "gin" | "beer" | "wine" | "brandy" | "tequila" | "liqueur"; else null,
+  "brand": the drink's brand as said or null,
+  "ml": for an alcoholic drink, the millilitres drunk (a small peg 30, a large peg 60, a pint 330, a beer bottle 650, a glass of wine 150)}]}
+"ek" = 1, "do" = 2, "teen" = 3, "aadha" = 0.5. Split a meal into its foods ("dal chawal" = dal, rice; "whisky with coke" = whisky, coke).
+An alcoholic drink's nutrition is worked out from its strength elsewhere - give drink, brand and ml for it."""
 
 
-def _ai_guess(unknown: list[dict]) -> None:
-    """The last resort, for what INDB, USDA and learning all couldn't work
-    out: the LLM's own estimate (the user asked for it), checked for sense
-    and marked as such. Not remembered - the real sources get another go
-    next time (USDA's demo key may simply have been used up)."""
-    if not unknown:
-        return
-    asked = {}
-    for i in unknown[:10]:
-        g = i.get("grams") or (how_many(i) * 100 if i.get("count") else None)
-        asked[f"{i['said'] or i['name']}"] = (i, g)
-    lines = "\n".join(f"- {k}" + (f" (about {round(g)} g)" if g else "") for k, (_, g) in asked.items())
+def _groq_item(x: dict) -> dict:
+    """One food as Groq worked it out: its figures per 100 g (which it knows
+    better than for an amount - it mixed the two up), times the grams here.
+    Checked for sense: at most 900 kcal in 100 g, the calories near what its
+    protein, carbs and fat add up to. Fails the checks: left unknown, to be
+    put right with your own figure."""
+    said = str(x.get("said") or x.get("name") or "")[:80]
+    name = str(x.get("name") or said)[:80]
+    if x.get("drink"):
+        drink = _drink_item(x, said)
+        if drink:
+            return drink
     try:
-        got = chat_json(_GUESS, lines, temperature=0, timeout=30, prefer=1,
-                        extra={"reasoning_effort": "low"}).get("foods") or {}
-    except Exception as e:
-        print(f"[recipes] AI estimate failed: {e!r}")
-        return
-    low = {str(k).strip().lower(): v for k, v in got.items() if isinstance(v, dict)}
-    for said, (i, g) in asked.items():
-        # Keyed as asked, or (as it often answers) by the food's name alone
-        s, nm = said.strip().lower(), str(i.get("name") or "").strip().lower()
-        # (or with the "(about 200 g)" it was sent with)
-        v = low.get(s) or low.get(nm) or next((x for k, x in low.items() if k and (k in s or s in k or k == nm)), None)
-        try:
-            n = {k: max(0.0, round(float(v.get(k) or 0), 1)) for k in NUTRIENTS} if v else None
-            grams = float(v.get("grams") or g or 0) if v else 0
-        except (TypeError, ValueError):
-            n = None
-        if not n or not 0 < n["kcal"] <= 3000:
-            continue
-        # Sense checks: no more than 9 kcal a gram, and the calories near what its protein, carbs and fat add up to
-        from_macros = 4 * n["protein"] + 4 * n["carbs"] + 9 * n["fat"]
-        if (grams and n["kcal"] / grams > 9) or (from_macros and abs(from_macros - n["kcal"]) > 0.35 * n["kcal"]):
-            continue
-        i.update({"nutrition": n, "source": "ai", "grams": round(grams) if grams else i.get("grams"),
-                  "basis": f"Groq's estimate{f' for {round(grams)} g' if grams else ''} - no data source had it"})
+        g = float(x.get("grams") or 0)
+        per = x.get("per100") if isinstance(x.get("per100"), dict) else {}
+        p100 = {k: max(0.0, float(per.get(k) or 0)) for k in NUTRIENTS}
+        n = {k: round(v * g / 100, 1) for k, v in p100.items()} if g > 0 and 0 < p100["kcal"] <= 900 else None
+    except (TypeError, ValueError):
+        g, n = 0, None
+    out = {"said": said, "name": name, "source": "ai", "grams": round(g) if g else None,
+           "basis": f"Groq's figures{f' for {round(g)} g' if g else ''}"}
+    try:
+        if x.get("count") not in (None, ""):
+            out["count"] = float(x["count"])
+    except (TypeError, ValueError):
+        pass
+    from_macros = 4 * n["protein"] + 4 * n["carbs"] + 9 * n["fat"] if n else 0
+    if not n or not 0 < n["kcal"] <= 4000 \
+            or (from_macros and abs(from_macros - n["kcal"]) > 0.35 * max(n["kcal"], 40)):
+        return {**out, "source": None, "nutrition": None, "basis": None}
+    out["nutrition"] = n
+    ing = [i for i in x.get("ingredients") or [] if isinstance(i, dict)]
+    if ing:
+        c = _price_serving(ing)
+        if c["total"] > 0:
+            out["cost"] = c["total"]
+    return out
 
 
 def how_many(item: dict) -> float:
@@ -592,32 +601,14 @@ def read_meal(text: str | None = None, planned: list[dict] | None = None, mine: 
                 items.append(_yours(_eaten_item({"said": d["name"], "name": d["name"], "count": p.get("servings") or 1,
                                                  "unit": d["serving"]["unit"] if d["serving"] else None}, d["name"]), [], mine))
     if text and text.strip():
-        got = chat_json(_READ_MEAL, text.strip()[:600], temperature=0, timeout=30, extra={"reasoning_effort": "low"})
-        raw = [x for x in got.get("items") or [] if isinstance(x, dict) and (x.get("name") or x.get("said"))][:10]
-        # Known dishes whose names share a word with what was eaten - the LLM picks among them
-        words = [w for x in raw for w in str(x.get("name") or "").lower().split()]
-        words += [e for w in list(words) for e in ALSO_CALLED.get(w, [])]
-        cands = indb.named(words, "any", limit=50) if words else []
-        matches = {}
-        if cands:
-            listing = "\n".join(f"- {d['name']}" for d in cands)
-            foods_ = "\n".join(f"- {x.get('name')}" for x in raw)
-            try:
-                matches = chat_json(_MATCH_MEAL, f"Foods eaten:\n{foods_}\n\nKnown dishes:\n{listing}", temperature=0,
-                                    timeout=30, prefer=1, extra={"reasoning_effort": "low"}).get("matches") or {}
-            except Exception:
-                matches = {}
-        low = {str(k).strip().lower(): v for k, v in matches.items()}
+        # Typed or said: worked out by Groq alone, in the user's own words (the
+        # user's choice - INDB and USDA renamed foods: "Rice" became "Boiled
+        # rice (Uble chawal)", "Gobi fry" plain cauliflower)
+        got = chat_json(_EAT, text.strip()[:600], temperature=0, timeout=45,
+                        extra={"reasoning_effort": "low", "max_completion_tokens": 3000})
+        raw = [x for x in got.get("items") or [] if isinstance(x, dict) and (x.get("name") or x.get("said"))][:12]
         for x in raw:
-            it = _eaten_item(x, low.get(str(x.get("name") or "").strip().lower()))
-            if not it.get("servings") and x.get("count") not in (None, ""):
-                try:
-                    it["count"] = float(x["count"])
-                except (TypeError, ValueError):
-                    pass
-            items.append(_yours(it, [x.get("said"), x.get("name")], mine))
-
-    _ai_guess([i for i in items if not i.get("nutrition")])
+            items.append(_yours(_groq_item(x), [x.get("said"), x.get("name")], mine))
 
     # What each INDB dish cost: its ingredients (remembered per dish), times the servings eaten
     is_dish = lambda i: "indb" in (i["source"], i.get("was"))     # noqa: E731 - your own figure for an INDB dish is still priced as one
