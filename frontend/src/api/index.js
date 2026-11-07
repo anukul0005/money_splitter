@@ -183,7 +183,8 @@ export const getGroups   = ()            => api.get('/groups/')
 export const getGroup    = (id)          => api.get(`/groups/${id}`)
 export const createGroup = (data)        => api.post('/groups/', data)
 export const updateGroup = (id, data)    => api.patch(`/groups/${id}`, data)
-export const deleteGroup = (id)          => api.delete(`/groups/${id}`)
+// force: also when the group holds a discussion (it's deleted with it) - the server refuses otherwise
+export const deleteGroup = (id, force = false) => api.delete(`/groups/${id}`, { params: force ? { force: true } : {} })
 
 // ── Expenses ──────────────────────────────────────────────────────────────────
 export const getExpenses   = (groupId)   => api.get(`/expenses/group/${groupId}`)

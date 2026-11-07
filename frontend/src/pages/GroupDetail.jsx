@@ -76,7 +76,14 @@ export default function GroupDetail() {
 
   const handleDeleteGroup = async () => {
     if (!confirm(`Delete group "${group.name}" and all its expenses? This cannot be undone.`)) return
-    await deleteGroup(id)
+    try {
+      await deleteGroup(id)
+    } catch (err) {
+      // It holds a discussion: say so, and delete only if asked again knowing that
+      if (err?.response?.status !== 409) { alert(err?.response?.data?.detail || "Couldn't delete the group"); return }
+      if (!confirm(`${err.response.data.detail}\n\nDelete the group and the discussion anyway?`)) return
+      await deleteGroup(id, true)
+    }
     nav('/')
   }
 

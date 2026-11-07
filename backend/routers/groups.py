@@ -172,8 +172,17 @@ def update_group(group_id: int, payload: GroupUpdate, background_tasks: Backgrou
 
 
 @router.delete("/{group_id}", status_code=204)
-def delete_group(group_id: int, db: Session = Depends(get_db),
+def delete_group(group_id: int, force: bool = False, db: Session = Depends(get_db),
                  caller: User = Depends(current_user)):
     group = member_group(group_id, caller, db)
+    # A discussion lives in its group and goes with it - its messages,
+    # quotes and trip plans too, for good. Said first, and only done when
+    # asked again knowing that (force).
+    from models import Discussion
+    talks = db.query(Discussion).filter(Discussion.group_id == group.id).all()
+    if talks and not force:
+        names = ", ".join(f'"{d.title}"' for d in talks)
+        raise HTTPException(409, f"This group holds the discussion {names} - deleting the group deletes "
+                                 "the discussion too, with its messages, quotes and trip plans, and it can't be brought back.")
     db.delete(group)
     db.commit()
