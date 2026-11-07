@@ -197,9 +197,10 @@ def log_meal(payload: LogIn, db: Session = Depends(get_db), caller: User = Depen
     plan = json.loads(k.plan_json) if k.plan_json else None
     if not plan:
         raise HTTPException(400, "Make a plan first - meals are tracked against it")
+    mine = _foods(k)["mine"]
     db.rollback()
     try:
-        entry = engine.read_meal(payload.text, payload.planned)
+        entry = engine.read_meal(payload.text, payload.planned, mine)
     except Exception as e:
         print(f"[recipes] read meal failed: {e!r}")
         raise HTTPException(502, "Couldn't read that just now - try again")
@@ -209,6 +210,7 @@ def log_meal(payload: LogIn, db: Session = Depends(get_db), caller: User = Depen
     days = _log(k, plan)
     day = days.setdefault(str(payload.day), {})
     old = day.get(payload.meal)
+    fresh = entry["items"] if (payload.text or "").strip() else []    # typed or said - not "as planned"
     if payload.add and old:
         # This dish replaces itself if it was there; the rest of the meal stays
         names = {i["name"] for i in entry["items"]}
@@ -221,8 +223,65 @@ def log_meal(payload: LogIn, db: Session = Depends(get_db), caller: User = Depen
     entry["logged_at"] = datetime.now(timezone.utc).isoformat()
     day[payload.meal] = entry
     k.log_json = json.dumps({"plan": plan.get("made_at"), "days": days})
+    _note_had(k, fresh)
     db.commit()
     return {"log": days, "entry": entry, "weeks": _weeks(k, plan, days)}
+
+
+def _foods(k: RecipeKitchen) -> dict:
+    try:
+        f = json.loads(k.foods_json) if k.foods_json else {}
+    except ValueError:
+        f = {}
+    return {"mine": f.get("mine") or {}, "had": f.get("had") or {}}
+
+
+def _note_had(k: RecipeKitchen, items: list[dict], foods_: dict | None = None) -> None:
+    """Foods typed or said, kept to suggest next time: as they were said,
+    how often, when last, and what one came to."""
+    from datetime import date
+    f = foods_ or _foods(k)
+    for i in items:
+        said = " ".join(str(i.get("said") or i.get("name") or "").split())[:80]
+        key = engine._food_key(i.get("name") or said)
+        if not key:
+            continue
+        h = f["had"].get(key) or {"name": i.get("name") or said, "times": 0}
+        h.update({"said": said, "times": h["times"] + 1, "last": date.today().isoformat()})
+        if i.get("nutrition"):
+            h["kcal"] = round(i["nutrition"]["kcal"] / engine.how_many(i))
+        f["had"][key] = h
+    # The 300 most recent are plenty to suggest from
+    f["had"] = dict(sorted(f["had"].items(), key=lambda kv: kv[1].get("last") or "")[-300:])
+    k.foods_json = json.dumps(f, ensure_ascii=False)
+
+
+@router.get("/foods")
+def my_foods(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """What you've had before, most often first - suggested as you type a meal."""
+    k = _kitchen(db, caller)
+    f = _foods(k)
+    had = dict(f["had"])
+    # Meals logged before this list was kept count too
+    try:
+        plan = json.loads(k.plan_json) if k.plan_json else None
+    except ValueError:
+        plan = None
+    for meals in _log(k, plan).values():
+        for e in meals.values():
+            for i in e.get("items") or []:
+                key = engine._food_key(i.get("name") or i.get("said") or "")
+                if key and key not in had:
+                    had[key] = {"name": i["name"], "said": i.get("said") or i["name"], "times": 1,
+                                "kcal": round(i["nutrition"]["kcal"] / engine.how_many(i)) if i.get("nutrition") else None}
+    out = []
+    for key, h in had.items():
+        yours = f["mine"].get(key)
+        out.append({"name": h["name"], "said": h.get("said") or h["name"], "times": h.get("times", 1), "last": h.get("last") or "",
+                    "kcal": round(yours["one"]["kcal"]) if yours else h.get("kcal"), "yours": bool(yours)})
+    out.sort(key=lambda x: x["last"], reverse=True)       # most recent first...
+    out.sort(key=lambda x: -x["times"])                   # ...within most often
+    return {"foods": out[:200]}
 
 
 def _logged(db: Session, caller: User, day: int, meal: str):
@@ -272,8 +331,9 @@ class FixIn(BaseModel):
 
 @router.post("/log/fix")
 def fix_item(payload: FixIn, db: Session = Depends(get_db), caller: User = Depends(current_user)):
-    """Your own figure for something you had - used, and remembered for
-    that food from now on."""
+    """Your own figure for something you had - used, and remembered (for
+    you) for that food from now on: next time it's logged, one of it comes
+    to what one came to here."""
     if not 0 < payload.kcal <= 5000:
         raise HTTPException(400, "Calories for what you had, e.g. 450")
     k, plan, days, entry = _logged(db, caller, payload.day, payload.meal)
@@ -281,14 +341,24 @@ def fix_item(payload: FixIn, db: Session = Depends(get_db), caller: User = Depen
     if not 0 <= payload.index < len(items):
         raise HTTPException(400, "Which item?")
     it = dict(items[payload.index])
-    g = it.get("grams") or 250
-    n = {x: 0.0 for x in engine.NUTRIENTS}
+    old = it.get("nutrition") or {}
+    if old.get("kcal"):
+        # The rest scaled with the calories (the same food, a different amount); protein if given
+        n = {x: round((old.get(x) or 0) * payload.kcal / old["kcal"], 1) for x in engine.NUTRIENTS}
+    else:
+        n = {x: 0.0 for x in engine.NUTRIENTS}
     n["kcal"] = round(payload.kcal, 1)
     if payload.protein is not None:
         n["protein"] = round(payload.protein, 1)
-    it.update({"nutrition": n, "source": "you", "grams": g, "basis": "your own figure"})
+    it.update({"nutrition": n, "source": "you", "basis": "your own figure", "was": it.get("was") or it.get("source")})
     items[payload.index] = it
-    engine.remember_food(it["name"], {x: v / g * 100 for x, v in n.items()}, "you", "your own figure", g)
+    many = engine.how_many(it)
+    f = _foods(k)
+    one = {"name": it["name"], "one": {x: round(v / many, 2) for x, v in n.items()}}
+    for w in {it.get("said"), it.get("name")}:
+        if engine._food_key(w or ""):
+            f["mine"][engine._food_key(w)] = one
+    _note_had(k, [], f)
     return _save_entry(db, k, plan, days, payload.day, payload.meal, {**entry, **engine.meal_totals(items)})
 
 

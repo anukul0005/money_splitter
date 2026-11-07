@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { askRecipes, fixMealItem, logMeal, planRecipes, recipeDish, recipesMe, reworkMeal, saveRecipesMe, unlogMeal } from '../api'
+import { askRecipes, fixMealItem, logMeal, myFoods, planRecipes, recipeDish, recipesMe, reworkMeal, saveRecipesMe, unlogMeal } from '../api'
 import RecommendTabs from '../components/RecommendTabs'
 import { Typewriter } from '../components/ExpenseChat'
 import { useVoice, canRecord as micWorks } from '../components/useVoice'
@@ -321,8 +321,6 @@ function Weeks({ weeks }) {
 function UnknownItem({ day, meal, index, item, onLog }) {
   const [busy, setBusy] = useState(false)
   const [own, setOwn] = useState(false)
-  const [kcal, setKcal] = useState('')
-  const [protein, setProtein] = useState('')
   const [err, setErr] = useState('')
   const run = async (f) => {
     setBusy(true); setErr('')
@@ -340,18 +338,96 @@ function UnknownItem({ day, meal, index, item, onLog }) {
           </button>
           <button disabled={busy} onClick={() => setOwn(true)} className="text-[11px] font-bold text-gray-600">Enter calories myself</button>
         </div>
-      ) : (
-        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-          <input type="number" inputMode="decimal" placeholder="kcal" value={kcal} onChange={(e) => setKcal(e.target.value)}
-            className="w-20 border border-amber-200 rounded-md px-2 py-1 text-xs" />
-          <input type="number" inputMode="decimal" placeholder="protein g" value={protein} onChange={(e) => setProtein(e.target.value)}
-            className="w-24 border border-amber-200 rounded-md px-2 py-1 text-xs" />
-          <button disabled={busy || !(parseFloat(kcal) > 0)} className="btn-primary text-[11px] py-1 px-2.5 disabled:opacity-50"
-            onClick={() => run(() => fixMealItem(day, meal, index, parseFloat(kcal), protein === '' ? null : parseFloat(protein)))}>Save</button>
-          <button onClick={() => setOwn(false)} className="text-[11px] font-bold text-gray-400">Cancel</button>
-        </div>
-      )}
+      ) : <OwnFigure day={day} meal={meal} index={index} item={item} onLog={onLog} onClose={() => setOwn(false)} />}
       {err && <p className="text-[10px] text-red-600 mt-0.5">{err}</p>}
+    </div>
+  )
+}
+
+/**
+ * Your own calories (and protein, if you like) for something you had - used
+ * for this meal, and remembered for that food: the next time you have it,
+ * one of it comes to what one came to here.
+ */
+function OwnFigure({ day, meal, index, item, onLog, onClose }) {
+  const [kcal, setKcal] = useState(item.nutrition ? String(r0(item.nutrition.kcal)) : '')
+  const [protein, setProtein] = useState(item.nutrition ? String(Math.round(item.nutrition.protein * 10) / 10) : '')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const save = async () => {
+    setBusy(true); setErr('')
+    try {
+      const { data } = await fixMealItem(day, meal, index, parseFloat(kcal), protein === '' ? null : parseFloat(protein))
+      forgetMyFoods(); onLog(data.log, data.weeks); onClose()
+    } catch (e) { setErr(e?.response?.data?.detail || "Couldn't save - try again") } finally { setBusy(false) }
+  }
+  return (
+    <div className="mt-1 mb-1">
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <input type="number" inputMode="decimal" placeholder="kcal" value={kcal} onChange={(e) => setKcal(e.target.value)} autoFocus
+          className="w-20 border border-amber-200 rounded-md px-2 py-1 text-xs bg-white" />
+        <span className="text-[10px] text-gray-400">kcal</span>
+        <input type="number" inputMode="decimal" placeholder="protein" value={protein} onChange={(e) => setProtein(e.target.value)}
+          className="w-20 border border-amber-200 rounded-md px-2 py-1 text-xs bg-white" />
+        <span className="text-[10px] text-gray-400">g protein</span>
+        <button disabled={busy || !(parseFloat(kcal) > 0)} onClick={save} className="btn-primary text-[11px] py-1 px-2.5 disabled:opacity-50">{busy ? 'Saving…' : 'Save'}</button>
+        <button onClick={onClose} className="text-[11px] font-bold text-gray-400">Cancel</button>
+      </div>
+      <p className="text-[10px] text-gray-400 mt-0.5">Remembered for {item.name}{item.servings || item.count ? ` - ${r0(parseFloat(kcal) / (item.servings || item.count)) || '…'} kcal for each one` : ''} next time you have it</p>
+      {err && <p className="text-[10px] text-red-600">{err}</p>}
+    </div>
+  )
+}
+
+// What you've had before - fetched once a minute at most, for suggestions as you type
+let foodsCache = null
+const forgetMyFoods = () => { foodsCache = null }
+function useMyFoods(on) {
+  const [list, setList] = useState(foodsCache?.list || [])
+  useEffect(() => {
+    if (!on) return
+    if (foodsCache && Date.now() - foodsCache.at < 60000) { setList(foodsCache.list); return }
+    myFoods().then((r) => { foodsCache = { at: Date.now(), list: r.data.foods || [] }; setList(foodsCache.list) }).catch(() => {})
+  }, [on])
+  return list
+}
+
+// Where the food being typed starts: after the last comma, "and", "aur"…
+const SEP = /(,|;|\+|\n|\s(?:and|aur|with|और)\s)/gi
+const QTY = /^((?:\d+(?:\.\d+)?|ek|do|teen|char|aadha|half|one|two|three)\s+)?(.*)$/i
+
+/** Foods you've had before that fit what's being typed - tap one to put it in. */
+function FoodHints({ text, setText, foods, focused }) {
+  let cut = 0
+  for (const m of text.matchAll(SEP)) cut = m.index + m[0].length
+  const [, qty = '', frag = ''] = text.slice(cut).trimStart().match(QTY) || []
+  const f = frag.trim().toLowerCase()
+  let hits
+  if (!text.trim()) {
+    if (!focused) return null
+    hits = foods.slice(0, 6)
+  } else {
+    if (f.length < 2) return null
+    const starts = (s) => (s || '').toLowerCase().split(/[\s/(),-]+/).some((w) => w.startsWith(f)) || (s || '').toLowerCase().startsWith(f)
+    hits = foods.filter((x) => (starts(x.name) || starts(x.said) || (f.length >= 4 && `${x.name} ${x.said}`.toLowerCase().includes(f)))
+      && x.said.toLowerCase() !== f && x.name.toLowerCase() !== f).slice(0, 5)
+  }
+  if (!hits.length) return null
+  const put = (x) => {
+    // With a quantity typed, the food's name; otherwise as you said it last time
+    const what = qty ? x.name : x.said
+    const before = text.slice(0, cut).replace(/\s+$/, '')
+    setText(`${before}${before ? ' ' : ''}${qty}${what}, `)
+  }
+  return (
+    <div className="flex flex-wrap gap-1 mt-1">
+      {!text.trim() && <span className="text-[10px] text-gray-400 self-center">You often have:</span>}
+      {hits.map((x) => (
+        <button key={`${x.name}|${x.said}`} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => put(x)}
+          className="text-[11px] bg-white border border-amber-200 rounded-full px-2 py-0.5 text-gray-700 active:bg-amber-100 max-w-full truncate">
+          {qty ? x.name : x.said}{x.kcal != null && <span className="text-gray-400"> · {x.kcal} kcal{x.yours ? ' (yours)' : ''}</span>}
+        </button>
+      ))}
     </div>
   )
 }
@@ -368,6 +444,9 @@ export function MealLog({ day, meal, planned, entry, onLog, add = false, quickLa
   const [editing, setEditing] = useState(!entry)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [focused, setFocused] = useState(false)
+  const [fixing, setFixing] = useState(null)     // which item's calories are being put right
+  const foods = useMyFoods(editing)
   const voice = useVoice({
     onText: (said) => { setErr(''); setText((p) => (p.trim() ? `${p.trim()} ${said}` : said)) },
     onError: setErr,
@@ -378,7 +457,7 @@ export function MealLog({ day, meal, planned, entry, onLog, add = false, quickLa
     setBusy(true); setErr('')
     try {
       const { data } = await logMeal({ day, meal, ...payload })
-      onLog(data.log, data.weeks); setText(''); setEditing(false)
+      forgetMyFoods(); onLog(data.log, data.weeks); setText(''); setEditing(false)
     } catch (e) {
       setErr(e?.response?.data?.detail || "Couldn't log that - try again.")
     } finally { setBusy(false) }
@@ -398,16 +477,23 @@ export function MealLog({ day, meal, planned, entry, onLog, add = false, quickLa
             const label = <span className="text-gray-800 min-w-0">{i.name}{i.servings ? <span className="text-gray-400"> × {i.servings} {i.unit}</span> : i.grams ? <span className="text-gray-400"> · {i.grams} g</span> : ''}</span>
             const nums = <span className="text-gray-500 tabular-nums flex-shrink-0">{i.nutrition ? `${r0(i.nutrition.kcal)} kcal · ${r0(i.nutrition.protein)} g P` : '-'}{links ? ' ›' : ''}</span>
             // How a food not known by name was worked out - an estimate, said so
-            const how = { alcohol: `= ${i.basis}`, ingredients: `≈ added up from ${i.basis || 'its ingredients'}`, similar: `≈ estimated from ${(i.basis || '').replace('the closest dish INDB has: ', 'a similar dish, ')}`, you: 'your own figure' }[i.source]
+            const how = { alcohol: `= ${i.basis}`, ingredients: `≈ added up from ${i.basis || 'its ingredients'}`, similar: `≈ estimated from ${(i.basis || '').replace('the closest dish INDB has: ', 'a similar dish, ')}`, you: 'your own figure - used whenever you have it' }[i.source]
             return (
               <div key={k}>
-                {links && i.nutrition ? (
-                  <Link to={dishHref({ name: i.name, servings: i.servings || 1, unit: i.unit, day, meal })}
-                    className="flex items-baseline justify-between gap-2 text-xs py-1 active:bg-amber-100 rounded [&>span:first-child]:underline [&>span:first-child]:decoration-amber-300 [&>span:first-child]:underline-offset-2">
-                    {label}{nums}
-                  </Link>
-                ) : <div className="flex items-baseline justify-between gap-2 text-xs py-0.5">{label}{nums}</div>}
+                <div className="flex items-baseline gap-1.5">
+                  {links && i.nutrition ? (
+                    <Link to={dishHref({ name: i.name, servings: i.servings || 1, unit: i.unit, day, meal })}
+                      className="flex-1 min-w-0 flex items-baseline justify-between gap-2 text-xs py-1 active:bg-amber-100 rounded [&>span:first-child]:underline [&>span:first-child]:decoration-amber-300 [&>span:first-child]:underline-offset-2">
+                      {label}{nums}
+                    </Link>
+                  ) : <div className="flex-1 min-w-0 flex items-baseline justify-between gap-2 text-xs py-0.5">{label}{nums}</div>}
+                  {i.nutrition && (
+                    <button onClick={() => setFixing(fixing === k ? null : k)} disabled={busy} aria-label={`Edit calories of ${i.name}`}
+                      className="text-[10px] font-bold text-brand-600 flex-shrink-0 px-1">✎</button>
+                  )}
+                </div>
                 {how && <p className="text-[10px] text-gray-400 -mt-0.5 mb-0.5">{how}</p>}
+                {fixing === k && i.nutrition && <OwnFigure day={day} meal={meal} index={k} item={i} onLog={onLog} onClose={() => setFixing(null)} />}
                 {!i.nutrition && <UnknownItem day={day} meal={meal} index={k} item={i} onLog={onLog} />}
               </div>
             )
@@ -440,10 +526,12 @@ export function MealLog({ day, meal, planned, entry, onLog, add = false, quickLa
           )}
           <div className="relative">
             <textarea rows={2} value={text} onChange={(e) => setText(e.target.value)} disabled={busy}
+              onFocus={() => setFocused(true)} onBlur={() => setTimeout(() => setFocused(false), 250)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (text.trim()) send({ text }) } }}
               placeholder={voice.recording ? `Listening… ${voice.seconds}s` : 'Or what you actually had - “2 besan chilla aur chai”, “दो रोटी और दाल”'}
               className="w-full bg-white border border-amber-200 rounded-md px-2.5 py-1.5 text-xs outline-none focus:border-brand-400 resize-none" />
           </div>
+          <FoodHints text={text} setText={setText} foods={foods} focused={focused} />
           <div className="flex items-center gap-2 mt-1">
             <button onClick={() => send({ text })} disabled={busy || !text.trim()} className="btn-primary text-[11px] py-1.5 px-3 disabled:opacity-50">
               {busy ? 'Working it out…' : entry ? 'Save changes' : 'Log it'}

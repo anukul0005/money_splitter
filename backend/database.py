@@ -239,6 +239,7 @@ _ADDED_COLUMNS = [
     ("recipe_kitchens", "plan_json", "TEXT"),
     ("recipe_kitchens", "log_json", "TEXT"),
     ("recipe_kitchens", "weeks_json", "TEXT"),
+    ("recipe_kitchens", "foods_json", "TEXT"),
     ("users", "show_drinks", "BOOLEAN NOT NULL DEFAULT TRUE"),
     ("users", "last_daily_summary_sent", "VARCHAR(10)"),
     ("expenses", "subcategory", "VARCHAR(100)"),

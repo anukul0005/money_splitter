@@ -202,7 +202,8 @@ export const planRecipes   = (days = 7, diet = 'any') => api.post('/recipes/plan
 export const logMeal       = (data)   => api.post('/recipes/log', data)
 export const unlogMeal     = (day, meal) => api.post('/recipes/log/remove', { day, meal })
 export const reworkMeal    = (day, meal) => api.post('/recipes/log/rework', { day, meal })
-export const fixMealItem   = (day, meal, index, kcal, protein) => api.post('/recipes/log/fix', { day, meal, index, kcal, protein })
+export const myFoods       = ()       => api.get('/recipes/foods')
+export const fixMealItem   =(day, meal, index, kcal, protein) => api.post('/recipes/log/fix', { day, meal, index, kcal, protein })
 export const recipeDish    =(name, servings = 1, recipe = null) => api.post('/recipes/dish', { name, servings, recipe })
 // Add Expense's chat box and mic: a message read into the form's fields
 export const understandExpense  = (data) => api.post('/expenses/understand', data)

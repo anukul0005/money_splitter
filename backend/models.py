@@ -1546,4 +1546,8 @@ class RecipeKitchen(Base):
     # Weeks gone by: each plan's summary (target, eaten, meals logged), kept
     # when a new plan replaces it - routers/recipes._week
     weeks_json = Column(Text, nullable=True)
+    # Foods this person has had: {"mine": {food key: their own figures for
+    # one}, "had": {food key: name, as said, times, last}} - their figures
+    # override the worked-out ones; "had" suggests foods as they type
+    foods_json = Column(Text, nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

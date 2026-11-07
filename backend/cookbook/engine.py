@@ -495,17 +495,40 @@ def _learnt_item(it: dict, said: str, name: str, grams: float | None, count: flo
             "nutrition": {k: round(got["per100"][k] * g / 100, 1) for k in NUTRIENTS}}
 
 
-def read_meal(text: str | None = None, planned: list[dict] | None = None) -> dict:
+def how_many(item: dict) -> float:
+    """How many of the food an item is - its servings, else the count said, else one."""
+    try:
+        return max(0.1, float(item.get("servings") or item.get("count") or 1))
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def _yours(item: dict, words: list, mine: dict | None) -> dict:
+    """The person's own figures for this food, when they've put some in -
+    for one of it, times how many were had. Otherwise the item as worked out."""
+    if not mine:
+        return item
+    hit = next((mine[k] for k in (_food_key(w) for w in words + [item.get("said"), item.get("name")] if w) if k in mine), None)
+    if not hit or not hit.get("one"):
+        return item
+    n = how_many(item)
+    return {**item, "source": "you", "basis": "your own figure", "was": item.get("source"),
+            "nutrition": {k: round((hit["one"].get(k) or 0) * n, 1) for k in NUTRIENTS}}
+
+
+def read_meal(text: str | None = None, planned: list[dict] | None = None, mine: dict | None = None) -> dict:
     """What was eaten at one meal, worked out. `text`: in the user's words,
     any language; `planned`: [{name, servings}] eaten as planned (INDB
-    dishes, no reading needed). Costs come from each dish's ingredients."""
+    dishes, no reading needed). Costs come from each dish's ingredients.
+    `mine`: the person's own figures for foods ({food key: {"one": per one}}),
+    which win over the worked-out ones."""
     items: list[dict] = []
     if planned:
         for p in planned[:8]:
             d = indb.find(str(p.get("name") or ""), min_score=0.9)
             if d:
-                items.append(_eaten_item({"said": d["name"], "name": d["name"], "count": p.get("servings") or 1,
-                                          "unit": d["serving"]["unit"] if d["serving"] else None}, d["name"]))
+                items.append(_yours(_eaten_item({"said": d["name"], "name": d["name"], "count": p.get("servings") or 1,
+                                                 "unit": d["serving"]["unit"] if d["serving"] else None}, d["name"]), [], mine))
     if text and text.strip():
         got = chat_json(_READ_MEAL, text.strip()[:600], temperature=0, timeout=30, extra={"reasoning_effort": "low"})
         raw = [x for x in got.get("items") or [] if isinstance(x, dict) and (x.get("name") or x.get("said"))][:10]
@@ -526,13 +549,21 @@ def read_meal(text: str | None = None, planned: list[dict] | None = None) -> dic
             except Exception:
                 matches = {}
         low = {str(k).strip().lower(): v for k, v in matches.items()}
-        items += [_eaten_item(x, low.get(str(x.get("name") or "").strip().lower())) for x in raw]
+        for x in raw:
+            it = _eaten_item(x, low.get(str(x.get("name") or "").strip().lower()))
+            if not it.get("servings") and x.get("count") not in (None, ""):
+                try:
+                    it["count"] = float(x["count"])
+                except (TypeError, ValueError):
+                    pass
+            items.append(_yours(it, [x.get("said"), x.get("name")], mine))
 
     # What each INDB dish cost: its ingredients (remembered per dish), times the servings eaten
-    dishes = [indb.find(i["name"], min_score=0.9) for i in items if i["source"] == "indb"]
+    is_dish = lambda i: "indb" in (i["source"], i.get("was"))     # noqa: E731 - your own figure for an INDB dish is still priced as one
+    dishes = [indb.find(i["name"], min_score=0.9) for i in items if is_dish(i)]
     ing = _dish_ingredients([d for d in dishes if d and d["serving"]]) if dishes else {}
     for i in items:
-        if i["source"] == "indb" and i["name"] in ing:
+        if is_dish(i) and i["name"] in ing:
             i["cost"] = round(_price_serving(ing[i["name"]])["total"] * i["servings"], 1)
     known = [i for i in items if i.get("nutrition")]
     costs = [i["cost"] for i in items if i.get("cost") is not None]
