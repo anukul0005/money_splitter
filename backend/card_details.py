@@ -306,12 +306,51 @@ def reconcile(summary: dict, txns: list[dict], period: tuple | None = None) -> N
         if want is None:
             continue
         lines = [t for t in txns if t["type"] == kind and not t.get("excluded")]
+        if kind == "credit" and _balances(summary, txns):
+            # The lines make previous balance - payments + purchases = total
+            # due exactly: the stated figure was misread (ICICI's payments
+            # read as ₹0, which left every payment out) - the lines win
+            summary[key] = round(sum(t["amount"] for t in lines), 2)
+            continue
         # purchases & debits may or may not count the fees - whichever the lines match
         targets = [want] + ([round(want + x, 2) for x in extras] if kind == "debit" else [])
         drops = [d for d in (_drop_to(lines, target) for target in targets) if d is not None]
         if drops:
             for t in min(drops, key=len):
                 t["excluded"] = "not in this bill's totals"
+
+
+def _balances(summary: dict, txns: list[dict]) -> bool:
+    """Previous balance - the lines' credits + their debits = total due, to
+    two rupees."""
+    prev, total = summary.get("previous_balance"), summary.get("total_due")
+    if prev is None or total is None:
+        return False
+    live = [t for t in txns if not t.get("excluded")]
+    debits = sum(t["amount"] for t in live if t["type"] == "debit")
+    credits = sum(t["amount"] for t in live if t["type"] == "credit")
+    return abs(prev - credits + debits - total) <= 2
+
+
+def adopt_pdf_total(bill, details: dict) -> bool:
+    """The statement PDF's total due (and minimum, dates) onto the bill when
+    the PDF's figures check out (its lines add up to it) - the email's own
+    figure can be wrong: ICICI's was read as ₹270, the minimum, for both.
+    An email total no more than the minimum is taken as misread too."""
+    s = details.get("summary") or {}
+    total = s.get("total_due")
+    if not total or (bill.total_due is not None and abs(bill.total_due - total) <= 1):
+        return False
+    ok = (details.get("check") or {}).get("ok")
+    misread = bill.total_due is None or (bill.minimum_due is not None and bill.total_due <= bill.minimum_due + 1)
+    if not (ok or misread):
+        return False
+    bill.total_due = round(float(total), 2)
+    if s.get("minimum_due"):
+        bill.minimum_due = round(float(s["minimum_due"]), 2)
+    bill.due_date = bill.due_date or s.get("due_date")
+    bill.statement_date = bill.statement_date or s.get("statement_date")
+    return True
 
 
 def rerule(txns: list[dict]) -> None:
@@ -508,6 +547,7 @@ def read_bill(db, user_id: int, bill_id: int, step=lambda text, frac=None: None)
                         "stopped_at": STOP_AT[bank].pattern if bank in STOP_AT and
                         any(STOP_AT[bank].search(p) for p in pages[:used]) else None}
     bill.details_json = json.dumps(details)
+    adopt_pdf_total(bill, details)
     db.commit()
     return details
 
