@@ -457,7 +457,7 @@ export default function Loans() {
                   <div className="mt-2 space-y-1">
                     {l.installments.map((i, k) => (
                       <div key={k} className="flex items-center justify-between text-[11px]">
-                        <span className="text-gray-500">EMI {k + 1} · {i.pct}% · {i.date}</span>
+                        <span className={i.paid ? 'text-gray-400 line-through' : 'text-gray-500'}>EMI {k + 1} · {i.pct}% · {i.date}</span>
                         <span className={i.paid ? 'text-green-600 font-bold' : i.overdue ? 'text-red-600 font-bold' : 'text-gray-700 font-bold'}>
                           {i.paid ? 'Paid ✓' : `${INR(i.balance)}${i.overdue ? ' overdue' : ''}`}
                         </span>

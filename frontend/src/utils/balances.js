@@ -34,6 +34,8 @@ export function loanContributions(loansData, me) {
       about: l.note || `${iOwe ? 'Borrowed' : 'Lent'} ₹${Number(l.principal).toLocaleString('en-IN')}${l.start_date ? ` on ${l.start_date}` : ''}`,
       // EMIs still open (unpaid ones, each with its date and what's left of it), or the one due date
       emis: (l.installments || []).filter((i) => !i.paid && i.balance > 0.01), dueDate: l.due_date,
+      // every EMI, cleared ones too - shown struck through
+      allEmis: l.installments || [],
     })
   }
 

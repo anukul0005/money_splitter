@@ -74,6 +74,16 @@ function DueBy({ emis, positive }) {
         <span className="flex-1">Due by</span><span className="w-20 text-right">EMI</span><span className="w-20 text-right">Total by then</span>
       </span>
       {emis.map((i, k) => {
+        if (i.paid || i.balance <= 0.01) {
+          // Cleared: struck through, out of the running total
+          return (
+            <span key={k} className="flex text-[0.68rem] tabular-nums text-gray-400">
+              <span className="flex-1 line-through">{shortDate(i.date)}</span>
+              <span className="w-20 text-right line-through">{INR(i.amount)}</span>
+              <span className="w-20 text-right font-bold text-green-600">paid ✓</span>
+            </span>
+          )
+        }
         run += i.balance
         return (
           <span key={k} className="flex text-[0.68rem] tabular-nums">
@@ -116,7 +126,7 @@ function LoanItem({ it, nav }) {
       </span>
       {it.about && <span className="block text-[9.85px] text-gray-600 mt-0.5 truncate">{it.about}</span>}
       {it.emis?.length > 0
-        ? <DueBy emis={it.emis} positive={it.positive} />
+        ? <DueBy emis={it.allEmis?.length ? it.allEmis : it.emis} positive={it.positive} />
         : it.tag === 'Loan' && it.dueDate && <span className="block text-[9.85px] text-gray-500 mt-0.5">Due by {shortDate(it.dueDate)}</span>}
       {it.tag === 'Bill' && (
         <span className="block mt-0.5 space-y-0.5">
