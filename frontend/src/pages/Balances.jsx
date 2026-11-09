@@ -114,6 +114,7 @@ function LoanItem({ it, nav }) {
           {INR(it.amount)}
         </span>
       </span>
+      {it.about && <span className="block text-[9.85px] text-gray-600 mt-0.5 truncate">{it.about}</span>}
       {it.emis?.length > 0
         ? <DueBy emis={it.emis} positive={it.positive} />
         : it.tag === 'Loan' && it.dueDate && <span className="block text-[9.85px] text-gray-500 mt-0.5">Due by {shortDate(it.dueDate)}</span>}

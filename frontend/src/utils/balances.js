@@ -30,6 +30,8 @@ export function loanContributions(loansData, me) {
     add(other, iOwe ? -l.total_due : l.total_due, {
       key: `loan${l.id}`, tag: 'Loan', label: iOwe ? `You owe ${other}` : `${other} owes you`,
       amount: l.total_due, positive: !iOwe,
+      // One brief line: the loan's own note, else what it was
+      about: l.note || `${iOwe ? 'Borrowed' : 'Lent'} ₹${Number(l.principal).toLocaleString('en-IN')}${l.start_date ? ` on ${l.start_date}` : ''}`,
       // EMIs still open (unpaid ones, each with its date and what's left of it), or the one due date
       emis: (l.installments || []).filter((i) => !i.paid && i.balance > 0.01), dueDate: l.due_date,
     })
