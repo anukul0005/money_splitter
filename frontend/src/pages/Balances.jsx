@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
-  getFriends, getGroups, getLoans, getStatement, listUpiIdsFor, listMyUpiIds, createPaymentClaim,
+  getFriends, getGroups, getLoans, paymentsBetween, listUpiIdsFor, listMyUpiIds, createPaymentClaim,
   sendNudge, getRecentNudges,
 } from '../api'
 import { MONEY_CHANGED } from '../components/PaymentClaimsInbox'
@@ -97,111 +97,8 @@ function LoanItem({ it, nav }) {
   )
 }
 
-/** "you owe ₹X" / "owes you ₹X" / "even" - a running balance, from your side. */
-function Standing({ bal, name }) {
-  if (Math.abs(bal) < 1) return <span className="text-gray-400">even</span>
-  return bal > 0
-    ? <span className="text-green-700">{dn(name)} owes {INR(bal)}</span>
-    : <span className="text-red-700">you owe {INR(-bal)}</span>
-}
-
-/** What one statement line was, in words. */
-function describe(x, name, me) {
-  const them = dn(name)
-  const amt = INR(Math.abs(x.amount))
-  const byMe = same(x.payer, me)
-  switch (x.kind) {
-    case 'group':
-      return { title: x.amount > 0 ? `${them} owed you ${amt}` : `You owed ${them} ${amt}`, sub: `Group “${x.label}”`, link: `/groups/${x.group_id}` }
-    case 'loan':
-      return {
-        title: x.amount < 0 ? `Loan: you borrowed ${INR(x.principal)} from ${them}` : `Loan: you lent ${them} ${INR(x.principal)}`,
-        sub: [x.label, x.interest >= 1 && `incl. ${INR(x.interest)} interest`, x.open ? (x.due_date && `due ${shortDate(x.due_date)}`) : 'now repaid']
-          .filter(Boolean).join(' · '),
-        link: `/loans?tab=loans&loan=${x.loan_id}`, loan: true,
-      }
-    case 'payment':
-      return { title: byMe ? `You paid ${them} ${amt}` : `${them} paid you ${amt}`, sub: `in “${x.label}”${x.note ? ` · ${x.note}` : ''}` }
-    case 'repay':
-      return { title: x.mine ? `You repaid ${amt} of the ${INR(x.principal)} loan` : `${them} repaid ${amt} of the ${INR(x.principal)} loan`, loan: true }
-    case 'setoff':
-      return { title: `${INR(x.cash)} of one loan set off against the other`, sub: 'loans both ways cancel out', loan: true }
-    case 'bill':
-      return { title: x.amount > 0 ? `${them}'s share of ${x.label}` : `Your share of ${x.label}`, sub: 'Recurring bill', loan: true }
-    case 'bill_paid':
-      return { title: x.amount < 0 ? `${them} paid their ${x.label} share` : `You paid your ${x.label} share`, loan: true }
-    case 'settle': {
-      const c = x.covers || {}
-      const loans = (c.loans || []).map((l) => INR(l.principal))
-      const parts = [
-        c.groups && `${c.groups} group${c.groups > 1 ? 's' : ''}`,
-        loans.length && `${loans.length > 1 ? `${loans.length} loans` : 'the loan'} (${loans.join(' + ')})`,
-        c.bills && `${c.bills} bill share${c.bills > 1 ? 's' : ''}`,
-      ].filter(Boolean)
-      return {
-        title: `${byMe ? `You paid ${them}` : `${them} paid you`} ${INR(x.cash)} · settled up`,
-        sub: [parts.length && `Cleared ${parts.join(', ')}`, x.note].filter(Boolean).join(' · '),
-        settle: true,
-      }
-    }
-    default:
-      return { title: 'Other adjustments', sub: 'rounding, and group payments routed through other members' }
-  }
-}
-
-/** Everything between you and one person, oldest first, with where it left
- *  you after each line - ending at the figure on the card. */
-function Statement({ data, name, me, nav }) {
-  const [all, setAll] = useState(false)
-  const lines = data.lines
-  const SHOW = 8
-  const from = all ? 0 : Math.max(0, lines.length - SHOW)
-  const forward = from > 0 ? lines[from - 1].balance : null
-  return (
-    <div className="pt-3">
-      <p className="text-[9.85px] font-bold text-gray-400 uppercase tracking-widest">How you got here</p>
-      <p className="text-[9.85px] text-gray-400 mb-1.5">Every group, loan and payment with {dn(name)}, oldest first - the right column is where it left you.</p>
-      <div className="rounded-md border border-gray-200 divide-y divide-gray-100 overflow-hidden">
-        {forward !== null && (
-          <button onClick={() => setAll(true)} className="w-full flex items-center gap-2 px-3 py-2 bg-gray-50 text-left">
-            <span className="flex-1 text-[10.84px] text-gray-500">
-              {from} earlier entr{from > 1 ? 'ies' : 'y'} · <span className="font-bold text-brand-600">show all</span>
-            </span>
-            <span className="text-[10.84px] font-bold tabular-nums"><Standing bal={forward} name={name} /></span>
-          </button>
-        )}
-        {lines.slice(from).map((x, i) => {
-          const d = describe(x, name, me)
-          const Tag = d.link ? 'button' : 'div'
-          return (
-            <Tag key={i} onClick={d.link ? () => nav(d.link) : undefined}
-              className={`w-full text-left flex gap-2 px-3 py-2 ${d.settle ? 'bg-green-50' : d.loan ? 'bg-orange-50/60' : 'bg-white'} ${d.link ? 'hover:bg-amber-50' : ''}`}>
-              <span className="w-11 flex-shrink-0 text-[9.85px] text-gray-400 pt-0.5 tabular-nums">{x.date ? shortDate(x.date).replace(/ \d+$/, '') : ''}</span>
-              <span className="flex-1 min-w-0">
-                <span className={`block text-[0.739rem] ${d.settle ? 'font-bold text-green-800' : 'font-semibold text-gray-800'}`}>{d.title}</span>
-                {d.sub && <span className="block text-[9.85px] text-gray-500">{d.sub}</span>}
-              </span>
-              <span className="flex-shrink-0 text-right">
-                <span className={`block text-[0.739rem] font-black tabular-nums ${x.amount > 0 ? 'text-green-700' : x.amount < 0 ? 'text-red-700' : 'text-gray-400'}`}>
-                  {Math.abs(x.amount) < 0.01 ? '±0' : `${x.amount > 0 ? '+' : '−'}${INR(Math.abs(x.amount))}`}
-                </span>
-                <span className="block text-[9.85px] font-bold tabular-nums"><Standing bal={x.balance} name={name} /></span>
-              </span>
-            </Tag>
-          )
-        })}
-        <div className="flex items-center gap-2 px-3 py-2 bg-gray-50">
-          <span className="flex-1 text-[0.739rem] font-bold text-gray-700">Now</span>
-          <span className="text-[0.789rem] font-black tabular-nums"><Standing bal={data.now} name={name} /></span>
-        </div>
-      </div>
-      <p className="text-[9.85px] text-gray-400 mt-1">+ means {dn(name)} owes you more, − means less (or you owe more).</p>
-    </div>
-  )
-}
-
 function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastNudge, onNudged }) {
-  const [stmt, setStmt] = useState(null)
+  const [payments, setPayments] = useState(null)
 
   // The bell: a "settle up" reminder by email + app push. A confirm step
   // first - it reaches a real person - then the server works out the
@@ -245,23 +142,53 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
   }
 
   useEffect(() => {
-    if (expanded && stmt === null) {
-      setStmt('loading')
-      getStatement(row.name).then((r) => setStmt(r.data)).catch(() => setStmt('error'))
+    if (expanded && payments === null) {
+      // paymentsBetween also returns payments elsewhere in a shared group
+      // that don't touch me at all (it explains group-wide settlement
+      // context on the friend page) - here it's specifically "how did I
+      // get to this number with them", so keep only the ones I'm actually
+      // a side of.
+      paymentsBetween(me, row.name)
+        .then((r) => setPayments(r.data.filter((p) => same(p.from_member, me) || same(p.to_member, me))))
+        .catch(() => setPayments([]))
     }
-  }, [expanded, stmt])
-  // A payment recorded meanwhile moves the figure: read the statement again
-  useEffect(() => { setStmt((s) => (s && typeof s === 'object' && Math.abs(s.now - row.net) >= 1 ? null : s)) }, [row.net])
+  }, [expanded])
 
   // What makes up the figure now: what's still owed in each group after
-  // payments (liveGroups) - this way round and the other - plus open loans
-  // & bills; together they add up to the number on the card. How it got
-  // there is the statement below.
+  // payments (liveGroups), newest group first. A group a payment has
+  // cleared drops out, so these rows plus the loans & bills below add up
+  // to the number on the card. Payments are listed after, as history.
   const groups = (row.liveGroups ?? row.groups).filter((g) => Math.abs(g.net) >= 1)   // paisa residue isn't a debt
+  // Oldest group first - the order a payment pays them in (settle_up.py).
   const since = (g) => g.since || groupDates[g.group_id] || ''
   const byDate = (a, b) => (since(a) > since(b) ? 1 : -1)
   const same_ = groups.filter((g) => (owing ? g.net < 0 : g.net > 0)).sort(byDate)
   const opposite = groups.filter((g) => (owing ? g.net > 0 : g.net < 0)).sort(byDate)
+  // One dated timeline, newest first: each group by when it began, each
+  // payment on the day it was paid - so a payment sits among the groups it
+  // came after, not in a list of its own.
+  const timeline = [
+    ...same_.map((g) => ({ kind: 'group', key: `g${g.group_id}`, at: since(g), data: g })),
+    ...(payments || []).map((p) => ({ kind: 'payment', key: `p${p.id}`,
+                                      at: (p.date || p.recorded_at || '').slice(0, 10), data: p })),
+  ].sort((a, b) => (a.at === b.at ? (a.kind === 'payment' ? -1 : b.kind === 'payment' ? 1 : 0) : a.at < b.at ? 1 : -1))
+  // What the figure is made of: payments and the other-way groups clear the
+  // oldest groups first, so only the newest groups make up what's owed now -
+  // walk back from the newest until the loans/bills plus these reach the
+  // card's figure. The oldest one kept may be only partly owed.
+  const dir = owing ? -1 : 1
+  const fromLoans = row.loanItems.reduce((s, it) => s + (it.positive ? it.amount : -it.amount) * dir, 0)
+  let left = Math.max(0, Math.abs(row.net) - fromLoans)
+  const owedNow = []
+  for (const g of [...same_].reverse()) {
+    if (left < 1) break
+    const full = Math.abs(g.net)
+    const part = Math.min(full, left)
+    owedNow.push({ g, part, full })            // newest first, as shown
+    left -= part
+  }
+  const cleared = same_.length - owedNow.length
+  const [history, setHistory] = useState(false)
 
   return (
     <div className={`card ${loanOnly ? 'border-l-4 border-l-orange-400' : ''}`}>
@@ -369,49 +296,85 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
       {expanded && (
         <div className="space-y-1.5 mt-3">
           <p className="text-[9.85px] font-bold text-gray-400 uppercase tracking-widest">
-            What makes up {INR(Math.abs(row.net))} now
+            What makes up {INR(Math.abs(row.net))}
           </p>
-          {/* Everything still open, each way - these add up to the figure:
-              what's owed in each group after payments, then loans & bills
-              (dashed orange). */}
-          {[...same_].reverse().map((g) => (
+          {/* Only what's still owed - these add up to the figure. Bills,
+              then groups newest first, then loans; loans & bills keep their
+              dashed orange outline. */}
+          {row.loanItems.filter((it) => it.tag === 'Bill').map((it) => <LoanItem key={it.key} it={it} nav={nav} />)}
+          {owedNow.map(({ g, part, full }) => (
             <button key={g.group_id} onClick={() => nav(`/groups/${g.group_id}`)}
               className={`w-full text-left rounded-md px-3 py-2 border transition-colors ${
                 owing ? 'bg-red-50 border-red-100 hover:bg-red-100' : 'bg-green-50 border-green-200 hover:bg-green-100'
               }`}>
               <span className="flex items-center gap-2">
-                <span className="text-[8.87px] font-bold uppercase tracking-widest text-gray-400 flex-shrink-0">Group</span>
                 <span className="text-[0.739rem] font-semibold text-gray-700 flex-1 min-w-0 truncate">{g.name}</span>
                 <span className={`text-[0.739rem] font-black flex-shrink-0 ${owing ? 'text-red-700' : 'text-green-700'}`}>
-                  {INR(Math.abs(g.net))}
+                  {INR(part)}
                 </span>
               </span>
-              <span className="block text-[9.85px] text-gray-500 mt-0.5">
-                {owing ? `you owe ${dn(row.name)} here` : `${dn(row.name)} owes you here`}
-              </span>
+              {full - part >= 1 && (
+                <span className="block text-[9.85px] text-gray-500 mt-0.5">
+                  {INR(part)} of {INR(full)} still owed - the rest is cleared
+                </span>
+              )}
             </button>
           ))}
-          {[...opposite].reverse().map((g) => (
-            <button key={g.group_id} onClick={() => nav(`/groups/${g.group_id}`)}
-              className="w-full text-left rounded-md px-3 py-2 border border-gray-200 bg-gray-50 hover:bg-gray-100 transition-colors">
-              <span className="flex items-center gap-2">
-                <span className="text-[8.87px] font-bold uppercase tracking-widest text-gray-400 flex-shrink-0">Group</span>
-                <span className="text-[0.739rem] font-semibold text-gray-600 flex-1 min-w-0 truncate">{g.name}</span>
-                <span className="text-[0.739rem] font-black flex-shrink-0 text-gray-500">−{INR(Math.abs(g.net))}</span>
-              </span>
-              <span className="block text-[9.85px] text-gray-500 mt-0.5">
-                {owing ? `${dn(row.name)} owes you here - takes it down` : `you owe ${dn(row.name)} here - takes it down`}
-              </span>
+          {row.loanItems.filter((it) => it.tag !== 'Bill').map((it) => <LoanItem key={it.key} it={it} nav={nav} />)}
+
+          {(cleared > 0 || opposite.length > 0 || payments?.length > 0) && (
+            <button onClick={() => setHistory((h) => !h)}
+              className="w-full text-left text-[10.84px] text-gray-500 pt-2">
+              {cleared > 0 && <>{cleared} older group{cleared > 1 ? 's' : ''} already cleared · </>}
+              <span className="font-bold text-brand-600">{history ? 'Hide' : 'Show'} payments & history</span>
             </button>
-          ))}
-          {row.loanItems.map((it) => <LoanItem key={it.key} it={it} nav={nav} />)}
-          {same_.length === 0 && opposite.length === 0 && row.loanItems.length === 0 && (
-            <p className="text-[0.739rem] text-gray-400 text-center py-2">Nothing open</p>
+          )}
+          {payments === null && history && <p className="text-[10.84px] text-gray-300 pt-2">Loading payment history…</p>}
+          {history && timeline.map((row2) => {
+            if (row2.kind === 'payment') {
+              const p = row2.data
+              // A thin rule rather than a boxed row: money that moved,
+              // not another debt.
+              return (
+                <div key={row2.key} className="w-full flex items-center gap-2 py-0.5">
+                  <span className="h-px flex-1 bg-green-200" />
+                  <span className="flex items-center gap-1.5 text-[10.84px] font-bold text-green-700 whitespace-nowrap">
+                    <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                    {dn(p.from_member)} paid {dn(p.to_member)} {INR(p.amount)}
+                    <span className="font-normal text-gray-400">· {stamp(p.date || p.recorded_at)}</span>
+                  </span>
+                  <span className="h-px flex-1 bg-green-200" />
+                </div>
+              )
+            }
+            // History: grey, so it doesn't read as part of the figure.
+            return (
+              <button key={row2.key} onClick={() => nav(`/groups/${row2.data.group_id}`)}
+                className="w-full text-left flex items-center gap-2 rounded-md px-3 py-1.5 border border-gray-200 bg-gray-50 hover:bg-gray-100 transition-colors">
+                <span className="text-[0.739rem] text-gray-500 flex-1 min-w-0 truncate">{row2.data.name}</span>
+                <span className="text-[0.739rem] font-semibold text-gray-500 flex-shrink-0">{INR(Math.abs(row2.data.net))}</span>
+              </button>
+            )
+          })}
+
+          {history && opposite.length > 0 && (
+            <>
+              <p className="text-[9.85px] font-bold text-gray-400 uppercase tracking-widest pt-2">Cancelled out by</p>
+              {[...opposite].reverse().map((g) => (
+                <button key={g.group_id} onClick={() => nav(`/groups/${g.group_id}`)}
+                  className="w-full text-left flex items-center gap-2 rounded-md px-3 py-2 border border-amber-200 bg-amber-50 hover:bg-amber-100 transition-colors">
+                  <span className="text-[0.739rem] font-semibold text-gray-600 flex-1 min-w-0 truncate">{g.name}</span>
+                  <span className="text-[0.739rem] font-bold text-gray-500 flex-shrink-0">−{INR(Math.abs(g.net))}</span>
+                </button>
+              ))}
+            </>
           )}
 
-          {stmt === 'loading' && <p className="text-[10.84px] text-gray-300 pt-3">Loading the statement…</p>}
-          {stmt === 'error' && <p className="text-[10.84px] text-gray-400 pt-3">Couldn't load the statement.</p>}
-          {stmt && typeof stmt === 'object' && <Statement data={stmt} name={row.name} me={me} nav={nav} />}
+          {owedNow.length === 0 && same_.length === 0 && opposite.length === 0 && row.loanItems.length === 0 && payments?.length === 0 && (
+            <p className="text-[0.739rem] text-gray-400 text-center py-2">No shared groups — only Loans & bills</p>
+          )}
         </div>
       )}
     </div>

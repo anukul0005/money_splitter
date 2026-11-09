@@ -316,20 +316,6 @@ def get_friends(db: Session = Depends(get_db), caller: User = Depends(current_us
     return compute_friend_balances(db, caller.name)
 
 
-@router.get("/statement", response_model=dict)
-def get_statement(name: str, db: Session = Depends(get_db), caller: User = Depends(current_user)):
-    """Everything between the caller and `name` - groups, loans, bills and
-    payments in date order, with the running balance (person_statement.py)."""
-    from person_statement import statement
-    if not name.strip() or _same_name(name, caller.name):
-        raise HTTPException(400, "Pick someone else")
-    return statement(db, caller, name.strip())
-
-
-def _same_name(a: str, b: str) -> bool:
-    return a.strip().lower() == b.strip().lower()
-
-
 @router.get("/global-analytics", response_model=dict)
 def get_global_analytics(db: Session = Depends(get_db), caller: User = Depends(current_user)):
     """Cross-group analytics: overall by expense category + per-person category breakdown.

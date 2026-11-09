@@ -265,7 +265,6 @@ export const getOverview        = ()        => api.get('/stats/overview/all')
 export const getUserSummary     = (name)    => api.get('/stats/user-summary')
 export const getUserGroupBalances   = (name) => api.get('/stats/user-group-balances')
 export const getFriends             = (name) => api.get('/stats/friends')
-export const getStatement           = (name) => api.get('/stats/statement', { params: { name } })
 
 // ── Drink recommender ─────────────────────────────────────────────────────────
 // Prices come from scraped state excise listings; history from your own spend.
