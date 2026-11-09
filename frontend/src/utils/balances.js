@@ -24,9 +24,21 @@ export function loanContributions(loansData, me) {
   const same = (a, b) => key(a) === key(b)
 
   for (const l of loansData?.loans ?? []) {
-    if (l.total_due <= 0.01) continue
     const iOwe = same(l.borrower, me)
     const other = iOwe ? l.lender : l.borrower
+    if (!same(l.lender, me) && !iOwe) continue
+    // Every loan with them, repaid ones too: how the loans' figure came about
+    const k = key(other)
+    const row0 = byPerson[k] || { name: other, net: 0, items: [] }
+    const pays = l.payments || []
+    const sum = (ps) => ps.reduce((s, p) => s + Number(p.amount), 0)
+    row0.history = [...(row0.history || []), {
+      id: l.id, iOwe, principal: Number(l.principal), date: l.start_date, left: l.total_due,
+      netted: sum(pays.filter((p) => p.netted)), cash: sum(pays.filter((p) => !p.netted)),
+      interest: l.interest || 0,
+    }]
+    byPerson[k] = row0
+    if (l.total_due <= 0.01) continue
     add(other, iOwe ? -l.total_due : l.total_due, {
       key: `loan${l.id}`, tag: 'Loan', label: iOwe ? `You owe ${other}` : `${other} owes you`,
       amount: l.total_due, positive: !iOwe,
@@ -90,6 +102,7 @@ export function combinedBalances(friends, loansData, me) {
     const row = rows[k] || { name: l.name, net: 0, groups: [], liveGroups: [], loanItems: [] }
     row.net += l.net
     row.loanItems = l.items
+    row.loanHistory = l.history || []
     rows[k] = row
   }
   return Object.values(rows)

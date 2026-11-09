@@ -147,6 +147,45 @@ function LoanItem({ it, nav }) {
   )
 }
 
+/** How the loans' figure came about, every loan with them (repaid ones too):
+ *  what was borrowed or lent, what was set against groups over time, what
+ *  was paid back, and what's left - then the groups taken off it. */
+function LoanStory({ row, owing, groupsOff }) {
+  const hist = [...(row.loanHistory || [])].sort((a, b) => ((a.date || '') < (b.date || '') ? -1 : 1))
+  if (!hist.length) return null
+  const s = (h) => (h.iOwe === owing ? 1 : -1)          // + in the card's direction
+  const sum = (f) => hist.reduce((t, h) => t + s(h) * f(h), 0)
+  const netted = sum((h) => h.netted)
+  const cash = sum((h) => h.cash)
+  const interest = sum((h) => h.interest)
+  const left = sum((h) => h.left)
+  const Line = ({ label, v, sign, bold, sub }) => (
+    <span className={`flex tabular-nums ${bold ? 'font-black text-gray-800 border-t border-gray-200 pt-0.5 mt-0.5' : 'text-gray-600'}`}>
+      <span className="flex-1">{label}{sub && <span className="text-gray-400 font-normal"> {sub}</span>}</span>
+      <span className={bold ? '' : 'font-semibold'}>{sign}{INR(Math.abs(v))}</span>
+    </span>
+  )
+  return (
+    <div className="rounded-md px-3 py-2 border border-gray-200 bg-white text-[9.85px] space-y-0.5">
+      <p className="text-[8.87px] font-bold uppercase tracking-widest text-gray-400 mb-1">Loans with {dn(row.name)}, from the start</p>
+      {hist.map((h) => (
+        <Line key={h.id} label={`${h.iOwe ? 'Borrowed' : 'Lent'} ${shortDate(h.date)}`}
+          sub={h.left <= 0.01 ? '· repaid' : ''} v={h.principal} sign={s(h) > 0 ? '' : '−'} />
+      ))}
+      {Math.abs(netted) >= 1 && <Line label="Set off against groups" sub="(what the other side owed in groups)" v={netted} sign="−" />}
+      {Math.abs(cash) >= 1 && <Line label="Paid back" v={cash} sign="−" />}
+      {Math.abs(interest) >= 1 && <Line label="Interest" v={interest} sign="+" />}
+      <Line label="Loans left" v={left} sign={left < 0 ? '−' : ''} bold />
+      {groupsOff >= 1 && (
+        <>
+          <Line label="Groups now, owed the other way" v={groupsOff} sign="−" />
+          <Line label={owing ? `You owe ${dn(row.name)}` : `${dn(row.name)} owes you`} v={row.net} sign="" bold />
+        </>
+      )}
+    </div>
+  )
+}
+
 function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastNudge, onNudged }) {
   const [payments, setPayments] = useState(null)
 
@@ -238,6 +277,18 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
     left -= part
   }
   const cleared = same_.length - owedNow.length
+  // Groups pulling the other way (they owe you in groups while you owe them
+  // a loan): newest first, up to what the groups part of the figure is, shown
+  // as "−" so the rows still add up to the card.
+  const groupsNet = (row.net - row.loanItems.reduce((s, it) => s + (it.positive ? it.amount : -it.amount), 0)) * dir
+  let back = groupsNet < -1 ? -groupsNet : 0
+  const takenOff = []
+  for (const g of [...opposite].reverse()) {
+    if (back < 1) break
+    const part = Math.min(Math.abs(g.net), back)
+    takenOff.push({ g, part, full: Math.abs(g.net) })
+    back -= part
+  }
   const [history, setHistory] = useState(false)
 
   return (
@@ -372,6 +423,20 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
             </button>
           ))}
           {row.loanItems.filter((it) => it.tag !== 'Bill').map((it) => <LoanItem key={it.key} it={it} nav={nav} />)}
+          {takenOff.map(({ g, part, full }) => (
+            <button key={g.group_id} onClick={() => nav(`/groups/${g.group_id}`)}
+              className="w-full text-left rounded-md px-3 py-2 border border-amber-200 bg-amber-50 hover:bg-amber-100 transition-colors">
+              <span className="flex items-center gap-2">
+                <span className="text-[8.87px] font-bold uppercase tracking-widest text-amber-700 flex-shrink-0">Group</span>
+                <span className="text-[0.739rem] font-semibold text-gray-700 flex-1 min-w-0 truncate">{g.name}</span>
+                <span className="text-[0.739rem] font-black text-gray-600 flex-shrink-0">−{INR(part)}</span>
+              </span>
+              <span className="block text-[9.85px] text-gray-500 mt-0.5">
+                {owing ? `${dn(row.name)} owes you here` : `You owe ${dn(row.name)} here`} - taken off{full - part >= 1 ? ` (${INR(part)} of ${INR(full)})` : ''}
+              </span>
+            </button>
+          ))}
+          <LoanStory row={row} owing={owing} groupsOff={takenOff.reduce((s, x) => s + x.part, 0)} />
 
           {(cleared > 0 || opposite.length > 0 || payments?.length > 0) && (
             <button onClick={() => setHistory((h) => !h)}

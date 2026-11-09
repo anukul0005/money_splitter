@@ -148,6 +148,21 @@ def _iso(s: str, what: str) -> str:
         raise HTTPException(400, f"{what} must be a date (YYYY-MM-DD)")
 
 
+def _netted(loan: Loan, ref: str | None) -> bool:
+    """A repayment that was no cash of the borrower's: a set-off, or a
+    dashboard settle-up where the lender was the one paying - the loan then
+    went against what the lender owed in groups."""
+    if not ref:
+        return False
+    if ref.startswith("setoff:"):
+        return True
+    from sqlalchemy.orm import object_session
+    from models import Payment
+    p = (object_session(loan).query(Payment)
+         .filter(Payment.settlement_ref == ref, Payment.settlement_amount != None).first())  # noqa: E711
+    return bool(p) and (p.from_member or "").strip().lower() == (loan.lender or "").strip().lower()
+
+
 def _loan_out(loan: Loan) -> dict:
     o = outstanding(loan)
     return {
@@ -158,7 +173,8 @@ def _loan_out(loan: Loan) -> dict:
         "interest_day": loan.interest_day, "emi": bool(emi_plan(loan)), "card_ref": loan.card_ref, **o,
         "paid": o["total_due"] <= 0.01,
         "payments": [{"id": p.id, "amount": p.amount, "date": p.date,
-                      "set_off": (p.settlement_ref or "").startswith("setoff:")} for p in loan.payments],
+                      "set_off": (p.settlement_ref or "").startswith("setoff:"),
+                      "netted": _netted(loan, p.settlement_ref)} for p in loan.payments],
     }
 
 
