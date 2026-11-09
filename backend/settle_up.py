@@ -15,10 +15,10 @@ owing the most. Two things went wrong:
 settle() spreads the transfer instead, each piece no larger than the debt
 it pays, in this order - each one paid off before the next, the last one
 reached part-paid:
-  1. the payer's recurring-bill shares, oldest month first (₹165 of a
-     ₹167 month leaves ₹2 due on it);
-  2. their loans and EMI loans, soonest due first (an overdue EMI first);
-  3. each group where they owe, oldest group first (by its first expense);
+  1. their loans, each EMI of an EMI loan and their recurring-bill shares,
+     all together by due date, soonest (or most overdue) first - ₹165 of
+     a ₹167 share leaves ₹2 due on it;
+  2. each group where they owe, oldest group first (by its first expense);
   4. anything left is an overpayment, held as credit in a two-person group
      where possible, where it can't leak to anyone else.
 When the transfer settles everything between the two, what the receiver
@@ -62,6 +62,17 @@ def _credit_group(groups: list[Group]) -> Group:
     from routers.payments import _busiest_group
     pairs = [g for g in groups if len(g.members) == 2]
     return _busiest_group(pairs or groups)
+
+
+def _charge_due(c: RecurringCharge) -> str:
+    """When a bill share is due: its month's due day (the next month's when
+    that comes before the billing day), else the day it was billed."""
+    y, m = (int(x) for x in c.period.split("-"))
+    bill_day = c.bill.day_of_month or 1
+    due_day = c.bill.due_day
+    if due_day and due_day < bill_day:
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return f"{y:04d}-{m:02d}-{(due_day or bill_day):02d}"
 
 
 def started(g: Group) -> str:
@@ -117,20 +128,23 @@ def settle(db, caller: User, frm: str, to: str, amount: float, when: str | None,
             if c.due <= 0.01:
                 continue
             if _same(c.member, frm) and _same(c.bill.payer, to):
-                owed_by_payer.append(((1, c.period), "charge", c, c.due))
+                owed_by_payer.append(((1, _charge_due(c)), "charge", c, c.due))
             elif _same(c.member, to) and _same(c.bill.payer, frm):
-                owed_by_receiver.append(((1, c.period), "charge", c, c.due))
+                owed_by_receiver.append(((1, _charge_due(c)), "charge", c, c.due))
         for l in db.query(Loan).all():
             o = outstanding(l)
-            due = o["total_due"]
-            if due <= 0.01:
+            if o["total_due"] <= 0.01:
                 continue
-            # Soonest due first - an overdue EMI before one next month
-            when_due = o.get("next_due_date") or l.due_date or ""
-            if _same(l.borrower, frm) and _same(l.lender, to):
-                owed_by_payer.append(((1.5, when_due), "loan", l, due))
-            elif _same(l.borrower, to) and _same(l.lender, frm):
-                owed_by_receiver.append(((1.5, when_due), "loan", l, due))
+            # An EMI loan is each open instalment on its own date (a payment
+            # to the loan pays its earliest instalment first), so next
+            # month's EMI waits behind a bill due sooner
+            parts = [(i["date"], i["balance"]) for i in o.get("installments") or [] if i["balance"] > 0.01] \
+                or [(o.get("next_due_date") or l.due_date or "", o["total_due"])]
+            for when_due, amt in parts:
+                if _same(l.borrower, frm) and _same(l.lender, to):
+                    owed_by_payer.append(((1, when_due), "loan", l, amt))
+                elif _same(l.borrower, to) and _same(l.lender, frm):
+                    owed_by_receiver.append(((1, when_due), "loan", l, amt))
 
     def clear(kind, obj, amt, payer, receiver, primary):
         if kind == "group":
@@ -140,8 +154,8 @@ def settle(db, caller: User, frm: str, to: str, amount: float, when: str | None,
         else:
             db.add(LoanPayment(loan_id=obj.id, amount=round(amt, 2), date=when, settlement_ref=ref))
 
-    # The order money goes: recurring bills (oldest month first), then
-    # loans and EMIs (soonest due first), then groups (oldest group first) -
+    # The order money goes: loans, EMIs and bill shares together, soonest
+    # due first (overdue ones first of all), then groups, oldest first -
     # each paid off before the next, the last one reached part-paid.
     todo = [list(x) for x in sorted(owed_by_payer, key=lambda x: x[0])]   # [order, kind, obj, still owed]
 
