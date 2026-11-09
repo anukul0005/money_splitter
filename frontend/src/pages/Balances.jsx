@@ -41,6 +41,30 @@ const shortDate = (iso) => {
     ? d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' }) : iso || ''
 }
 
+/** 1st, 2nd, 3rd, 23rd */
+const ordinal = (n) => `${n}${[11, 12, 13].includes(n % 100) ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`
+
+/** "Groups ₹X · Loans ₹Y · Bills ₹Z" - what the person's figure is made of,
+ *  each part in the figure's direction (− when it pulls the other way). */
+function Parts({ row, owing }) {
+  const dir = owing ? -1 : 1
+  const signed = (it) => (it.positive ? it.amount : -it.amount)
+  const loans = row.loanItems.filter((it) => it.tag !== 'Bill').reduce((s, it) => s + signed(it), 0)
+  const bills = row.loanItems.filter((it) => it.tag === 'Bill').reduce((s, it) => s + signed(it), 0)
+  const groups = row.net - loans - bills
+  const parts = [['Groups', groups], ['Loans', loans], ['Bills', bills]].filter(([, v]) => Math.abs(v) >= 1)
+  if (parts.length < 2 && !(parts.length === 1 && parts[0][0] !== 'Groups')) return null
+  return (
+    <p className="text-[10px] text-gray-500 mt-0.5 pl-5 tabular-nums">
+      {parts.map(([k, v], i) => (
+        <span key={k}>
+          {i > 0 && ' · '}{k} <b className={v * dir > 0 ? 'text-gray-700' : 'text-gray-400'}>{v * dir < 0 ? '−' : ''}{INR(Math.abs(v))}</b>
+        </span>
+      ))}
+    </p>
+  )
+}
+
 /** An EMI loan's open instalments, soonest first: each date, that EMI, and the total to be paid by then. */
 function DueBy({ emis, positive }) {
   let run = 0
@@ -93,6 +117,24 @@ function LoanItem({ it, nav }) {
       {it.emis?.length > 0
         ? <DueBy emis={it.emis} positive={it.positive} />
         : it.tag === 'Loan' && it.dueDate && <span className="block text-[9.85px] text-gray-500 mt-0.5">Due by {shortDate(it.dueDate)}</span>}
+      {it.tag === 'Bill' && (
+        <span className="block mt-0.5 space-y-0.5">
+          <span className="block text-[9.85px] text-gray-500">
+            Billed on the {ordinal(it.billDay || 1)}{it.dueDay ? ` · due by the ${ordinal(it.dueDay)}` : ''} every month
+          </span>
+          {(it.months || []).map((m) => {
+            const late = m.due && m.due < new Date().toISOString().slice(0, 10)
+            return (
+              <span key={m.period} className={`flex text-[9.85px] tabular-nums ${late ? 'text-red-600 font-bold' : 'text-gray-600'}`}>
+                <span className="flex-1">
+                  Billed {shortDate(m.billed)}{m.due ? ` · due by ${shortDate(m.due)}` : ''}{late ? ' · overdue' : ''}
+                </span>
+                {it.months.length > 1 && <span className="font-bold">{INR(m.amount)}</span>}
+              </span>
+            )
+          })}
+        </span>
+      )}
     </button>
   )
 }
@@ -237,6 +279,7 @@ function PersonCard({ row, owing, expanded, onToggle, nav, me, groupDates, lastN
         </div>
       </div>
 
+      <Parts row={row} owing={owing} />
       {next && (
         <button onClick={onToggle} className={`block text-left text-[10.84px] font-bold mt-1 pl-5 ${next.overdue ? 'text-red-600' : 'text-gray-600'}`}>
           {next.overdue ? 'EMI overdue' : 'Next EMI'}: {INR(next.amount)} by {shortDate(next.date)}

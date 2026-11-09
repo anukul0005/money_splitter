@@ -696,6 +696,9 @@ class RecurringBill(Base):
     payer = Column(String(100), nullable=False, index=True)
     members = Column(Text, nullable=False)          # comma-separated names, payer included
     day_of_month = Column(Integer, nullable=False, default=1)
+    # Day of the month each share is due by (Netflix: billed on the 6th, due
+    # by the 23rd) - the next month's when it's before the billing day
+    due_day = Column(Integer, nullable=True)
     active = Column(Boolean, nullable=False, default=True)
     # "YYYY-MM" of the last month billed - the guard that makes a repeated
     # cron ping harmless, and what lets a missed day be caught up later.

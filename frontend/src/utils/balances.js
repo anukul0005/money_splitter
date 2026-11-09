@@ -35,16 +35,37 @@ export function loanContributions(loansData, me) {
     })
   }
 
+  // A bill share's dates: billed on the bill's day of that month, due by its
+  // due day (the next month's when that comes before the billing day)
+  const billDates = (b, open) => {
+    const iso = (y, m, d) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    return open.map((c) => {
+      const [y, m] = c.period.split('-').map(Number)
+      const billed = iso(y, m, b.day_of_month || 1)
+      let due = null
+      if (b.due_day) {
+        const next = b.due_day < (b.day_of_month || 1)
+        due = next ? iso(m === 12 ? y + 1 : y, m === 12 ? 1 : m + 1, b.due_day) : iso(y, m, b.due_day)
+      }
+      return { period: c.period, billed, due, amount: c.due ?? c.share }
+    }).sort((a, b2) => (a.period < b2.period ? -1 : 1))
+  }
+
   for (const b of loansData?.bills ?? []) {
+    const item = (open, positive) => {
+      const due = open.reduce((s, c) => s + (c.due ?? c.share), 0)
+      return [due, { key: `bill${b.id}`, tag: 'Bill', label: b.title, amount: due, positive,
+                     billDay: b.day_of_month, dueDay: b.due_day, months: billDates(b, open) }]
+    }
     if (same(b.payer, me)) {
       const debtors = [...new Set(b.charges.map((c) => c.member))]
       for (const m of debtors) {
-        const due = b.charges.filter((c) => same(c.member, m) && !c.paid).reduce((s, c) => s + (c.due ?? c.share), 0)
-        if (due > 0.01) add(m, due, { key: `bill${b.id}`, tag: 'Bill', label: b.title, amount: due, positive: true })
+        const [due, it] = item(b.charges.filter((c) => same(c.member, m) && !c.paid), true)
+        if (due > 0.01) add(m, due, it)
       }
     } else {
-      const due = b.charges.filter((c) => same(c.member, me) && !c.paid).reduce((s, c) => s + (c.due ?? c.share), 0)
-      if (due > 0.01) add(b.payer, -due, { key: `bill${b.id}`, tag: 'Bill', label: b.title, amount: due, positive: false })
+      const [due, it] = item(b.charges.filter((c) => same(c.member, me) && !c.paid), false)
+      if (due > 0.01) add(b.payer, -due, it)
     }
   }
   return byPerson

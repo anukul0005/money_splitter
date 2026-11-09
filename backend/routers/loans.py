@@ -107,6 +107,7 @@ class BillCreate(BaseModel):
     amount: float
     members: list[str]         # the other people sharing it; the caller pays
     day_of_month: int = 1
+    due_day: Optional[int] = None
 
     @field_validator("amount")
     @classmethod
@@ -129,12 +130,13 @@ class BillRepayIn(BaseModel):
 
 
 class BillDayIn(BaseModel):
-    day_of_month: int
+    day_of_month: Optional[int] = None
+    due_day: Optional[int] = None         # 0 clears it
 
-    @field_validator("day_of_month")
+    @field_validator("day_of_month", "due_day")
     @classmethod
     def in_range(cls, v):
-        if not 1 <= v <= 28:
+        if v is not None and v != 0 and not 1 <= v <= 28:
             raise ValueError("Day of month must be 1-28")
         return v
 
@@ -164,7 +166,7 @@ def _bill_out(bill: RecurringBill) -> dict:
     return {
         "id": bill.id, "title": bill.title, "amount": bill.amount, "payer": bill.payer,
         "members": [m for m in bill.members.split(",") if m],
-        "day_of_month": bill.day_of_month, "active": bill.active,
+        "day_of_month": bill.day_of_month, "due_day": bill.due_day, "active": bill.active,
         "charges": [
             {"id": c.id, "period": c.period, "member": c.member, "share": c.share,
              "paid": c.paid, "paid_on": c.paid_on, "due": c.due,
@@ -369,7 +371,8 @@ def create_bill(payload: BillCreate, db: Session = Depends(get_db),
     if not 1 <= payload.day_of_month <= 28:
         raise HTTPException(400, "Day of month must be 1-28")
     bill = RecurringBill(title=payload.title.strip(), amount=payload.amount, payer=caller.name,
-                         members=",".join(members.values()), day_of_month=payload.day_of_month)
+                         members=",".join(members.values()), day_of_month=payload.day_of_month,
+                         due_day=payload.due_day if payload.due_day and 1 <= payload.due_day <= 28 else None)
     db.add(bill)
     db.commit()
     db.refresh(bill)
@@ -446,7 +449,10 @@ def update_bill_day(bill_id: int, payload: BillDayIn, db: Session = Depends(get_
     bill = db.query(RecurringBill).filter(RecurringBill.id == bill_id).first()
     if not bill or not _same(bill.payer, caller.name):
         raise HTTPException(404, "Bill not found")
-    bill.day_of_month = payload.day_of_month
+    if payload.day_of_month:
+        bill.day_of_month = payload.day_of_month
+    if payload.due_day is not None:
+        bill.due_day = payload.due_day or None
     db.commit()
     db.refresh(bill)
     return _bill_out(bill)

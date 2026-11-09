@@ -17,8 +17,8 @@ it pays, in this order - each one paid off before the next, the last one
 reached part-paid:
   1. the payer's recurring-bill shares, oldest month first (₹165 of a
      ₹167 month leaves ₹2 due on it);
-  2. each group where they owe, oldest group first (by its first expense);
-  3. their loans, by due date;
+  2. their loans and EMI loans, soonest due first (an overdue EMI first);
+  3. each group where they owe, oldest group first (by its first expense);
   4. anything left is an overpayment, held as credit in a two-person group
      where possible, where it can't leak to anyone else.
 When the transfer settles everything between the two, what the receiver
@@ -121,13 +121,16 @@ def settle(db, caller: User, frm: str, to: str, amount: float, when: str | None,
             elif _same(c.member, to) and _same(c.bill.payer, frm):
                 owed_by_receiver.append(((1, c.period), "charge", c, c.due))
         for l in db.query(Loan).all():
-            due = outstanding(l)["total_due"]
+            o = outstanding(l)
+            due = o["total_due"]
             if due <= 0.01:
                 continue
+            # Soonest due first - an overdue EMI before one next month
+            when_due = o.get("next_due_date") or l.due_date or ""
             if _same(l.borrower, frm) and _same(l.lender, to):
-                owed_by_payer.append(((3, l.due_date or ""), "loan", l, due))
+                owed_by_payer.append(((1.5, when_due), "loan", l, due))
             elif _same(l.borrower, to) and _same(l.lender, frm):
-                owed_by_receiver.append(((3, l.due_date or ""), "loan", l, due))
+                owed_by_receiver.append(((1.5, when_due), "loan", l, due))
 
     def clear(kind, obj, amt, payer, receiver, primary):
         if kind == "group":
@@ -138,8 +141,8 @@ def settle(db, caller: User, frm: str, to: str, amount: float, when: str | None,
             db.add(LoanPayment(loan_id=obj.id, amount=round(amt, 2), date=when, settlement_ref=ref))
 
     # The order money goes: recurring bills (oldest month first), then
-    # groups (oldest group first), then loans - each paid off before the
-    # next, the last one reached part-paid.
+    # loans and EMIs (soonest due first), then groups (oldest group first) -
+    # each paid off before the next, the last one reached part-paid.
     todo = [list(x) for x in sorted(owed_by_payer, key=lambda x: x[0])]   # [order, kind, obj, still owed]
 
     # Debts the other way are only netted off when this settles everything

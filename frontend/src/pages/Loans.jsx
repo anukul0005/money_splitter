@@ -19,6 +19,8 @@ import { combinedBalances } from '../utils/balances'
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
 const same = (a, b) => (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase()
 const r2 = (n) => Math.round(n * 100) / 100
+/** 1st, 2nd, 3rd, 23rd */
+const ord = (n) => `${n}${[11, 12, 13].includes(n % 100) ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`
 
 
 /**
@@ -126,7 +128,8 @@ export default function Loans() {
     e.preventDefault()
     if (!bill.title || !bill.amount || bill.members.length === 0) return setError('Title, amount and at least one person are required.')
     run(async () => {
-      await createBill({ ...bill, amount: parseFloat(bill.amount), day_of_month: Number(bill.day_of_month) || 1 })
+      await createBill({ ...bill, amount: parseFloat(bill.amount), day_of_month: Number(bill.day_of_month) || 1,
+                         due_day: Number(bill.due_day) || null })
       setBill({ title: '', amount: '', members: [], day_of_month: 1 })
       setShowForm(false)
     })
@@ -185,6 +188,15 @@ export default function Loans() {
     const day = parseInt(raw, 10)
     if (!raw || isNaN(day) || day < 1 || day > 28) return
     run(() => updateBillDay(bill.id, { day_of_month: day }))
+  }
+
+  const editDueDay = (bill) => {
+    const raw = window.prompt('Each share is due by which day of the month? (1-28, blank for none)\n'
+      + 'If it is before the billing day, it means the next month.', bill.due_day ? String(bill.due_day) : '')
+    if (raw === null) return
+    const day = raw.trim() === '' ? 0 : parseInt(raw, 10)
+    if (isNaN(day) || day < 0 || day > 28) return
+    run(() => updateBillDay(bill.id, { due_day: day }))
   }
 
   if (!data) return <LoadingSpinner />
@@ -345,10 +357,15 @@ export default function Loans() {
                 <input className="input" type="number" min="1" step="0.01" value={bill.amount}
                   onChange={(e) => setBill((f) => ({ ...f, amount: e.target.value }))} />
               </div>
-              <div className="w-28">
+              <div className="w-24">
                 <label className="label">Bill on day</label>
                 <input className="input" type="number" min="1" max="28" value={bill.day_of_month}
                   onChange={(e) => setBill((f) => ({ ...f, day_of_month: e.target.value }))} />
+              </div>
+              <div className="w-24">
+                <label className="label">Due by day</label>
+                <input className="input" type="number" min="1" max="28" placeholder="—" value={bill.due_day || ''}
+                  onChange={(e) => setBill((f) => ({ ...f, due_day: e.target.value }))} />
               </div>
             </div>
             <div>
@@ -502,11 +519,17 @@ export default function Loans() {
                     {b.title} · {INR(share)} each · billed on the{' '}
                     {iPay ? (
                       <button onClick={() => editBillDay(b)} className="underline decoration-dotted">
-                        {b.day_of_month}{b.day_of_month === 1 ? 'st' : 'th'}
+                        {ord(b.day_of_month)}
                       </button>
                     ) : (
-                      <>{b.day_of_month}{b.day_of_month === 1 ? 'st' : 'th'}</>
+                      <>{ord(b.day_of_month)}</>
                     )}
+                    {' · '}
+                    {iPay ? (
+                      <button onClick={() => editDueDay(b)} className="underline decoration-dotted">
+                        {b.due_day ? `due by the ${ord(b.due_day)}` : 'set a due day'}
+                      </button>
+                    ) : b.due_day ? <>due by the {ord(b.due_day)}</> : null}
                   </p>
                   {iPay && (
                     <button onClick={() => confirm('Stop billing this every month?') && run(() => stopBill(b.id))}
