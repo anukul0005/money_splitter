@@ -169,9 +169,21 @@ def settle(db, caller: User, frm: str, to: str, amount: float, when: str | None,
     total = sum(x[3] for x in owed_by_payer) - sum(x[3] for x in owed_by_receiver)
     credit: dict[str, float] = {}
     if amount >= total - 1:
-        for _, kind, obj, amt in sorted(owed_by_receiver, key=lambda x: x[0]):
-            clear(kind, obj, amt, to, frm, False)
-            credit[kind] = credit.get(kind, 0) + amt
+        # Only as much of the receiver's side as the payer's debts need
+        # beyond the cash - the rest stays where it is, a loan still a loan.
+        # Clearing all of it parked the difference as credit in a group:
+        # Anukul's ₹18,372 of loans from Anjali, netted against ₹12,000-odd of
+        # groups, came out as "₹8,437 owed in 08 nov 26". Groups are netted
+        # first, then bill shares, loans last, so loans are what's left open.
+        budget = round(sum(x[3] for x in owed_by_payer) - amount, 2)
+        rank = {"group": 0, "charge": 1, "loan": 2}
+        for _, kind, obj, amt in sorted(owed_by_receiver, key=lambda x: (rank[x[1]], x[0])):
+            part = round(min(amt, budget), 2)
+            if part <= 0.01:
+                break
+            clear(kind, obj, part, to, frm, False)
+            credit[kind] = credit.get(kind, 0) + part
+            budget -= part
 
     def take(item, budget: float) -> float:
         """Pay `item` out of `budget`; returns how much it used."""
