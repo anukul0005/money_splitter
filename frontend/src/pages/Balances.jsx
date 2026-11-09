@@ -52,13 +52,13 @@ function Parts({ row, owing }) {
   const loans = row.loanItems.filter((it) => it.tag !== 'Bill').reduce((s, it) => s + signed(it), 0)
   const bills = row.loanItems.filter((it) => it.tag === 'Bill').reduce((s, it) => s + signed(it), 0)
   const groups = row.net - loans - bills
-  const parts = [['Groups', groups], ['Loans', loans], ['Bills', bills]].filter(([, v]) => Math.abs(v) >= 1)
-  if (parts.length < 2 && !(parts.length === 1 && parts[0][0] !== 'Groups')) return null
+  // All three always, ₹0 included - so it's plain nothing else is owed
+  const parts = [['Groups', groups], ['Loans', loans], ['Bills', bills]].map(([k, v]) => [k, Math.abs(v) < 1 ? 0 : v])
   return (
     <p className="text-[10px] text-gray-500 mt-0.5 pl-5 tabular-nums">
       {parts.map(([k, v], i) => (
         <span key={k}>
-          {i > 0 && ' · '}{k} <b className={v * dir > 0 ? 'text-gray-700' : 'text-gray-400'}>{v * dir < 0 ? '−' : ''}{INR(Math.abs(v))}</b>
+          {i > 0 && ' · '}{k} <b className={v * dir > 0 ? 'text-gray-700' : 'text-gray-400 font-semibold'}>{v * dir < 0 ? '−' : ''}{INR(Math.abs(v))}</b>
         </span>
       ))}
     </p>
