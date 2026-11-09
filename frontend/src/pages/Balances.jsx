@@ -119,15 +119,12 @@ function LoanItem({ it, nav }) {
         : it.tag === 'Loan' && it.dueDate && <span className="block text-[9.85px] text-gray-500 mt-0.5">Due by {shortDate(it.dueDate)}</span>}
       {it.tag === 'Bill' && (
         <span className="block mt-0.5 space-y-0.5">
-          <span className="block text-[9.85px] text-gray-500">
-            Billed on the {ordinal(it.billDay || 1)}{it.dueDay ? ` · due by the ${ordinal(it.dueDay)}` : ''} every month
-          </span>
           {(it.months || []).map((m) => {
             const late = m.due && m.due < new Date().toISOString().slice(0, 10)
             return (
-              <span key={m.period} className={`flex text-[9.85px] tabular-nums ${late ? 'text-red-600 font-bold' : 'text-gray-600'}`}>
+              <span key={m.period} className={`flex text-[9.85px] tabular-nums ${late ? 'text-red-600 font-bold' : 'text-gray-500'}`}>
                 <span className="flex-1">
-                  Billed {shortDate(m.billed)}{m.due ? ` · due by ${shortDate(m.due)}` : ''}{late ? ' · overdue' : ''}
+                  {m.due ? `Due by ${shortDate(m.due)}` : `Billed ${shortDate(m.billed)}`}{late ? ' · overdue' : ''}
                 </span>
                 {it.months.length > 1 && <span className="font-bold">{INR(m.amount)}</span>}
               </span>
