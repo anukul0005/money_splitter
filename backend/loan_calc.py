@@ -103,6 +103,15 @@ def _outstanding_emi(loan, plan: list[dict], as_of: date) -> dict:
             charged[idx] += 1
     charges = max(charged) if charged else 0
 
+    # Paise left on an EMI paid in round rupees (₹5,307 of ₹5,307.28) move to
+    # the next one still open - that EMI shows paid, not "₹0 overdue"
+    for k, inst in enumerate(insts[:-1]):
+        if 0 < inst["balance"] < 1:
+            nxt = next((j for j in insts[k + 1:] if j["balance"] > 0.01), None)
+            if nxt:
+                nxt["balance"] += inst["balance"]
+                inst["balance"] = 0.0
+
     total_due = max(round(sum(i["balance"] for i in insts), 2), 0.0)
     remaining_principal = max(round(principal - paid_total, 2), 0.0)
     open_ = [i for i in insts if i["balance"] > 0.01]
