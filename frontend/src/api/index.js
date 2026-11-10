@@ -330,7 +330,19 @@ export const tennisDay      = (date, tour)       => remembered('/tennis/day', { 
 export const tennisPlayers  = (q, tour)          => remembered('/tennis/players', { q, tour }, 5 * MIN)
 export const tennisPlayer   = (tour, id)         => remembered(`/tennis/player/${tour}/${id}`, null, 5 * MIN)
 export const tennisH2H      = (tour, a, b)       => api.get('/tennis/h2h', { params: { tour, a, b } })
-export const tennisLive     = (tour)             => remembered('/tennis/live', { tour }, 8_000)
+// fresh: skip the 8-second memo - back in the app after a while, the scores must be now's
+export const tennisLive     = (tour, fresh)      => {
+  if (fresh) memo.delete('/tennis/live' + JSON.stringify({ tour }))
+  return remembered('/tennis/live', { tour }, 8_000)
+}
+/** Calls `load(true)` whenever the app comes back to the screen - phones pause
+ *  timers in the background, so without this the last poll's scores stay up. */
+export const onBackInView = (load) => {
+  const f = () => { if (!document.hidden) load(true) }
+  document.addEventListener('visibilitychange', f)
+  window.addEventListener('focus', f)
+  return () => { document.removeEventListener('visibilitychange', f); window.removeEventListener('focus', f) }
+}
 export const tennisLivePoints = ()               => api.get('/tennis/live/points')
 export const tennisLiveFeed = (espn)             => api.get('/tennis/live/feed', { params: { espn } })
 export const tennisMatchup  = (params)           => remembered('/tennis/matchup', params, 2 * MIN)

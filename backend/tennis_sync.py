@@ -12,7 +12,7 @@ from datetime import date, datetime, timedelta
 _running = threading.Lock()
 
 
-HOURLY_EVERY = timedelta(hours=1)
+HOURLY_EVERY = timedelta(minutes=15)    # opening Betting analytics re-reads results this old
 
 
 def run(today: date, light: bool = False) -> dict:
@@ -30,7 +30,10 @@ def run(today: date, light: bool = False) -> dict:
         if not last:
             return {"skipped": "tennis tables not loaded yet"}
         start = today - timedelta(days=1) if light else date.fromisoformat(last) - timedelta(days=2)
-        out = kb.fetch_range(conn, start, today, log=lambda m: print(f"[tennis] {m}"), light=light)
+        # Through tomorrow: the server's clock is UTC, so until 05:30 IST its
+        # "today" is India's yesterday and matches already dated India's
+        # today (Asia, Australia) were not read. Only finished matches are stored.
+        out = kb.fetch_range(conn, start, today + timedelta(days=1), log=lambda m: print(f"[tennis] {m}"), light=light)
         kb.meta_set(conn, "last_update", datetime.now().isoformat(timespec="seconds"))
         conn.commit()
         print(f"[tennis] {start} to {today}: {out}")

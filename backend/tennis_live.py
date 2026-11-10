@@ -17,7 +17,8 @@ from sqlalchemy import text
 
 import tennis_kb as kb
 
-CACHE_SECONDS = 60
+CACHE_SECONDS = 30
+STALE_SECONDS = 90     # older than this is read again before answering, not after
 AHEAD_HOURS = 36                      # upcoming: what starts within this
 _cache: dict[str, tuple[float, list]] = {}
 _tourneys: tuple[float, object] | None = None
@@ -273,11 +274,14 @@ def matches(db, tour: str = "all") -> dict:
     for t in tours:
         with _lock:
             hit = _cache.get(t)
-        if hit:
+        age = time.time() - hit[0] if hit else None
+        if hit and age < STALE_SECONDS:
             out += hit[1]
-            if time.time() - hit[0] >= CACHE_SECONDS:
+            if age >= CACHE_SECONDS:
                 _bg(f"espn-{t}", lambda t=t: _refresh(t))     # this answer now, a fresh one behind it
         else:
+            # Nothing, or nobody has asked for a while (the app was closed):
+            # wait for a fresh read rather than show scores from minutes ago
             missing.append(t)
     if missing:                                    # only the very first ask waits
         _tourney_info()

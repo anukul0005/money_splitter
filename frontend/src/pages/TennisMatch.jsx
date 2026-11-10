@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { tennisEarlyBreak, tennisLive, tennisLiveFeed, tennisMatchup } from '../api'
+import { onBackInView, tennisEarlyBreak, tennisLive, tennisLiveFeed, tennisMatchup } from '../api'
 import { LiveRow, MatchRow, ROUND_NAME, SURFACE, Safe, ScoreText, fmtShort, matchLink, startTime, useLivePoints, withPoints } from './BettingAnalytics'
 
 /**
@@ -75,7 +75,8 @@ function Commentary({ espn, tour, names }) {
     const load = () => tennisLiveFeed(espn).then((r) => { if (alive) setF(r.data) }).catch(() => {})
     load()
     const t = setInterval(() => { if (!document.hidden) load() }, 5000)
-    return () => { alive = false; clearInterval(t) }
+    const off = onBackInView(() => load())
+    return () => { alive = false; clearInterval(t); off() }
   }, [espn, tour])
   const head = <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Commentary</p>
   if (tour !== 'WTA') {
@@ -310,12 +311,13 @@ export default function TennisMatch() {
   useEffect(() => {
     if (!espn) return undefined
     let alive = true
-    const load = () => tennisLive(q.get('tour')).then((r) => {
+    const load = (fresh) => tennisLive(q.get('tour'), fresh).then((r) => {
       if (alive) setLive(r.data.matches.find((m) => m.espn === espn) || { gone: true })
     }).catch(() => {})
     load()
     const t = setInterval(() => { if (!document.hidden) load() }, 10000)
-    return () => { alive = false; clearInterval(t) }
+    const off = onBackInView(load)
+    return () => { alive = false; clearInterval(t); off() }
   }, [espn])
 
   const pts = useLivePoints(live?.tour === 'WTA' && live?.state === 'live')

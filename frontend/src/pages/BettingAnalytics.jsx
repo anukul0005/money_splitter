@@ -1,6 +1,6 @@
 import { Component, memo, useEffect, useRef, useState, useTransition } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { badmintonSummary, tennisDay, tennisEarlyBreak, tennisLive, tennisLivePoints, tennisPatterns, tennisPlayer, tennisPlayers, tennisPressure, tennisRankings, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
+import { badmintonSummary, tennisDay, tennisEarlyBreak, tennisLive, tennisLivePoints, tennisPatterns, tennisPlayer, tennisPlayers, tennisPressure, tennisRankings, onBackInView, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
 import RankingList, { RankingSwitch } from '../components/RankingList'
 import Badminton, { B_TABS } from './Badminton'
 import Hockey, { H_TABS } from './Hockey'
@@ -1248,7 +1248,8 @@ export function useLivePoints(on) {
     }
     load()
     const t = setInterval(load, 3000)
-    return () => { alive = false; clearInterval(t) }
+    const off = onBackInView(() => load())
+    return () => { alive = false; clearInterval(t); off() }
   }, [on])
   return pts
 }
@@ -1332,10 +1333,11 @@ function Live({ tour, onOpen, active = true }) {
   useEffect(() => {
     if (!active) return undefined          // kept but hidden behind another tab: no polling
     let alive = true
-    const load = () => tennisLive(tour).then((r) => { if (alive) { setD(r.data); setErr(false) } }).catch(() => { if (alive) setErr(true) })
+    const load = (fresh) => tennisLive(tour, fresh).then((r) => { if (alive) { setD(r.data); setErr(false) } }).catch(() => { if (alive) setErr(true) })
     load()
     const t = setInterval(() => { if (!document.hidden) load() }, 10000)
-    return () => { alive = false; clearInterval(t) }
+    const off = onBackInView(load)
+    return () => { alive = false; clearInterval(t); off() }
   }, [tour, active])
   const pts = useLivePoints(active && !!d?.matches?.some((m) => m.tour === 'WTA' && m.state === 'live'))
   const eb = useEarlyBreak(active)
