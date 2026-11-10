@@ -353,7 +353,8 @@ export const betsDeletePromo = (day)             => api.delete(`/bets/promos/${d
 export const tennisSetsTourney = (tour, name)    => remembered('/tennis/sets/tournament', { tour, name }, 10 * MIN)
 // Bottles I've had - read from drink expenses' descriptions and notes (backend bottles.py)
 export const getMyBottles      = ()     => api.get('/drinks/my-bottles')
-export const getBottlePurchases = (name, size) => api.get('/drinks/my-bottles/purchases', { params: { name, size } })
+export const nameBottle       = (body) => api.post('/drinks/my-bottles/name', body)
+export const getBottlePurchases =(name, size) => api.get('/drinks/my-bottles/purchases', { params: { name, size } })
 
 // ── Forecast ───────────────────────────────────────────────────────────────────
 // Two directions on the same question. /budget splits one total into a

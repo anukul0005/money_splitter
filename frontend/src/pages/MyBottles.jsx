@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getMyBottles, getBottlePurchases } from '../api'
+import { getMyBottles, getBottlePurchases, nameBottle } from '../api'
 import Dropdown from '../components/Dropdown'
 import { dn } from '../utils/displayName'
 
@@ -73,6 +73,35 @@ function SizeRow({ s, nav, single }) {
   )
 }
 
+/** A "Beer" with no brand: asks which one it was (and the size and price of one, if known). */
+function NameIt({ u, onDone }) {
+  const [name, setName] = useState('')
+  const [ml, setMl] = useState(u.size_ml ? String(u.size_ml) : '')
+  const [price, setPrice] = useState(u.price_each ? String(Math.round(u.price_each)) : '')
+  const [err, setErr] = useState('')
+  const save = () => {
+    setErr('')
+    nameBottle({ id: u.id, name: name.trim(), size_ml: Number(ml) || null, price_each: Number(price) || null })
+      .then(onDone).catch((e) => setErr(e.response?.data?.detail || 'Could not save.'))
+  }
+  return (
+    <div className="py-2 border-t border-amber-200 first:border-t-0">
+      <p className="text-xs text-gray-800 break-words">{u.title || 'No description'}</p>
+      <p className="text-[10px] text-gray-400">
+        {fmtDate(u.date)} · {u.group}{u.qty > 1 ? ` · ${u.qty} ${u.kind.toLowerCase()}s` : ''}
+      </p>
+      <div className="flex gap-1.5 mt-1.5">
+        <input className="input text-xs flex-1 min-w-0 py-1.5" placeholder={`Which ${u.kind.toLowerCase()}? e.g. Kingfisher Ultra`}
+          value={name} onChange={(e) => setName(e.target.value)} />
+        <input className="input text-xs w-16 py-1.5" placeholder="ml" inputMode="numeric" value={ml} onChange={(e) => setMl(e.target.value)} />
+        <input className="input text-xs w-16 py-1.5" placeholder="₹ each" inputMode="numeric" value={price} onChange={(e) => setPrice(e.target.value)} />
+        <button onClick={save} disabled={name.trim().length < 2} className="btn-primary w-auto text-xs px-3 py-1.5 disabled:opacity-40">Save</button>
+      </div>
+      {err && <p className="text-[10px] text-red-600 mt-1">{err}</p>}
+    </div>
+  )
+}
+
 // A brand's sizes under each variety ("Minty Jamun"), the plain brand first.
 const groupByVariety = (b) => {
   const m = new Map()
@@ -138,6 +167,7 @@ export default function MyBottles() {
   const [q, setQ] = useState('')
   const [sort, setSort] = useState('times')
 
+  const [tick, setTick] = useState(0)          // reload after a beer is named
   useEffect(() => {
     let timer
     const load = () => getMyBottles()
@@ -149,7 +179,7 @@ export default function MyBottles() {
       .catch(() => setError('Could not load your bottles.'))
     load()
     return () => clearTimeout(timer)
-  }, [])
+  }, [tick])
 
   // one entry per brand (older servers: one per size)
   const list = data?.brands || (data?.bottles || []).map((x) => ({ ...x, sizes: [x], price_low: x.avg_price, price_high: x.avg_price }))
@@ -190,6 +220,15 @@ export default function MyBottles() {
           <p className="text-sm text-gray-400 text-center py-10">
             No bottles yet. Write the bottle in a drink expense's description or notes - "Old Monk half", "2 KF strong" - and it shows up here.
           </p>
+        )}
+        {data?.unnamed?.length > 0 && (
+          <div className="card border-amber-300 bg-amber-50">
+            <p className="text-sm font-black text-gray-900">Which {data.unnamed.length === 1 ? 'one was this' : 'ones were these'}?</p>
+            <p className="text-[10px] text-gray-500 mb-1">
+              These only say "{data.unnamed[0].kind}" - name the brand and they join the list (and the price table).
+            </p>
+            {data.unnamed.map((u) => <NameIt key={u.id} u={u} onDone={() => setTick((t) => t + 1)} />)}
+          </div>
         )}
         {list.length > 0 && shown.length === 0 && <p className="text-sm text-gray-400 text-center py-6">No bottle matches “{q}”.</p>}
         {shown.map((b) => <Brand key={b.name} b={b} nav={nav} />)}

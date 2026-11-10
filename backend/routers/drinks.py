@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 import bottles
@@ -29,6 +30,41 @@ def _mine(db: Session, caller: User):
 
 def _key(b: DrinkBottle) -> tuple[str, str]:
     return bottles.bottle_key(b.name), str(b.size_ml or b.size or "")
+
+
+GENERIC = {"beer", "beers", "vodka", "whisky", "whiskey", "rum", "gin", "wine", "brandy", "tequila", "alcohol", "liquor"}
+
+
+def _generic(name: str) -> bool:
+    """A kind of drink, not a bottle: "Beer", "vodka"."""
+    return (name or "").strip().lower() in GENERIC
+
+
+class NameIn(BaseModel):
+    id: int
+    name: str = Field(min_length=2, max_length=120)
+    size_ml: int | None = None
+    price_each: float | None = None
+
+
+@router.post("/my-bottles/name", response_model=dict)
+def name_bottle(body: NameIn, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Give a "Beer" its brand ("Kingfisher Ultra"), and its size and price
+    when known - one of the caller's own drink expenses only."""
+    _, _, mine = _mine(db, caller)
+    b = db.get(DrinkBottle, body.id)
+    if not b or b.expense_id not in {e.id for e in mine}:
+        raise HTTPException(404, "Not one of your bottles")
+    if _generic(body.name):
+        raise HTTPException(400, "Which brand? \"Beer\" alone can't be looked up")
+    b.name = body.name.strip()
+    if body.size_ml:
+        b.size_ml = body.size_ml
+        b.size = next((k for k, v in bottles.SIZES_ML.items() if v == body.size_ml), b.size)
+    if body.price_each:
+        b.price_each = round(body.price_each, 2)
+    db.commit()
+    return {"id": b.id, "name": b.name, "size_ml": b.size_ml, "price_each": b.price_each}
 
 
 def _with(e, group: Group, caller: User) -> list[str]:
@@ -117,6 +153,13 @@ def my_bottles(db: Session = Depends(get_db), caller: User = Depends(current_use
 
     by_id = {e.id: e for e in mine}
     rows = db.query(DrinkBottle).filter(DrinkBottle.expense_id.in_(list(by_id))).all() if by_id else []
+    # "Beer" with no brand isn't a bottle anyone can look up: asked about
+    # instead (POST /my-bottles/name), kept out of the list until named
+    unnamed = [{"id": b.id, "kind": b.name, "date": (by_id[b.expense_id].date or "")[:10] or None,
+                "title": by_id[b.expense_id].title or by_id[b.expense_id].notes, "qty": b.qty,
+                "size": b.size, "size_ml": b.size_ml, "price_each": b.price_each,
+                "group": groups[by_id[b.expense_id].group_id].name} for b in rows if _generic(b.name)]
+    rows = [b for b in rows if not _generic(b.name)]
     agg: dict[tuple, dict] = {}
     spellings: dict[tuple, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     company: dict[tuple, dict[str, int]] = defaultdict(lambda: defaultdict(int))   # who it was drunk with, how often
@@ -149,7 +192,7 @@ def my_bottles(db: Session = Depends(get_db), caller: User = Depends(current_use
         except Exception as err:
             db.rollback()
             print(f"[drinks] learning prices failed: {err}")
-    return {"bottles": out, "brands": _brands(out), "reading": bottles.status()["running"], "unread": unread}
+    return {"bottles": out, "brands": _brands(out), "unnamed": sorted(unnamed, key=lambda x: x["date"] or "", reverse=True), "reading": bottles.status()["running"], "unread": unread}
 
 
 # Brands whose names carry a variety after them ("Smirnoff Minty Jamun",
