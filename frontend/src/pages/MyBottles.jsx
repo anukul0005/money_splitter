@@ -195,7 +195,7 @@ export default function MyBottles() {
     <div className="pb-28 md:pb-10">
       <div className="px-5 pt-10 md:pt-6 pb-4 bg-cream sticky top-0 z-10 border-b border-amber-100/60">
         <button onClick={() => nav(-1)} className="text-xs font-bold text-gray-400 mb-2">← What to drink</button>
-        <h1 className="text-xl font-black tracking-tight">Bottles I've had</h1>
+        <h1 className="text-xl font-black tracking-tight">My drinks</h1>
         <p className="text-xs text-gray-400 mt-1">
           {data ? `${list.length} bottles, from your drink expenses` : 'From your drink expenses'}
         </p>

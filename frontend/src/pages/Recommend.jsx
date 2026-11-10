@@ -235,7 +235,7 @@ function YourBottles() {
     <button onClick={() => nav('/drinks/bottles')} className="card w-full text-left active:scale-[0.99] transition-transform">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Bottles I've had</p>
+          <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">My drinks</p>
           <p className="text-sm font-bold text-gray-900 mt-1">
             {list.length ? `${list.length} bottles, from your drink expenses` : 'Reading your drink expenses…'}
           </p>
