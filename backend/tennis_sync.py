@@ -36,7 +36,7 @@ def run(today: date, light: bool = False) -> dict:
         out = kb.fetch_range(conn, start, today + timedelta(days=1), log=lambda m: print(f"[tennis] {m}"), light=light)
         kb.meta_set(conn, "last_update", datetime.now().isoformat(timespec="seconds"))
         conn.commit()
-        print(f"[tennis] {start} to {today}: {out}")
+        print(f"[tennis] {start} to {today + timedelta(days=1)}: {out}")
         return out
     except Exception as err:          # never let tennis break the daily jobs
         print(f"[tennis] update failed: {err}")
