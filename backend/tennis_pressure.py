@@ -20,6 +20,7 @@ import sys
 from collections import defaultdict
 
 import tennis_kb as kb
+from tennis_early_break import load, save
 
 FROM_YEAR = 2017
 JSON_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tennis_pressure.json")
@@ -148,41 +149,23 @@ def _players(sets: dict) -> dict:
     return out
 
 
-_held = None
-_players_held = None
-
-
 def player(tour: str, name: str) -> dict | None:
     """One player's pressure games and the tour's average, or None when too few are charted."""
-    global _players_held
-    if _players_held is None:
-        try:
-            with open(PLAYERS_FILE, encoding="utf8") as f:
-                _players_held = json.load(f)
-        except OSError:
-            _players_held = {}
-    t = _players_held.get(tour.upper()) or {}
+    t = load(PLAYERS_FILE, {}).get(tour.upper()) or {}
     me = t.get(kb.norm(name))
     return {"from_year": FROM_YEAR, "player": me, "avg": t.get("_avg")} if me else None
 
 
 def get() -> dict:
-    global _held
-    if _held is None:
-        try:
-            with open(JSON_FILE, encoding="utf8") as f:
-                _held = json.load(f)
-        except OSError:
-            _held = {"tours": {}}
-    return _held
+    return load(JSON_FILE, {"tours": {}})
 
 
 if __name__ == "__main__":
+    # python tennis_pressure.py <charting folder> [output folder - default the repo's]
     data, players = build(sys.argv[1])
-    with open(JSON_FILE, "w", encoding="utf8") as f:
-        json.dump(data, f, separators=(",", ":"))
-    with open(PLAYERS_FILE, "w", encoding="utf8") as f:
-        json.dump(players, f, separators=(",", ":"))
+    out = sys.argv[2] if len(sys.argv) > 2 else None
+    save(data, JSON_FILE, out)
+    save(players, PLAYERS_FILE, out)
     print({t: len(v) - 1 for t, v in players.items()}, "players")
     for t, d in data["tours"].items():
         print(t, d["sets"], {k: (d[k]["n"], round(100 * (1 - d[k]["held"] / max(1, d[k]["n"])), 1))

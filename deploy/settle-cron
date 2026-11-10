@@ -3,3 +3,5 @@
 35 7 * * * ubuntu /opt/settle/deploy/cron.sh daily
 # Fresh tennis results every hour
 5 * * * * ubuntu /opt/settle/deploy/cron.sh tennis
+# Tennis patterns rebuilt from the Match Charting Project, Mondays 03:30 IST
+0 22 * * 0 ubuntu bash /opt/settle/deploy/tennis-charting.sh >/tmp/tennis-charting.log 2>&1

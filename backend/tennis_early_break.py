@@ -177,41 +177,55 @@ def _players(sets: dict) -> dict:
     return out
 
 
-_held = None
-_players_held = None
+# The weekly rebuild on the server (deploy/tennis-charting.sh) writes here,
+# outside the checkout a deploy resets; the files in the repo are the
+# fallback until it first runs.
+LIVE_DIR = os.environ.get("TENNIS_DATA_DIR") or os.path.expanduser("~/settle-data/tennis")
+_cache: dict = {}
+
+
+def load(repo_file: str, empty):
+    """A built JSON file, the rebuilt copy when there is one - read again
+    whenever the file changes, so a rebuild shows without a restart."""
+    live = os.path.join(LIVE_DIR, os.path.basename(repo_file))
+    path = live if os.path.exists(live) else repo_file
+    try:
+        stamp = (path, os.path.getmtime(path))
+        if _cache.get(repo_file, (None,))[0] != stamp:
+            with open(path, encoding="utf8") as f:
+                _cache[repo_file] = (stamp, json.load(f))
+        return _cache[repo_file][1]
+    except (OSError, ValueError):
+        return empty
+
+
+def save(data, repo_file: str, out_dir: str | None) -> None:
+    """Write a built file - into out_dir (the server's rebuild) or the repo -
+    whole, so the API never reads a half-written one."""
+    path = os.path.join(out_dir, os.path.basename(repo_file)) if out_dir else repo_file
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".tmp", "w", encoding="utf8") as f:
+        json.dump(data, f, separators=(",", ":"))
+    os.replace(path + ".tmp", path)
 
 
 def player(tour: str, name: str) -> dict | None:
     """One player's early-break sets and the tour's average, or None when too few are charted."""
-    global _players_held
-    if _players_held is None:
-        try:
-            with open(PLAYERS_FILE, encoding="utf8") as f:
-                _players_held = json.load(f)
-        except OSError:
-            _players_held = {}
-    t = _players_held.get(tour.upper()) or {}
+    t = load(PLAYERS_FILE, {}).get(tour.upper()) or {}
     me = t.get(kb.norm(name))
     return {"from_year": FROM_YEAR, "player": me, "avg": t.get("_avg")} if me else None
 
 
 def get() -> dict:
-    global _held
-    if _held is None:
-        try:
-            with open(JSON_FILE, encoding="utf8") as f:
-                _held = json.load(f)
-        except OSError:
-            _held = {"tours": {}}
-    return _held
+    return load(JSON_FILE, {"tours": {}})
 
 
 if __name__ == "__main__":
+    # python tennis_early_break.py <charting folder> [output folder - default the repo's]
     data, players = build(sys.argv[1])
-    with open(JSON_FILE, "w", encoding="utf8") as f:
-        json.dump(data, f, separators=(",", ":"))
-    with open(PLAYERS_FILE, "w", encoding="utf8") as f:
-        json.dump(players, f, separators=(",", ":"))
+    out = sys.argv[2] if len(sys.argv) > 2 else None
+    save(data, JSON_FILE, out)
+    save(players, PLAYERS_FILE, out)
     print({t: len(v) - 1 for t, v in players.items()}, "players")
     for t, d in data["tours"].items():
         print(t, [(r["key"], r["n"], round(100 * r["under"] / max(1, r["n"]), 1)) for r in d["rows"]])

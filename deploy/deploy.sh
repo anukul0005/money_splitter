@@ -22,6 +22,7 @@ cd "$APP"
 
 echo "== restarting"
 sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
+sudo cp deploy/settle-cron /etc/cron.d/settle-cron && sudo chmod 644 /etc/cron.d/settle-cron
 sudo systemctl reload caddy
 sudo systemctl restart settle-api
 for i in $(seq 1 30); do
