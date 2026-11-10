@@ -37,7 +37,14 @@ function SizeRow({ s, nav, single }) {
       {!single && (
         <button onClick={() => setOpen((o) => !o)} className="w-full text-left flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-xs font-bold text-gray-800">{sizeText(s) || 'Size not noted'}</p>
+            <p className="text-xs font-bold text-gray-800">
+              {sizeText(s) || 'Size not noted'}
+              {s.guessed > 0 && (
+                <span className="ml-1.5 text-[9px] font-semibold text-amber-700">
+                  {s.guessed === s.times ? 'size from price' : `${s.guessed} sized from price`}
+                </span>
+              )}
+            </p>
             <p className="text-[10px] text-gray-500">
               {s.times} time{s.times === 1 ? '' : 's'}{s.bottles !== s.times && ` · ${s.bottles} bottles`}{s.last ? ` · last ${fmtDate(s.last)}` : ''}
             </p>
@@ -59,6 +66,7 @@ function SizeRow({ s, nav, single }) {
                 <p className="text-[10px] text-gray-400">
                   {fmtDate(p.date)} · {p.group}
                   {p.with?.length > 0 && <> · with <span className="text-gray-600 font-semibold">{p.with.map(dn).join(', ')}</span></>}
+                  {p.size_guessed && <span className="text-amber-700"> · size from price</span>}
                 </p>
               </div>
               <p className="text-xs font-bold text-gray-900 shrink-0">

@@ -28,8 +28,24 @@ def _mine(db: Session, caller: User):
     return groups, expenses, mine
 
 
-def _key(b: DrinkBottle) -> tuple[str, str]:
-    return bottles.bottle_key(b.name), str(b.size_ml or b.size or "")
+def _key(b: DrinkBottle, sized: dict | None = None) -> tuple[str, str]:
+    size, ml, _ = (sized or {}).get(b.id, (b.size, b.size_ml, False))
+    return bottles.bottle_key(b.name), str(ml or size or "")
+
+
+def _sized(rows, ref) -> dict:
+    """bottle id -> (size, ml, guessed): the size the expense gave, else one
+    guessed from what a bottle cost (_Reference.size_for) - ₹830 of Smirnoff
+    is a full one."""
+    by_ml = {v: k for k, v in bottles.SIZES_ML.items()}
+    out = {}
+    for b in rows:
+        if b.size_ml or not b.price_each:
+            continue
+        ml = ref.size_for(b.name, b.price_each)
+        if ml:
+            out[b.id] = (by_ml.get(ml, f"{ml}ml") if ml != 650 else "bottle", ml, True)
+    return out
 
 
 GENERIC = {"beer", "beers", "vodka", "whisky", "whiskey", "rum", "gin", "wine", "brandy", "tequila", "alcohol", "liquor"}
@@ -81,50 +97,93 @@ LEARN_STATE = "Uttar Pradesh"
 LEARN_NOTE = "Paid, from drink expenses"     # marks a learned row: these get updated, hand ones never
 
 
-def learn_prices(db: Session, sizes: list[dict], by: str) -> list[dict]:
-    """Write the average paid for each bottle and size into the shared price
-    table, as a correction for LEARN_STATE. Only a bottle the table already
-    knows (so a misread name adds nothing), only with a size, and only a
-    price within half to double the published one - a bar bill read as one
-    bottle is no price. A correction someone typed by hand is left alone.
-    Returns what changed."""
-    from liquor_prices import BOTTLES
-    from models import PriceOverride
-    from routers.recommend import _brand_key, _resolve_brand
-    # A brand's price per ml - its own state's list first, then any state's,
-    # then a hand correction - to check a paid price against at any size
-    per_ml: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
-    for b in BOTTLES:
-        if b.size_ml and b.price:
-            per_ml[_brand_key(b.brand)]["here" if b.state == LEARN_STATE else "any"].append(b.price / b.size_ml)
-    for o in db.query(PriceOverride).all():
-        if o.size_ml and o.price and not (o.note or "").startswith(LEARN_NOTE):
-            per_ml[o.brand_key]["hand"].append(o.price / o.size_ml)
+class _Reference:
+    """What a bottle should cost at a size: the brand's price per ml - its
+    own state's list first, then any state's, then a hand correction - times
+    the size. Checks a paid price, and guesses a size from one."""
 
-    def expected(key: str, ml: int) -> float | None:
+    def __init__(self, db: Session):
+        from liquor_prices import BOTTLES
+        from models import PriceOverride
+        from routers.recommend import _brand_key, _resolve_brand
+        self.db, self.key, self._resolve = db, _brand_key, _resolve_brand
+        self.per_ml: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+        for b in BOTTLES:
+            if b.size_ml and b.price:
+                self.per_ml[_brand_key(b.brand)]["here" if b.state == LEARN_STATE else "any"].append(b.price / b.size_ml)
+        for o in db.query(PriceOverride).all():
+            if o.size_ml and o.price and not (o.note or "").startswith(LEARN_NOTE):
+                self.per_ml[o.brand_key]["hand"].append(o.price / o.size_ml)
+        self._memo: dict[str, tuple] = {}
+
+    def resolve(self, name: str):
+        """(catalogue brand, kind, known) - a variety the table lacks
+        ("Smirnoff Minty Jamun") falls back to its brand's ("Smirnoff")."""
+        if name not in self._memo:
+            kind = "beer" if bottles._BEER.search(name) else "whisky"
+            hit = self._resolve(self.db, name, kind)
+            if not hit[2]:
+                parent = next((p for p in sorted(PARENT_BRANDS, key=len, reverse=True)
+                               if bottles.bottle_key(name).startswith(bottles.bottle_key(p))), None)
+                if parent:
+                    hit = self._resolve(self.db, parent, kind)
+            self._memo[name] = hit
+        return self._memo[name]
+
+    def expected(self, name: str, ml: int) -> float | None:
+        brand, _, known = self.resolve(name)
+        if not known:
+            return None
         for where in ("here", "any", "hand"):
-            xs = sorted(per_ml[key][where])
+            xs = sorted(self.per_ml[self.key(brand)][where])
             if xs:
                 return xs[len(xs) // 2] * ml
         return None
+
+    def size_for(self, name: str, price: float) -> int | None:
+        """The standard size a price fits best - ₹830 of Smirnoff is a full
+        bottle - or None when no size comes within a third of it."""
+        import math
+        beer = bool(bottles._BEER.search(name))
+        best = None
+        for ml in ((330, 500, 650) if beer else (180, 375, 750)):
+            ref = self.expected(name, ml)
+            if ref:
+                off = abs(math.log(price / ref))
+                if best is None or off < best[0]:
+                    best = (off, ml)
+        return best[1] if best and best[0] <= math.log(1.35) else None
+
+
+def learn_prices(db: Session, sizes: list[dict], by: str, ref: _Reference | None = None) -> list[dict]:
+    """Write the average paid for each bottle and size into the shared price
+    table, as a correction for LEARN_STATE. Only a bottle the table already
+    knows (so a misread name adds nothing), only with a size the expense
+    said (not one guessed from the price), and only a price within half to
+    double the published one - a bar bill read as one bottle is no price. A
+    correction someone typed by hand is left alone. Returns what changed."""
+    from models import PriceOverride
+    ref_ = ref or _Reference(db)
     changed = []
     for s in sizes:
-        ml, price = s.get("size_ml"), s.get("avg_price")
+        ml, price = s.get("size_ml"), s.get("noted_avg")
         if not ml or not price:
             continue
-        kind = "beer" if bottles._BEER.search(s["name"]) else "whisky"
-        brand, kind, known = _resolve_brand(db, s["name"], kind)
-        if not known:
-            continue
-        key = _brand_key(brand)
-        ref = expected(key, ml)
+        brand, kind, known = ref_.resolve(s["name"])
+        if not known or not ref_._resolve(db, s["name"], kind)[2]:
+            continue                                  # unknown, or a variety known only as its brand - it would overwrite the brand's price
+        parent, variety = _split_brand(s["name"], sorted(PARENT_BRANDS, key=len))
+        if variety and bottles.bottle_key(brand) == bottles.bottle_key(parent):
+            continue                                  # "Smirnoff Mango chilli" matched to plain Smirnoff: not its price
+        key = ref_.key(brand)
+        ref = ref_.expected(s["name"], ml)
         if not ref or not (0.5 * ref <= price <= 2 * ref):
             continue                                  # nothing to check it by, or no bottle costs that
         row = (db.query(PriceOverride).filter(PriceOverride.brand_key == key, PriceOverride.state == LEARN_STATE,
                                               PriceOverride.size_ml == ml).first())
         if row and not (row.note or "").startswith(LEARN_NOTE):
             continue                                  # typed by hand - that one knows better
-        note = f"{LEARN_NOTE}: avg of {s['priced']}, last bought {s['last'] or '?'}"
+        note = f"{LEARN_NOTE}: avg of {s['noted_n']}, last bought {s['last'] or '?'}"
         if row and row.price == price and row.note == note:
             continue
         if row is None:
@@ -160,14 +219,20 @@ def my_bottles(db: Session = Depends(get_db), caller: User = Depends(current_use
                 "size": b.size, "size_ml": b.size_ml, "price_each": b.price_each,
                 "group": groups[by_id[b.expense_id].group_id].name} for b in rows if _generic(b.name)]
     rows = [b for b in rows if not _generic(b.name)]
+    ref = _Reference(db)
+    sized = _sized(rows, ref)
     agg: dict[tuple, dict] = {}
     spellings: dict[tuple, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     company: dict[tuple, dict[str, int]] = defaultdict(lambda: defaultdict(int))   # who it was drunk with, how often
     for b in rows:
-        k = _key(b)
+        k = _key(b, sized)
         e = by_id[b.expense_id]
-        a = agg.setdefault(k, {"size": b.size, "size_ml": b.size_ml, "times": 0, "bottles": 0,
-                               "priced": 0, "spent": 0.0, "last": None})
+        size, ml, guessed = sized.get(b.id, (b.size, b.size_ml, False))
+        a = agg.setdefault(k, {"size": size, "size_ml": ml, "times": 0, "bottles": 0, "guessed": 0,
+                               "priced": 0, "spent": 0.0, "noted_n": 0, "noted_spent": 0.0, "last": None})
+        if not guessed and b.size_ml:
+            a["size"], a["size_ml"] = b.size, b.size_ml    # the expense's own words over a guess
+        a["guessed"] += guessed
         for n in _with(e, groups[e.group_id], caller):
             company[k][n] += 1
         a["times"] += 1
@@ -175,6 +240,9 @@ def my_bottles(db: Session = Depends(get_db), caller: User = Depends(current_use
         if b.price_each:
             a["priced"] += b.qty
             a["spent"] += b.price_each * b.qty
+            if not guessed:                               # only a stated size teaches the price table
+                a["noted_n"] += b.qty
+                a["noted_spent"] += b.price_each * b.qty
         if e.date and (a["last"] is None or e.date > a["last"]):
             a["last"] = e.date[:10]
         spellings[k][b.name] += 1
@@ -183,12 +251,13 @@ def my_bottles(db: Session = Depends(get_db), caller: User = Depends(current_use
         name = max(spellings[k].items(), key=lambda x: x[1])[0]
         out.append({"name": name, "size": a["size"], "size_ml": a["size_ml"], "times": a["times"],
                     "bottles": a["bottles"], "avg_price": round(a["spent"] / a["priced"]) if a["priced"] else None,
-                    "priced": a["priced"], "last": a["last"],
+                    "priced": a["priced"], "last": a["last"], "guessed": a["guessed"],
+                    "noted_n": a["noted_n"], "noted_avg": round(a["noted_spent"] / a["noted_n"]) if a["noted_n"] else None,
                     "with": [[n, c] for n, c in sorted(company[k].items(), key=lambda x: (-x[1], x[0].lower()))]})
     out.sort(key=lambda x: (-x["times"], x["name"].lower(), SIZE_ORDER.get(x["size"] or "", 9)))
     if not unread:
         try:      # what was paid corrects the shared price table
-            learn_prices(db, out, caller.name)
+            learn_prices(db, out, caller.name, ref)
         except Exception as err:
             db.rollback()
             print(f"[drinks] learning prices failed: {err}")
@@ -271,14 +340,15 @@ def bottle_purchases(name: str, size: str = "", db: Session = Depends(get_db),
     by_id = {e.id: e for e in mine}
     want = (bottles.bottle_key(name), size)
     rows = db.query(DrinkBottle).filter(DrinkBottle.expense_id.in_(list(by_id))).all() if by_id else []
+    sized = _sized(rows, _Reference(db))
     out = []
     for b in rows:
-        if _key(b) != want:
+        if _key(b, sized) != want:
             continue
         e = by_id[b.expense_id]
         out.append({"expense_id": e.id, "date": (e.date or "")[:10] or None, "title": e.title or e.notes,
                     "notes": e.notes, "qty": b.qty, "price_each": b.price_each, "amount": e.amount,
                     "group": groups[e.group_id].name, "group_id": e.group_id,
-                    "with": _with(e, groups[e.group_id], caller)})
+                    "with": _with(e, groups[e.group_id], caller), "size_guessed": b.id in sized})
     out.sort(key=lambda x: x["date"] or "", reverse=True)
     return out
