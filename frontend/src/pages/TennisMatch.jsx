@@ -297,6 +297,95 @@ function ScoreStats({ live, eb, players, names }) {
   )
 }
 
+/** 5-4 and 4-5 (backend tennis_pressure): serving for the set, and serving
+ *  to stay in it - how often each player was broken there, side by side
+ *  with the tour. Shown all match, quietly; when a set reaches one of the
+ *  two scores the card comes forward and reads the row out. */
+const PRESSURE_ROWS = [
+  ['s54', 'Serving for the set at 5-4', 'broken'],
+  ['s45', 'Serving at 4-5 to stay in it', 'broken = set lost'],
+]
+function PressureCard({ players, names, live }) {
+  const data = players.map((p) => p?.pressure)
+  if (!data.some((x) => x?.player)) return null
+  const avg = data.find((x) => x?.avg)?.avg || {}
+  const last = (n) => (n || '').split(' ').slice(-1)[0]
+  const pct = (c) => (c?.[0] ? (100 * (c[0] - c[1])) / c[0] : null)    // [games served, held] -> % broken
+  // live: which of these games is being played now, and by whom
+  let now = null
+  if (live?.state === 'live') {
+    const st = setState(live)
+    const srv = live.players[0].serving ? 0 : live.players[1].serving ? 1 : null
+    if (!st.done && srv != null) {
+      const mine = srv === 0 ? [st.g0, st.g1] : [st.g1, st.g0]
+      const key = { '5-4': 's54', '4-5': 's45' }[mine.join('-')]
+      if (key) now = { key, srv, score: mine.join('-') }
+    }
+  }
+  const Cell = ({ c, k, strong }) => {
+    const p = pct(c, k), t = pct(avg[k], k)
+    const few = !c?.[0] || c[0] < 5
+    const diff = p != null && t != null && !few ? p - t : null
+    const good = diff != null && diff <= -5           // broken less than the tour
+    const bad = diff != null && diff >= 5
+    return (
+      <td className="px-1 py-1.5 text-center">
+        <p className={`tabular-nums ${strong ? 'text-[15px]' : 'text-[13px]'} font-black ${few ? 'text-gray-300' : good ? 'text-green-700' : bad ? 'text-red-600' : 'text-gray-900'}`}>
+          {p == null ? '—' : `${Math.round(p)}%`}
+        </p>
+        <p className="text-[9px] text-gray-500 tabular-nums">{c?.[0] ? `${c[0] - c[1]}/${c[0]}` : 'not charted'}</p>
+      </td>
+    )
+  }
+  return (
+    // quiet until a set is at 5-4 / 4-5, then forward
+    <div className={`card ${now ? 'border-amber-400 ring-1 ring-amber-300' : 'opacity-70'}`}>
+      <p className={`text-[10px] font-black uppercase tracking-widest ${now ? 'text-amber-700' : 'text-gray-400'}`}>Pressure · 5-4 and 4-5</p>
+      {now && (() => {
+        const c = data[now.srv]?.player?.[now.key], p = pct(c, now.key), t = pct(avg[now.key], now.key)
+        return (
+          <p className="text-sm font-black text-gray-900 mt-1">
+            {last(names[now.srv])} serving at {now.score}
+            <span className="block text-[11px] font-semibold text-gray-600">
+              broken {p == null ? '— (too few charted)' : `${Math.round(p)}% (${c[0] - c[1]} of ${c[0]})`} · tour {t == null ? '—' : `${Math.round(t)}%`}
+              {now.key === 's45' ? ' - a break ends the set' : ' - a hold wins the set'}
+            </span>
+          </p>
+        )
+      })()}
+      <table className="w-full text-xs mt-1">
+        <thead>
+          <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
+            <th className="py-1 text-left" />
+            <th className="py-1">{last(names[0])}</th><th className="py-1">{last(names[1])}</th><th className="py-1">Tour</th>
+          </tr>
+        </thead>
+        <tbody>
+          {PRESSURE_ROWS.map(([k, label, sub]) => {
+            const lit = now?.key === k
+            return (
+              <tr key={k} className={`border-t ${lit ? 'bg-amber-50 border-amber-300' : 'border-gray-100'}`}>
+                <td className="py-1.5 pl-1 text-gray-800 font-semibold">
+                  {label}<span className="block text-[9px] font-normal text-gray-400">{sub}</span>
+                </td>
+                <Cell c={data[0]?.player?.[k]} k={k} strong={lit && now.srv === 0} />
+                <Cell c={data[1]?.player?.[k]} k={k} strong={lit && now.srv === 1} />
+                <td className="px-1 py-1.5 text-center text-[12px] font-bold text-gray-500 tabular-nums">
+                  {pct(avg[k], k) == null ? '—' : `${Math.round(pct(avg[k], k))}%`}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+      <p className="text-[10px] text-gray-400 mt-2">
+        Green / red: 5+ points better / worse for that player than the tour; grey = under 5 games charted.
+        Match Charting Project, {data.find((x) => x)?.from_year} on.
+      </p>
+    </div>
+  )
+}
+
 export default function TennisMatch() {
   const nav = useNavigate()
   const [q] = useSearchParams()
@@ -372,6 +461,11 @@ export default function TennisMatch() {
                 <ScoreStats live={withPoints(live, pts)} eb={eb} players={[A, B]} names={live.players.map((p) => p.name)} />
               </Safe>
             )}
+
+            <Safe what="the pressure pattern">
+              <PressureCard players={[A, B]} live={!m && live && !live.gone ? withPoints(live, pts) : null}
+                names={!m && live?.players ? live.players.map((p) => p.name) : [nameA, nameB]} />
+            </Safe>
 
             {!m && live && !live.gone && live.state === 'live' && (
               <Commentary espn={espn} tour={live.tour} names={live.players.map((p) => p.name)} />
