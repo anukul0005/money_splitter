@@ -175,7 +175,12 @@ function Results({ tour, fresh, onPlayer, onOpen }) {
       </div>
       {busy && <p className="text-xs text-gray-400 text-center py-6">Loading…</p>}
       {!busy && day && day.tournaments.length === 0 && (
-        <p className="text-sm text-gray-400 text-center py-10">No matches on this day - use ‹ › to jump to the nearest day with results.</p>
+        <p className="text-sm text-gray-400 text-center py-10">
+          {day.date >= new Date().toLocaleDateString('en-CA')
+            // today or later: not "no tennis" - just none finished yet
+            ? "No match has finished yet on this day - each one shows here within 15 minutes of ending. What's coming up is on the Live tab."
+            : 'No matches on this day - use ‹ › to jump to the nearest day with results.'}
+        </p>
       )}
       {!busy && day?.tournaments.map((t) => <TournamentCard key={`${t.tour}|${t.name}`} t={t} onPlayer={onPlayer} onOpen={onOpen} />)}
     </div>
