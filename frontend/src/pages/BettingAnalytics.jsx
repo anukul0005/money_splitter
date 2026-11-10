@@ -1,6 +1,6 @@
 import { Component, memo, useEffect, useRef, useState, useTransition } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { badmintonSummary, tennisDay, tennisEarlyBreak, tennisLive, tennisLivePoints, tennisPatterns, tennisPlayer, tennisPlayers, tennisRankings, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
+import { badmintonSummary, tennisDay, tennisEarlyBreak, tennisLive, tennisLivePoints, tennisPatterns, tennisPlayer, tennisPlayers, tennisPressure, tennisRankings, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
 import RankingList, { RankingSwitch } from '../components/RankingList'
 import Badminton, { B_TABS } from './Badminton'
 import Hockey, { H_TABS } from './Hockey'
@@ -221,6 +221,7 @@ function PlayerView({ sel, onPlayer, onOpen }) {
         </div>
       </div>
       {p.early_break && <Safe what="the early-break pattern"><PlayerEarlyBreak d={p.early_break} name={info.name} /></Safe>}
+      {p.pressure && <Safe what="the pressure pattern"><PlayerPressure d={p.pressure} name={info.name} /></Safe>}
       {p.sets?.length > 0 && p.sets[0].length === 5 && (
         <Safe what="set statistics"><PlayerSets rows={p.sets} vs={p.sets_vs} name={info.name} /></Safe>
       )}
@@ -885,6 +886,155 @@ function PlayerEarlyBreak({ d, name }) {
   )
 }
 
+/* ---- Pressure: serving at 4-5 to stay in the set, broken = set lost (backend tennis_pressure) ---- */
+const brokePct = (c) => (c?.n ? (100 * (c.n - c.held)) / c.n : null)
+const PR_ROWS = [
+  ['s45', 'Serving at 4-5 to stay in the set', 'broken = set lost 4-6', true],
+  ['s45_set1', 'in set 1', '', false, true],
+  ['s45_middle', 'in a middle set', '', false, true],
+  ['s45_decider', 'in the deciding set', '', false, true],
+  ['s56', 'Serving at 5-6 to reach the tie-break', 'broken = set lost 5-7'],
+  ['s54', 'Serving for the set at 5-4', 'broken = back to 5-5'],
+  ['s65', 'Serving for the set at 6-5', 'broken = tie-break'],
+  ['hold', 'Any service game (the baseline)', ''],
+]
+
+function PressurePattern() {
+  const [d, setD] = useState(null)
+  useEffect(() => { tennisPressure().then((r) => setD(r.data)).catch(() => {}) }, [])
+  const T = d?.tours || {}
+  if (!T.ATP) return null
+  const Cell = ({ c, strong }) => {
+    const p = brokePct(c)
+    return (
+      <td className="px-1 py-1.5 text-center">
+        <p className={`tabular-nums ${strong ? 'text-[14px] font-black text-gray-900' : 'text-[13px] font-bold text-gray-800'}`}>{p == null ? '—' : `${p.toFixed(1)}%`}</p>
+        <p className="text-[9px] text-gray-500 tabular-nums">{c?.n ? `${fmtN(c.n - c.held)} of ${fmtN(c.n)}` : ''}</p>
+      </td>
+    )
+  }
+  const gap = (t) => brokePct(T[t].s45) - brokePct(T[t].hold)
+  const after = T.ALL?.after_hold || []
+  const afterN = after.reduce((s, [, n]) => s + n, 0)
+  return (
+    <div className="space-y-3">
+      <div className="card space-y-1">
+        <p className="text-sm font-black text-gray-900">Pressure: serving at 4-5 → set lost</p>
+        <p className="text-[10px] text-gray-400">
+          A player serving at 4-5 to stay in the set: broken there, the set is gone 4-6. How often that happens, next to
+          the other service games that decide a set and an ordinary service game. {fmtN(T.ALL?.sets || 0)} charted sets
+          from {d.from_year} on (Match Charting Project - it leans to the bigger matches).
+        </p>
+      </div>
+      <div className="card">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
+              <th className="py-1 text-left">Server broken</th><th className="py-1">ATP</th><th className="py-1">WTA</th>
+            </tr>
+          </thead>
+          <tbody>
+            {PR_ROWS.map(([k, label, sub, strong, indent]) => (
+              <tr key={k} className={`border-t ${strong ? 'border-gray-300 bg-amber-50' : 'border-gray-100'}`}>
+                <td className={`py-1.5 ${indent ? 'pl-3 text-gray-700' : 'font-bold text-gray-900'}`}>
+                  {label}{sub && <span className="block text-[9px] font-normal text-gray-400">{sub}</span>}
+                </td>
+                <Cell c={T.ATP[k]} strong={strong} />
+                <Cell c={T.WTA[k]} strong={strong} />
+              </tr>
+            ))}
+            <tr className="border-t border-gray-100">
+              <td className="py-1.5 text-gray-500">Pressure effect at 4-5 (points over the baseline)</td>
+              {['ATP', 'WTA'].map((t) => (
+                <td key={t} className={`py-1.5 text-center text-[12px] font-black tabular-nums ${gap(t) >= 1 ? 'text-red-500' : gap(t) <= -1 ? 'text-green-600' : 'text-gray-500'}`}>
+                  {gap(t) > 0 ? '+' : ''}{gap(t).toFixed(1)}
+                </td>
+              ))}
+            </tr>
+          </tbody>
+        </table>
+        {afterN > 0 && (
+          <p className="text-[10px] text-gray-400 mt-2">
+            When the server held at 4-5, the set went on to: {after.map(([k, n]) => `${k} ${((100 * n) / afterN).toFixed(0)}%`).join(' · ')}
+            {' '}(from the 4-5 server's side).
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** A player's record in the games that decide a set, next to the tour's (backend tennis_pressure.player). */
+const PP_ROWS = [
+  ['head', 'Serving under pressure - broken'],
+  ['s45', 'At 4-5 to stay in the set (set lost 4-6)', 'broke'],
+  ['s56', 'At 5-6 to reach the tie-break (set lost 5-7)', 'broke'],
+  ['head', 'Serving for the set - broken'],
+  ['s54', 'At 5-4', 'broke'],
+  ['s65', 'At 6-5', 'broke'],
+  ['head', 'Returning - they break and take the set'],
+  ['r45', 'Opponent serving at 4-5', 'held'],
+  ['r56', 'Opponent serving at 5-6', 'held'],
+  ['head', 'Baseline'],
+  ['hold', 'Any service game - broken', 'broke'],
+]
+function PlayerPressure({ d, name }) {
+  const me = d.player, avg = d.avg || {}
+  // [games, held] for serving keys (show broken), [games, broke] for returning keys (show broke)
+  const pct = (c, serving) => (c?.[0] ? (100 * (serving ? c[0] - c[1] : c[1])) / c[0] : null)
+  const short = name.split(' ').slice(-1)[0]
+  const p45 = pct(me.s45, true), base = pct(me.hold, true)
+  return (
+    <div className="card">
+      <p className="text-sm font-black text-gray-900">Pressure: serving at 4-5 → set lost</p>
+      <p className="text-[10px] text-gray-400 mb-1">
+        {name}'s set-deciding service games from {d.from_year} on - {fmtN(me.sets)} charted sets from {fmtN(me.matches)} matches
+        (Match Charting Project), against every player on the tour.
+      </p>
+      {p45 != null && base != null && me.s45[0] >= 5 && (
+        <p className={`text-[11px] font-bold mb-1 ${p45 - base >= 5 ? 'text-red-600' : p45 - base <= -5 ? 'text-green-700' : 'text-gray-600'}`}>
+          {short} is broken at 4-5 in {p45.toFixed(0)}% against {base.toFixed(0)}% of all service games
+          {p45 - base >= 5 ? ' - tightens up under pressure' : p45 - base <= -5 ? ' - steps up under pressure' : ' - about the same under pressure'}.
+        </p>
+      )}
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
+            <th className="py-1 text-left" /><th className="py-1">{short}</th><th className="py-1">Tour</th><th className="py-1">±</th>
+          </tr>
+        </thead>
+        <tbody>
+          {PP_ROWS.map((r) => {
+            if (r[0] === 'head') return <tr key={r[1]}><td colSpan={4} className="pt-3 pb-1 text-[10px] font-black text-gray-500 uppercase tracking-widest">{r[1]}</td></tr>
+            const [k, label] = r
+            const serving = !k.startsWith('r')
+            const c = me[k], p = pct(c, serving), t = pct(avg[k], serving)
+            const few = !c?.[0] || c[0] < 5
+            const diff = p != null && t != null && !few ? p - t : null
+            // broken more than the tour is bad for them; breaking more is good
+            const good = diff != null && (serving ? diff <= -5 : diff >= 5)
+            const bad = diff != null && (serving ? diff >= 5 : diff <= -5)
+            return (
+              <tr key={k} className="border-t border-gray-100">
+                <td className="py-1.5 pl-1 text-gray-700">{label}</td>
+                <td className="px-1 py-1.5 text-center">
+                  <p className={`text-[13px] font-black tabular-nums ${few ? 'text-gray-300' : 'text-gray-900'}`}>{p == null ? '—' : `${p.toFixed(0)}%`}</p>
+                  <p className="text-[9px] text-gray-500 tabular-nums">{c?.[0] ? `${serving ? c[0] - c[1] : c[1]} of ${c[0]}` : ''}</p>
+                </td>
+                <td className="px-1 py-1.5 text-center text-[12px] font-bold text-gray-500 tabular-nums">{t == null ? '—' : `${t.toFixed(0)}%`}</td>
+                <td className={`px-1 py-1.5 text-center text-[11px] font-black tabular-nums ${good ? 'text-green-600' : bad ? 'text-red-500' : 'text-gray-300'}`}>
+                  {diff == null ? '' : `${diff > 0 ? '+' : ''}${diff.toFixed(0)}`}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+      <p className="text-[10px] text-gray-400 mt-2">± is percentage points against the tour (green good for {short}, red bad); fewer than 5 games is greyed out.</p>
+    </div>
+  )
+}
+
 /** A live set past game 4 that can still end under 8.5: how often sets at this score did. */
 function EarlyBreakFlag({ m, eb }) {
   const T = eb?.tours?.[m.tour]
@@ -1057,6 +1207,7 @@ function Patterns() {
   return (
     <div className="space-y-6">
       <EarlyBreakPattern />
+      <PressurePattern />
       <div>
         <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2">Pattern explorer</p>
         <PatternExplorer rows={rows} />

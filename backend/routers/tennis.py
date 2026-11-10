@@ -13,6 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 import tennis_early_break
+import tennis_pressure
 import tennis_stats
 import tennis_sync
 from auth import current_user
@@ -152,6 +153,7 @@ def player(tour: str, player_id: int, db: Session = Depends(get_db), _: User = D
             "sets": tennis_stats.player_sets(rows, recent_cut, player_id),
             "sets_vs": tennis_stats.player_sets_vs(rows, recent_cut, player_id),
             "early_break": tennis_early_break.player(tour, p["name"]),
+            "pressure": tennis_pressure.player(tour, p["name"]),
             "matches": [_match(r) for r in rows[:40]]}
 
 
@@ -169,6 +171,13 @@ def early_break(_: User = Depends(owner)):
     """A break in a set's first 4 games -> the set closed under 8.5 games
     (tennis_early_break: worked out once from the Match Charting Project)."""
     return tennis_early_break.get()
+
+
+@router.get("/pressure", response_model=dict)
+def pressure(_: User = Depends(owner)):
+    """Serving at 4-5 (and the other set-deciding service games): how often
+    the server is broken and loses the set (tennis_pressure, Match Charting Project)."""
+    return tennis_pressure.get()
 
 
 @router.get("/patterns", response_model=dict)
@@ -311,7 +320,8 @@ def matchup(tour: str, a: int | None = None, b: int | None = None, surface: str 
         out["players"][key] = {"info": dict(p) if p else {"player_id": pid}, "rank": rank_now.get(pid),
                                **_form(rows, pid, surface),
                                # their side of the early-break pattern - the live "at this score" card
-                               "early_break": tennis_early_break.player(tour, p["name"]) if p else None}
+                               "early_break": tennis_early_break.player(tour, p["name"]) if p else None,
+                               "pressure": tennis_pressure.player(tour, p["name"]) if p else None}
     if a and b:
         out["h2h"] = h2h(tour, a, b, db, _)
     return out

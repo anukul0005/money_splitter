@@ -338,6 +338,7 @@ export const tennisSets     = ()                 => remembered('/tennis/sets', n
 export const tennisRankings = (tour)             => remembered('/tennis/rankings', { tour }, 30 * MIN)
 export const tennisPatterns = (since = 0)        => remembered('/tennis/patterns', { since }, 10 * MIN)
 export const tennisEarlyBreak = ()              => remembered('/tennis/early-break', {}, 60 * MIN)
+export const tennisPressure   = ()              => remembered('/tennis/pressure', {}, 60 * MIN)
 
 // My bets - 1xbet history read from Gmail (backend routers/bets.py; owner only)
 export const betsStatus     = ()                 => api.get('/bets/status')
