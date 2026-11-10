@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getMyBottles, getBottlePurchases } from '../api'
 import Dropdown from '../components/Dropdown'
+import { dn } from '../utils/displayName'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 const fmtDate = (iso) => (iso ? new Date(`${iso}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' }) : '')
@@ -13,6 +14,14 @@ const SORTS = [
 ]
 // "half · 375 ml" - whichever of the two the expense gave.
 const sizeText = (b) => [b.size, b.size_ml && !(b.size || '').includes('ml') ? `${b.size_ml} ml` : null].filter(Boolean).join(' · ')
+// "with Anjali ×3, Utkarsh" - who it was drunk with, most often first; nothing for bottles had alone.
+const WithLine = ({ w, className = '' }) => (w?.length ? (
+  <p className={`text-[10px] text-gray-500 ${className}`}>
+    with <span className="font-semibold text-gray-700">
+      {w.map(([n, c]) => `${dn(n)}${c > 1 ? ` ×${c}` : ''}`).join(', ')}
+    </span>
+  </p>
+) : null)
 // What the purchases endpoint groups by - the same as the list's own key.
 const sizeKey = (b) => String(b.size_ml || b.size || '')
 
@@ -32,6 +41,7 @@ function SizeRow({ s, nav, single }) {
             <p className="text-[10px] text-gray-500">
               {s.times} time{s.times === 1 ? '' : 's'}{s.bottles !== s.times && ` · ${s.bottles} bottles`}{s.last ? ` · last ${fmtDate(s.last)}` : ''}
             </p>
+            <WithLine w={s.with} />
           </div>
           <div className="text-right shrink-0">
             <p className="text-xs font-black text-brand-600">{s.avg_price != null ? INR(s.avg_price) : '—'}</p>
@@ -46,7 +56,10 @@ function SizeRow({ s, nav, single }) {
             <button key={p.expense_id} onClick={() => nav(`/groups/${p.group_id}`)} className="w-full text-left flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-xs text-gray-800 break-words">{p.title || 'No description'}</p>
-                <p className="text-[10px] text-gray-400">{fmtDate(p.date)} · {p.group}</p>
+                <p className="text-[10px] text-gray-400">
+                  {fmtDate(p.date)} · {p.group}
+                  {p.with?.length > 0 && <> · with <span className="text-gray-600 font-semibold">{p.with.map(dn).join(', ')}</span></>}
+                </p>
               </div>
               <p className="text-xs font-bold text-gray-900 shrink-0">
                 {p.qty > 1 && <span className="font-normal text-gray-400">{p.qty} × </span>}
@@ -87,6 +100,7 @@ function Brand({ b, nav }) {
             {!one && (b.varieties?.length ? ` · ${b.varieties.length + (b.sizes.some((x) => !x.variety) ? 1 : 0)} kinds` : ` · ${b.sizes.length} sizes`)}
             {b.last ? ` · last ${fmtDate(b.last)}` : ''}
           </p>
+          <WithLine w={b.with} className="mt-0.5" />
         </div>
         <div className="text-right shrink-0">
           <p className="text-sm font-black text-brand-600">{price}</p>

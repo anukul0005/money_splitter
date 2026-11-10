@@ -31,6 +31,78 @@ def _key(b: DrinkBottle) -> tuple[str, str]:
     return bottles.bottle_key(b.name), str(b.size_ml or b.size or "")
 
 
+def _with(e, group: Group, caller: User) -> list[str]:
+    """Who else had a share of this expense - the people the bottle was
+    drunk with. Empty for one had alone."""
+    from routers.stats import _member_share
+    return [m.name for m in group.members
+            if m.name.lower() != caller.name.lower() and _member_share(e, m.name) is not None]
+
+
+# What the paid prices teach the price table (PriceOverride), and where:
+# the bottles are bought around Noida, so Uttar Pradesh's list.
+LEARN_STATE = "Uttar Pradesh"
+LEARN_NOTE = "Paid, from drink expenses"     # marks a learned row: these get updated, hand ones never
+
+
+def learn_prices(db: Session, sizes: list[dict], by: str) -> list[dict]:
+    """Write the average paid for each bottle and size into the shared price
+    table, as a correction for LEARN_STATE. Only a bottle the table already
+    knows (so a misread name adds nothing), only with a size, and only a
+    price within half to double the published one - a bar bill read as one
+    bottle is no price. A correction someone typed by hand is left alone.
+    Returns what changed."""
+    from liquor_prices import BOTTLES
+    from models import PriceOverride
+    from routers.recommend import _brand_key, _resolve_brand
+    # A brand's price per ml - its own state's list first, then any state's,
+    # then a hand correction - to check a paid price against at any size
+    per_ml: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    for b in BOTTLES:
+        if b.size_ml and b.price:
+            per_ml[_brand_key(b.brand)]["here" if b.state == LEARN_STATE else "any"].append(b.price / b.size_ml)
+    for o in db.query(PriceOverride).all():
+        if o.size_ml and o.price and not (o.note or "").startswith(LEARN_NOTE):
+            per_ml[o.brand_key]["hand"].append(o.price / o.size_ml)
+
+    def expected(key: str, ml: int) -> float | None:
+        for where in ("here", "any", "hand"):
+            xs = sorted(per_ml[key][where])
+            if xs:
+                return xs[len(xs) // 2] * ml
+        return None
+    changed = []
+    for s in sizes:
+        ml, price = s.get("size_ml"), s.get("avg_price")
+        if not ml or not price:
+            continue
+        kind = "beer" if bottles._BEER.search(s["name"]) else "whisky"
+        brand, kind, known = _resolve_brand(db, s["name"], kind)
+        if not known:
+            continue
+        key = _brand_key(brand)
+        ref = expected(key, ml)
+        if not ref or not (0.5 * ref <= price <= 2 * ref):
+            continue                                  # nothing to check it by, or no bottle costs that
+        row = (db.query(PriceOverride).filter(PriceOverride.brand_key == key, PriceOverride.state == LEARN_STATE,
+                                              PriceOverride.size_ml == ml).first())
+        if row and not (row.note or "").startswith(LEARN_NOTE):
+            continue                                  # typed by hand - that one knows better
+        note = f"{LEARN_NOTE}: avg of {s['priced']}, last bought {s['last'] or '?'}"
+        if row and row.price == price and row.note == note:
+            continue
+        if row is None:
+            row = PriceOverride(brand_key=key, state=LEARN_STATE, size_ml=ml, brand=brand, kind=kind)
+            db.add(row)
+        changed.append({"brand": brand, "size_ml": ml, "was": row.price, "expected": round(ref), "now": price})
+        row.price, row.note, row.set_by = price, note, by
+    if changed:
+        db.commit()
+        from knowledge import _extra as _extra_catalogue
+        _extra_catalogue.cache_clear()
+    return changed
+
+
 @router.get("/my-bottles", response_model=dict)
 def my_bottles(db: Session = Depends(get_db), caller: User = Depends(current_user)):
     """Every bottle the caller has had: times bought, bottles in all, the
@@ -47,11 +119,14 @@ def my_bottles(db: Session = Depends(get_db), caller: User = Depends(current_use
     rows = db.query(DrinkBottle).filter(DrinkBottle.expense_id.in_(list(by_id))).all() if by_id else []
     agg: dict[tuple, dict] = {}
     spellings: dict[tuple, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    company: dict[tuple, dict[str, int]] = defaultdict(lambda: defaultdict(int))   # who it was drunk with, how often
     for b in rows:
         k = _key(b)
         e = by_id[b.expense_id]
         a = agg.setdefault(k, {"size": b.size, "size_ml": b.size_ml, "times": 0, "bottles": 0,
                                "priced": 0, "spent": 0.0, "last": None})
+        for n in _with(e, groups[e.group_id], caller):
+            company[k][n] += 1
         a["times"] += 1
         a["bottles"] += b.qty
         if b.price_each:
@@ -65,8 +140,15 @@ def my_bottles(db: Session = Depends(get_db), caller: User = Depends(current_use
         name = max(spellings[k].items(), key=lambda x: x[1])[0]
         out.append({"name": name, "size": a["size"], "size_ml": a["size_ml"], "times": a["times"],
                     "bottles": a["bottles"], "avg_price": round(a["spent"] / a["priced"]) if a["priced"] else None,
-                    "priced": a["priced"], "last": a["last"]})
+                    "priced": a["priced"], "last": a["last"],
+                    "with": [[n, c] for n, c in sorted(company[k].items(), key=lambda x: (-x[1], x[0].lower()))]})
     out.sort(key=lambda x: (-x["times"], x["name"].lower(), SIZE_ORDER.get(x["size"] or "", 9)))
+    if not unread:
+        try:      # what was paid corrects the shared price table
+            learn_prices(db, out, caller.name)
+        except Exception as err:
+            db.rollback()
+            print(f"[drinks] learning prices failed: {err}")
     return {"bottles": out, "brands": _brands(out), "reading": bottles.status()["running"], "unread": unread}
 
 
@@ -113,7 +195,10 @@ def _brands(sizes: list[dict]) -> list[dict]:
         parent, variety = _split_brand(s["name"], known)
         s = {**s, "variety": variety}
         k = bottles.bottle_key(parent)
-        b = by.setdefault(k, {"name": parent, "times": 0, "bottles": 0, "last": None, "sizes": [], "_n": defaultdict(int)})
+        b = by.setdefault(k, {"name": parent, "times": 0, "bottles": 0, "last": None, "sizes": [], "_n": defaultdict(int),
+                              "_with": defaultdict(int)})
+        for n, c in s.get("with") or []:
+            b["_with"][n] += c
         b["times"] += s["times"]
         b["bottles"] += s["bottles"]
         b["_n"][parent] += s["times"]
@@ -123,6 +208,7 @@ def _brands(sizes: list[dict]) -> list[dict]:
     out = []
     for b in by.values():
         b["name"] = max(b.pop("_n").items(), key=lambda x: x[1])[0]       # the spelling used most
+        b["with"] = [[n, c] for n, c in sorted(b.pop("_with").items(), key=lambda x: (-x[1], x[0].lower()))]
         b["sizes"].sort(key=lambda s: ((s["variety"] or "").lower(),
                                        SIZE_ORDER.get(s["size"] or "", 9) if s["size"] else 10, s["size_ml"] or 0))
         b["varieties"] = sorted({s["variety"] for s in b["sizes"] if s["variety"]})
@@ -149,6 +235,7 @@ def bottle_purchases(name: str, size: str = "", db: Session = Depends(get_db),
         e = by_id[b.expense_id]
         out.append({"expense_id": e.id, "date": (e.date or "")[:10] or None, "title": e.title or e.notes,
                     "notes": e.notes, "qty": b.qty, "price_each": b.price_each, "amount": e.amount,
-                    "group": groups[e.group_id].name, "group_id": e.group_id})
+                    "group": groups[e.group_id].name, "group_id": e.group_id,
+                    "with": _with(e, groups[e.group_id], caller)})
     out.sort(key=lambda x: x["date"] or "", reverse=True)
     return out
