@@ -175,9 +175,13 @@ def settle(db, caller: User, frm: str, to: str, amount: float, when: str | None,
         # Anukul's ₹18,372 of loans from Anjali, netted against ₹12,000-odd of
         # groups, came out as "₹8,437 owed in 08 nov 26". Groups are netted
         # first, then bill shares, loans last, so loans are what's left open.
+        # Loans netted the oldest taken first (then each EMI by its date): a
+        # ₹10,000 loan from 8 Nov was once cleared ahead of one from 16 Sep
+        # only because it fell due sooner.
         budget = round(sum(x[3] for x in owed_by_payer) - amount, 2)
         rank = {"group": 0, "charge": 1, "loan": 2}
-        for _, kind, obj, amt in sorted(owed_by_receiver, key=lambda x: (rank[x[1]], x[0])):
+        taken = lambda x: (x[2].start_date or "") if x[1] == "loan" else ""   # noqa: E731
+        for _, kind, obj, amt in sorted(owed_by_receiver, key=lambda x: (rank[x[1]], taken(x), x[0])):
             part = round(min(amt, budget), 2)
             if part <= 0.01:
                 break
