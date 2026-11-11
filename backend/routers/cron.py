@@ -57,7 +57,27 @@ def run_tennis(key: str = "", db: Session = Depends(get_db)):
     from sqlalchemy import text
     import tennis_sync
     last = db.execute(text("SELECT value FROM tennis_meta WHERE key = 'last_update'")).scalar()
+    threading.Thread(target=_keep_odds, daemon=True, name="tennis-odds").start()
     return {"last_update": last, "started": tennis_sync.refresh_if_stale(last)}
+
+
+_odds_running = threading.Lock()
+
+
+def _keep_odds() -> None:
+    """Pre-match odds kept for every match (tennis_odds.keep_job - it paces itself)."""
+    if not _odds_running.acquire(blocking=False):
+        return
+    try:
+        import tennis_odds
+        from database import get_session_factory
+        db = get_session_factory()()
+        try:
+            tennis_odds.keep_job(db)
+        finally:
+            db.close()
+    finally:
+        _odds_running.release()
 
 
 # ── catch-up ──────────────────────────────────────────────────────────────

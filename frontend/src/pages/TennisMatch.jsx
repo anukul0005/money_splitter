@@ -389,51 +389,12 @@ function PressureCard({ players, names, live }) {
 // as tennis_kb.norm - the fan picks come back under these keys
 const norm = (s) => (s || '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[-'’.]/g, ' ').split(/\s+/).filter(Boolean).join(' ')
 
-/** Bookmaker prices before the match (backend tennis_odds): each player to
- *  win and the total-games line - the median across bookmakers, best beside it. */
-function Odds({ o, names, last }) {
-  if (!o) return null
-  if (o.missing_key) return <p className="text-[10px] text-gray-400 mt-2">Bookmaker odds: add TENNIS_API_KEY (Tennis API on RapidAPI) and/or ODDS_API_KEY (the-odds-api.com) to the server.</p>
-  if (o.none || o.error || !o.winner?.length) return <p className="text-[10px] text-gray-400 mt-2">{o.error ? "Couldn't read the bookmaker odds." : 'No bookmaker odds for this match yet.'}</p>
-  const priceOf = (n) => o.winner.find((w) => norm(last(w.name)) === norm(last(n)))
-  const fav = Math.min(...o.winner.map((w) => w.median))
-  const Cell = ({ label, p, hi }) => (
-    <div className="flex-1 text-center">
-      <p className="text-[9px] font-black text-gray-400 uppercase tracking-wider truncate">{label}</p>
-      <p className={`text-base font-black tabular-nums ${hi ? 'text-gray-900' : 'text-gray-600'}`}>{p ? p.median.toFixed(2) : '—'}</p>
-      {p && <p className="text-[9px] text-gray-400 tabular-nums">best {p.best.toFixed(2)} · {Math.round(100 / p.median)}%</p>}
-    </div>
-  )
-  return (
-    <div className="mt-3 border-t border-gray-100 pt-2">
-      <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Odds · to win</p>
-      <div className="flex gap-2 mt-1">
-        {names.map((n) => { const p = priceOf(n); return <Cell key={n} label={last(n)} p={p} hi={p?.median === fav} /> })}
-      </div>
-      {[].concat(o.totals || []).map((t) => (
-        <div key={t.unit}>
-          <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest mt-2">
-            Total {t.unit || 'games'} in the match · {t.line}
-            {t.source && <span className="ml-1 normal-case tracking-normal font-semibold text-gray-400">· {t.source}{t.over?.books > 1 ? `, ${t.over.books} bookmakers` : ''}</span>}
-          </p>
-          <div className="flex gap-2 mt-1">
-            <Cell label={`Over ${t.line}`} p={t.over} />
-            <Cell label={`Under ${t.line}`} p={t.under} />
-          </div>
-        </div>
-      ))}
-      <p className="text-[9px] text-gray-400 mt-1.5">
-        Decimal odds · to win: median of {Math.max(...o.winner.map((w) => w.books))} bookmaker{Math.max(...o.winner.map((w) => w.books)) === 1 ? '' : 's'} ({o.source}) · % = implied chance
-        {o.remaining != null ? ` · The Odds API: ${o.remaining} credits left this month` : ''}
-        {o.used_today != null ? ` · Tennis API: ${o.used_today} of 50 requests today` : ''}
-      </p>
-    </div>
-  )
-}
-
-/** Fans: everyone in the app picks who wins, up to the first ball (and can
- *  change their mind until then); after that the split is shown, and once
- *  it's played, whether the fans called it. */
+/** Pre-match odds and picks, as one table: each player's bookmaker price
+ *  (backend tennis_odds - read now before the start, the kept pre-match one
+ *  after), the chance it implies, how many fans picked them and my pick -
+ *  made here up to the first ball. Then the total lines, and once played,
+ *  how my pick did as a mock bet at the My picks stake. */
+const STAKE_KEY = 'tennis.mockStake'
 function FanVote({ tour, names, date, espn, open, winner, tournament }) {
   const [f, setF] = useState(null)
   const [odds, setOdds] = useState(null)
@@ -443,12 +404,12 @@ function FanVote({ tour, names, date, espn, open, winner, tournament }) {
     if (!date || !names[0] || !names[1]) return
     tennisFans({ tour, a: names[0], b: names[1], date }).then((r) => setF(r.data)).catch(() => {})
   }, [tour, names[0], names[1], date])
-  // bookmaker prices: before the match only (each read spends the odds service's monthly credits)
   useEffect(() => {
-    if (!open || !names[0] || !names[1]) return
+    if (!names[0] || !names[1]) return
     tennisOdds({ tour, a: names[0], b: names[1], tournament: tournament || '', start: date || '' }).then((r) => setOdds(r.data)).catch(() => {})
-  }, [open, tour, names[0], names[1]])
-  if (!f || (!open && !f.total)) return null
+  }, [open, tour, names[0], names[1], date])
+  const has = odds?.winner?.length > 0
+  if (!f || (!open && !f.total && !has)) return null
   const vote = (name) => {
     setBusy(true); setErr('')
     tennisFanVote({ tour, espn, pick: name }).then((r) => setF(r.data))
@@ -456,51 +417,85 @@ function FanVote({ tour, names, date, espn, open, winner, tournament }) {
       .finally(() => setBusy(false))
   }
   const last = (n) => (n || '').split(' ').slice(-1)[0]
-  const n = names.map((x) => f.counts[norm(x)] || 0)
-  const share = n.map((x) => (f.total ? Math.round((100 * x) / f.total) : 0))
-  const fav = f.total && n[0] !== n[1] ? (n[0] > n[1] ? 0 : 1) : null
+  const priceOf = (n) => (has ? odds.winner.find((w) => norm(last(w.name)) === norm(last(n))) : null)
+  const favPrice = has ? Math.min(...odds.winner.map((w) => w.median)) : null
+  const fans = (x) => f.counts[norm(x)] || 0
+  const won = (x) => winner && norm(x) === norm(winner)
+  let stake = 100
+  try { stake = Number(localStorage.getItem(STAKE_KEY)) || 100 } catch { /* private mode */ }
+  const mine = names.find((x) => f.mine === norm(x))
+  const minePrice = mine && priceOf(mine)
+  const books = has ? Math.max(...odds.winner.map((w) => w.books || 0)) : 0
   return (
     <div className="card">
-      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Fans · who wins?</p>
-      {open && (
-        <div className="grid grid-cols-2 gap-2 mt-2">
+      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Pre-match odds &amp; picks</p>
+      <table className="w-full text-xs mt-1.5">
+        <thead>
+          <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
+            <th className="py-1 text-left">Player</th><th className="py-1 text-right">Odds</th><th className="py-1 text-right">Chance</th>
+            <th className="py-1 text-center">Fans</th><th className="py-1 text-center">My pick</th>
+          </tr>
+        </thead>
+        <tbody>
           {names.map((x) => {
-            const mine = f.mine === norm(x)
+            const p = priceOf(x), isMine = f.mine === norm(x)
             return (
-              <button key={x} disabled={busy} onClick={() => vote(x)}
-                className={`rounded-lg border px-2 py-2.5 text-sm font-black truncate ${mine ? 'bg-brand-600 border-brand-600 text-white' : 'border-gray-200 text-gray-800'}`}>
-                {mine ? '✓ ' : ''}{last(x)}
-              </button>
+              <tr key={x} className={`border-t border-gray-100 ${isMine ? 'bg-amber-50' : ''}`}>
+                <td className="py-2 pl-1 font-bold text-gray-900 truncate max-w-[120px]">
+                  {last(x)}{won(x) && <span className="ml-1 text-green-600 font-black">✓</span>}
+                </td>
+                <td className={`py-2 text-right tabular-nums ${p && p.median === favPrice ? 'font-black text-gray-900' : 'font-semibold text-gray-600'}`}>
+                  {p ? p.median.toFixed(2) : '—'}
+                  {p && p.books > 1 && <span className="block text-[9px] font-normal text-gray-400">best {p.best.toFixed(2)}</span>}
+                </td>
+                <td className="py-2 text-right tabular-nums text-gray-500">{p ? `${Math.round(100 / p.median)}%` : '—'}</td>
+                <td className="py-2 text-center tabular-nums text-gray-600">{fans(x) || '—'}</td>
+                <td className="py-2 text-center">
+                  {open
+                    ? <button disabled={busy} onClick={() => vote(x)}
+                        className={`rounded-md border px-2 py-1 text-[11px] font-black ${isMine ? 'bg-brand-600 border-brand-600 text-white' : 'border-gray-300 text-gray-500'}`}>
+                        {isMine ? '✓ Picked' : 'Pick'}
+                      </button>
+                    : isMine ? <span className={`font-black ${winner ? (won(x) ? 'text-green-700' : 'text-red-600') : 'text-gray-900'}`}>✓</span> : ''}
+                </td>
+              </tr>
             )
           })}
-        </div>
-      )}
-      {open && <Odds o={odds} names={names} last={last} />}
-      {open && <p className="text-[10px] text-gray-400 mt-1.5">{f.mine ? 'Your pick - you can change it until the match starts.' : 'Pick before the first ball - voting closes when the match starts.'}</p>}
-      {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
-      {f.total > 0 && (
-        <>
-          <div className="flex justify-between text-xs font-bold mt-3">
-            <span className={fav === 0 ? 'text-gray-900' : 'text-gray-500'}>{last(names[0])} {share[0]}%</span>
-            <span className={fav === 1 ? 'text-gray-900' : 'text-gray-500'}>{share[1]}% {last(names[1])}</span>
-          </div>
-          <div className="flex h-2 rounded-full overflow-hidden bg-gray-100 mt-1">
-            <div className="bg-brand-600" style={{ width: `${share[0]}%` }} />
-            <div className="bg-field-950" style={{ width: `${share[1]}%` }} />
-          </div>
-          <p className="text-[10px] text-gray-400 mt-1">{f.total} pick{f.total === 1 ? '' : 's'}{!open ? ' · voting closed' : ''}</p>
-          {winner && fav != null && (
-            <p className={`text-[11px] font-bold mt-1 ${norm(names[fav]) === norm(winner) ? 'text-green-700' : 'text-red-600'}`}>
-              {norm(names[fav]) === norm(winner) ? `✓ The fans called it - ${last(winner)} won` : `✗ The fans backed ${last(names[fav])} - ${last(winner)} won`}
-            </p>
-          )}
-          <p className="text-[11px] text-gray-600 mt-2 leading-relaxed">
-            {f.voters.map((v, i) => (
-              <span key={v.name}>{i ? ' · ' : ''}<b>{v.name}</b> {last(names.find((x) => norm(x) === v.pick) || v.pick)}</span>
+        </tbody>
+      </table>
+      {has && [].concat(odds.totals || []).length > 0 && (
+        <table className="w-full text-xs mt-2">
+          <thead>
+            <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
+              <th className="py-1 text-left">Total in the match</th><th className="py-1 text-right">Over</th><th className="py-1 text-right">Under</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[].concat(odds.totals).map((t) => (
+              <tr key={t.unit} className="border-t border-gray-100">
+                <td className="py-1.5 pl-1 text-gray-800 font-semibold">
+                  {t.line} {t.unit || 'games'}
+                  <span className="block text-[9px] font-normal text-gray-400">{t.source}{t.over?.books > 1 ? `, ${t.over.books} bookmakers` : ''}</span>
+                </td>
+                <td className="py-1.5 text-right tabular-nums font-bold">{t.over ? t.over.median.toFixed(2) : '—'}</td>
+                <td className="py-1.5 text-right tabular-nums font-bold">{t.under ? t.under.median.toFixed(2) : '—'}</td>
+              </tr>
             ))}
-          </p>
-        </>
+          </tbody>
+        </table>
       )}
+      {winner && mine && (
+        <p className={`text-[11px] font-bold mt-2 ${won(mine) ? 'text-green-700' : 'text-red-600'}`}>
+          {won(mine) ? '✓' : '✗'} My pick {last(mine)}{minePrice ? ` at ${minePrice.median.toFixed(2)}` : ''} {won(mine) ? 'won' : 'lost'}
+          {minePrice && ` · ₹${stake} stake: ${won(mine) ? `+₹${Math.round(stake * (minePrice.median - 1))}` : `−₹${stake}`}`}
+        </p>
+      )}
+      {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
+      <p className="text-[10px] text-gray-400 mt-2">
+        {open ? (f.mine ? 'You can change your pick until the match starts.' : 'Pick before the first ball - picking closes when the match starts.') : 'Picking closed.'}
+        {has ? ` Decimal odds, ${odds.kept ? 'last read before the start' : 'now'} - median of ${books} bookmaker${books === 1 ? '' : 's'} (${odds.source}).` : odds?.missing_key ? ' No odds key on the server.' : ' No bookmaker odds for this match.'}
+        {f.voters.length > 0 && ` Picks: ${f.voters.map((v) => `${v.name} ${last(names.find((x) => norm(x) === v.pick) || v.pick)}`).join(', ')}.`}
+      </p>
     </div>
   )
 }

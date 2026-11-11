@@ -365,18 +365,85 @@ def fans(tour: str, a: str, b: str, date: str, db: Session = Depends(get_db), ca
             "voters": sorted(({"name": n, "pick": v.pick} for v, n in rows), key=lambda x: x["name"].lower())}
 
 
+def _kept_shape(k: dict) -> dict:
+    """A kept row in the shape the match page reads (names are surnames)."""
+    return {"source": k["source"], "kept": True, "day": k["day"], "totals": k["totals"],
+            "winner": [{"name": n, **p} for n, p in k["prices"].items()]}
+
+
 @router.get("/odds", response_model=dict)
-def odds(tour: str, a: str, b: str, tournament: str = "", start: str = "", _: User = Depends(owner)):
-    """Bookmaker prices before the match (tennis_odds): winner and the total line."""
+def odds(tour: str, a: str, b: str, tournament: str = "", start: str = "",
+         db: Session = Depends(get_db), _: User = Depends(owner)):
+    """Bookmaker prices before the match (tennis_odds): winner and the total
+    lines. Before the start they're read now (and kept); after it, the kept
+    pre-match ones."""
     import tennis_odds
+    when = tennis_odds._when(start) if start else None
+    if when and when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
     try:
+        if when is None or (len(start) > 10 and when <= datetime.now(timezone.utc)) or len(start) == 10:
+            k = tennis_odds.kept(db, tour, a, b, (when or datetime.now(timezone.utc)).date())
+            return _kept_shape(k) if k else {"none": True, "kept": True}
         out = tennis_odds.match(tour, a, b, tournament, start)
+        if out.get("winner"):
+            tennis_odds.store(db, tour.upper(), a, b, when.date(), when,
+                              {w["name"]: {k: w[k] for k in ("median", "best", "books")} for w in out["winner"]},
+                              out.get("totals"), out.get("source"))
         print(f"[tennis-odds] {a} v {b}: " + (out.get("source") and f"{out['source']}, {len(out.get('winner', []))} prices, "
                                                f"{len(out.get('totals') or [])} totals" or ", ".join(k for k in out if out[k] is True)))
         return out
     except Exception as err:
+        db.rollback()
         print(f"[tennis-odds] {err}")
         return {"error": True}
+
+
+@router.get("/odds/days", response_model=dict)
+def odds_days(start: str, end: str, tour: str = "all", db: Session = Depends(get_db), _: User = Depends(owner)):
+    """Every kept pre-match price between two days - the Live and Results lists."""
+    import tennis_odds
+    from datetime import date as _date
+    from models import TennisOdds
+    q = db.query(TennisOdds).filter(TennisOdds.day.between(_date.fromisoformat(start), _date.fromisoformat(end)))
+    if tour.upper() in ("ATP", "WTA"):
+        q = q.filter(TennisOdds.tour == tour.upper())
+    return {"odds": [tennis_odds.as_dict(r) for r in q.all()]}
+
+
+@router.get("/fans/mine/history", response_model=dict)
+def my_pick_history(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Every pick I've made: the pre-match price of my pick and of the other
+    player (tennis_odds kept), and how it went (the results) - My picks'
+    mock betting works out profit and loss from these."""
+    import tennis_odds
+    votes = db.query(TennisFanVote).filter(TennisFanVote.voter_id == caller.id).order_by(TennisFanVote.start.desc()).all()
+    out = []
+    for v in votes:
+        a, b = v.pair.split("|")
+        sur = lambda n: tennis_odds._surname(n)
+        k = tennis_odds.kept(db, v.tour, a, b, v.start.date())
+        lo, hi = (v.start - timedelta(days=2)).date().isoformat(), (v.start + timedelta(days=2)).date().isoformat()
+        res = None
+        for r in db.execute(text("SELECT winner_name, loser_name, score, play_date, match_id, tourney_name FROM tennis_matches "
+                                 "WHERE tour = :t AND play_date BETWEEN :lo AND :hi"), {"t": v.tour, "lo": lo, "hi": hi}).mappings():
+            if {sur(r["winner_name"]), sur(r["loser_name"])} == {sur(a), sur(b)}:
+                res = dict(r)
+                break
+        other = b if kb.norm(a) == v.pick else a
+        prices = (k or {}).get("prices", {})
+        status = "pending"
+        if res:
+            sc = (res["score"] or "").upper()
+            status = "void" if "W/O" in sc or "WO" == sc.strip() else ("won" if sur(res["winner_name"]) == sur(v.pick) else "lost")
+        out.append({"espn": v.espn, "tour": v.tour, "start": v.start.isoformat(), "pick": v.pick_name,
+                    "other": res and (res["loser_name"] if status == "won" else res["winner_name"]) or other.title(),
+                    "odds": (prices.get(sur(v.pick)) or {}).get("median"),
+                    "other_odds": (prices.get(sur(other)) or {}).get("median"),
+                    "odds_source": (k or {}).get("source"), "status": status,
+                    "score": res and res["score"], "match_id": res and res["match_id"],
+                    "tournament": res and res["tourney_name"]})
+    return {"picks": out}
 
 
 @router.get("/fans/mine", response_model=dict)

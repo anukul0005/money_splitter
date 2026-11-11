@@ -1576,3 +1576,24 @@ class TennisFanVote(Base):
     pick_name = Column(String(100), nullable=False)     # as shown
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class TennisOdds(Base):
+    """Bookmaker prices for a match before it started (tennis_odds): kept
+    from the last read before the first ball, so they stay with the match
+    once it's played. `pair` is the two surnames, normalised and sorted
+    ("rune|kecmanovic" -> "kecmanovic|rune"); `prices` JSON {surname:
+    {median, best, books}}; `totals` JSON [{line, unit, over, under, source}]."""
+
+    __tablename__ = "tennis_odds"
+    __table_args__ = (UniqueConstraint("tour", "pair", "day", name="ux_tennis_odds"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    tour = Column(String(3), nullable=False)
+    pair = Column(String(120), nullable=False)
+    day = Column(Date, nullable=False, index=True)       # UTC day it was (to be) played
+    start = Column(DateTime(timezone=True), nullable=True)
+    prices = Column(Text, nullable=False)
+    totals = Column(Text, nullable=True)
+    source = Column(String(60), nullable=True)
+    read_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

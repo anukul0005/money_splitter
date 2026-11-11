@@ -1,6 +1,6 @@
 import { Component, memo, useEffect, useRef, useState, useTransition } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { badmintonSummary, tennisDay, tennisEarlyBreak, tennisLive, tennisLivePoints, tennisMyPicks, tennisPatterns, tennisPlayer, tennisPlayers, tennisPressure, tennisRankings, onBackInView, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
+import { badmintonSummary, tennisDay, tennisEarlyBreak, tennisLive, tennisLivePoints, tennisMyPicks, tennisOddsDays, tennisPatterns, tennisPickHistory, tennisPlayer, tennisPlayers, tennisPressure, tennisRankings, onBackInView, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
 import RankingList, { RankingSwitch } from '../components/RankingList'
 import Badminton, { B_TABS } from './Badminton'
 import Hockey, { H_TABS } from './Hockey'
@@ -76,11 +76,49 @@ export class Safe extends Component {
   }
 }
 
+// ── kept pre-match odds (backend tennis_odds) ──
+const nm = (s) => (s || '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[-'’.]/g, ' ').split(/\s+/).filter(Boolean)
+export const surname = (n) => nm(n).slice(-1)[0] || ''
+const isoDay = (d) => new Date(d).toISOString().slice(0, 10)
+const addDays = (iso, n) => isoDay(new Date(`${iso.slice(0, 10)}T12:00:00Z`).getTime() + n * 86400000)
+
+/** The kept odds between two days (ISO), reloaded when `tick` changes. */
+export function useKeptOdds(start, end, tick) {
+  const [list, setList] = useState(null)
+  useEffect(() => {
+    if (!start || !end) return
+    tennisOddsDays(start, end).then((r) => setList(r.data.odds)).catch(() => {})
+  }, [start, end, tick])
+  return list
+}
+
+/** A match's kept prices {surname: {median, best, books}}, a day either side of `day`. */
+export function findOdds(list, tour, a, b, day) {
+  if (!list || !a || !b) return null
+  const pair = [surname(a), surname(b)].sort().join('|')
+  const d = day ? new Date(`${String(day).slice(0, 10)}T12:00:00Z`).getTime() : Date.now()
+  let best = null
+  for (const o of list) {
+    if (o.pair !== pair || (tour && o.tour !== tour)) continue
+    const gap = Math.abs(new Date(`${o.day}T12:00:00Z`).getTime() - d) / 86400000
+    if (gap <= 1.01 && (!best || gap < best.gap)) best = { gap, o }
+  }
+  return best?.o.prices || null
+}
+
+/** A player's pre-match price beside their name - the favourite's darker. */
+export function OddsTag({ prices, name }) {
+  const p = prices?.[surname(name)]
+  if (!p) return <span className="w-9" />
+  const fav = Math.min(...Object.values(prices).map((x) => x.median)) === p.median
+  return <span className={`w-9 text-right text-[11px] tabular-nums ${fav ? 'font-black text-gray-700' : 'font-semibold text-gray-400'}`}>{p.median.toFixed(2)}</span>
+}
+
 export function Flag({ ioc }) {
   return <span className="inline-block w-8 text-[9px] font-bold text-gray-400 tracking-wider">{ioc || ''}</span>
 }
 
-function PlayerLine({ p, won, sets, side, onPlayer, tour }) {
+function PlayerLine({ p, won, sets, side, onPlayer, tour, odds }) {
   return (
     <div className={`flex items-center gap-1.5 ${won ? 'text-gray-900' : 'text-gray-400'}`}>
       <Flag ioc={p.ioc} />
@@ -91,6 +129,7 @@ function PlayerLine({ p, won, sets, side, onPlayer, tour }) {
         {p.seed && <span className="ml-1 text-[10px] font-semibold text-gray-400">({p.seed})</span>}
         {p.rank && <span className="ml-1 text-[9px] font-normal text-gray-300">#{p.rank}</span>}
       </button>
+      {odds && <OddsTag prices={odds} name={p.name} />}
       <span className="w-3.5 text-center text-[10px] text-green-600 font-black">{won ? '✓' : ''}</span>
       {sets.map((st, i) => {
         const games = side === 'w' ? st.w : st.l
@@ -106,13 +145,13 @@ function PlayerLine({ p, won, sets, side, onPlayer, tour }) {
 }
 
 /** A match: tap it for its own page (form, head-to-head, set habits); tap a name for that player. */
-export function MatchRow({ m, onPlayer, onOpen }) {
+export function MatchRow({ m, onPlayer, onOpen, odds }) {
   const { sets, end } = parseScore(m.score)
   return (
     <div onClick={onOpen ? () => onOpen(m) : undefined}
       className={`py-2 border-t border-gray-100 first:border-t-0 ${onOpen ? 'cursor-pointer active:bg-amber-50 hover:bg-amber-50/50 -mx-2 px-2 rounded' : ''}`}>
-      <PlayerLine p={m.winner} won sets={sets} side="w" onPlayer={onPlayer} tour={m.tour} />
-      <PlayerLine p={m.loser} won={false} sets={sets} side="l" onPlayer={onPlayer} tour={m.tour} />
+      <PlayerLine p={m.winner} won sets={sets} side="w" onPlayer={onPlayer} tour={m.tour} odds={odds} />
+      <PlayerLine p={m.loser} won={false} sets={sets} side="l" onPlayer={onPlayer} tour={m.tour} odds={odds} />
       {(end || m.minutes || onOpen) && (
         <div className="flex items-center gap-2 mt-0.5 pl-9 text-[10px] text-gray-400">
           {end && <span className="font-bold text-amber-600">{end}</span>}
@@ -124,7 +163,7 @@ export function MatchRow({ m, onPlayer, onOpen }) {
   )
 }
 
-function TournamentCard({ t, onPlayer, onOpen }) {
+function TournamentCard({ t, onPlayer, onOpen, odds }) {
   return (
     <div className="card p-0 overflow-hidden">
       <div className="px-4 py-2.5 bg-field-950 text-white flex items-center gap-2">
@@ -141,7 +180,8 @@ function TournamentCard({ t, onPlayer, onOpen }) {
         {t.rounds.map((r) => (
           <div key={r.round} className="mt-2">
             <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">{ROUND_NAME[r.round] || r.round}</p>
-            {r.matches.map((m) => <MatchRow key={m.id} m={m} onPlayer={onPlayer} onOpen={onOpen} />)}
+            {r.matches.map((m) => <MatchRow key={m.id} m={m} onPlayer={onPlayer} onOpen={onOpen}
+              odds={findOdds(odds, m.tour, m.winner.name, m.loser.name, m.date)} />)}
           </div>
         ))}
       </div>
@@ -158,6 +198,7 @@ function Results({ tour, fresh, onPlayer, onOpen }) {
     tennisDay(date, tour).then((r) => { setDay(r.data); if (!date && r.data.date) setDate(r.data.date) })
       .catch(() => setDay({ tournaments: [] })).finally(() => setBusy(false))
   }, [date, tour, fresh])
+  const kept = useKeptOdds(day?.date && addDays(day.date, -1), day?.date && addDays(day.date, 1), fresh)
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
@@ -182,7 +223,7 @@ function Results({ tour, fresh, onPlayer, onOpen }) {
             : 'No matches on this day - use ‹ › to jump to the nearest day with results.'}
         </p>
       )}
-      {!busy && day?.tournaments.map((t) => <TournamentCard key={`${t.tour}|${t.name}`} t={t} onPlayer={onPlayer} onOpen={onOpen} />)}
+      {!busy && day?.tournaments.map((t) => <TournamentCard key={`${t.tour}|${t.name}`} t={t} onPlayer={onPlayer} onOpen={onOpen} odds={kept} />)}
     </div>
   )
 }
@@ -1280,7 +1321,7 @@ function Flash({ v, className = '', children }) {
 }
 
 /** One live / upcoming match: the players with their games so far, the set or the start time. */
-export function LiveRow({ m, onOpen, plain, eb, picks }) {
+export function LiveRow({ m, onOpen, plain, eb, picks, odds }) {
   const live = m.state === 'live'
   // the fans' vote: my pick, or a nudge on a match still open to picking (both players known)
   const pick = picks?.[m.espn]
@@ -1310,6 +1351,7 @@ export function LiveRow({ m, onOpen, plain, eb, picks }) {
                   className="ml-1.5 inline-block w-2 h-2 rounded-full bg-lime-400 ring-1 ring-lime-600 align-middle" />
               )}
             </span>
+            {odds && <OddsTag prices={odds} name={p.name} />}
             {p.games.map((g, k) => {
               const done = k < p.games.length - 1 || !live          // the set being played is red
               const took = done && g > (o.games[k] ?? 0)
@@ -1336,10 +1378,95 @@ export function LiveRow({ m, onOpen, plain, eb, picks }) {
   )
 }
 
+/** My picks as mock bets: one stake (mine to set) on every pick, settled at
+ *  the kept pre-match price of the player I picked (backend
+ *  /tennis/fans/mine/history). A pick with no kept price isn't counted. */
+const STAKE_KEY = 'tennis.mockStake'
+function MyPicks({ active }) {
+  const [d, setD] = useState(null)
+  const [stake, setStake] = useState(() => { try { return Number(localStorage.getItem(STAKE_KEY)) || 100 } catch { return 100 } })
+  useEffect(() => { if (active) tennisPickHistory().then((r) => setD(r.data.picks)).catch(() => setD([])) }, [active])
+  const save = (v) => { setStake(v); try { localStorage.setItem(STAKE_KEY, String(v)) } catch { /* private mode */ } }
+  if (!d) return <p className="text-xs text-gray-400 text-center py-6">Loading your picks…</p>
+  const rupees = (x) => `${x < 0 ? '−' : x > 0 ? '+' : ''}₹${Math.abs(Math.round(x)).toLocaleString('en-IN')}`
+  const pl = (p) => (p.status === 'won' && p.odds ? stake * (p.odds - 1) : p.status === 'lost' && p.odds ? -stake : null)
+  const settled = d.filter((p) => pl(p) != null)
+  const won = settled.filter((p) => p.status === 'won')
+  const total = settled.reduce((a, p) => a + pl(p), 0)
+  const staked = stake * settled.length
+  const favs = settled.filter((p) => p.other_odds && p.odds < p.other_odds)
+  const Stat = ({ label, v, tone }) => (
+    <div className="flex-1 min-w-[80px] rounded-md bg-white border border-amber-100 px-3 py-2">
+      <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">{label}</p>
+      <p className={`text-base font-black tabular-nums ${tone || 'text-gray-900'}`}>{v}</p>
+    </div>
+  )
+  return (
+    <div className="space-y-3">
+      <div className="card">
+        <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Mock betting · my picks</p>
+        <label className="flex items-center gap-2 mt-2 text-sm font-semibold text-gray-700">
+          Stake on every pick ₹
+          <input type="number" min="1" inputMode="numeric" value={stake} onChange={(e) => save(Math.max(0, Number(e.target.value) || 0))}
+            className="w-24 rounded-md border border-amber-300 px-2 py-1 text-sm font-black tabular-nums" />
+        </label>
+        <div className="flex gap-2 mt-3 flex-wrap">
+          <Stat label="Profit / loss" v={rupees(total)} tone={total > 0 ? 'text-green-700' : total < 0 ? 'text-red-600' : ''} />
+          <Stat label="Return" v={staked ? `${total >= 0 ? '+' : ''}${Math.round((100 * total) / staked)}%` : '—'} tone={total > 0 ? 'text-green-700' : total < 0 ? 'text-red-600' : ''} />
+          <Stat label="Won" v={`${won.length} of ${settled.length}`} />
+          <Stat label="Staked" v={`₹${staked.toLocaleString('en-IN')}`} />
+        </div>
+        <p className="text-[10px] text-gray-400 mt-2">
+          Settled at the bookmakers' pre-match price for the player picked (decimal: a win pays stake × (odds − 1)).
+          {favs.length > 0 && ` Backed the favourite ${favs.length} time${favs.length === 1 ? '' : 's'}, the outsider ${settled.length - favs.length}.`}
+          {d.length - settled.length > 0 && ` ${d.filter((p) => p.status === 'pending').length} still to play`}
+          {d.filter((p) => p.status !== 'pending' && !p.odds).length > 0 && ` · ${d.filter((p) => p.status !== 'pending' && !p.odds).length} without a kept price (not counted)`}
+        </p>
+      </div>
+      <div className="card overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider text-left">
+              <th className="py-1">Date</th><th className="py-1">My pick</th><th className="py-1 text-right">Odds</th>
+              <th className="py-1 text-right">Other</th><th className="py-1 text-center">Result</th><th className="py-1 text-right">P / L</th>
+            </tr>
+          </thead>
+          <tbody>
+            {d.length === 0 && <tr><td colSpan={6} className="py-4 text-center text-gray-400">No picks yet - pick a winner on any upcoming match's page.</td></tr>}
+            {d.map((p) => {
+              const x = pl(p)
+              return (
+                <tr key={p.espn} className="border-t border-gray-100 align-top">
+                  <td className="py-1.5 pr-1 text-gray-500 whitespace-nowrap">{fmtShort(p.start.slice(0, 10))}</td>
+                  <td className="py-1.5 pr-1">
+                    <span className="font-bold text-gray-900">{p.pick}</span>
+                    <span className="block text-[10px] text-gray-400 truncate max-w-[150px]">v {p.other}{p.tournament ? ` · ${p.tournament}` : ''}</span>
+                  </td>
+                  <td className={`py-1.5 text-right tabular-nums font-black ${p.other_odds && p.odds < p.other_odds ? 'text-gray-900' : 'text-gray-600'}`}>{p.odds ? p.odds.toFixed(2) : '—'}</td>
+                  <td className="py-1.5 text-right tabular-nums text-gray-400">{p.other_odds ? p.other_odds.toFixed(2) : '—'}</td>
+                  <td className="py-1.5 text-center">
+                    {p.status === 'won' ? <span className="font-black text-green-700">Won</span>
+                      : p.status === 'lost' ? <span className="font-black text-red-600">Lost</span>
+                        : p.status === 'void' ? <span className="text-gray-400">Void</span> : <span className="text-gray-400">To play</span>}
+                    {p.score && <span className="block text-[9px] text-gray-400">{p.score}</span>}
+                  </td>
+                  <td className={`py-1.5 text-right tabular-nums font-black ${x > 0 ? 'text-green-700' : x < 0 ? 'text-red-600' : 'text-gray-300'}`}>{x == null ? '—' : rupees(x)}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 /** Live now, then what starts in the next day and a half, by tournament: the list refreshed every 10 seconds, a WTA game's points every 3. */
 function Live({ tour, onOpen, active = true }) {
   const [d, setD] = useState(null)
   const [picks, setPicks] = useState(null)        // my fan picks, by ESPN id
+  const today = isoDay(Date.now())
+  const kept = useKeptOdds(addDays(today, -1), addDays(today, 2), picks)
   const [err, setErr] = useState(false)
   useEffect(() => {
     if (!active) return undefined          // kept but hidden behind another tab: no polling
@@ -1389,7 +1516,8 @@ function Live({ tour, onOpen, active = true }) {
               <p className="text-sm font-bold flex-1 min-w-0 truncate">{g.name}</p>
               {g.surface && <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${SURFACE[g.surface] || 'bg-gray-100 text-gray-700'}`}>{g.surface}</span>}
             </div>
-            <div className="px-4 pb-1">{g.matches.map((m) => <LiveRow key={m.espn} m={withPoints(m, pts)} onOpen={onOpen} eb={eb} picks={picks} />)}</div>
+            <div className="px-4 pb-1">{g.matches.map((m) => <LiveRow key={m.espn} m={withPoints(m, pts)} onOpen={onOpen} eb={eb} picks={picks}
+              odds={findOdds(kept, m.tour, m.players[0].name, m.players[1].name, m.start)} />)}</div>
           </div>
         ))}
       </div>
@@ -1539,8 +1667,8 @@ export default function BettingAnalytics() {
             ))}
           </div>
         </div>
-        <div className="grid grid-cols-5 mt-2.5 rounded-md border border-amber-300 overflow-hidden">
-          {[['live', 'Live'], ['results', 'Results'], ['players', 'Players'], ['sets', 'Sets'], ['patterns', 'Patterns']].map(([k, l]) => (
+        <div className="grid grid-cols-6 mt-2.5 rounded-md border border-amber-300 overflow-hidden">
+          {[['live', 'Live'], ['results', 'Results'], ['picks', 'My picks'], ['players', 'Players'], ['sets', 'Sets'], ['patterns', 'Patterns']].map(([k, l]) => (
             <button key={k} onClick={() => setTab(k)}
               className={`py-1.5 text-[11px] font-bold ${tab === k ? 'bg-brand-400 text-white' : 'bg-white text-gray-600'}`}>
               {k === 'live' && <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 mr-1 align-middle" />}{l}
@@ -1568,13 +1696,14 @@ export default function BettingAnalytics() {
             is instant, with its scroll, filters and data as they were */}
         {sport === 'tennis' && [...opened].map((k) => (
           <Pane key={k} hidden={k !== tab}
-            deps={`${tour}|${k === 'live' ? tab === 'live' : ''}|${k === 'results' ? fresh : ''}|${k === 'players' ? pl : ''}`}>
+            deps={`${tour}|${k === 'live' || k === 'picks' ? tab === k : ''}|${k === 'results' ? fresh : ''}|${k === 'players' ? pl : ''}`}>
             <Safe what="this tab">
               {k === 'live' && <Live tour={tour} onOpen={openLive} active={tab === 'live'} />}
               {k === 'results' && <Results tour={tour} fresh={fresh} onPlayer={openPlayer} onOpen={openMatch} />}
               {k === 'players' && <Players tour={tour} sel={sel} setSel={setSel} onOpen={openMatch} />}
               {k === 'sets' && <SetStats tour={tour} />}
               {k === 'patterns' && <Patterns />}
+              {k === 'picks' && <MyPicks active={tab === 'picks'} />}
             </Safe>
           </Pane>
         ))}
