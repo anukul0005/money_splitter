@@ -410,19 +410,22 @@ function Odds({ o, names, last }) {
       <div className="flex gap-2 mt-1">
         {names.map((n) => { const p = priceOf(n); return <Cell key={n} label={last(n)} p={p} hi={p?.median === fav} /> })}
       </div>
-      {o.totals && (
-        <>
-          <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest mt-2">Total {o.totals.unit || 'games'} in the match · {o.totals.line}</p>
+      {[].concat(o.totals || []).map((t) => (
+        <div key={t.unit}>
+          <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest mt-2">
+            Total {t.unit || 'games'} in the match · {t.line}
+            {t.source && <span className="ml-1 normal-case tracking-normal font-semibold text-gray-400">· {t.source}{t.over?.books > 1 ? `, ${t.over.books} bookmakers` : ''}</span>}
+          </p>
           <div className="flex gap-2 mt-1">
-            <Cell label={`Over ${o.totals.line}`} p={o.totals.over} />
-            <Cell label={`Under ${o.totals.line}`} p={o.totals.under} />
+            <Cell label={`Over ${t.line}`} p={t.over} />
+            <Cell label={`Under ${t.line}`} p={t.under} />
           </div>
-        </>
-      )}
+        </div>
+      ))}
       <p className="text-[9px] text-gray-400 mt-1.5">
-        Decimal odds, median of {Math.max(...o.winner.map((w) => w.books))} bookmaker{Math.max(...o.winner.map((w) => w.books)) === 1 ? '' : 's'} · % = implied chance · {o.source}
-        {o.source === 'The Odds API' && o.remaining != null ? ` · ${o.remaining} credits left this month` : ''}
-        {o.source === 'Tennis API' && o.used_today != null ? ` · ${o.used_today} of 50 requests used today` : ''}
+        Decimal odds · to win: median of {Math.max(...o.winner.map((w) => w.books))} bookmaker{Math.max(...o.winner.map((w) => w.books)) === 1 ? '' : 's'} ({o.source}) · % = implied chance
+        {o.remaining != null ? ` · The Odds API: ${o.remaining} credits left this month` : ''}
+        {o.used_today != null ? ` · Tennis API: ${o.used_today} of 50 requests today` : ''}
       </p>
     </div>
   )

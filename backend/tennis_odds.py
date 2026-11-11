@@ -189,7 +189,8 @@ def _tennis_api(tour: str, a: str, b: str, start: str) -> dict | None:
             if not any(prices.values()) and not totals:
                 return None
             t = r.get("tournament")
-            return {"source": "Tennis API", "event": r.get("tournamentName") or (t.get("name") if isinstance(t, dict) else t),
+            return {"source": "Tennis API", "match_id": r.get("id"), "type": r.get("type") or tour.lower(),
+                    "event": r.get("tournamentName") or (t.get("name") if isinstance(t, dict) else t),
                     "start": r.get("date") or r.get("startTime"),
                     "winner": [{"name": n, **_price(xs)} for n, xs in prices.items() if xs],
                     "totals": totals, "used_today": ta_used.get(datetime.now(timezone.utc).date().isoformat(), 0),
@@ -197,16 +198,64 @@ def _tennis_api(tour: str, a: str, b: str, start: str) -> dict | None:
     return None
 
 
+def _ta_games(match_id, kind: str) -> dict | None:
+    """The games line for one match (Marathonbet's) - a request of its own,
+    so only when the match page is open, and not once the day's 50 run low."""
+    if not match_id:
+        return None
+    day = datetime.now(timezone.utc).date().isoformat()
+    key = f"ta-match-{match_id}"
+    with _lock:
+        hit = key in _cache
+    if not hit and ta_used.get(day, 0) >= TA_MATCH_CAP:
+        return None
+    rows = _cached(key, ODDS_HOURS, lambda: (_ta_get(f"/tennis/v2/matches/{match_id}/odds", type=kind, source="today") or {}).get("odds") or [])
+    for o in rows:
+        if str(o.get("totalUnit") or "").lower().startswith("game") and o.get("total") is not None:
+            one = lambda x: {"median": x, "best": x, "books": 1} if _num(x) else None
+            return {"line": float(o["total"]), "unit": "games", "over": one(o.get("ktb")), "under": one(o.get("ktm")),
+                    "source": o.get("bookmaker") or "Tennis API"}
+    return None
+
+
+TA_MATCH_CAP = 40                      # past this many of today's 50, no per-match reads
+
+
 def match(tour: str, a: str, b: str, tournament: str = "", start: str = "") -> dict:
-    """Tennis API first; The Odds API when it has nothing for this match."""
+    """Both sources in tandem: the winner from whichever has more bookmakers;
+    total games from The Odds API (many bookmakers) where it has the match,
+    else Tennis API's per-match read; total sets from Tennis API's Pinnacle."""
     has_ta, has_oa = bool(os.environ.get("TENNIS_API_KEY")), bool(os.environ.get("ODDS_API_KEY"))
     if not has_ta and not has_oa:
         return {"missing_key": True}
+    ta = oa = None
     if has_ta:
         try:
-            got = _tennis_api(tour, a, b, start)
-            if got and got["winner"]:
-                return got
-        except Exception as err:          # over the day's 50, or down: try the other
+            ta = _tennis_api(tour, a, b, start)
+        except Exception as err:          # over the day's 50, or down: the other one
             print(f"[tennis-odds] Tennis API: {err}")
-    return _odds_api(tour, a, b, tournament) if has_oa else {"none": True}
+    if has_oa:
+        try:
+            oa = _odds_api(tour, a, b, tournament)
+            oa = None if oa.get("none") else oa
+        except Exception as err:
+            print(f"[tennis-odds] The Odds API: {err}")
+    if not ta and not oa:
+        return {"none": True, "remaining": remaining}
+    books = lambda x: max((w.get("books", 0) for w in (x or {}).get("winner", [])), default=0)
+    win = oa if books(oa) > books(ta) else ta
+    totals = []
+    if oa and oa.get("totals"):
+        totals.append({**oa["totals"], "source": "The Odds API"})
+    elif ta:
+        try:
+            g = _ta_games(ta.get("match_id"), ta.get("type") or tour.lower())
+            if g:
+                totals.append(g)
+        except Exception as err:
+            print(f"[tennis-odds] Tennis API match odds: {err}")
+    if ta and ta.get("totals") and ta["totals"]["unit"] == "sets":
+        totals.append({**ta["totals"], "source": "Pinnacle"})
+    return {"source": win["source"], "sources": [x["source"] for x in (ta, oa) if x],
+            "event": win.get("event"), "start": win.get("start"), "winner": win["winner"], "totals": totals,
+            "remaining": remaining, "used_today": ta_used.get(datetime.now(timezone.utc).date().isoformat(), 0) if has_ta else None}
