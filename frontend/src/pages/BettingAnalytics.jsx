@@ -1,6 +1,6 @@
 import { Component, memo, useEffect, useRef, useState, useTransition } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { badmintonSummary, tennisDay, tennisEarlyBreak, tennisLive, tennisLivePoints, tennisPatterns, tennisPlayer, tennisPlayers, tennisPressure, tennisRankings, onBackInView, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
+import { badmintonSummary, tennisDay, tennisEarlyBreak, tennisLive, tennisLivePoints, tennisMyPicks, tennisPatterns, tennisPlayer, tennisPlayers, tennisPressure, tennisRankings, onBackInView, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
 import RankingList, { RankingSwitch } from '../components/RankingList'
 import Badminton, { B_TABS } from './Badminton'
 import Hockey, { H_TABS } from './Hockey'
@@ -1280,8 +1280,11 @@ function Flash({ v, className = '', children }) {
 }
 
 /** One live / upcoming match: the players with their games so far, the set or the start time. */
-export function LiveRow({ m, onOpen, plain, eb }) {
+export function LiveRow({ m, onOpen, plain, eb, picks }) {
   const live = m.state === 'live'
+  // the fans' vote: my pick, or a nudge on a match still open to picking (both players known)
+  const pick = picks?.[m.espn]
+  const canPick = picks && !live && !pick && new Date(m.start) > new Date() && !m.players.some((p) => p.name === 'TBD')
   return (
     <button onClick={() => onOpen(m)} className="w-full text-left py-2 border-t border-gray-100 first:border-t-0 hover:bg-amber-50/50 active:bg-amber-50 -mx-2 px-2 rounded block">
       <div className="flex items-center gap-2 mb-0.5 text-[10px]">
@@ -1290,7 +1293,9 @@ export function LiveRow({ m, onOpen, plain, eb }) {
             {m.players.some((p) => p.serving) && <span className="font-semibold text-gray-400">· <span className="inline-block w-1.5 h-1.5 rounded-full bg-lime-400 ring-1 ring-lime-600 align-middle" /> serving</span>}</span>
           : <span className="font-bold text-gray-500">{startTime(m.start)}</span>}
         {!plain && <span className="text-gray-400">{ROUND_NAME[m.round] || m.round}</span>}
-        {!plain && <span className="ml-auto font-bold text-brand-600">Match ›</span>}
+        {pick && <span className="ml-auto font-bold text-green-700 bg-green-50 rounded px-1.5 truncate max-w-[110px]">✓ {pick.split(' ').slice(-1)[0]}</span>}
+        {canPick && <span className="ml-auto font-bold text-gray-400 border border-dashed border-gray-300 rounded px-1.5">Pick</span>}
+        {!plain && <span className={`${pick || canPick ? '' : 'ml-auto '}font-bold text-brand-600`}>Match ›</span>}
       </div>
       {m.players.map((p, i) => {
         const o = m.players[1 - i]
@@ -1334,14 +1339,17 @@ export function LiveRow({ m, onOpen, plain, eb }) {
 /** Live now, then what starts in the next day and a half, by tournament: the list refreshed every 10 seconds, a WTA game's points every 3. */
 function Live({ tour, onOpen, active = true }) {
   const [d, setD] = useState(null)
+  const [picks, setPicks] = useState(null)        // my fan picks, by ESPN id
   const [err, setErr] = useState(false)
   useEffect(() => {
     if (!active) return undefined          // kept but hidden behind another tab: no polling
     let alive = true
     const load = (fresh) => tennisLive(tour, fresh).then((r) => { if (alive) { setD(r.data); setErr(false) } }).catch(() => { if (alive) setErr(true) })
+    const loadPicks = () => tennisMyPicks().then((r) => { if (alive) setPicks(r.data.picks) }).catch(() => {})
     load()
+    loadPicks()
     const t = setInterval(() => { if (!document.hidden) load() }, 10000)
-    const off = onBackInView(load)
+    const off = onBackInView((fresh) => { load(fresh); loadPicks() })
     return () => { alive = false; clearInterval(t); off() }
   }, [tour, active])
   const pts = useLivePoints(active && !!d?.matches?.some((m) => m.tour === 'WTA' && m.state === 'live'))
@@ -1363,6 +1371,15 @@ function Live({ tour, onOpen, active = true }) {
       <div className="space-y-2">
         <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">
           {title} · {gs.reduce((a, g) => a + g.matches.length, 0)}
+          {state === 'upcoming' && picks && (() => {
+            const open = gs.flatMap((g) => g.matches).filter((m) => new Date(m.start) > new Date() && !m.players.some((p) => p.name === 'TBD'))
+            const done = open.filter((m) => picks[m.espn]).length
+            return open.length > 0 && (
+              <span className={`ml-2 normal-case tracking-normal font-bold ${done === open.length ? 'text-green-700' : 'text-gray-400'}`}>
+                {done === open.length ? `✓ all ${open.length} picked` : `picked ${done} of ${open.length}`}
+              </span>
+            )
+          })()}
         </p>
         {gs.length === 0 && <p className="text-xs text-gray-400 px-1">{state === 'live' ? 'Nothing on court right now.' : 'Nothing scheduled in the next day and a half.'}</p>}
         {gs.map((g) => (
@@ -1372,7 +1389,7 @@ function Live({ tour, onOpen, active = true }) {
               <p className="text-sm font-bold flex-1 min-w-0 truncate">{g.name}</p>
               {g.surface && <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${SURFACE[g.surface] || 'bg-gray-100 text-gray-700'}`}>{g.surface}</span>}
             </div>
-            <div className="px-4 pb-1">{g.matches.map((m) => <LiveRow key={m.espn} m={withPoints(m, pts)} onOpen={onOpen} eb={eb} />)}</div>
+            <div className="px-4 pb-1">{g.matches.map((m) => <LiveRow key={m.espn} m={withPoints(m, pts)} onOpen={onOpen} eb={eb} picks={picks} />)}</div>
           </div>
         ))}
       </div>

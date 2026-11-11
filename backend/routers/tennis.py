@@ -376,6 +376,15 @@ def odds(tour: str, a: str, b: str, tournament: str = "", start: str = "", _: Us
         return {"error": True}
 
 
+@router.get("/fans/mine", response_model=dict)
+def my_fan_picks(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """The caller's picks on matches from the last day on, by ESPN id -
+    the Live list marks which ones they have picked."""
+    since = datetime.now(timezone.utc) - timedelta(days=1)
+    rows = db.query(TennisFanVote).filter(TennisFanVote.voter_id == caller.id, TennisFanVote.start >= since).all()
+    return {"picks": {v.espn: v.pick_name for v in rows}}
+
+
 @router.post("/fans", response_model=dict)
 def fan_vote(body: FanVoteIn, db: Session = Depends(get_db), caller: User = Depends(current_user)):
     """Picks (or changes the pick of) who wins a match that hasn't started."""
