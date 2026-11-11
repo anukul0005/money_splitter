@@ -393,7 +393,7 @@ const norm = (s) => (s || '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerC
  *  win and the total-games line - the median across bookmakers, best beside it. */
 function Odds({ o, names, last }) {
   if (!o) return null
-  if (o.missing_key) return <p className="text-[10px] text-gray-400 mt-2">Bookmaker odds: add ODDS_API_KEY (the-odds-api.com) to the server.</p>
+  if (o.missing_key) return <p className="text-[10px] text-gray-400 mt-2">Bookmaker odds: add TENNIS_API_KEY (Tennis API on RapidAPI) and/or ODDS_API_KEY (the-odds-api.com) to the server.</p>
   if (o.none || o.error || !o.winner?.length) return <p className="text-[10px] text-gray-400 mt-2">{o.error ? "Couldn't read the bookmaker odds." : 'No bookmaker odds for this match yet.'}</p>
   const priceOf = (n) => o.winner.find((w) => norm(last(w.name)) === norm(last(n)))
   const fav = Math.min(...o.winner.map((w) => w.median))
@@ -412,7 +412,7 @@ function Odds({ o, names, last }) {
       </div>
       {o.totals && (
         <>
-          <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest mt-2">Total games in the match · {o.totals.line}</p>
+          <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest mt-2">Total {o.totals.unit || 'games'} in the match · {o.totals.line}</p>
           <div className="flex gap-2 mt-1">
             <Cell label={`Over ${o.totals.line}`} p={o.totals.over} />
             <Cell label={`Under ${o.totals.line}`} p={o.totals.under} />
@@ -420,8 +420,9 @@ function Odds({ o, names, last }) {
         </>
       )}
       <p className="text-[9px] text-gray-400 mt-1.5">
-        Decimal odds, median of {Math.max(...o.winner.map((w) => w.books))} bookmakers · % = implied chance
-        {o.remaining != null ? ` · ${o.remaining} odds credits left this month` : ''}
+        Decimal odds, median of {Math.max(...o.winner.map((w) => w.books))} bookmaker{Math.max(...o.winner.map((w) => w.books)) === 1 ? '' : 's'} · % = implied chance · {o.source}
+        {o.source === 'The Odds API' && o.remaining != null ? ` · ${o.remaining} credits left this month` : ''}
+        {o.source === 'Tennis API' && o.used_today != null ? ` · ${o.used_today} of 50 requests used today` : ''}
       </p>
     </div>
   )
@@ -442,7 +443,7 @@ function FanVote({ tour, names, date, espn, open, winner, tournament }) {
   // bookmaker prices: before the match only (each read spends the odds service's monthly credits)
   useEffect(() => {
     if (!open || !names[0] || !names[1]) return
-    tennisOdds({ tour, a: names[0], b: names[1], tournament: tournament || '' }).then((r) => setOdds(r.data)).catch(() => {})
+    tennisOdds({ tour, a: names[0], b: names[1], tournament: tournament || '', start: date || '' }).then((r) => setOdds(r.data)).catch(() => {})
   }, [open, tour, names[0], names[1]])
   if (!f || (!open && !f.total)) return null
   const vote = (name) => {

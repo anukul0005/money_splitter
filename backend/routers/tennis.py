@@ -366,11 +366,11 @@ def fans(tour: str, a: str, b: str, date: str, db: Session = Depends(get_db), ca
 
 
 @router.get("/odds", response_model=dict)
-def odds(tour: str, a: str, b: str, tournament: str = "", _: User = Depends(owner)):
-    """Bookmaker prices before the match (tennis_odds): winner and total games."""
+def odds(tour: str, a: str, b: str, tournament: str = "", start: str = "", _: User = Depends(owner)):
+    """Bookmaker prices before the match (tennis_odds): winner and the total line."""
     import tennis_odds
     try:
-        return tennis_odds.match(tour, a, b, tournament)
+        return tennis_odds.match(tour, a, b, tournament, start)
     except Exception as err:
         print(f"[tennis-odds] {err}")
         return {"error": True}
