@@ -370,7 +370,10 @@ def odds(tour: str, a: str, b: str, tournament: str = "", start: str = "", _: Us
     """Bookmaker prices before the match (tennis_odds): winner and the total line."""
     import tennis_odds
     try:
-        return tennis_odds.match(tour, a, b, tournament, start)
+        out = tennis_odds.match(tour, a, b, tournament, start)
+        print(f"[tennis-odds] {a} v {b}: " + (out.get("source") and f"{out['source']}, {len(out.get('winner', []))} prices, "
+                                               f"{len(out.get('totals') or [])} totals" or ", ".join(k for k in out if out[k] is True)))
+        return out
     except Exception as err:
         print(f"[tennis-odds] {err}")
         return {"error": True}
