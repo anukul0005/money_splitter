@@ -365,6 +365,17 @@ def fans(tour: str, a: str, b: str, date: str, db: Session = Depends(get_db), ca
             "voters": sorted(({"name": n, "pick": v.pick} for v, n in rows), key=lambda x: x["name"].lower())}
 
 
+@router.get("/odds", response_model=dict)
+def odds(tour: str, a: str, b: str, tournament: str = "", _: User = Depends(owner)):
+    """Bookmaker prices before the match (tennis_odds): winner and total games."""
+    import tennis_odds
+    try:
+        return tennis_odds.match(tour, a, b, tournament)
+    except Exception as err:
+        print(f"[tennis-odds] {err}")
+        return {"error": True}
+
+
 @router.post("/fans", response_model=dict)
 def fan_vote(body: FanVoteIn, db: Session = Depends(get_db), caller: User = Depends(current_user)):
     """Picks (or changes the pick of) who wins a match that hasn't started."""

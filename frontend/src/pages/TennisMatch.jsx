@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { onBackInView, tennisEarlyBreak, tennisFanVote, tennisFans, tennisLive, tennisLiveFeed, tennisMatchup } from '../api'
+import { onBackInView, tennisEarlyBreak, tennisFanVote, tennisFans, tennisLive, tennisOdds, tennisLiveFeed, tennisMatchup } from '../api'
 import { LiveRow, MatchRow, ROUND_NAME, SURFACE, Safe, ScoreText, fmtShort, matchLink, startTime, useLivePoints, withPoints } from './BettingAnalytics'
 
 /**
@@ -389,17 +389,61 @@ function PressureCard({ players, names, live }) {
 // as tennis_kb.norm - the fan picks come back under these keys
 const norm = (s) => (s || '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[-'’.]/g, ' ').split(/\s+/).filter(Boolean).join(' ')
 
+/** Bookmaker prices before the match (backend tennis_odds): each player to
+ *  win and the total-games line - the median across bookmakers, best beside it. */
+function Odds({ o, names, last }) {
+  if (!o) return null
+  if (o.missing_key) return <p className="text-[10px] text-gray-400 mt-2">Bookmaker odds: add ODDS_API_KEY (the-odds-api.com) to the server.</p>
+  if (o.none || o.error || !o.winner?.length) return <p className="text-[10px] text-gray-400 mt-2">{o.error ? "Couldn't read the bookmaker odds." : 'No bookmaker odds for this match yet.'}</p>
+  const priceOf = (n) => o.winner.find((w) => norm(last(w.name)) === norm(last(n)))
+  const fav = Math.min(...o.winner.map((w) => w.median))
+  const Cell = ({ label, p, hi }) => (
+    <div className="flex-1 text-center">
+      <p className="text-[9px] font-black text-gray-400 uppercase tracking-wider truncate">{label}</p>
+      <p className={`text-base font-black tabular-nums ${hi ? 'text-gray-900' : 'text-gray-600'}`}>{p ? p.median.toFixed(2) : '—'}</p>
+      {p && <p className="text-[9px] text-gray-400 tabular-nums">best {p.best.toFixed(2)} · {Math.round(100 / p.median)}%</p>}
+    </div>
+  )
+  return (
+    <div className="mt-3 border-t border-gray-100 pt-2">
+      <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Odds · to win</p>
+      <div className="flex gap-2 mt-1">
+        {names.map((n) => { const p = priceOf(n); return <Cell key={n} label={last(n)} p={p} hi={p?.median === fav} /> })}
+      </div>
+      {o.totals && (
+        <>
+          <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest mt-2">Total games in the match · {o.totals.line}</p>
+          <div className="flex gap-2 mt-1">
+            <Cell label={`Over ${o.totals.line}`} p={o.totals.over} />
+            <Cell label={`Under ${o.totals.line}`} p={o.totals.under} />
+          </div>
+        </>
+      )}
+      <p className="text-[9px] text-gray-400 mt-1.5">
+        Decimal odds, median of {Math.max(...o.winner.map((w) => w.books))} bookmakers · % = implied chance
+        {o.remaining != null ? ` · ${o.remaining} odds credits left this month` : ''}
+      </p>
+    </div>
+  )
+}
+
 /** Fans: everyone in the app picks who wins, up to the first ball (and can
  *  change their mind until then); after that the split is shown, and once
  *  it's played, whether the fans called it. */
-function FanVote({ tour, names, date, espn, open, winner }) {
+function FanVote({ tour, names, date, espn, open, winner, tournament }) {
   const [f, setF] = useState(null)
+  const [odds, setOdds] = useState(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   useEffect(() => {
     if (!date || !names[0] || !names[1]) return
     tennisFans({ tour, a: names[0], b: names[1], date }).then((r) => setF(r.data)).catch(() => {})
   }, [tour, names[0], names[1], date])
+  // bookmaker prices: before the match only (each read spends the odds service's monthly credits)
+  useEffect(() => {
+    if (!open || !names[0] || !names[1]) return
+    tennisOdds({ tour, a: names[0], b: names[1], tournament: tournament || '' }).then((r) => setOdds(r.data)).catch(() => {})
+  }, [open, tour, names[0], names[1]])
   if (!f || (!open && !f.total)) return null
   const vote = (name) => {
     setBusy(true); setErr('')
@@ -427,6 +471,7 @@ function FanVote({ tour, names, date, espn, open, winner }) {
           })}
         </div>
       )}
+      {open && <Odds o={odds} names={names} last={last} />}
       {open && <p className="text-[10px] text-gray-400 mt-1.5">{f.mine ? 'Your pick - you can change it until the match starts.' : 'Pick before the first ball - voting closes when the match starts.'}</p>}
       {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
       {f.total > 0 && (
@@ -530,7 +575,7 @@ export default function TennisMatch() {
               {m ? (
                 <FanVote tour={tour} names={[m.winner.name, m.loser.name]} date={m.date} winner={m.winner.name} />
               ) : live && !live.gone && live.start && (
-                <FanVote tour={live.tour} names={live.players.map((p) => p.name)} date={live.start} espn={espn}
+                <FanVote tour={live.tour} names={live.players.map((p) => p.name)} date={live.start} espn={espn} tournament={live.tournament}
                   open={live.state === 'upcoming' && new Date(live.start) > new Date()} />
               )}
             </Safe>
