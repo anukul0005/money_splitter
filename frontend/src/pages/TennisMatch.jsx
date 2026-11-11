@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { onBackInView, tennisEarlyBreak, tennisLive, tennisLiveFeed, tennisMatchup } from '../api'
+import { onBackInView, tennisEarlyBreak, tennisFanVote, tennisFans, tennisLive, tennisLiveFeed, tennisMatchup } from '../api'
 import { LiveRow, MatchRow, ROUND_NAME, SURFACE, Safe, ScoreText, fmtShort, matchLink, startTime, useLivePoints, withPoints } from './BettingAnalytics'
 
 /**
@@ -386,6 +386,76 @@ function PressureCard({ players, names, live }) {
   )
 }
 
+// as tennis_kb.norm - the fan picks come back under these keys
+const norm = (s) => (s || '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[-'’.]/g, ' ').split(/\s+/).filter(Boolean).join(' ')
+
+/** Fans: everyone in the app picks who wins, up to the first ball (and can
+ *  change their mind until then); after that the split is shown, and once
+ *  it's played, whether the fans called it. */
+function FanVote({ tour, names, date, espn, open, winner }) {
+  const [f, setF] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    if (!date || !names[0] || !names[1]) return
+    tennisFans({ tour, a: names[0], b: names[1], date }).then((r) => setF(r.data)).catch(() => {})
+  }, [tour, names[0], names[1], date])
+  if (!f || (!open && !f.total)) return null
+  const vote = (name) => {
+    setBusy(true); setErr('')
+    tennisFanVote({ tour, espn, pick: name }).then((r) => setF(r.data))
+      .catch((e) => setErr(e?.response?.data?.detail || "Couldn't save your pick"))
+      .finally(() => setBusy(false))
+  }
+  const last = (n) => (n || '').split(' ').slice(-1)[0]
+  const n = names.map((x) => f.counts[norm(x)] || 0)
+  const share = n.map((x) => (f.total ? Math.round((100 * x) / f.total) : 0))
+  const fav = f.total && n[0] !== n[1] ? (n[0] > n[1] ? 0 : 1) : null
+  return (
+    <div className="card">
+      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Fans · who wins?</p>
+      {open && (
+        <div className="grid grid-cols-2 gap-2 mt-2">
+          {names.map((x) => {
+            const mine = f.mine === norm(x)
+            return (
+              <button key={x} disabled={busy} onClick={() => vote(x)}
+                className={`rounded-lg border px-2 py-2.5 text-sm font-black truncate ${mine ? 'bg-brand-600 border-brand-600 text-white' : 'border-gray-200 text-gray-800'}`}>
+                {mine ? '✓ ' : ''}{last(x)}
+              </button>
+            )
+          })}
+        </div>
+      )}
+      {open && <p className="text-[10px] text-gray-400 mt-1.5">{f.mine ? 'Your pick - you can change it until the match starts.' : 'Pick before the first ball - voting closes when the match starts.'}</p>}
+      {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
+      {f.total > 0 && (
+        <>
+          <div className="flex justify-between text-xs font-bold mt-3">
+            <span className={fav === 0 ? 'text-gray-900' : 'text-gray-500'}>{last(names[0])} {share[0]}%</span>
+            <span className={fav === 1 ? 'text-gray-900' : 'text-gray-500'}>{share[1]}% {last(names[1])}</span>
+          </div>
+          <div className="flex h-2 rounded-full overflow-hidden bg-gray-100 mt-1">
+            <div className="bg-brand-600" style={{ width: `${share[0]}%` }} />
+            <div className="bg-field-950" style={{ width: `${share[1]}%` }} />
+          </div>
+          <p className="text-[10px] text-gray-400 mt-1">{f.total} pick{f.total === 1 ? '' : 's'}{!open ? ' · voting closed' : ''}</p>
+          {winner && fav != null && (
+            <p className={`text-[11px] font-bold mt-1 ${norm(names[fav]) === norm(winner) ? 'text-green-700' : 'text-red-600'}`}>
+              {norm(names[fav]) === norm(winner) ? `✓ The fans called it - ${last(winner)} won` : `✗ The fans backed ${last(names[fav])} - ${last(winner)} won`}
+            </p>
+          )}
+          <p className="text-[11px] text-gray-600 mt-2 leading-relaxed">
+            {f.voters.map((v, i) => (
+              <span key={v.name}>{i ? ' · ' : ''}<b>{v.name}</b> {last(names.find((x) => norm(x) === v.pick) || v.pick)}</span>
+            ))}
+          </p>
+        </>
+      )}
+    </div>
+  )
+}
+
 export default function TennisMatch() {
   const nav = useNavigate()
   const [q] = useSearchParams()
@@ -455,6 +525,15 @@ export default function TennisMatch() {
                 </div>
               )}
             </div>
+
+            <Safe what="the fans' picks">
+              {m ? (
+                <FanVote tour={tour} names={[m.winner.name, m.loser.name]} date={m.date} winner={m.winner.name} />
+              ) : live && !live.gone && live.start && (
+                <FanVote tour={live.tour} names={live.players.map((p) => p.name)} date={live.start} espn={espn}
+                  open={live.state === 'upcoming' && new Date(live.start) > new Date()} />
+              )}
+            </Safe>
 
             {!m && live && !live.gone && live.state === 'live' && eb && (
               <Safe what="the stats at this score">

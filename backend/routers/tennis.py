@@ -7,18 +7,21 @@ exist (404), not that it's forbidden.
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 import tennis_early_break
+import tennis_kb as kb
 import tennis_pressure
 import tennis_stats
 import tennis_sync
 from auth import current_user
 from database import get_db
-from models import User
+from models import TennisFanVote, User
 
 router = APIRouter(prefix="/tennis", tags=["tennis"])
 
@@ -325,6 +328,65 @@ def matchup(tour: str, a: int | None = None, b: int | None = None, surface: str 
     if a and b:
         out["h2h"] = h2h(tour, a, b, db, _)
     return out
+
+
+class FanVoteIn(BaseModel):
+    tour: str
+    espn: str
+    pick: str
+
+
+def _pair(a: str, b: str) -> str:
+    return "|".join(sorted((kb.norm(a), kb.norm(b))))
+
+
+@router.get("/fans", response_model=dict)
+def fans(tour: str, a: str, b: str, date: str, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Who the fans picked for a match: the two players' names and when it
+    starts (or the day it was played). Picks made within two days either
+    side count; when the pair met twice in that time, the nearest."""
+    try:
+        when = datetime.fromisoformat(date.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(400, "Bad date")
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    rows = (db.query(TennisFanVote, User.name).join(User, User.id == TennisFanVote.voter_id)
+            .filter(TennisFanVote.tour == tour.upper(), TennisFanVote.pair == _pair(a, b),
+                    TennisFanVote.start.between(when - timedelta(days=2), when + timedelta(days=2))).all())
+    if rows:
+        near = min({v.espn: abs((v.start - when).total_seconds()) for v, _ in rows}.items(), key=lambda x: x[1])[0]
+        rows = [(v, n) for v, n in rows if v.espn == near]
+    counts = defaultdict(int)
+    for v, _ in rows:
+        counts[v.pick] += 1
+    return {"total": len(rows), "counts": dict(counts),
+            "mine": next((v.pick for v, _ in rows if v.voter_id == caller.id), None),
+            "voters": sorted(({"name": n, "pick": v.pick} for v, n in rows), key=lambda x: x["name"].lower())}
+
+
+@router.post("/fans", response_model=dict)
+def fan_vote(body: FanVoteIn, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Picks (or changes the pick of) who wins a match that hasn't started."""
+    import tennis_live
+    m = next((x for x in tennis_live.matches(db, body.tour)["matches"] if x["espn"] == body.espn), None)
+    start = None
+    if m and m.get("start"):
+        start = datetime.fromisoformat(m["start"].replace("Z", "+00:00"))
+    if not m or m["state"] != "upcoming" or not start or start <= datetime.now(timezone.utc):
+        raise HTTPException(409, "Voting closed - the match has started")
+    names = [p["name"] for p in m["players"]]
+    pick = kb.norm(body.pick)
+    if pick not in [kb.norm(n) for n in names]:
+        raise HTTPException(400, "Pick one of the two players")
+    v = db.query(TennisFanVote).filter_by(espn=body.espn, voter_id=caller.id).first()
+    if not v:
+        v = TennisFanVote(espn=body.espn, voter_id=caller.id)
+        db.add(v)
+    v.tour, v.pair, v.start = m["tour"], _pair(*names), start
+    v.pick, v.pick_name = pick, next(n for n in names if kb.norm(n) == pick)
+    db.commit()
+    return fans(m["tour"], names[0], names[1], m["start"], db, caller)
 
 
 @router.get("/h2h", response_model=dict)

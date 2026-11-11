@@ -1554,3 +1554,25 @@ class RecipeKitchen(Base):
     # override the worked-out ones; "had" suggests foods as they type
     foods_json = Column(Text, nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class TennisFanVote(Base):
+    """A fan's pick of who wins a tennis match, made on the match page
+    before it starts (routers/tennis fans). The match is the two players
+    (`pair`: their names, normalised and sorted, "a|b") on a tour, around
+    `start`, so a pick made on the upcoming match is found again on the
+    finished one; `espn` is the upcoming match it was made on."""
+
+    __tablename__ = "tennis_fan_votes"
+    __table_args__ = (UniqueConstraint("espn", "voter_id", name="ux_tennis_fan_vote"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    tour = Column(String(3), nullable=False)
+    pair = Column(String(200), nullable=False, index=True)
+    espn = Column(String(40), nullable=False)
+    start = Column(DateTime(timezone=True), nullable=False)
+    voter_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    pick = Column(String(100), nullable=False)          # normalised name
+    pick_name = Column(String(100), nullable=False)     # as shown
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
