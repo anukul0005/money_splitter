@@ -302,8 +302,8 @@ function ScoreStats({ live, eb, players, names }) {
  *  with the tour. Shown all match, quietly; when a set reaches one of the
  *  two scores the card comes forward and reads the row out. */
 const PRESSURE_ROWS = [
-  ['s54', 'Serving for the set at 5-4', 'broken'],
-  ['s45', 'Serving at 4-5 to stay in it', 'broken = set lost'],
+  ['s54', 'Ahead 5-4, serving to win the set', 'hold = set won · broken = back to 5-5'],
+  ['s45', 'Behind 4-5, serving to stay in the set', 'hold = 5-5 · broken = set lost 4-6'],
 ]
 function PressureCard({ players, names, live }) {
   const data = players.map((p) => p?.pressure)
@@ -356,7 +356,7 @@ function PressureCard({ players, names, live }) {
       <table className="w-full text-xs mt-1">
         <thead>
           <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
-            <th className="py-1 text-left" />
+            <th className="py-1 text-left font-semibold normal-case tracking-normal text-gray-400">% of these games broken</th>
             <th className="py-1">{last(names[0])}</th><th className="py-1">{last(names[1])}</th><th className="py-1">Tour</th>
           </tr>
         </thead>
@@ -379,7 +379,7 @@ function PressureCard({ players, names, live }) {
         </tbody>
       </table>
       <p className="text-[10px] text-gray-400 mt-2">
-        Green / red: 5+ points better / worse for that player than the tour; grey = under 5 games charted.
+        Lower is better - 2/15 = broken in 2 of the 15 such games charted.Green / red: 5+ points better / worse for that player than the tour; grey = under 5 games charted.
         Match Charting Project, {data.find((x) => x)?.from_year} on.
       </p>
     </div>
