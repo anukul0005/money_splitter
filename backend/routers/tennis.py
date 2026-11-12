@@ -391,11 +391,11 @@ def odds(tour: str, a: str, b: str, tournament: str = "", start: str = "",
                               {w["name"]: {k: w[k] for k in ("median", "best", "books")} for w in out["winner"]},
                               out.get("totals"), out.get("source"))
         print(f"[tennis-odds] {a} v {b}: " + (out.get("source") and f"{out['source']}, {len(out.get('winner', []))} prices, "
-                                               f"{len(out.get('totals') or [])} totals" or ", ".join(k for k in out if out[k] is True)))
+                                               f"{len(out.get('totals') or [])} totals" or ", ".join(k for k in out if out[k] is True)), flush=True)
         return out
     except Exception as err:
         db.rollback()
-        print(f"[tennis-odds] {err}")
+        print(f"[tennis-odds] {err}", flush=True)
         return {"error": True}
 
 

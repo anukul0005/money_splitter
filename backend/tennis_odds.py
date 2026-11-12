@@ -138,7 +138,7 @@ def _ta_day(tour: str, day: str) -> list:
         data = _ta_get(f"/tennis/v2/upcoming/matches/{tour.lower()}", dateOnly=day, page=page, limit=100, group="singles")
         got = _rows(data)
         if page == 1 and not got:
-            print(f"[tennis-odds] Tennis API {tour} {day}: no rows, keys {list(data)[:10] if isinstance(data, dict) else type(data)}")
+            print(f"[tennis-odds] Tennis API {tour} {day}: no rows, keys {list(data)[:10] if isinstance(data, dict) else type(data)}", flush=True)
         rows += got
         more = isinstance(data, dict) and (data.get("hasNextPage") or (data.get("pagination") or {}).get("hasNextPage"))
         if not more:
@@ -233,13 +233,13 @@ def match(tour: str, a: str, b: str, tournament: str = "", start: str = "") -> d
         try:
             ta = _tennis_api(tour, a, b, start)
         except Exception as err:          # over the day's 50, or down: the other one
-            print(f"[tennis-odds] Tennis API: {err}")
+            print(f"[tennis-odds] Tennis API: {err}", flush=True)
     if has_oa:
         try:
             oa = _odds_api(tour, a, b, tournament)
             oa = None if oa.get("none") else oa
         except Exception as err:
-            print(f"[tennis-odds] The Odds API: {err}")
+            print(f"[tennis-odds] The Odds API: {err}", flush=True)
     if not ta and not oa:
         return {"none": True, "remaining": remaining}
     books = lambda x: max((w.get("books", 0) for w in (x or {}).get("winner", [])), default=0)
@@ -253,7 +253,7 @@ def match(tour: str, a: str, b: str, tournament: str = "", start: str = "") -> d
             if g:
                 totals.append(g)
         except Exception as err:
-            print(f"[tennis-odds] Tennis API match odds: {err}")
+            print(f"[tennis-odds] Tennis API match odds: {err}", flush=True)
     if ta and ta.get("totals") and ta["totals"]["unit"] == "sets":
         totals.append({**ta["totals"], "source": "Pinnacle"})
     return {"source": win["source"], "sources": [x["source"] for x in (ta, oa) if x],
@@ -400,9 +400,9 @@ def keep_job(db) -> dict:
             mark("odds_results_day", today.isoformat())
     except Exception as err:
         db.rollback()
-        print(f"[tennis-odds] keep: {err}")
+        print(f"[tennis-odds] keep: {err}", flush=True)
         out["error"] = str(err)[:200]
-    print(f"[tennis-odds] keep {out} · {ta_used.get(today.isoformat(), 0)} Tennis API requests today")
+    print(f"[tennis-odds] keep {out} · {ta_used.get(today.isoformat(), 0)} Tennis API requests today", flush=True)
     return out
 
 
