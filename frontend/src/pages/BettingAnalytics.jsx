@@ -1,6 +1,6 @@
 import { Component, memo, useEffect, useRef, useState, useTransition } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { badmintonSummary, tennisDay, tennisEarlyBreak, tennisLive, tennisLivePoints, tennisMyPicks, tennisOddsDays, tennisPatterns, tennisPickHistory, tennisPlayer, tennisPlayers, tennisPressure, tennisRankings, onBackInView, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
+import { badmintonSummary, tennisDay, tennisEarlyBreak, tennisLive, tennisLivePoints, tennisMyPicks, tennisOddsDays, tennisPatterns, tennisPickHistory, sportPickHistory, tennisPlayer, tennisPlayers, tennisPressure, tennisRankings, onBackInView, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
 import RankingList, { RankingSwitch } from '../components/RankingList'
 import Badminton, { B_TABS } from './Badminton'
 import Hockey, { H_TABS } from './Hockey'
@@ -1382,10 +1382,12 @@ export function LiveRow({ m, onOpen, plain, eb, picks, odds }) {
  *  the kept pre-match price of the player I picked (backend
  *  /tennis/fans/mine/history). A pick with no kept price isn't counted. */
 const STAKE_KEY = 'tennis.mockStake'
-function MyPicks({ active }) {
+function MyPicks({ active, sport = 'tennis' }) {
   const [d, setD] = useState(null)
   const [stake, setStake] = useState(() => { try { return Number(localStorage.getItem(STAKE_KEY)) || 100 } catch { return 100 } })
-  useEffect(() => { if (active) tennisPickHistory().then((r) => setD(r.data.picks)).catch(() => setD([])) }, [active])
+  useEffect(() => {
+    if (active) (sport === 'tennis' ? tennisPickHistory() : sportPickHistory(sport)).then((r) => setD(r.data.picks)).catch(() => setD([]))
+  }, [active, sport])
   const save = (v) => { setStake(v); try { localStorage.setItem(STAKE_KEY, String(v)) } catch { /* private mode */ } }
   if (!d) return <p className="text-xs text-gray-400 text-center py-6">Loading your picks…</p>
   const rupees = (x) => `${x < 0 ? '−' : x > 0 ? '+' : ''}₹${Math.abs(Math.round(x)).toLocaleString('en-IN')}`
@@ -1417,10 +1419,10 @@ function MyPicks({ active }) {
           <Stat label="Staked" v={`₹${staked.toLocaleString('en-IN')}`} />
         </div>
         <p className="text-[10px] text-gray-400 mt-2">
-          Settled at the bookmakers' pre-match price for the player picked (decimal: a win pays stake × (odds − 1)).
+          {sport === 'tennis' ? "Settled at the bookmakers' pre-match price for the player picked" : 'Settled at the odds you typed in beside each pick on the Live tab (no bookmaker feed covers this sport)'} - decimal: a win pays stake × (odds − 1), a loss costs the stake.
           {favs.length > 0 && ` Backed the favourite ${favs.length} time${favs.length === 1 ? '' : 's'}, the outsider ${settled.length - favs.length}.`}
           {d.length - settled.length > 0 && ` ${d.filter((p) => p.status === 'pending').length} still to play`}
-          {d.filter((p) => p.status !== 'pending' && !p.odds).length > 0 && ` · ${d.filter((p) => p.status !== 'pending' && !p.odds).length} without a kept price (not counted)`}
+          {d.filter((p) => p.status !== 'pending' && !p.odds).length > 0 && ` · ${d.filter((p) => p.status !== 'pending' && !p.odds).length} ${sport === 'tennis' ? 'without a kept price' : 'with no odds typed in'} (not counted)`}
         </p>
       </div>
       <div className="card overflow-x-auto">
@@ -1432,11 +1434,11 @@ function MyPicks({ active }) {
             </tr>
           </thead>
           <tbody>
-            {d.length === 0 && <tr><td colSpan={6} className="py-4 text-center text-gray-400">No picks yet - pick a winner on any upcoming match's page.</td></tr>}
+            {d.length === 0 && <tr><td colSpan={6} className="py-4 text-center text-gray-400">No picks yet - {sport === 'tennis' ? "pick a winner on any upcoming match's page." : 'pick a winner under any upcoming match on the Live tab.'}</td></tr>}
             {d.map((p) => {
               const x = pl(p)
               return (
-                <tr key={p.espn} className="border-t border-gray-100 align-top">
+                <tr key={p.espn || p.key} className="border-t border-gray-100 align-top">
                   <td className="py-1.5 pr-1 text-gray-500 whitespace-nowrap">{fmtShort(p.start.slice(0, 10))}</td>
                   <td className="py-1.5 pr-1">
                     <span className="font-bold text-gray-900">{p.pick}</span>
@@ -1626,7 +1628,7 @@ export default function BettingAnalytics() {
               <br />
               live scores, tables and world rankings from fih.hockey
             </p>
-            <div className="grid grid-cols-4 mt-2.5 rounded-md border border-amber-300 overflow-hidden">
+            <div className="grid grid-cols-5 mt-2.5 rounded-md border border-amber-300 overflow-hidden">
               {H_TABS.map(([k, l]) => (
                 <button key={k} onClick={() => setHtab(k)}
                   className={`py-1.5 text-[11px] font-bold ${htab === k ? 'bg-brand-400 text-white' : 'bg-white text-gray-600'}`}>
@@ -1642,7 +1644,7 @@ export default function BettingAnalytics() {
               <br />
               {bsum?.sync?.running ? (bsum.sync.todo ? `reading BWF's archive - ${bsum.sync.done} of ${bsum.sync.todo} tournaments` : "reading BWF's calendars, 2018 to now…") : 'live scores from bwfbadminton.com'}
             </p>
-            <div className="grid grid-cols-4 mt-2.5 rounded-md border border-amber-300 overflow-hidden">
+            <div className="grid grid-cols-5 mt-2.5 rounded-md border border-amber-300 overflow-hidden">
               {B_TABS.map(([k, l]) => (
                 <button key={k} onClick={() => setBtab(k)}
                   className={`py-1.5 text-[11px] font-bold ${btab === k ? 'bg-brand-400 text-white' : 'bg-white text-gray-600'}`}>
@@ -1681,14 +1683,15 @@ export default function BettingAnalytics() {
         {sport === 'hockey' && [...hOpened].map((k) => (
           <Pane key={`h-${k}`} hidden={k !== htab} deps={`${k === htab}|${params.get('he') || ''}`}>
             <Safe what="this tab">
-              <Hockey tab={k} active={k === htab} />
+              {k === 'picks' ? <MyPicks sport="hockey" active={k === htab} /> : <Hockey tab={k} active={k === htab} />}
             </Safe>
           </Pane>
         ))}
         {sport === 'badminton' && [...bOpened].map((k) => (
           <Pane key={`b-${k}`} hidden={k !== btab} deps={`${k === btab}|${k === 'players' ? bp : ''}|${k === 'results' ? bsum?.matches : ''}`}>
             <Safe what="this tab">
-              <Badminton tab={k} active={k === btab} player={bp} setPlayer={setBp} sum={bsum} />
+              {k === 'picks' ? <MyPicks sport="badminton" active={k === btab} />
+                : <Badminton tab={k} active={k === btab} player={bp} setPlayer={setBp} sum={bsum} />}
             </Safe>
           </Pane>
         ))}

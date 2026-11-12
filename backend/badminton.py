@@ -287,9 +287,11 @@ def _read_live() -> dict:
         days = sorted({d for d in (now.date() - timedelta(days=1), now.date(), now.date() + timedelta(days=1))
                        if start <= d <= end})
         raw = {}
-        for d in days:
-            got = _get("/tournaments/day-matches", {"tournamentCode": t["code"], "date": d.isoformat(),
-                                                    "order": 2, "court": 0})
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(3) as pool:                  # the days at once, not one after another
+            pages = list(pool.map(lambda d: (d, _get("/tournaments/day-matches", {"tournamentCode": t["code"], "date": d.isoformat(),
+                                                                                  "order": 2, "court": 0})), days))
+        for d, got in pages:
             for m in got if isinstance(got, list) else []:
                 if not m.get("isTeamMatch") and m.get("id"):
                     raw[m["id"]] = (m, d)
@@ -329,10 +331,27 @@ def _neg(s: str) -> str:
     return "".join(chr(0x10FFFF - ord(c)) for c in s)
 
 
+KEEP_IDLE = 5 * 60          # kept in the background this often when nobody's looking
+_asked = 0.0
+
+
+def keep_live() -> None:
+    """From server start: the live list read now and kept fresh, so the
+    Live tab never waits the minute a cold read takes."""
+    global _live
+    while True:
+        try:
+            _live = (time.time(), _read_live())
+        except Exception as e:
+            print(f"[badminton] keep live: {e}")
+        time.sleep(LIVE_SECONDS if time.time() - _asked < 20 * 60 else KEEP_IDLE)
+
+
 def live() -> dict:
     """Today's matches at the tournaments under way; read again when LIVE_SECONDS old
     (the request gets the last answer while that happens in the background)."""
-    global _live, _live_busy
+    global _live, _live_busy, _asked
+    _asked = time.time()
     if _live and time.time() - _live[0] < LIVE_SECONDS:
         return _live[1]
     if _live is None:

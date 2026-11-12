@@ -1597,3 +1597,28 @@ class TennisOdds(Base):
     totals = Column(Text, nullable=True)
     source = Column(String(60), nullable=True)
     read_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SportPick(Base):
+    """My pick of who wins a badminton or hockey match, made before it
+    starts (routers/picks) - tennis has its own (TennisFanVote). Neither
+    sport has a bookmaker feed, so `odds` is the price the picker typed in;
+    My picks settles its mock bets at it. `ref` JSON: where the result is
+    read from (badminton: the BWF match id; hockey: series and game ids)."""
+
+    __tablename__ = "sport_picks"
+    __table_args__ = (UniqueConstraint("sport", "match_key", "voter_id", name="ux_sport_pick"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    sport = Column(String(12), nullable=False)
+    match_key = Column(String(40), nullable=False)
+    voter_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    side = Column(Integer, nullable=False)                 # 1 or 2, as the feed lists them
+    pick_name = Column(String(200), nullable=False)
+    other_name = Column(String(200), nullable=False)
+    label = Column(String(200), nullable=True)             # tournament · event / round
+    start = Column(DateTime(timezone=True), nullable=False)
+    odds = Column(Float, nullable=True)
+    ref = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

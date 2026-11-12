@@ -18,7 +18,10 @@ from sqlalchemy import text
 import tennis_kb as kb
 
 CACHE_SECONDS = 30
-STALE_SECONDS = 90     # older than this is read again before answering, not after
+KEEP_ACTIVE = 30       # kept fresh in the background: this often while someone looks,
+KEEP_IDLE = 60         # and this often otherwise - so a request never waits on ESPN
+ACTIVE_FOR = 20 * 60   # "someone looks" = asked within this
+_asked = 0.0
 AHEAD_HOURS = 36                      # upcoming: what starts within this
 _cache: dict[str, tuple[float, list]] = {}
 _tourneys: tuple[float, object] | None = None
@@ -261,13 +264,23 @@ def _refresh(t: str) -> None:
 
 def warm() -> None:
     """At server start: the tournament list, both tours' matches and the WTA points
-    ready before anyone opens the Live tab."""
+    ready before anyone opens the Live tab - then kept fresh for as long as
+    the server runs (KEEP_ACTIVE / KEEP_IDLE), so opening the app is instant."""
     for t in ("ATP", "WTA"):
         _refresh(t)
     _load_wta_points()
+    while True:
+        time.sleep(KEEP_ACTIVE if time.time() - _asked < ACTIVE_FOR else KEEP_IDLE)
+        for t in ("ATP", "WTA"):
+            try:
+                _refresh(t)
+            except Exception as err:
+                print(f"[tennis-live] keep {t}: {err}")
 
 
 def matches(db, tour: str = "all") -> dict:
+    global _asked
+    _asked = time.time()
     tours = [tour.upper()] if tour.upper() in ("ATP", "WTA") else ["ATP", "WTA"]
     out = []
     missing = []
@@ -275,14 +288,12 @@ def matches(db, tour: str = "all") -> dict:
         with _lock:
             hit = _cache.get(t)
         age = time.time() - hit[0] if hit else None
-        if hit and age < STALE_SECONDS:
-            out += hit[1]
+        if hit:
+            out += hit[1]                          # kept fresh by warm()'s loop - never waited on
             if age >= CACHE_SECONDS:
-                _bg(f"espn-{t}", lambda t=t: _refresh(t))     # this answer now, a fresh one behind it
+                _bg(f"espn-{t}", lambda t=t: _refresh(t))
         else:
-            # Nothing, or nobody has asked for a while (the app was closed):
-            # wait for a fresh read rather than show scores from minutes ago
-            missing.append(t)
+            missing.append(t)                      # only before the first read
     if missing:                                    # only the very first ask waits
         _tourney_info()
         from concurrent.futures import ThreadPoolExecutor

@@ -1,0 +1,11 @@
+# Daily jobs (birthdays, memories, reminders, summaries) at 12:35 IST.
+[Unit]
+Description=Settle daily jobs
+
+[Timer]
+OnCalendar=*-*-* 07:35:00 UTC
+Persistent=true
+Unit=settle-job@daily.service
+
+[Install]
+WantedBy=timers.target

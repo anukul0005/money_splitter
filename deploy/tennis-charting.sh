@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Weekly (deploy/settle-cron): fetch the Match Charting Project's latest
+# Weekly (deploy/systemd/settle-charting.timer): fetch the Match Charting Project's latest
 # point-by-point logs and rebuild the tennis patterns worked out from them -
 # early break (tennis_early_break) and pressure at 4-5 (tennis_pressure).
 # The results go to ~/settle-data/tennis, outside the checkout a deploy

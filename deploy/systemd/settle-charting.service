@@ -1,0 +1,8 @@
+# Tennis patterns rebuilt from the Match Charting Project (deploy/tennis-charting.sh).
+[Unit]
+Description=Settle tennis patterns rebuild
+
+[Service]
+Type=oneshot
+User=ubuntu
+ExecStart=/bin/bash /opt/settle/deploy/tennis-charting.sh

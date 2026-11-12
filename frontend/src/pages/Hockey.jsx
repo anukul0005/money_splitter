@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import RankingList, { RankingSwitch } from '../components/RankingList'
 import { CardHead, Tile, fmtDate } from './Badminton'
+import SportPick, { useSportPicks } from '../components/SportPick'
 import { hockeyEvent, hockeyEvents, hockeyH2H, hockeyLive, hockeyRankings, hockeyStats } from '../api'
 
 /**
@@ -10,7 +11,7 @@ import { hockeyEvent, hockeyEvents, hockeyH2H, hockeyLive, hockeyRankings, hocke
  * (backend routers/hockey.py, read from fih.hockey). A match opens in place
  * with the two teams' head-to-head.
  */
-export const H_TABS = [['live', 'Live'], ['results', 'Results'], ['rankings', 'Rankings'], ['stats', 'Stats']]
+export const H_TABS = [['live', 'Live'], ['results', 'Results'], ['picks', 'My picks'], ['rankings', 'Rankings'], ['stats', 'Stats']]
 const GENDER = { M: "Men's", F: "Women's" }
 
 const fmtTime = (iso) => {
@@ -154,6 +155,7 @@ function ComingUp({ list, onOpen }) {
 
 function Live({ active, onOpen }) {
   const [d, setD] = useState(null)
+  const [picks, setPick] = useSportPicks('hockey', active)
   const [err, setErr] = useState(false)
   useEffect(() => {
     if (!active) return undefined
@@ -179,7 +181,15 @@ function Live({ active, onOpen }) {
               <div key={k} className="px-4 pb-2 mt-2">
                 <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">{label} · {ms.length}</p>
                 {ms.length === 0 && <p className="text-xs text-gray-400 py-1">Nothing on the pitch right now.</p>}
-                {(k === 'finished' ? [...ms].reverse() : ms).map((m) => <Match key={m.id} m={m} />)}
+                {(k === 'finished' ? [...ms].reverse() : ms).map((m) => (
+                  <div key={m.id}>
+                    <Match m={m} />
+                    {picks && m.home.name !== 'TBD' && m.away.name !== 'TBD' && (
+                      <SportPick sport="hockey" mkey={String(m.id)} pick={picks[String(m.id)]} onSaved={setPick}
+                        upcoming={m.state === 'upcoming'} names={[m.home.name, m.away.name]} />
+                    )}
+                  </div>
+                ))}
               </div>
             )
           })}

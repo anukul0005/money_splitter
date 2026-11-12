@@ -1,0 +1,9 @@
+# One of the API's /cron jobs (deploy/cron.sh daily|tennis), started by its timer.
+[Unit]
+Description=Settle scheduled job: %i
+After=settle-api.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+ExecStart=/opt/settle/deploy/cron.sh %i

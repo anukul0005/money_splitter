@@ -55,10 +55,10 @@ if [ ! -f /etc/settle/api.env ]; then
 fi
 sudo chown "$USER": /etc/settle/api.env && chmod 600 /etc/settle/api.env
 sudo cp "$APP/deploy/settle-api.service" /etc/systemd/system/
-sudo cp "$APP/deploy/settle-cron" /etc/cron.d/settle-cron && sudo chmod 644 /etc/cron.d/settle-cron
+sudo cp "$APP"/deploy/systemd/* /etc/systemd/system/          # scheduled jobs (timers - no cron here)
 sudo cp "$APP/deploy/Caddyfile" /etc/caddy/Caddyfile
 sudo systemctl daemon-reload
-sudo systemctl enable settle-api caddy
+sudo systemctl enable settle-api caddy settle-daily.timer settle-tennis.timer settle-charting.timer
 
 echo
 echo "Done. Next:"

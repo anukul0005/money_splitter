@@ -5,7 +5,7 @@ from database import create_tables, get_settings
 from routers import (
     groups, expenses, settlements, stats, users, payments, activity, recommend,
     food, knowledge_api, forecast, cron, receipts, push, loans, gmail_auth,
-    credit_cards, payment_claims, nudges, ledger, drinks, tennis, bets, badminton, hockey, recipes, ask, salary, discussions,
+    credit_cards, payment_claims, nudges, ledger, drinks, tennis, bets, badminton, hockey, picks, recipes, ask, salary, discussions,
 )
 
 
@@ -61,6 +61,7 @@ async def lifespan(app: FastAPI):
     # Badminton: BWF results from 2018 read in once (resumable), then kept current.
     import badminton
     threading.Thread(target=badminton.loop, daemon=True, name="badminton-sync").start()
+    threading.Thread(target=badminton.keep_live, daemon=True, name="badminton-live").start()
     # Woken after 12:30 IST with today's daily jobs not yet run (the cron
     # ping was refused, say)? Run them now - see routers/cron.py.
     cron.maybe_catch_up()
@@ -131,6 +132,7 @@ app.include_router(tennis.router)
 app.include_router(bets.router)
 app.include_router(badminton.router)
 app.include_router(hockey.router)
+app.include_router(picks.router)
 app.include_router(recipes.router)
 app.include_router(ask.router)
 

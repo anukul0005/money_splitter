@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import RankingList, { RankingSwitch } from '../components/RankingList'
 import DatePicker from '../components/DatePicker'
+import SportPick, { useSportPicks } from '../components/SportPick'
 import {
   badmintonDay, badmintonH2H, badmintonLive, badmintonMatch, badmintonPlayer, badmintonPlayers, badmintonRankings,
   badmintonStats, badmintonTournament, badmintonTournaments,
@@ -13,7 +14,7 @@ import {
  * read from bwfbadminton.com). A match opens on a page of its own, as in
  * tennis (pages/BadmintonMatch.jsx).
  */
-export const B_TABS = [['live', 'Live'], ['results', 'Results'], ['players', 'Players'], ['stats', 'Stats']]
+export const B_TABS = [['live', 'Live'], ['results', 'Results'], ['picks', 'My picks'], ['players', 'Players'], ['stats', 'Stats']]
 const EVENTS = [['MS', "Men's singles"], ['WS', "Women's singles"], ['MD', "Men's doubles"], ['WD', "Women's doubles"], ['XD', 'Mixed']]
 export const EVENT = Object.fromEntries(EVENTS)
 export const ROUND = { Final: 'Final', SF: 'Semifinals', QF: 'Quarterfinals', R16: 'Round of 16', R32: 'Round of 32', R64: 'Round of 64' }
@@ -181,6 +182,7 @@ export function CardHead({ title, sub, logo }) {
 
 function Live({ active, onPlayer }) {
   const [d, setD] = useState(null)
+  const [picks, setPick] = useSportPicks('badminton', active)
   const [err, setErr] = useState(false)
   useEffect(() => {
     if (!active) return undefined
@@ -206,7 +208,16 @@ function Live({ active, onPlayer }) {
               <div key={k} className="px-4 pb-2 mt-2">
                 <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">{label} · {ms.length}</p>
                 {ms.length === 0 && <p className="text-xs text-gray-400 py-1">Nothing on court right now.</p>}
-                {ms.map((m) => <Match key={m.id} m={m} onPlayer={onPlayer} showEvent />)}
+                {ms.map((m) => (
+                  <div key={m.id}>
+                    <Match m={m} onPlayer={onPlayer} showEvent />
+                    {picks && m.side1.players[0]?.name !== 'TBD' && m.side2.players[0]?.name !== 'TBD' && (
+                      <SportPick sport="badminton" mkey={String(m.id)} pick={picks[String(m.id)]} onSaved={setPick}
+                        upcoming={m.state === 'upcoming' && !!m.time_utc && new Date(`${m.time_utc.replace(' ', 'T')}Z`) > new Date()}
+                        names={[m.side1, m.side2].map((s) => s.players.map((p) => p.name).join(' / '))} />
+                    )}
+                  </div>
+                ))}
               </div>
             )
           })}

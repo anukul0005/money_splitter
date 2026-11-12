@@ -366,7 +366,7 @@ BACKFILL_DAYS = 45
 
 def keep_job(db) -> dict:
     """From the 15-minute tennis cron. Within Tennis API's 50 a day: today's
-    lists every 6 hours, tomorrow's every 12, yesterday's results once, and
+    lists every 3 hours, tomorrow's every 12, yesterday's results once, and
     two more days back each day until BACKFILL_DAYS are filled."""
     if not os.environ.get("TENNIS_API_KEY"):
         return {"skipped": "no key"}
@@ -384,7 +384,7 @@ def keep_job(db) -> dict:
     age = lambda k: (now - _when(meta(k))).total_seconds() / 3600 if _when(meta(k)) else 1e9
     out = {}
     try:
-        if age("odds_today_at") >= 6:
+        if age("odds_today_at") >= 3:
             out["today"] = sum(keep_day(db, t, today) for t in ("ATP", "WTA"))
             mark("odds_today_at", now.isoformat())
         if age("odds_tomorrow_at") >= 12:
