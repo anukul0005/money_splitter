@@ -5,9 +5,14 @@ set -euo pipefail
 APP=/opt/settle
 cd "$APP"
 
-echo "== pulling"
-git fetch --quiet origin main
-git reset --hard --quiet origin/main
+if [ "${1:-}" != --pulled ]; then
+  echo "== pulling"
+  git fetch --quiet origin main
+  git reset --hard --quiet origin/main
+  # Carry on with the copy just pulled: bash reads a script as it goes, so
+  # the rest of this one - replaced on disk by the reset - mustn't be run
+  exec bash "$APP/deploy/deploy.sh" --pulled
+fi
 
 echo "== backend packages"
 "$APP/venv/bin/pip" install --quiet -r backend/requirements.txt
