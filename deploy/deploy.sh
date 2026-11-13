@@ -23,10 +23,12 @@ cd "$APP"
 echo "== restarting"
 sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
 # Scheduled jobs: systemd timers (this VM has no cron)
+sudo install -d -o ubuntu -g ubuntu /var/backups/settle      # the database backups (deploy/backup-db.sh)
+command -v rclone >/dev/null || sudo apt-get install -y -qq rclone   # their weekly copy to Google Drive
 sudo rm -f /etc/cron.d/settle-cron
 sudo cp deploy/systemd/* /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now --quiet settle-daily.timer settle-tennis.timer settle-charting.timer
+sudo systemctl enable --now --quiet settle-daily.timer settle-tennis.timer settle-charting.timer settle-backup.timer
 sudo systemctl reload caddy
 sudo systemctl restart settle-api
 for i in $(seq 1 30); do

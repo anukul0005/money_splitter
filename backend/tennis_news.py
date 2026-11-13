@@ -71,7 +71,7 @@ def sports_for(user) -> list[str]:
         return list(SPORTS)
     return [s for s in SPORTS if s in OPEN_SPORTS]
 MAX_AGE = timedelta(days=7)   # a feed's old items (the Guardian's football one goes back years) stay out
-POLL_EVERY = 1800           # seconds - not oftener: each read wakes the database (Neon bills it awake)
+POLL_EVERY = 600            # seconds
 PUSH_EACH = 3               # stories pushed one by one per read; the rest as "+N more"
 FRESH = timedelta(hours=3)  # only stories this new are pushed
 HEADLINE_WORDS = 20

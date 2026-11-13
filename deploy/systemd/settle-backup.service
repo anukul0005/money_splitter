@@ -1,0 +1,8 @@
+# The database's nightly backup (deploy/backup-db.sh).
+[Unit]
+Description=Settle database backup
+
+[Service]
+Type=oneshot
+User=ubuntu
+ExecStart=/bin/bash /opt/settle/deploy/backup-db.sh

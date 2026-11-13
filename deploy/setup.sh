@@ -58,7 +58,7 @@ sudo cp "$APP/deploy/settle-api.service" /etc/systemd/system/
 sudo cp "$APP"/deploy/systemd/* /etc/systemd/system/          # scheduled jobs (timers - no cron here)
 sudo cp "$APP/deploy/Caddyfile" /etc/caddy/Caddyfile
 sudo systemctl daemon-reload
-sudo systemctl enable settle-api caddy settle-daily.timer settle-tennis.timer settle-charting.timer
+sudo systemctl enable settle-api caddy settle-daily.timer settle-tennis.timer settle-charting.timer settle-backup.timer
 
 echo
 echo "Done. Next:"
