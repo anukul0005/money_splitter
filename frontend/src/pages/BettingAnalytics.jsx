@@ -1,6 +1,6 @@
 import { Component, memo, useEffect, useRef, useState, useTransition } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { badmintonSummary, tennisDay, tennisEarlyBreak, tennisLive, tennisLivePoints, tennisMyPicks, tennisOddsDays, tennisPatterns, tennisPickHistory, sportPickHistory, tennisPlayer, tennisPlayers, tennisPressure, tennisRankings, onBackInView, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
+import { badmintonLive, badmintonSummary, hockeyLive, peek, tennisDay, tennisEarlyBreak, tennisLive, tennisLivePoints, tennisMyPicks, tennisOddsDays, tennisPatterns, tennisPickHistory, sportPickHistory, tennisPlayer, tennisPlayers, tennisPressure, tennisRankings, onBackInView, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
 import RankingList, { RankingSwitch } from '../components/RankingList'
 import Badminton, { B_TABS } from './Badminton'
 import Hockey, { H_TABS } from './Hockey'
@@ -190,11 +190,11 @@ function TournamentCard({ t, onPlayer, onOpen, odds }) {
 }
 
 function Results({ tour, fresh, onPlayer, onOpen }) {
-  const [day, setDay] = useState(null)
+  const [day, setDay] = useState(() => peek('/tennis/day', { date: '', tour }) || null)
   const [date, setDate] = useState('')
   const [busy, setBusy] = useState(false)
   useEffect(() => {
-    setBusy(!fresh)                            // a refresh reloads quietly, without the loading line
+    setBusy(!fresh && !peek('/tennis/day', { date, tour }))   // a refresh, or a day seen before, reloads quietly
     tennisDay(date, tour).then((r) => { setDay(r.data); if (!date && r.data.date) setDate(r.data.date) })
       .catch(() => setDay({ tournaments: [] })).finally(() => setBusy(false))
   }, [date, tour, fresh])
@@ -1465,7 +1465,7 @@ function MyPicks({ active, sport = 'tennis' }) {
 
 /** Live now, then what starts in the next day and a half, by tournament: the list refreshed every 10 seconds, a WTA game's points every 3. */
 function Live({ tour, onOpen, active = true }) {
-  const [d, setD] = useState(null)
+  const [d, setD] = useState(() => peek('/tennis/live', { tour }) || null)   // the last list at once, then fresh
   const [picks, setPicks] = useState(null)        // my fan picks, by ESPN id
   const today = isoDay(Date.now())
   const kept = useKeptOdds(addDays(today, -1), addDays(today, 2), picks)
@@ -1587,7 +1587,9 @@ export default function BettingAnalytics() {
   // to any of them finds it waiting (api.remembered keeps the answers)
   useEffect(() => {
     const t = setTimeout(() => {
-      [() => tennisLive('all'), () => tennisDay('', 'all'), () => tennisSets(), () => tennisPatterns(2016)]
+      // all three sports, so switching to badminton or hockey is instant too
+      [() => tennisLive('all'), () => tennisDay('', 'all'), () => tennisSets(), () => tennisPatterns(2016),
+        () => badmintonLive(), () => badmintonSummary(), () => hockeyLive()]
         .forEach((f) => f().catch(() => {}))
     }, 800)
     return () => clearTimeout(t)

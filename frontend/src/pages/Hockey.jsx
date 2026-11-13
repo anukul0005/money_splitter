@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import RankingList, { RankingSwitch } from '../components/RankingList'
 import { CardHead, Tile, fmtDate } from './Badminton'
 import SportPick, { useSportPicks } from '../components/SportPick'
-import { hockeyEvent, hockeyEvents, hockeyH2H, hockeyLive, hockeyRankings, hockeyStats } from '../api'
+import { peek, hockeyEvent, hockeyEvents, hockeyH2H, hockeyLive, hockeyRankings, hockeyStats } from '../api'
 
 /**
  * Field hockey in the sports section (Betting analytics' 🏑 switch): FIH live
@@ -154,7 +154,7 @@ function ComingUp({ list, onOpen }) {
 }
 
 function Live({ active, onOpen }) {
-  const [d, setD] = useState(null)
+  const [d, setD] = useState(() => peek('/hockey/live') || null)      // the last list at once, then fresh
   const [picks, setPick] = useSportPicks('hockey', active)
   const [err, setErr] = useState(false)
   useEffect(() => {

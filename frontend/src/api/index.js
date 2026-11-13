@@ -289,6 +289,7 @@ export const getMyPlaceVisits  = (name) => api.get('/food/my-places/visits', { p
 // Betting analytics answers are kept a short while in memory: going back to a
 // tab or a page just seen shows at once instead of asking the server again.
 const memo = new Map()
+const last = new Map()                           // the last answer for each, however old
 const MIN = 60_000
 function remembered(url, params, ttl) {
   const k = url + JSON.stringify(params || {})
@@ -296,17 +297,22 @@ function remembered(url, params, ttl) {
   if (hit && Date.now() - hit.t < ttl) return hit.p
   const p = api.get(url, { params }).then((r) => {
     if (r.data?.refreshing) memo.delete(k)       // still being worked out: ask again next time
+    else last.set(k, r.data)
     return r
   }).catch((e) => { memo.delete(k); throw e })
   memo.set(k, { t: Date.now(), p })
   if (memo.size > 200) memo.delete(memo.keys().next().value)
+  if (last.size > 200) last.delete(last.keys().next().value)
   return p
 }
+/** The last answer seen for a remembered call (any age), or undefined - a
+ *  tab starts from it, so switching back shows at once, then updates. */
+export const peek = (url, params) => last.get(url + JSON.stringify(params || {}))
 
 export const tennisSummary  = ()                 => remembered('/tennis/summary', null, 5 * MIN)
 // Badminton - BWF live scores, results from 2018, players, stats (backend routers/badminton.py)
 export const badmintonSummary     = ()               => remembered('/badminton/summary', null, MIN)
-export const badmintonLive        = ()               => api.get('/badminton/live')
+export const badmintonLive        = ()               => remembered('/badminton/live', null, 8_000)
 export const badmintonTournaments = (year)           => remembered('/badminton/tournaments', { year }, 5 * MIN)
 export const badmintonTournament  = (id)             => remembered(`/badminton/tournament/${id}`, null, 2 * MIN)
 export const badmintonMatch       = (tid, code, finished) => remembered(`/badminton/match/${tid}/${code}`, { finished }, finished ? 60 * MIN : 15_000)
@@ -318,7 +324,7 @@ export const badmintonH2H         = (a, b)           => remembered('/badminton/h
 export const badmintonRankings    = (event)          => remembered('/badminton/rankings', { event }, 60 * MIN)
 export const badmintonStats       = (event, since)   => remembered('/badminton/stats', { event, since }, 10 * MIN)
 // Hockey - FIH live scores, tournaments, standings, stats, rankings (backend routers/hockey.py)
-export const hockeyLive     = ()                 => api.get('/hockey/live')
+export const hockeyLive     = ()                 => remembered('/hockey/live', null, 8_000)
 // My picks for badminton and hockey (backend routers/picks)
 export const sportPicks       = (sport)          => api.get('/picks/mine', { params: { sport } })
 export const sportPick        = (body)           => api.post('/picks', body)

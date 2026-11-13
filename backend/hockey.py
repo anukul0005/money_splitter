@@ -182,6 +182,18 @@ def live() -> dict:
             "updated": datetime.now(timezone.utc).isoformat()}
 
 
+def keep_live() -> None:
+    """From server start: the live list's FIH reads redone just before they
+    go stale, so the Live tab is answered from memory, never waiting on FIH."""
+    time.sleep(20)
+    while True:
+        try:
+            live()
+        except Exception as e:
+            print(f"[hockey] keep live: {e}")
+        time.sleep(10)                 # oftener than LIVE_SECONDS, so it is the one that waits
+
+
 # ── Standings, stats, head-to-head, rankings ────────────────────────────────
 
 def _int(v):

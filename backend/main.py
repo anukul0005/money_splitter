@@ -62,6 +62,8 @@ async def lifespan(app: FastAPI):
     import badminton
     threading.Thread(target=badminton.loop, daemon=True, name="badminton-sync").start()
     threading.Thread(target=badminton.keep_live, daemon=True, name="badminton-live").start()
+    import hockey
+    threading.Thread(target=hockey.keep_live, daemon=True, name="hockey-live").start()
     # Woken after 12:30 IST with today's daily jobs not yet run (the cron
     # ping was refused, say)? Run them now - see routers/cron.py.
     cron.maybe_catch_up()

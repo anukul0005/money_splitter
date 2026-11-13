@@ -4,6 +4,7 @@ import RankingList, { RankingSwitch } from '../components/RankingList'
 import DatePicker from '../components/DatePicker'
 import SportPick, { useSportPicks } from '../components/SportPick'
 import {
+  peek,
   badmintonDay, badmintonH2H, badmintonLive, badmintonMatch, badmintonPlayer, badmintonPlayers, badmintonRankings,
   badmintonStats, badmintonTournament, badmintonTournaments,
 } from '../api'
@@ -181,7 +182,7 @@ export function CardHead({ title, sub, logo }) {
 // ── Live ────────────────────────────────────────────────────────────────────
 
 function Live({ active, onPlayer }) {
-  const [d, setD] = useState(null)
+  const [d, setD] = useState(() => peek('/badminton/live') || null)   // the last list at once, then fresh
   const [picks, setPick] = useSportPicks('badminton', active)
   const [err, setErr] = useState(false)
   useEffect(() => {
