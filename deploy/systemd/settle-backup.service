@@ -1,4 +1,4 @@
-# The database's nightly backup (deploy/backup-db.sh).
+# The database's weekly backup (deploy/backup-db.sh).
 [Unit]
 Description=Settle database backup
 

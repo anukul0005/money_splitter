@@ -1,9 +1,10 @@
-# Nightly at 03:00 IST; the Sunday one also goes to Google Drive.
+# Weekly, Mondays 03:00 IST: the database backed up to the VM and Google Drive
+# (only the latest kept in each - deploy/backup-db.sh).
 [Unit]
-Description=Settle nightly database backup
+Description=Settle weekly database backup
 
 [Timer]
-OnCalendar=*-*-* 21:30:00 UTC
+OnCalendar=Sun *-*-* 21:30:00 UTC
 Persistent=true
 
 [Install]
