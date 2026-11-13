@@ -1,9 +1,10 @@
-# Tennis results and kept pre-match odds, every 15 minutes.
+# Tennis results and kept pre-match odds, hourly - every run wakes the
+# database (Neon bills compute while awake); opening the app refreshes too.
 [Unit]
 Description=Settle tennis refresh
 
 [Timer]
-OnCalendar=*:0/15
+OnCalendar=hourly
 Persistent=true
 Unit=settle-job@tennis.service
 

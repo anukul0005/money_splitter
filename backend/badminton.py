@@ -274,7 +274,7 @@ def live_item(m: dict, tournament_id: int) -> dict:
             "time_utc": m.get("matchTimeUtc"), "court": m.get("courtName"), "minutes": m.get("duration")}
 
 
-def _read_live() -> dict:
+def _read_live(store: bool = True) -> dict:
     from models import BadmintonTournament
     now = datetime.now(timezone.utc)
     data = _get("/match-center/vue-current-live", {"category[]": list(CATEGORIES)})
@@ -310,7 +310,10 @@ def _read_live() -> dict:
                     "venue": ", ".join(x for x in (t.get("venue_name"), t.get("venue_address1")) if x),
                     "logo": t.get("tmtLogo"), "category": LEVEL_NAME.get(CATEGORIES.get(cat, 9)),
                     "matches": items})
-        # what was read goes into the results too
+        # what was read goes into the results too - only while someone's looking,
+        # so an idle app leaves the database (Neon, billed while awake) asleep
+        if not store:
+            continue
         db = _session()
         try:
             if db.get(BadmintonTournament, int(t["id"])) is None:
@@ -331,7 +334,7 @@ def _neg(s: str) -> str:
     return "".join(chr(0x10FFFF - ord(c)) for c in s)
 
 
-KEEP_IDLE = 5 * 60          # kept in the background this often when nobody's looking
+KEEP_IDLE = 10 * 60         # kept in the background this often when nobody's looking (no database writes then)
 _asked = 0.0
 
 
@@ -340,11 +343,12 @@ def keep_live() -> None:
     Live tab never waits the minute a cold read takes."""
     global _live
     while True:
+        active = time.time() - _asked < 20 * 60
         try:
-            _live = (time.time(), _read_live())
+            _live = (time.time(), _read_live(store=active))
         except Exception as e:
             print(f"[badminton] keep live: {e}")
-        time.sleep(LIVE_SECONDS if time.time() - _asked < 20 * 60 else KEEP_IDLE)
+        time.sleep(LIVE_SECONDS if active else KEEP_IDLE)
 
 
 def live() -> dict:
