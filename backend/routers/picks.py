@@ -263,7 +263,7 @@ def _settle(odds, status, stake):
 
 
 @router.get("/backtest", response_model=dict)
-def backtest(days: int = 30, stake: float = 100, db: Session = Depends(get_db), caller: User = Depends(owner)):
+def backtest(days: int = 30, stake: float = 100, edge: float = 0.20, db: Session = Depends(get_db), caller: User = Depends(owner)):
     """The last `days` across the sports, at `stake` a bet. My own picks count
     as recorded (their prices as My picks settles them). Every other played
     match gets `stake` on the favourite: tennis at the bookmakers' kept
@@ -305,9 +305,11 @@ def backtest(days: int = 30, stake: float = 100, db: Session = Depends(get_db), 
                      "pick": r["winner_name"] if fav_won else r["loser_name"],
                      "other": r["loser_name"] if fav_won else r["winner_name"],
                      "odds": pw if fav_won else pl_, "status": "won" if fav_won else "lost", "kind": "auto"})
+    sugg = _tennis_suggested(db, since, edge)
     out["tennis"] = _summary(bets, stake, {"no_price": no_price,
                                            "auto_rule": "the bookmakers' favourite at their median pre-match price",
                                            "priced_from": _first_kept(db)})
+    out["tennis"]["suggested"] = _summary(sugg, stake, {})
 
     # badminton
     hist = [p for p in history(sport="badminton", db=db, caller=caller)["picks"] if p["start"][:10] >= since.isoformat()]
@@ -342,17 +344,98 @@ def backtest(days: int = 30, stake: float = 100, db: Session = Depends(get_db), 
     auto = [b for b in bets if b["kind"] == "auto"]
     s["at_book_margin"] = round(sum(_settle(b["book_odds"], b["status"], stake) for b in auto), 2) if auto else 0
     out["badminton"] = s
+    s["suggested"] = _summary(_book_suggested(db, caller, "badminton", since, edge), stake, {})
 
     # hockey - my picks only
     hist = [p for p in history(sport="hockey", db=db, caller=caller)["picks"] if p["start"][:10] >= since.isoformat()]
     bets = [{"date": p["start"][:10], "label": p.get("tournament"), "pick": p["pick"], "other": p["other"],
              "odds": p["odds"], "status": p["status"], "kind": "mine"} for p in hist]
     out["hockey"] = _summary(bets, stake, {"auto_rule": None})
+    out["hockey"]["suggested"] = _summary(_book_suggested(db, caller, "hockey", since, edge), stake, {})
 
     allb = [dict(b, sport=k) for k, v in out.items() for b in v.pop("_bets")]
     total = _summary(allb, stake, {})
     total.pop("_bets")
-    return {"days": days, "stake": stake, "since": since.isoformat(), "total": total, "sports": out}
+    sb = [dict(b, sport=k) for k, v in out.items() for b in v["suggested"].pop("_bets")]
+    total["suggested"] = _summary(sb, stake, {})
+    total["suggested"].pop("_bets")
+    import suggest
+    return {"days": days, "stake": stake, "edge": suggest.clamp_edge(edge), "since": since.isoformat(),
+            "total": total, "sports": out}
+
+
+def _tennis_suggested(db, since, edge) -> list:
+    """Played tennis matches the rule would have bet on: our pre-match chance
+    (tennis_model, from before the match) against the bookmakers' kept price."""
+    from sqlalchemy import text
+    import suggest
+    import tennis_model
+    import tennis_odds
+    bets = []
+    for r in db.execute(text("SELECT tour, winner_name, loser_name, score, play_date, tourney_name, round FROM tennis_matches "
+                             "WHERE play_date >= :s"), {"s": since.isoformat()}).mappings():
+        sc = (r["score"] or "").upper()
+        if "W/O" in sc or sc.strip() in ("WO", "W.O."):
+            continue
+        p = tennis_model.before(r["tour"], r["play_date"], r["winner_name"], r["loser_name"])
+        if p is None:
+            continue
+        k = tennis_odds.kept(db, r["tour"], r["winner_name"], r["loser_name"], date_of(r["play_date"]))
+        pr = (k or {}).get("prices") or {}
+        ow = (pr.get(tennis_odds._surname(r["winner_name"])) or {}).get("median")
+        ol = (pr.get(tennis_odds._surname(r["loser_name"])) or {}).get("median")
+        if not ow or not ol:
+            continue
+        v = suggest.verdict([p, 1 - p], [ow, ol], edge)
+        if v["verdict"] != "consider":
+            continue
+        won = v["side"] == 1
+        bets.append({"date": r["play_date"][:10], "label": f"{r['tourney_name']} · {r['round']}",
+                     "pick": r["winner_name"] if won else r["loser_name"], "other": r["loser_name"] if won else r["winner_name"],
+                     "odds": v["price"], "expected": v["expected"], "status": "won" if won else "lost", "kind": "suggested"})
+    return bets
+
+
+def _book_suggested(db, caller, sport, since, edge) -> list:
+    """Played badminton / hockey matches I typed a price in for before the
+    start, where the rule would have said consider."""
+    import suggest
+    bets = []
+    q = db.query(BookOdds).filter(BookOdds.sport == sport, BookOdds.voter_id == caller.id, BookOdds.start >= datetime.combine(since, datetime.min.time(), tzinfo=timezone.utc))
+    for b in q.all():
+        if b.start and b.entered_at > b.start:
+            continue
+        ref = json.loads(b.ref or "{}")
+        names = json.loads(b.names or "[]") or ["?", "?"]
+        if sport == "badminton":
+            import badminton_model as bm
+            r = db.get(BadmintonResult, int(ref.get("id") or 0))
+            m = bm.before(r.id) if r else None
+            if not r or not m or r.status != "F" or not r.winner or r.score_status == 1:
+                continue
+            v = suggest.verdict([m["p1"], 1 - m["p1"]], [b.odds1, b.odds2], edge)
+            winner = r.winner
+        else:
+            try:
+                import hockey_model as hm
+                import hockey as fih
+            except ImportError:
+                continue
+            ms = fih.matches(int(ref.get("series_id") or 0))
+            m = next((x for x in ms if x["id"] == ref.get("id")), None)
+            mod = hm.before(ref.get("id")) if m else None
+            if not m or not mod or m["state"] != "finished":
+                continue
+            v = suggest.verdict([mod["win"][0], mod["win"][1]], [b.odds1, b.odds2], edge)
+            winner = m["winner"]
+            if not winner:
+                continue
+        if v["verdict"] != "consider":
+            continue
+        bets.append({"date": b.start.date().isoformat(), "label": b.label, "pick": names[v["side"] - 1],
+                     "other": names[2 - v["side"]], "odds": v["price"], "expected": v["expected"],
+                     "status": "won" if winner == v["side"] else "lost", "kind": "suggested"})
+    return bets
 
 
 def date_of(s):
@@ -387,3 +470,71 @@ def _summary(bets: list, stake: float, extra: dict) -> dict:
             "pending": sum(b["status"] == "pending" for b in bets),
             "unsettled": sum(b["status"] != "pending" and b["pl"] is None for b in bets),
             "recent": sorted(done, key=lambda x: x["date"], reverse=True)[:400], **extra, "_bets": bets}
+
+
+# -- Suggestions: consider / skip, for every match still to play --------------
+
+@router.get("/suggestions", response_model=dict)
+def suggestions(sport: str, edge: float = 0.20, db: Session = Depends(get_db), caller: User = Depends(owner)):
+    """For each upcoming match on the sport's Live tab (by its key there):
+    our chance, the price (tennis: the bookmakers' kept pre-match median;
+    badminton / hockey: the one I typed in) and the verdict (suggest.py)."""
+    import suggest
+    edge = suggest.clamp_edge(edge)
+    out = {}
+    if sport == "tennis":
+        import tennis_live
+        import tennis_model
+        import tennis_odds
+        for m in tennis_live.matches(db)["matches"]:
+            if m["state"] != "upcoming" or len(m["players"]) != 2:
+                continue
+            a, b = (p["name"] for p in m["players"])
+            bo = 5 if m["tour"] == "ATP" and m.get("level") == "G" else 3
+            mod = tennis_model.predict(m["tour"], a, b, m.get("surface"), bo)
+            if not mod:
+                continue
+            day = (_aware(m.get("start")) or datetime.now(timezone.utc)).date()
+            k = tennis_odds.kept(db, m["tour"], a, b, day)
+            pr = (k or {}).get("prices") or {}
+            pa, pb = (pr.get(tennis_odds._surname(a)) or {}).get("median"), (pr.get(tennis_odds._surname(b)) or {}).get("median")
+            v = suggest.verdict([mod["p1"], 1 - mod["p1"]], [pa, pb] if pa and pb else None, edge)
+            out[m["espn"]] = {**v, "names": [a, b], "prices": [pa, pb] if pa and pb else None, "price_from": "bookmakers",
+                              "thin": mod["thin"]}
+    elif sport == "badminton":
+        import badminton as bwf
+        import badminton_model as bm
+        books = {b.match_key: b for b in db.query(BookOdds).filter(BookOdds.sport == "badminton", BookOdds.voter_id == caller.id).all()}
+        for t in bwf.live().get("tournaments", []):
+            for m in t.get("matches", []):
+                if m.get("state") != "upcoming":
+                    continue
+                mod = bm.for_match(m)
+                if not mod:
+                    continue
+                b = books.get(str(m["id"]))
+                v = suggest.verdict([mod["p1"], 1 - mod["p1"]], [b.odds1, b.odds2] if b else None, edge)
+                out[str(m["id"])] = {**v, "names": [_badminton_names(m["side1"]), _badminton_names(m["side2"])],
+                                     "prices": [b.odds1, b.odds2] if b else None, "price_from": (b.book or "bookmaker") if b else None,
+                                     "thin": mod["thin"]}
+    elif sport == "hockey":
+        import hockey as fih
+        try:
+            import hockey_model as hm
+        except ImportError:
+            hm = None
+        books = {b.match_key: b for b in db.query(BookOdds).filter(BookOdds.sport == "hockey", BookOdds.voter_id == caller.id).all()}
+        for t in fih.live().get("tournaments", []):
+            for m in t.get("matches", []):
+                if m.get("state") != "upcoming" or not hm:
+                    continue
+                mod = hm.for_match(m)
+                if not mod:
+                    continue
+                b = books.get(str(m["id"]))
+                prices = [b.odds1, b.odds2] + ([b.odds_draw] if getattr(b, "odds_draw", None) else []) if b else None
+                probs = mod["probs"] if prices and len(prices) == 3 else [mod["win"][0], mod["win"][1]]
+                v = suggest.verdict(probs, prices, edge)
+                out[str(m["id"])] = {**v, "names": [m["home"]["name"], m["away"]["name"]], "prices": prices,
+                                     "price_from": (b.book or "bookmaker") if b else None, "three_way": bool(prices and len(prices) == 3)}
+    return {"edge": edge, "suggestions": out}

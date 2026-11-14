@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { pnlBacktest } from '../api'
+import { EDGES, useEdge } from '../components/Suggest'
 
 /** P/L across the sports (backend routers/picks.backtest): my own picks as
  *  recorded, plus a flat stake on the favourite in every other played match
@@ -28,7 +29,7 @@ function Tile({ label, value, sub, cls, onClick }) {
   )
 }
 
-function Split({ s, stake }) {
+function Split({ s, stake, edge }) {
   const row = (label, x) => (
     <tr className="border-t border-gray-100">
       <td className="py-1.5 pl-1 font-semibold text-gray-800">{label}</td>
@@ -49,6 +50,7 @@ function Split({ s, stake }) {
       <tbody>
         {row('My picks (as recorded)', s.mine)}
         {row(`₹${stake} on the favourite, every other match`, s.auto)}
+        {s.suggested && row(`Suggested: ${Math.round(100 * edge)}%+ expected`, s.suggested)}
       </tbody>
     </table>
   )
@@ -124,14 +126,14 @@ function Curve({ series }) {
   )
 }
 
-function Bets({ bets }) {
+function Bets({ bets, suggested }) {
   const [kind, setKind] = useState('all')
   const [more, setMore] = useState(false)
-  const shown = bets.filter((b) => kind === 'all' || b.kind === kind)
+  const shown = kind === 'suggested' ? suggested : bets.filter((b) => kind === 'all' || b.kind === kind)
   return (
     <div className="mt-3">
       <div className="flex gap-1.5 text-[11px]">
-        {[['all', 'All'], ['mine', 'My picks'], ['auto', 'Favourite']].map(([k, l]) => (
+        {[['all', 'All'], ['mine', 'My picks'], ['auto', 'Favourite'], ['suggested', `Suggested (${suggested.length})`]].map(([k, l]) => (
           <button key={k} onClick={() => setKind(k)}
             className={`rounded-full border px-2 py-0.5 font-bold ${kind === k ? 'bg-brand-600 border-brand-600 text-white' : 'border-gray-300 text-gray-500'}`}>{l}</button>
         ))}
@@ -150,6 +152,7 @@ function Bets({ bets }) {
                 <td className="py-1.5">
                   <span className="font-bold text-gray-900">{b.pick}</span>
                   {b.kind === 'mine' && <span className="ml-1 text-[9px] font-black text-brand-600">MY PICK</span>}
+                  {b.expected != null && <span className="ml-1 text-[9px] font-black text-green-700">+{Math.round(100 * b.expected)}% EXP</span>}
                   <span className="block text-[10px] text-gray-400 truncate max-w-[240px]">v {b.other} · {b.label}</span>
                 </td>
                 <td className="py-1.5 text-right tabular-nums">{b.odds ? b.odds.toFixed(2) : '—'}</td>
@@ -168,7 +171,7 @@ function Bets({ bets }) {
   )
 }
 
-function SportCard({ k, s, stake }) {
+function SportCard({ k, s, stake, edge }) {
   const meta = SPORT[k]
   return (
     <div className="card">
@@ -188,7 +191,7 @@ function SportCard({ k, s, stake }) {
             <Tile label="Return" value={pct(s.roi)} cls={tone(s.pl)} />
             <Tile label="Bets" value={s.bets} sub={`${Math.round((100 * s.won) / s.bets)}% won`} />
           </div>
-          <Split s={s} stake={stake} />
+          <Split s={s} stake={stake} edge={edge} />
           <p className="text-[10px] text-gray-400 mt-2">
             {s.auto_rule && `Every other played match: ₹${stake} on ${s.auto_rule}. `}
             {k === 'tennis' && s.no_price > 0 && `${s.no_price} matches had no kept pre-match price${s.priced_from ? ` (prices are kept from ${fmtDay(s.priced_from)} on - older days fill in as they're read back)` : ''} and aren't counted. `}
@@ -196,7 +199,7 @@ function SportCard({ k, s, stake }) {
             {s.pending > 0 && `${s.pending} still to play. `}
             {s.unsettled > 0 && `${s.unsettled} without a price (not counted).`}
           </p>
-          <Bets bets={s.recent} />
+          <Bets bets={s.recent} suggested={s.suggested?.recent || []} />
         </>
       )}
     </div>
@@ -207,6 +210,7 @@ export default function PnlDashboard() {
   const nav = useNavigate()
   const [days, setDays] = useState(30)
   const [stake, setStake] = useState(100)
+  const [edge, setEdge] = useEdge()
   const [view, setView] = useState(() => { try { return sessionStorage.getItem('pnl.view') || 'all' } catch { return 'all' } })
   const pick = (v) => { setView(v); try { sessionStorage.setItem('pnl.view', v) } catch { /* private mode */ } }
   const [d, setD] = useState(null)
@@ -214,9 +218,9 @@ export default function PnlDashboard() {
   useEffect(() => {
     let alive = true
     setErr(false)
-    const t = setTimeout(() => pnlBacktest(days, stake).then((r) => { if (alive) setD(r.data) }).catch(() => { if (alive) setErr(true) }), 300)
+    const t = setTimeout(() => pnlBacktest(days, stake, edge).then((r) => { if (alive) setD(r.data) }).catch(() => { if (alive) setErr(true) }), 300)
     return () => { alive = false; clearTimeout(t) }
-  }, [days, stake])
+  }, [days, stake, edge])
   const series = !d ? [] : view === 'all' ? [
     { key: 'total', name: 'All sports', color: INK, curve: d.total.curve },
     ...Object.entries(d.sports).filter(([, s]) => s.bets > 0).map(([k, s]) => ({ key: k, name: SPORT[k].name, color: SPORT[k].color, curve: s.curve })),
@@ -239,6 +243,15 @@ export default function PnlDashboard() {
             <input type="number" min="1" inputMode="numeric" value={stake} onChange={(e) => setStake(Math.max(1, Number(e.target.value) || 1))}
               className="w-20 rounded-md border border-amber-300 px-2 py-0.5 text-[12px] font-black tabular-nums" />
           </label>
+        </div>
+        <div className="flex items-center gap-2 mt-2 text-[11px] font-semibold text-gray-600">
+          Suggest when expected return ≥
+          <div className="flex rounded-md border border-amber-300 overflow-hidden">
+            {EDGES.map((e) => (
+              <button key={e} onClick={() => setEdge(e)}
+                className={`px-2 py-0.5 text-[11px] font-bold ${edge === e ? 'bg-green-700 text-white' : 'bg-white text-gray-600'}`}>{Math.round(100 * e)}%</button>
+            ))}
+          </div>
         </div>
         <div className="grid grid-cols-4 mt-2.5 rounded-md border border-amber-300 overflow-hidden">
           {[['all', 'All'], ...Object.entries(SPORT).map(([k, m]) => [k, `${m.icon} ${m.name}`])].map(([k, l]) => (
@@ -264,7 +277,7 @@ export default function PnlDashboard() {
                     sub={s.bets ? `${s.bets} bets · ${pct(s.roi)}` : 'no bets'} />
                 ))}
               </div>
-              <Split s={t} stake={stake} />
+              <Split s={t} stake={stake} edge={d.edge} />
             </div>
             )}
 
@@ -275,11 +288,12 @@ export default function PnlDashboard() {
               </div>
             )}
 
-            {view !== 'all' && <SportCard k={view} s={d.sports[view]} stake={stake} />}
+            {view !== 'all' && <SportCard k={view} s={d.sports[view]} stake={stake} edge={d.edge} />}
 
             <p className="text-[10px] text-gray-400 text-center">
               Decimal odds: a win pays stake × (odds − 1), a loss costs the stake; walkovers and draws are void.
               My picks settle at the prices My picks uses; every other played match is a ₹{stake} bet on the favourite.
+              Suggested bets are a separate line (not in the totals above): the matches where our chance × the price cleared {Math.round(100 * d.edge)}% expected return - tennis at the bookmakers' kept price, badminton and hockey where you entered one before the start. A threshold is a filter, not a promise: big apparent edges are often the model missing news.
             </p>
           </>
         )}

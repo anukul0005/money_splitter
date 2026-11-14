@@ -1146,6 +1146,44 @@ class BookOdds(Base):
     entered_at = Column(DateTime(timezone=True), nullable=False)
 
 
+class HockeyMatch(Base):
+    """A senior outdoor international field-hockey match from FIH (hockey.sync_history),
+    kept for the odds model. Goals in regulation time; `so` the shoot-out, if one."""
+
+    __tablename__ = "hockey_matches"
+
+    id = Column(Integer, primary_key=True, autoincrement=False)      # FIH's game id
+    series_id = Column(Integer, nullable=False, index=True)
+    series = Column(String(200), nullable=True)
+    gender = Column(String(1), nullable=True, index=True)            # M / F
+    day = Column(Date, nullable=True, index=True)
+    start = Column(DateTime(timezone=True), nullable=True)
+    round = Column(String(80), nullable=True)
+    home_id = Column(Integer, nullable=True, index=True)
+    home = Column(String(80), nullable=True)
+    away_id = Column(Integer, nullable=True, index=True)
+    away = Column(String(80), nullable=True)
+    home_goals = Column(Integer, nullable=True)
+    away_goals = Column(Integer, nullable=True)
+    home_so = Column(Integer, nullable=True)
+    away_so = Column(Integer, nullable=True)
+    venue = Column(String(120), nullable=True)
+    country = Column(String(60), nullable=True)                       # where it was played, if FIH says
+
+
+class HockeySeries(Base):
+    """A tournament hockey.sync_history has read whole (finished, so not again)."""
+
+    __tablename__ = "hockey_series"
+
+    id = Column(Integer, primary_key=True, autoincrement=False)
+    name = Column(String(200), nullable=True)
+    gender = Column(String(1), nullable=True)
+    start = Column(Date, nullable=True)
+    matches = Column(Integer, nullable=False, default=0)
+    read_at = Column(DateTime(timezone=True), nullable=False)
+
+
 class BadmintonRanking(Base):
     """BWF world ranking, week by week (badminton.sync_rankings): the top
     RANK_DEPTH of each event. A pair is player1 + player2."""

@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import RankingList, { RankingSwitch } from '../components/RankingList'
 import { CardHead, Tile, fmtDate } from './Badminton'
 import SportPick, { BookOdds, useBookOdds, useSportPicks } from '../components/SportPick'
+import { SuggestTag, useSuggestions } from '../components/Suggest'
 import { peek, hockeyEvent, hockeyEvents, hockeyH2H, hockeyLive, hockeyRankings, hockeyStats } from '../api'
 
 /**
@@ -157,6 +158,7 @@ function Live({ active, onOpen }) {
   const [d, setD] = useState(() => peek('/hockey/live') || null)      // the last list at once, then fresh
   const [picks, setPick] = useSportPicks('hockey', active)
   const [books, setBook] = useBookOdds('hockey', active)
+  const sugg = useSuggestions('hockey', active, books)
   const [err, setErr] = useState(false)
   useEffect(() => {
     if (!active) return undefined
@@ -189,6 +191,7 @@ function Live({ active, onOpen }) {
                       <SportPick sport="hockey" mkey={String(m.id)} pick={picks[String(m.id)]} onSaved={setPick}
                         upcoming={m.state === 'upcoming'} names={[m.home.name, m.away.name]} />
                     )}
+                    {m.state === 'upcoming' && <div className="pl-9"><SuggestTag s={sugg?.[String(m.id)]} /></div>}
                     {books && (
                       <BookOdds sport="hockey" mkey={String(m.id)} entry={books[String(m.id)]} onSaved={setBook}
                         open={m.state !== 'finished'} names={[m.home.name, m.away.name]} />

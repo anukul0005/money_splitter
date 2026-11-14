@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import RankingList, { RankingSwitch } from '../components/RankingList'
 import DatePicker from '../components/DatePicker'
 import SportPick, { BookOdds, useBookOdds, useSportPicks } from '../components/SportPick'
+import { SuggestTag, useSuggestions } from '../components/Suggest'
 import {
   peek,
   badmintonDay, badmintonH2H, badmintonLive, badmintonMatch, badmintonPlayer, badmintonPlayers, badmintonRankings,
@@ -191,6 +192,7 @@ function Live({ active, onPlayer }) {
   const [d, setD] = useState(() => peek('/badminton/live') || null)   // the last list at once, then fresh
   const [picks, setPick] = useSportPicks('badminton', active)
   const [books, setBook] = useBookOdds('badminton', active)
+  const sugg = useSuggestions('badminton', active, books)
   const [err, setErr] = useState(false)
   useEffect(() => {
     if (!active) return undefined
@@ -219,6 +221,7 @@ function Live({ active, onPlayer }) {
                 {ms.map((m) => (
                   <div key={m.id}>
                     <Match m={m} onPlayer={onPlayer} showEvent />
+                    {m.state === 'upcoming' && <div className="pl-9"><SuggestTag s={sugg?.[String(m.id)]} /></div>}
                     {picks && m.side1.players[0]?.name !== 'TBD' && m.side2.players[0]?.name !== 'TBD' && (
                       <SportPick sport="badminton" mkey={String(m.id)} pick={picks[String(m.id)]} onSaved={setPick} model={m.model?.odds}
                         upcoming={m.state === 'upcoming' && !!m.time_utc && new Date(`${m.time_utc.replace(' ', 'T')}Z`) > new Date()}

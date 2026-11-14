@@ -1,5 +1,6 @@
 import { Component, memo, useEffect, useRef, useState, useTransition } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { SuggestTag, useSuggestions } from '../components/Suggest'
 import { badmintonLive, bookCompare, badmintonSummary, hockeyLive, peek, tennisDay, tennisEarlyBreak, tennisLive, tennisLivePoints, tennisMyPicks, tennisOddsDays, tennisPatterns, tennisPickHistory, sportPickHistory, tennisPlayer, tennisPlayers, tennisPressure, tennisRankings, onBackInView, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
 import RankingList, { RankingSwitch } from '../components/RankingList'
 import Badminton, { B_TABS } from './Badminton'
@@ -1321,7 +1322,7 @@ function Flash({ v, className = '', children }) {
 }
 
 /** One live / upcoming match: the players with their games so far, the set or the start time. */
-export function LiveRow({ m, onOpen, plain, eb, picks, odds }) {
+export function LiveRow({ m, onOpen, plain, eb, picks, odds, sugg }) {
   const live = m.state === 'live'
   // the fans' vote: my pick, or a nudge on a match still open to picking (both players known)
   const pick = picks?.[m.espn]
@@ -1374,6 +1375,7 @@ export function LiveRow({ m, onOpen, plain, eb, picks, odds }) {
         )
       })}
       {live && eb && <EarlyBreakFlag m={m} eb={eb} />}
+      {sugg && !live && <SuggestTag s={sugg} />}
     </button>
   )
 }
@@ -1517,6 +1519,7 @@ function Live({ tour, onOpen, active = true }) {
   const [picks, setPicks] = useState(null)        // my fan picks, by ESPN id
   const today = isoDay(Date.now())
   const kept = useKeptOdds(addDays(today, -1), addDays(today, 2), picks)
+  const sugg = useSuggestions('tennis', active)
   const [err, setErr] = useState(false)
   useEffect(() => {
     if (!active) return undefined          // kept but hidden behind another tab: no polling
@@ -1566,7 +1569,7 @@ function Live({ tour, onOpen, active = true }) {
               <p className="text-sm font-bold flex-1 min-w-0 truncate">{g.name}</p>
               {g.surface && <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${SURFACE[g.surface] || 'bg-gray-100 text-gray-700'}`}>{g.surface}</span>}
             </div>
-            <div className="px-4 pb-1">{g.matches.map((m) => <LiveRow key={m.espn} m={withPoints(m, pts)} onOpen={onOpen} eb={eb} picks={picks}
+            <div className="px-4 pb-1">{g.matches.map((m) => <LiveRow key={m.espn} m={withPoints(m, pts)} onOpen={onOpen} eb={eb} picks={picks} sugg={sugg?.[m.espn]}
               odds={findOdds(kept, m.tour, m.players[0].name, m.players[1].name, m.start)} />)}</div>
           </div>
         ))}

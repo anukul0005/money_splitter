@@ -3,10 +3,11 @@ head-to-heads and world rankings, read from fih.hockey's own public data
 feeds (the ones its match centre, event and rankings pages load in the
 browser). No key.
 
-Nothing is stored: hockey has a few dozen international tournaments a
+The pages read live: hockey has a few dozen international tournaments a
 year, each read whole in one request, so every answer is fetched when asked
 and held in memory a while - seconds for a tournament with a match on,
-hours for one that's over.
+hours for one that's over. Only the results history is stored
+(sync_history: senior outdoor internationals from 2012, for the odds model).
 """
 from __future__ import annotations
 
@@ -293,3 +294,74 @@ def rankings(gender: str) -> dict:
                           "points": round(r.get("points") or 0, 2), "last": r.get("last_match_played_on")}
                          for r in d.get("ranks") or []]}
     return _hold(f"r{gender}", 6 * 3600, read)
+
+
+# ── Results history (for the odds model) ────────────────────────────────────
+
+HISTORY_PACE = 2.0           # seconds between tournament reads
+HISTORY_EVERY = 6 * 3600     # new finished tournaments looked for this often
+_GENDER_OF = {"Senior Men's Outdoor": "M", "Senior Women's Outdoor": "F"}
+
+
+def _store_series(db, e: dict) -> int:
+    from models import HockeyMatch, HockeySeries
+    ms = [_match(m) for m in (_get(f"{FIXTURES}&tournament={e['id']}") or {}).get("matches") or [] if m.get("game_id")]   # not held: read once
+    g = _GENDER_OF.get(e.get("discipline"))
+    n = 0
+    for m in ms:
+        if m["state"] != "finished" or m["home"]["goals"] is None or m["away"]["goals"] is None:
+            continue
+        if not m["home"]["id"] or not m["away"]["id"]:
+            continue
+        when = _when(m)
+        db.merge(HockeyMatch(id=m["id"], series_id=e["id"], series=e["name"], gender=g, day=_day(m.get("day")) or (when.date() if when else None),
+                             start=when, round=m.get("round"), home_id=m["home"]["id"], home=m["home"]["name"],
+                             away_id=m["away"]["id"], away=m["away"]["name"], home_goals=m["home"]["goals"],
+                             away_goals=m["away"]["goals"], home_so=m["home"]["so"], away_so=m["away"]["so"],
+                             venue=m.get("venue")))
+        n += 1
+    db.merge(HockeySeries(id=e["id"], name=e["name"], gender=g, start=_day(e.get("start")), matches=n,
+                          read_at=datetime.now(timezone.utc)))
+    db.commit()
+    return n
+
+
+def sync_history(db, limit: int | None = None) -> int:
+    """Every finished senior outdoor tournament FIH lists, not yet on file."""
+    from models import HockeySeries
+    have = {i for (i,) in db.query(HockeySeries.id).all()}
+    first = events("r", 1, 100)
+    done = 0
+    for page in range(1, (first.get("pages") or 1) + 1):
+        for e in (first if page == 1 else events("r", page, 100))["events"]:
+            if e["id"] in have or e.get("discipline") not in _GENDER_OF:
+                continue
+            try:
+                n = _store_series(db, e)
+                done += 1
+                if done % 25 == 0:
+                    print(f"[hockey] history: {done} tournaments read, latest {e['name']} ({n} matches)", flush=True)
+            except Exception as err:
+                db.rollback()
+                print(f"[hockey] history {e['id']}: {err}", flush=True)
+            time.sleep(HISTORY_PACE)
+            if limit and done >= limit:
+                return done
+    return done
+
+
+def history_loop() -> None:
+    from database import get_session_factory
+    time.sleep(120)
+    while True:
+        try:
+            db = get_session_factory()()
+            try:
+                n = sync_history(db)
+                if n:
+                    print(f"[hockey] history: {n} new tournaments", flush=True)
+            finally:
+                db.close()
+        except Exception as e:
+            print(f"[hockey] history: {e}", flush=True)
+        time.sleep(HISTORY_EVERY)
