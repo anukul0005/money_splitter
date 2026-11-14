@@ -399,6 +399,13 @@ def odds(tour: str, a: str, b: str, tournament: str = "", start: str = "",
         return {"error": True}
 
 
+@router.get("/odds/live", response_model=dict)
+def odds_live(tour: str, a: str, b: str, _: User = Depends(owner)):
+    """A match in play: the bookmakers' current prices (tennis_odds.live)."""
+    import tennis_odds
+    return tennis_odds.live(tour, a, b)
+
+
 @router.get("/odds/days", response_model=dict)
 def odds_days(start: str, end: str, tour: str = "all", db: Session = Depends(get_db), _: User = Depends(owner)):
     """Every kept pre-match price between two days - the Live and Results lists."""

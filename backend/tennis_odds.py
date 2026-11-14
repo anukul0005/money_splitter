@@ -112,14 +112,19 @@ TA_HOST = "tennis-api-atp-wta-itf.p.rapidapi.com"
 DAY_HOURS = 6
 TA_PAGES = 4                           # a busy day's list runs to a few pages
 ta_used = {}                           # UTC day -> requests made today (the free plan is 50)
+ta_left = None                         # requests left today, as RapidAPI's last answer said
 
 
 def _ta_get(path: str, **params) -> dict:
     day = datetime.now(timezone.utc).date().isoformat()
     ta_used[day] = ta_used.get(day, 0) + 1
-    req = urllib.request.Request(f"https://{TA_HOST}{path}?{urllib.parse.urlencode(params)}",
+    req = urllib.request.Request(f"https://{TA_HOST}{path}" + (f"?{urllib.parse.urlencode(params)}" if params else ""),
                                  headers={"X-RapidAPI-Key": os.environ["TENNIS_API_KEY"], "X-RapidAPI-Host": TA_HOST})
+    global ta_left
     with urllib.request.urlopen(req, timeout=15) as r:
+        left = r.headers.get("x-ratelimit-requests-remaining")
+        if left is not None and left.isdigit():
+            ta_left = int(left)
         return json.loads(r.read())
 
 
@@ -219,6 +224,73 @@ def _ta_games(match_id, kind: str) -> dict | None:
 
 
 TA_MATCH_CAP = 40                      # past this many of today's 50, no per-match reads
+
+# --- in-play prices (Tennis API's live odds: Bet365, BWin, BetFair, FonBet, ...) ---
+LIVE_LIST_MIN = 10                     # the list of matches in play, re-read at most this often
+LIVE_ODDS_MIN = 4                      # one match's in-play prices, likewise
+LIVE_RESERVE = 15                      # left of the day's 50 for the pre-match keeper - no live reads below it
+LIVE_FRESH = 600                       # a bookmaker's quote older than this behind the newest is dropped
+
+
+def _live_get(path: str, **params):
+    if ta_left is not None and ta_left < LIVE_RESERVE:
+        raise RuntimeError("quota")
+    return _ta_get(f"/tennis/v2/extend/api{path}", **params)
+
+
+def live(tour: str, a: str, b: str) -> dict:
+    """The current prices of a match in play - only read while its page is
+    open, a few minutes cached, and never into the pre-match keeper's share
+    of the day's requests."""
+    if not os.environ.get("TENNIS_API_KEY"):
+        return {"missing_key": True}
+    pair = {_surname(a), _surname(b)}
+    with _lock:
+        failed = _cache.get("ta-live-failed")
+    if failed and time.time() - failed[0] < LIVE_ODDS_MIN * 60:
+        return {"error": True}
+    try:
+        rows = _cached("ta-live", LIVE_LIST_MIN / 60, lambda: _rows(_live_get("/events/live")))
+        ev = next((r for r in rows if {_surname(r.get("participant1", "")), _surname(r.get("participant2", ""))} == pair), None)
+        if not ev:
+            return {"none": True}
+        res = _cached(f"ta-live-{ev['id']}", LIVE_ODDS_MIN / 60,
+                      lambda: (_live_get(f"/event/recent-odds/get/{ev['id']}", inplay="true") or {}).get("result") or {})
+    except RuntimeError:
+        return {"quota": True, "left": ta_left}
+    except Exception as err:
+        print(f"[tennis-odds] live: {err}", flush=True)
+        with _lock:                    # not again for a few minutes - each try is one of the day's 50
+            _cache["ta-live-failed"] = (time.time(), None)
+        return {"error": True}
+
+    def quotes(books: dict) -> list:
+        qs = [(int(q.get("addTime") or 0), _num(q.get("od1")), _num(q.get("od2"))) for q in books.values() if isinstance(q, dict)]
+        qs = [q for q in qs if q[1] and q[2] and q[1] <= 1000 and q[2] <= 1000]
+        newest = max((q[0] for q in qs), default=0)
+        return [q for q in qs if newest - q[0] <= LIVE_FRESH]
+
+    win = quotes(res.get("Full Time Result") or {})
+    p1, p2 = ev.get("participant1", ""), ev.get("participant2", "")
+    winner = [{"name": n, **_price([q[i] for q in win])} for n, i in ((p1, 1), (p2, 2))] if win else []
+    totals = []
+    lines = []
+    for k, books in res.items():
+        if k.startswith("Over Under") and "|" in k:
+            qs = quotes(books)
+            if qs:
+                lines.append((max(q[0] for q in qs), float(k.split("|")[1]), qs))
+    if lines:
+        newest = max(t for t, _, _ in lines)
+        recent = [x for x in lines if newest - x[0] <= LIVE_FRESH] or lines
+        _, line, qs = min(recent, key=lambda x: abs(median(q[1] for q in x[2]) - median(q[2] for q in x[2])))
+        totals.append({"line": line, "unit": "games", "over": _price([q[1] for q in qs]),
+                       "under": _price([q[2] for q in qs]), "source": "in play"})
+    stamp = max([q[0] for q in win] + [t for t, _, _ in lines], default=0)
+    return {"winner": winner, "totals": totals, "score": ev.get("score"), "source": "Tennis API",
+            "updated": datetime.fromtimestamp(stamp, timezone.utc).isoformat(timespec="seconds") if stamp else None,
+            "read_at": datetime.fromtimestamp(_cache[f"ta-live-{ev['id']}"][0], timezone.utc).isoformat(timespec="seconds"),
+            "left": ta_left, **({} if winner or totals else {"none": True})}
 
 
 def match(tour: str, a: str, b: str, tournament: str = "", start: str = "") -> dict:

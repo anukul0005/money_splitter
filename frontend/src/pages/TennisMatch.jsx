@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { onBackInView, tennisEarlyBreak, tennisFanVote, tennisFans, tennisLive, tennisOdds, tennisLiveFeed, tennisMatchup } from '../api'
+import { onBackInView, tennisEarlyBreak, tennisFanVote, tennisFans, tennisLive, tennisOdds, tennisOddsLive, tennisLiveFeed, tennisMatchup } from '../api'
 import { LiveRow, MatchRow, ROUND_NAME, SURFACE, Safe, ScoreText, fmtShort, matchLink, startTime, useLivePoints, withPoints } from './BettingAnalytics'
 
 /**
@@ -395,9 +395,67 @@ const norm = (s) => (s || '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerC
  *  made here up to the first ball. Then the total lines, and once played,
  *  how my pick did as a mock bet at the My picks stake. */
 const STAKE_KEY = 'tennis.mockStake'
-function FanVote({ tour, names, date, espn, open, winner, tournament }) {
+
+/** In play: what the bookmakers offer now (backend tennis_odds.live), beside
+ *  the pre-match price, and the total-games line they've moved to. */
+function LiveOdds({ now, names, pre }) {
+  const last = (n) => (n || '').split(' ').slice(-1)[0]
+  const find = (list, n) => (list || []).find((w) => norm(last(w.name)) === norm(last(n)))
+  const hhmm = (s) => (s ? new Date(s).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '')
+  const t = (now?.totals || [])[0]
+  return (
+    <div className="mt-3 border-t border-gray-100 pt-2">
+      <p className="text-[10px] font-black text-red-600 uppercase tracking-widest">● Live odds</p>
+      {!now ? <p className="text-[11px] text-gray-400 mt-1">Reading…</p>
+        : now.quota ? <p className="text-[11px] text-gray-400 mt-1">Live odds are paused for today - the free plan's requests are kept for pre-match prices.</p>
+        : !now.winner?.length && !t ? <p className="text-[11px] text-gray-400 mt-1">No bookmaker has in-play prices for this match right now.</p>
+        : (
+          <>
+            {now.winner?.length > 0 && (
+              <table className="w-full text-xs mt-1">
+                <thead>
+                  <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
+                    <th className="py-1 text-left">Player</th><th className="py-1 text-right">Now</th>
+                    <th className="py-1 text-right">Chance</th><th className="py-1 text-right">Pre-match</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {names.map((x) => {
+                    const p = find(now.winner, x), b = find(pre?.winner, x)
+                    const move = p && b ? (p.median < b.median ? 'text-green-700' : p.median > b.median ? 'text-red-600' : 'text-gray-900') : 'text-gray-900'
+                    return (
+                      <tr key={x} className="border-t border-gray-100">
+                        <td className="py-1.5 pl-1 font-bold text-gray-900 truncate max-w-[120px]">{last(x)}</td>
+                        <td className={`py-1.5 text-right tabular-nums font-black ${move}`}>
+                          {p ? p.median.toFixed(2) : '—'}
+                          {p && p.books > 1 && <span className="block text-[9px] font-normal text-gray-400">best {p.best.toFixed(2)}</span>}
+                        </td>
+                        <td className="py-1.5 text-right tabular-nums text-gray-500">{p ? `${Math.round(100 / p.median)}%` : '—'}</td>
+                        <td className="py-1.5 text-right tabular-nums text-gray-500">{b ? b.median.toFixed(2) : '—'}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            )}
+            {t && (
+              <p className="text-[11px] text-gray-700 mt-1.5">
+                Total games now <b>{t.line}</b>: over <b className="tabular-nums">{t.over?.median.toFixed(2) ?? '—'}</b> · under <b className="tabular-nums">{t.under?.median.toFixed(2) ?? '—'}</b>
+              </p>
+            )}
+            <p className="text-[10px] text-gray-400 mt-1">
+              Median of {Math.max(0, ...(now.winner || []).map((w) => w.books || 0))} bookmakers' in-play prices
+              {now.updated ? `, last moved ${hhmm(now.updated)}` : ''} - refreshed every few minutes. Green = shorter than before the start.
+            </p>
+          </>
+        )}
+    </div>
+  )
+}
+function FanVote({ tour, names, date, espn, open, winner, tournament, inPlay }) {
   const [f, setF] = useState(null)
   const [odds, setOdds] = useState(null)
+  const [now, setNow] = useState(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   useEffect(() => {
@@ -408,8 +466,16 @@ function FanVote({ tour, names, date, espn, open, winner, tournament }) {
     if (!names[0] || !names[1]) return
     tennisOdds({ tour, a: names[0], b: names[1], tournament: tournament || '', start: date || '' }).then((r) => setOdds(r.data)).catch(() => {})
   }, [open, tour, names[0], names[1], date])
+  useEffect(() => {          // in play: the current prices, every few minutes while the page is open
+    if (!inPlay || !names[0] || !names[1]) return
+    let alive = true
+    const load = () => tennisOddsLive({ tour, a: names[0], b: names[1] }).then((r) => { if (alive) setNow(r.data) }).catch(() => {})
+    load()
+    const t = setInterval(load, 4 * 60_000)
+    return () => { alive = false; clearInterval(t) }
+  }, [inPlay, tour, names[0], names[1]])
   const has = odds?.winner?.length > 0
-  if (!f || (!open && !f.total && !has)) return null
+  if (!f || (!open && !inPlay && !f.total && !has)) return null
   const vote = (name) => {
     setBusy(true); setErr('')
     tennisFanVote({ tour, espn, pick: name }).then((r) => setF(r.data))
@@ -484,6 +550,7 @@ function FanVote({ tour, names, date, espn, open, winner, tournament }) {
           </tbody>
         </table>
       )}
+      {inPlay && <LiveOdds now={now} names={names} pre={has ? odds : null} />}
       {winner && mine && (
         <p className={`text-[11px] font-bold mt-2 ${won(mine) ? 'text-green-700' : 'text-red-600'}`}>
           {won(mine) ? '✓' : '✗'} My pick {last(mine)}{minePrice ? ` at ${minePrice.median.toFixed(2)}` : ''} {won(mine) ? 'won' : 'lost'}
@@ -575,7 +642,7 @@ export default function TennisMatch() {
                 <FanVote tour={tour} names={[m.winner.name, m.loser.name]} date={m.date} winner={m.winner.name} />
               ) : live && !live.gone && live.start && (
                 <FanVote tour={live.tour} names={live.players.map((p) => p.name)} date={live.start} espn={espn} tournament={live.tournament}
-                  open={live.state === 'upcoming' && new Date(live.start) > new Date()} />
+                  inPlay={live.state === 'live'} open={live.state === 'upcoming' && new Date(live.start) > new Date()} />
               )}
             </Safe>
 

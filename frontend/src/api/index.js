@@ -358,6 +358,7 @@ export const tennisLiveFeed = (espn)             => api.get('/tennis/live/feed',
 export const tennisMatchup  = (params)           => remembered('/tennis/matchup', params, 2 * MIN)
 export const tennisFans     = (params)           => api.get('/tennis/fans', { params })
 export const tennisOdds     = (params)           => remembered('/tennis/odds', params, 10 * MIN)
+export const tennisOddsLive = (params)           => remembered('/tennis/odds/live', params, 3 * MIN)
 export const tennisFanVote  = (body)             => api.post('/tennis/fans', body)
 export const tennisMyPicks  = ()                 => api.get('/tennis/fans/mine')
 export const tennisPickHistory = ()              => api.get('/tennis/fans/mine/history')
