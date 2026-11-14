@@ -1667,6 +1667,9 @@ export default function BettingAnalytics() {
                 className={`px-2.5 py-1 text-sm ${sport === k ? 'bg-field-950' : 'bg-white'}`}>{l}</button>
             ))}
           </div>
+          <button onClick={() => nav('/betting/pnl')} className="px-2.5 py-1 rounded-md border border-amber-300 bg-white text-[11px] font-bold text-brand-600">
+            P/L ›
+          </button>
           <button onClick={() => nav('/my-bets')} className="px-2.5 py-1 rounded-md border border-amber-300 bg-white text-[11px] font-bold text-brand-600">
             My bets ›
           </button>

@@ -13,6 +13,7 @@ import LedgerImport      from './pages/LedgerImport'
 import MyBottles         from './pages/MyBottles'
 import BettingAnalytics  from './pages/BettingAnalytics'
 import MyBets            from './pages/MyBets'
+import PnlDashboard      from './pages/PnlDashboard'
 import TennisMatch       from './pages/TennisMatch'
 import BadmintonMatch    from './pages/BadmintonMatch'
 import TennisNews        from './pages/TennisNews'
@@ -175,6 +176,7 @@ export default function App() {
                     <Route path="/betting/match" element={<TennisMatch />} />
                     <Route path="/betting/badminton-match" element={<BadmintonMatch />} />
                     <Route path="/my-bets" element={<MyBets />} />
+                    <Route path="/betting/pnl" element={<PnlDashboard />} />
                   </>
                 )}
                 {/* Sports news: badminton for everyone, tennis and football for the sports people (the server decides) */}

@@ -250,3 +250,140 @@ def compare(sport: str, db: Session = Depends(get_db), caller: User = Depends(ow
             "blend": score("blend_p1"),
             "margin": round(sum(x["margin"] for x in items) / len(items), 4) if items else None,
             "items": items[:100]}
+
+
+# -- P/L dashboard: my picks, plus a flat stake on every other played match ---
+
+def _settle(odds, status, stake):
+    if status == "won" and odds:
+        return round(stake * (odds - 1), 2)
+    if status == "lost" and odds:
+        return -stake
+    return None
+
+
+@router.get("/backtest", response_model=dict)
+def backtest(days: int = 30, stake: float = 100, db: Session = Depends(get_db), caller: User = Depends(owner)):
+    """The last `days` across the sports, at `stake` a bet. My own picks count
+    as recorded (their prices as My picks settles them). Every other played
+    match gets `stake` on the favourite: tennis at the bookmakers' kept
+    pre-match price (median), badminton at our model's pre-match price - and,
+    to be fair to a real bookmaker, that price with an 8% margin too. Hockey
+    has no price but the ones I typed, so only my picks."""
+    from sqlalchemy import text
+    import badminton_model as bm
+    import tennis_odds
+    from routers.tennis import my_pick_history
+    days = max(1, min(days, 120))
+    stake = max(1.0, min(stake, 100000.0))
+    now = datetime.now(timezone.utc)
+    since = (now - timedelta(days=days)).date()
+    out = {}
+
+    # tennis
+    mine = [p for p in my_pick_history(db=db, caller=caller)["picks"] if p["start"][:10] >= since.isoformat()]
+    taken = {p["match_id"] for p in mine if p.get("match_id")}
+    bets = [{"date": p["start"][:10], "label": p.get("tournament") or p["tour"], "pick": p["pick"], "other": p["other"],
+             "odds": p["odds"], "status": p["status"], "kind": "mine"} for p in mine]
+    no_price = 0
+    for r in db.execute(text("SELECT match_id, tour, winner_name, loser_name, score, play_date, tourney_name, round "
+                             "FROM tennis_matches WHERE play_date >= :s ORDER BY play_date"), {"s": since.isoformat()}).mappings():
+        if r["match_id"] in taken:
+            continue
+        sc = (r["score"] or "").upper()
+        if "W/O" in sc or sc.strip() in ("WO", "W.O."):
+            continue
+        k = tennis_odds.kept(db, r["tour"], r["winner_name"], r["loser_name"], date_of(r["play_date"]))
+        prices = (k or {}).get("prices") or {}
+        w, l = tennis_odds._surname(r["winner_name"]), tennis_odds._surname(r["loser_name"])
+        pw, pl_ = (prices.get(w) or {}).get("median"), (prices.get(l) or {}).get("median")
+        if not pw or not pl_:
+            no_price += 1
+            continue
+        fav_won = pw <= pl_
+        bets.append({"date": r["play_date"][:10], "label": f"{r['tourney_name']} · {r['round']}",
+                     "pick": r["winner_name"] if fav_won else r["loser_name"],
+                     "other": r["loser_name"] if fav_won else r["winner_name"],
+                     "odds": pw if fav_won else pl_, "status": "won" if fav_won else "lost", "kind": "auto"})
+    out["tennis"] = _summary(bets, stake, {"no_price": no_price,
+                                           "auto_rule": "the bookmakers' favourite at their median pre-match price",
+                                           "priced_from": _first_kept(db)})
+
+    # badminton
+    hist = [p for p in history(sport="badminton", db=db, caller=caller)["picks"] if p["start"][:10] >= since.isoformat()]
+    taken = {int(json.loads(sp.ref or "{}").get("id") or 0) for sp in db.query(SportPick).filter(
+        SportPick.sport == "badminton", SportPick.voter_id == caller.id).all()}
+    bets = [{"date": p["start"][:10], "label": p.get("tournament"), "pick": p["pick"], "other": p["other"],
+             "odds": p["odds"], "status": p["status"], "kind": "mine", "source": p.get("odds_source")} for p in hist]
+    from models import BadmintonPlayer, BadmintonTournament
+    rows = db.query(BadmintonResult).filter(BadmintonResult.day >= since, BadmintonResult.winner > 0,
+                                            BadmintonResult.status == "F").order_by(BadmintonResult.day).all()
+    ids = {i for r in rows for i in (r.p1a, r.p1b, r.p2a, r.p2b) if i}
+    names = {p.id: p.name for p in db.query(BadmintonPlayer).filter(BadmintonPlayer.id.in_(ids)).all()} if ids else {}
+    tn = {t.id: t.name for t in db.query(BadmintonTournament).filter(
+        BadmintonTournament.id.in_({r.tournament_id for r in rows})).all()} if rows else {}
+    side = lambda a, b: " / ".join(names.get(i, "?") for i in (a, b) if i)
+    no_price = 0
+    for r in rows:
+        if r.id in taken or r.score_status == 1:          # mine, or a walkover (void)
+            continue
+        m = bm.before(r.id)
+        if not m:
+            no_price += 1
+            continue
+        fav = 1 if m["p1"] >= 0.5 else 2
+        p = m["p1"] if fav == 1 else 1 - m["p1"]
+        bets.append({"date": r.day.isoformat(), "label": f"{tn.get(r.tournament_id, '?')} · {r.event} {r.round or ''}".strip(),
+                     "pick": side(r.p1a, r.p1b) if fav == 1 else side(r.p2a, r.p2b),
+                     "other": side(r.p2a, r.p2b) if fav == 1 else side(r.p1a, r.p1b),
+                     "odds": m["odds"][fav - 1], "book_odds": round(1 / (p * 1.08), 2),
+                     "status": "won" if r.winner == fav else "lost", "kind": "auto"})
+    s = _summary(bets, stake, {"no_price": no_price, "auto_rule": "our model's favourite at our pre-match price"})
+    auto = [b for b in bets if b["kind"] == "auto"]
+    s["at_book_margin"] = round(sum(_settle(b["book_odds"], b["status"], stake) for b in auto), 2) if auto else 0
+    out["badminton"] = s
+
+    # hockey - my picks only
+    hist = [p for p in history(sport="hockey", db=db, caller=caller)["picks"] if p["start"][:10] >= since.isoformat()]
+    bets = [{"date": p["start"][:10], "label": p.get("tournament"), "pick": p["pick"], "other": p["other"],
+             "odds": p["odds"], "status": p["status"], "kind": "mine"} for p in hist]
+    out["hockey"] = _summary(bets, stake, {"auto_rule": None})
+
+    allb = [dict(b, sport=k) for k, v in out.items() for b in v.pop("_bets")]
+    total = _summary(allb, stake, {})
+    total.pop("_bets")
+    return {"days": days, "stake": stake, "since": since.isoformat(), "total": total, "sports": out}
+
+
+def date_of(s):
+    from datetime import date
+    return date.fromisoformat(str(s)[:10])
+
+
+def _first_kept(db):
+    from sqlalchemy import func
+    from models import TennisOdds
+    d = db.query(func.min(TennisOdds.day)).scalar()
+    return d.isoformat() if d else None
+
+
+def _summary(bets: list, stake: float, extra: dict) -> dict:
+    for b in bets:
+        b["pl"] = _settle(b.get("odds"), b["status"], stake)
+    done = [b for b in bets if b["pl"] is not None]
+    pl = round(sum(b["pl"] for b in done), 2)
+    daily = {}
+    for b in sorted(done, key=lambda x: x["date"]):
+        daily[b["date"]] = round(daily.get(b["date"], 0) + b["pl"], 2)
+    run, curve = 0.0, []
+    for d, v in daily.items():
+        run = round(run + v, 2)
+        curve.append({"date": d, "pl": v, "cum": run})
+    part = lambda k: [b for b in done if b["kind"] == k]
+    seg = lambda xs: {"bets": len(xs), "won": sum(b["status"] == "won" for b in xs),
+                      "staked": round(stake * len(xs), 2), "pl": round(sum(b["pl"] for b in xs), 2),
+                      "roi": round(sum(b["pl"] for b in xs) / (stake * len(xs)), 4) if xs else None}
+    return {**seg(done), "mine": seg(part("mine")), "auto": seg(part("auto")), "curve": curve,
+            "pending": sum(b["status"] == "pending" for b in bets),
+            "unsettled": sum(b["status"] != "pending" and b["pl"] is None for b in bets),
+            "recent": sorted(done, key=lambda x: x["date"], reverse=True)[:400], **extra, "_bets": bets}

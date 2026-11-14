@@ -333,6 +333,7 @@ export const sportPickHistory = (sport)          => api.get('/picks/history', { 
 export const bookOdds         = (sport)          => api.get('/picks/book', { params: { sport } })
 export const bookOddsSave     = (body)           => api.post('/picks/book', body)
 export const bookCompare      = (sport)          => api.get('/picks/book/compare', { params: { sport } })
+export const pnlBacktest      = (days, stake)    => api.get('/picks/backtest', { params: { days, stake } })
 export const hockeyEvents   = (status, page)     => remembered('/hockey/events', { status, page }, 10 * MIN)
 export const hockeyEvent    = (id)               => remembered(`/hockey/event/${id}`, null, 30_000)
 export const hockeyStats    = (id)               => remembered(`/hockey/stats/${id}`, null, 5 * MIN)
