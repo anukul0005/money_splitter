@@ -226,6 +226,39 @@ def sync_all() -> None:
         db.close()
 
 
+RANK_DEPTH = 200            # the top this many of each event, each week
+
+
+def sync_rankings(db) -> int:
+    """Every ranking week BWF lists (it lists about the last 60) not yet on
+    file - the odds model weighs the ranking each side had going in."""
+    from models import BadmintonRanking
+    have = {w for (w,) in db.query(BadmintonRanking.week).distinct().all()}
+    added = 0
+    for wk in _get("/vue-rankingweek", {"rankId": 2}) or []:
+        day = _day(wk.get("date"))
+        if not day or day in have:
+            continue
+        rows, seen = [], set()
+        for event, cat in RANK_CAT.items():
+            for page in range(1, RANK_DEPTH // 100 + 1):
+                data = _get("/vue-rankingtable", {"rankId": 2, "catId": cat, "publicationId": wk["id"],
+                                                  "doubles": "true" if event in ("MD", "WD", "XD") else "false",
+                                                  "searchKey": "", "pageKey": 100, "page": page, "drawCount": 1}, pace=True)
+                for r in ((data.get("results") or {}).get("data") or []):
+                    k = (event, r.get("player1_id"), r.get("player2_id"))
+                    if r.get("player1_id") and r.get("rank") and k not in seen:   # a player can show twice (two partners)
+                        seen.add(k)
+                        rows.append(BadmintonRanking(week=day, event=event, rank=int(r["rank"]), player1=int(r["player1_id"]),
+                                                     player2=int(r["player2_id"]) if r.get("player2_id") else None,
+                                                     points=float(r.get("points") or 0), tournaments=r.get("tournaments")))
+        db.add_all(rows)
+        db.commit()
+        added += 1
+        print(f"[badminton] ranking week {day}: {len(rows)} rows", flush=True)
+    return added
+
+
 def loop() -> None:
     time.sleep(90)                 # let the app finish starting
     while True:
@@ -233,6 +266,15 @@ def loop() -> None:
             sync_all()
         except Exception as e:
             print(f"[badminton] sync failed: {e}")
+        try:
+            from database import get_session_factory
+            db = get_session_factory()()
+            try:
+                sync_rankings(db)
+            finally:
+                db.close()
+        except Exception as e:
+            print(f"[badminton] rankings: {e}", flush=True)
         time.sleep(RESYNC_EVERY)
 
 

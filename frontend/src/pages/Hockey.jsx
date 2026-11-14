@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import RankingList, { RankingSwitch } from '../components/RankingList'
 import { CardHead, Tile, fmtDate } from './Badminton'
-import SportPick, { useSportPicks } from '../components/SportPick'
+import SportPick, { BookOdds, useBookOdds, useSportPicks } from '../components/SportPick'
 import { peek, hockeyEvent, hockeyEvents, hockeyH2H, hockeyLive, hockeyRankings, hockeyStats } from '../api'
 
 /**
@@ -156,6 +156,7 @@ function ComingUp({ list, onOpen }) {
 function Live({ active, onOpen }) {
   const [d, setD] = useState(() => peek('/hockey/live') || null)      // the last list at once, then fresh
   const [picks, setPick] = useSportPicks('hockey', active)
+  const [books, setBook] = useBookOdds('hockey', active)
   const [err, setErr] = useState(false)
   useEffect(() => {
     if (!active) return undefined
@@ -187,6 +188,10 @@ function Live({ active, onOpen }) {
                     {picks && m.home.name !== 'TBD' && m.away.name !== 'TBD' && (
                       <SportPick sport="hockey" mkey={String(m.id)} pick={picks[String(m.id)]} onSaved={setPick}
                         upcoming={m.state === 'upcoming'} names={[m.home.name, m.away.name]} />
+                    )}
+                    {books && (
+                      <BookOdds sport="hockey" mkey={String(m.id)} entry={books[String(m.id)]} onSaved={setBook}
+                        open={m.state !== 'finished'} names={[m.home.name, m.away.name]} />
                     )}
                   </div>
                 ))}

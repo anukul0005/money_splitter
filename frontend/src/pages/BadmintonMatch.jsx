@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { badmintonGame, badmintonLive, badmintonModel } from '../api'
+import { BookOdds, useBookOdds } from '../components/SportPick'
 import { CardHead, Detail, EVENT, Match, ROUND, Side, Tile, fmtDate } from './Badminton'
 
 /**
@@ -117,8 +118,11 @@ export default function BadmintonMatch() {
  *  once it's played - with how the model has done on past matches. */
 function OurOdds({ m }) {
   const [rec, setRec] = useState(null)
+  const [books, setBook] = useBookOdds('badminton', true)
   useEffect(() => { badmintonModel().then((r) => setRec(r.data)).catch(() => {}) }, [])
   const o = m.model
+  const bk = books?.[String(m.id)]
+  const bp = bk ? (1 / bk.odds[0]) / (1 / bk.odds[0] + 1 / bk.odds[1]) : null
   const name = (s) => s.players.map((p) => p.name.split(' ').slice(-1)[0]).join(' / ')
   const pct = (p) => `${Math.round(100 * p)}%`
   const done = m.state === 'finished'
@@ -131,6 +135,7 @@ function OurOdds({ m }) {
         <thead>
           <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
             <th className="py-1 text-left">Side</th><th className="py-1 text-right">Chance</th><th className="py-1 text-right">Odds</th>
+            {bk && <th className="py-1 text-right">{bk.book || 'Book'}</th>}
           </tr>
         </thead>
         <tbody>
@@ -143,6 +148,12 @@ function OurOdds({ m }) {
                 </td>
                 <td className="py-1.5 text-right tabular-nums text-gray-500">{pct(p)}</td>
                 <td className={`py-1.5 text-right tabular-nums ${p >= 0.5 ? 'font-black text-gray-900' : 'font-semibold text-gray-600'}`}>{o.odds[i].toFixed(2)}</td>
+                {bk && (
+                  <td className="py-1.5 text-right tabular-nums font-semibold text-gray-700">
+                    {bk.odds[i].toFixed(2)}
+                    <span className="block text-[9px] font-normal text-gray-400">{pct(i ? 1 - bp : bp)}{bk.odds[i] > o.odds[i] ? ' · above ours' : ''}</span>
+                  </td>
+                )}
               </tr>
             )
           })}
@@ -150,9 +161,18 @@ function OurOdds({ m }) {
             <td className="py-1.5 pl-1 text-gray-800 font-semibold">Goes to 3 games{three != null && <span className={`ml-1 font-black ${three ? 'text-green-600' : 'text-gray-400'}`}>{three ? '✓' : '✗'}</span>}</td>
             <td className="py-1.5 text-right tabular-nums text-gray-500">{pct(o.p3)}</td>
             <td className="py-1.5 text-right tabular-nums font-semibold text-gray-700">{o.three.toFixed(2)} <span className="text-gray-400 font-normal">/ 2 games {o.two.toFixed(2)}</span></td>
+            {bk && <td />}
           </tr>
         </tbody>
       </table>
+      {o.parts && <Parts parts={o.parts} first={name(m.side1)} />}
+      {books && (
+        <div className="-ml-9 mt-1">
+          <BookOdds sport="badminton" mkey={String(m.id)} entry={bk} onSaved={setBook} ours={o.odds} open={m.state !== 'finished'}
+            names={[m.side1, m.side2].map((s) => s.players.map((p) => p.name).join(' / '))} />
+        </div>
+      )}
+      {bk && <p className="text-[10px] text-gray-500 mt-1">Bookmaker's chance is with its {(100 * bk.margin).toFixed(1)}% margin taken out. Where its price is above ours, it's paying more than we think fair.</p>}
       {right != null && (
         <p className={`text-[11px] font-bold mt-2 ${right ? 'text-green-700' : 'text-red-600'}`}>
           {right ? '✓ The favourite won' : '✗ The outsider won'}
@@ -163,6 +183,32 @@ function OurOdds({ m }) {
         Fair prices - no bookmaker margin, so a bookmaker would offer a little less.
         {o.thin && ' Someone here has under 3 matches on file, so take these with a pinch of salt.'}
         {rec?.matches > 0 && ` Since ${fmtDate(rec.since)} it has picked the winner of ${Math.round(100 * rec.right)}% of ${rec.matches.toLocaleString('en-IN')} matches, and what it calls 75% comes in about ${Math.round(100 * (rec.bands.find((b) => b.from === 70)?.came_in || 0.75))}% of the time.`}
+      </p>
+    </div>
+  )
+}
+
+/** How side 1's chance was built up, factor by factor (backend badminton_model.predict). */
+function Parts({ parts, first }) {
+  const steps = [['Rating (results since 2018)', parts.rating], ['+ home country', parts.home], ['+ tiredness at this event', parts.fatigue],
+    ['+ world ranking', parts.ranking], ['+ recent form', parts.form]]
+  const pts = (x) => (x == null ? 'outside top 200' : `${Math.round(x).toLocaleString('en-IN')} pts`)
+  const fm = (x) => `${x > 0 ? '+' : ''}${Math.round(100 * x)}%`
+  return (
+    <div className="mt-2 border-t border-gray-100 pt-1.5">
+      <p className="text-[9px] font-black text-gray-500 uppercase tracking-wider">How {first}'s chance is built</p>
+      {steps.map(([k, v], i) => {
+        const d = i ? v - steps[i - 1][1] : null
+        return (
+          <div key={k} className="flex text-[11px] py-0.5">
+            <span className="flex-1 text-gray-600">{k}</span>
+            {d != null && <span className={`w-12 text-right tabular-nums ${Math.abs(d) < 0.0005 ? 'text-gray-300' : d > 0 ? 'text-green-700' : 'text-red-600'}`}>{d > 0 ? '+' : ''}{(100 * d).toFixed(1)}</span>}
+            <span className="w-12 text-right tabular-nums font-bold text-gray-900">{Math.round(100 * v)}%</span>
+          </div>
+        )
+      })}
+      <p className="text-[10px] text-gray-400 mt-0.5">
+        Ranking points {pts(parts.points[0])} v {pts(parts.points[1])}. Form, last 10 matches - won beyond what was expected: {fm(parts.form_sides[0])} v {fm(parts.form_sides[1])}.
       </p>
     </div>
   )

@@ -1,6 +1,6 @@
 import { Component, memo, useEffect, useRef, useState, useTransition } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { badmintonLive, badmintonSummary, hockeyLive, peek, tennisDay, tennisEarlyBreak, tennisLive, tennisLivePoints, tennisMyPicks, tennisOddsDays, tennisPatterns, tennisPickHistory, sportPickHistory, tennisPlayer, tennisPlayers, tennisPressure, tennisRankings, onBackInView, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
+import { badmintonLive, bookCompare, badmintonSummary, hockeyLive, peek, tennisDay, tennisEarlyBreak, tennisLive, tennisLivePoints, tennisMyPicks, tennisOddsDays, tennisPatterns, tennisPickHistory, sportPickHistory, tennisPlayer, tennisPlayers, tennisPressure, tennisRankings, onBackInView, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
 import RankingList, { RankingSwitch } from '../components/RankingList'
 import Badminton, { B_TABS } from './Badminton'
 import Hockey, { H_TABS } from './Hockey'
@@ -1382,6 +1382,53 @@ export function LiveRow({ m, onOpen, plain, eb, picks, odds }) {
  *  the kept pre-match price of the player I picked (backend
  *  /tennis/fans/mine/history). A pick with no kept price isn't counted. */
 const STAKE_KEY = 'tennis.mockStake'
+/** Played badminton matches I entered a bookmaker's prices for before the
+ *  start: who came closer - the bookmaker (margin taken out), our model, or
+ *  the two averaged (backend routers/picks.compare). */
+function BookVsOurs({ active }) {
+  const [d, setD] = useState(null)
+  useEffect(() => { if (active) bookCompare('badminton').then((r) => setD(r.data)).catch(() => {}) }, [active])
+  if (!d) return null
+  const rows = [['Bookmaker', d.book], ['Ours', d.ours], ['Both averaged', d.blend]].filter(([, x]) => x)
+  const best = rows.length ? Math.min(...rows.map(([, x]) => x.brier)) : null
+  return (
+    <div className="card">
+      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Bookmaker vs ours</p>
+      {d.matches === 0 ? (
+        <p className="text-[11px] text-gray-500 mt-1.5">
+          Enter a bookmaker's prices under a match on the Live tab (+ Bookmaker odds) before it starts - once it's played it's scored here against our odds.
+          {d.late > 0 && ` ${d.late} entered after the start ${d.late === 1 ? "isn't" : "aren't"} counted.`}
+        </p>
+      ) : (
+        <>
+          <table className="w-full text-xs mt-1.5">
+            <thead>
+              <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
+                <th className="py-1 text-left">Over {d.matches} match{d.matches === 1 ? '' : 'es'}</th>
+                <th className="py-1 text-right">Favourite won</th><th className="py-1 text-right">Error (Brier)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(([k, x]) => (
+                <tr key={k} className={`border-t border-gray-100 ${x.brier === best ? 'bg-green-50' : ''}`}>
+                  <td className="py-1.5 pl-1 font-bold text-gray-900">{k}{x.brier === best && <span className="ml-1 text-green-700">✓ closest</span>}</td>
+                  <td className="py-1.5 text-right tabular-nums">{Math.round(100 * x.right)}%</td>
+                  <td className="py-1.5 text-right tabular-nums font-bold">{x.brier.toFixed(3)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-[10px] text-gray-400 mt-2">
+            Lower error is better. The bookmaker's margin averaged {(100 * d.margin).toFixed(1)}% - taken out before scoring.
+            {d.matches < 30 && ' Too few matches yet to say who is better - it settles down past 50 or so.'}
+            {d.late > 0 && ` ${d.late} entered after the start not counted.`}
+          </p>
+        </>
+      )}
+    </div>
+  )
+}
+
 function MyPicks({ active, sport = 'tennis' }) {
   const [d, setD] = useState(null)
   const [stake, setStake] = useState(() => { try { return Number(localStorage.getItem(STAKE_KEY)) || 100 } catch { return 100 } })
@@ -1405,6 +1452,7 @@ function MyPicks({ active, sport = 'tennis' }) {
   )
   return (
     <div className="space-y-3">
+      {sport === 'badminton' && <BookVsOurs active={active} />}
       <div className="card">
         <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Mock betting · my picks</p>
         <label className="flex items-center gap-2 mt-2 text-sm font-semibold text-gray-700">
@@ -1419,7 +1467,7 @@ function MyPicks({ active, sport = 'tennis' }) {
           <Stat label="Staked" v={`₹${staked.toLocaleString('en-IN')}`} />
         </div>
         <p className="text-[10px] text-gray-400 mt-2">
-          {sport === 'tennis' ? "Settled at the bookmakers' pre-match price for the player picked" : sport === 'badminton' ? "Settled at the odds you typed in beside a pick, else our own pre-match odds (m - from every BWF result since 2018)" : 'Settled at the odds you typed in beside each pick on the Live tab (no bookmaker feed covers this sport)'} - decimal: a win pays stake × (odds − 1), a loss costs the stake.
+          {sport === 'tennis' ? "Settled at the bookmakers' pre-match price for the player picked" : sport === 'badminton' ? "Settled at the odds you typed beside a pick, else the bookmaker odds you entered for the match (b), else our own pre-match odds (m)" : 'Settled at the odds you typed in beside each pick on the Live tab (no bookmaker feed covers this sport)'} - decimal: a win pays stake × (odds − 1), a loss costs the stake.
           {favs.length > 0 && ` Backed the favourite ${favs.length} time${favs.length === 1 ? '' : 's'}, the outsider ${settled.length - favs.length}.`}
           {d.length - settled.length > 0 && ` ${d.filter((p) => p.status === 'pending').length} still to play`}
           {d.filter((p) => p.status !== 'pending' && !p.odds).length > 0 && ` · ${d.filter((p) => p.status !== 'pending' && !p.odds).length} ${sport === 'tennis' ? 'without a kept price' : 'with no odds typed in'} (not counted)`}
@@ -1444,7 +1492,7 @@ function MyPicks({ active, sport = 'tennis' }) {
                     <span className="font-bold text-gray-900">{p.pick}</span>
                     <span className="block text-[10px] text-gray-400 truncate max-w-[150px]">v {p.other}{p.tournament ? ` · ${p.tournament}` : ''}</span>
                   </td>
-                  <td className={`py-1.5 text-right tabular-nums font-black ${p.other_odds && p.odds < p.other_odds ? 'text-gray-900' : 'text-gray-600'}`}>{p.odds ? p.odds.toFixed(2) : '—'}{p.odds_source === 'model' && <span className="text-[9px] font-normal text-gray-400"> m</span>}</td>
+                  <td className={`py-1.5 text-right tabular-nums font-black ${p.other_odds && p.odds < p.other_odds ? 'text-gray-900' : 'text-gray-600'}`}>{p.odds ? p.odds.toFixed(2) : '—'}{p.odds_source === 'model' && <span className="text-[9px] font-normal text-gray-400"> m</span>}{p.odds_source === 'book' && <span className="text-[9px] font-normal text-gray-400"> b</span>}</td>
                   <td className="py-1.5 text-right tabular-nums text-gray-400">{p.other_odds ? p.other_odds.toFixed(2) : '—'}</td>
                   <td className="py-1.5 text-center">
                     {p.status === 'won' ? <span className="font-black text-green-700">Won</span>

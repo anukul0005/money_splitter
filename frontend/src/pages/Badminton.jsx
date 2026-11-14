@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import RankingList, { RankingSwitch } from '../components/RankingList'
 import DatePicker from '../components/DatePicker'
-import SportPick, { useSportPicks } from '../components/SportPick'
+import SportPick, { BookOdds, useBookOdds, useSportPicks } from '../components/SportPick'
 import {
   peek,
   badmintonDay, badmintonH2H, badmintonLive, badmintonMatch, badmintonPlayer, badmintonPlayers, badmintonRankings,
@@ -190,6 +190,7 @@ export function CardHead({ title, sub, logo }) {
 function Live({ active, onPlayer }) {
   const [d, setD] = useState(() => peek('/badminton/live') || null)   // the last list at once, then fresh
   const [picks, setPick] = useSportPicks('badminton', active)
+  const [books, setBook] = useBookOdds('badminton', active)
   const [err, setErr] = useState(false)
   useEffect(() => {
     if (!active) return undefined
@@ -221,6 +222,11 @@ function Live({ active, onPlayer }) {
                     {picks && m.side1.players[0]?.name !== 'TBD' && m.side2.players[0]?.name !== 'TBD' && (
                       <SportPick sport="badminton" mkey={String(m.id)} pick={picks[String(m.id)]} onSaved={setPick} model={m.model?.odds}
                         upcoming={m.state === 'upcoming' && !!m.time_utc && new Date(`${m.time_utc.replace(' ', 'T')}Z`) > new Date()}
+                        names={[m.side1, m.side2].map((s) => s.players.map((p) => p.name).join(' / '))} />
+                    )}
+                    {books && m.side1.players[0]?.name !== 'TBD' && m.side2.players[0]?.name !== 'TBD' && (
+                      <BookOdds sport="badminton" mkey={String(m.id)} entry={books[String(m.id)]} onSaved={setBook}
+                        ours={m.model?.odds} open={m.state !== 'finished'}
                         names={[m.side1, m.side2].map((s) => s.players.map((p) => p.name).join(' / '))} />
                     )}
                   </div>

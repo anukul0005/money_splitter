@@ -1124,6 +1124,45 @@ class BadmintonResult(Base):
     court = Column(String(40), nullable=True)
 
 
+class BookOdds(Base):
+    """A bookmaker's prices for a badminton / hockey match, typed in by hand
+    (routers/picks.py) - no feed covers these sports. Kept to settle picks at
+    and to compare with our own odds once the match is played."""
+
+    __tablename__ = "book_odds"
+    __table_args__ = (UniqueConstraint("sport", "match_key", "voter_id", name="uq_book_odds"),)
+
+    id = Column(Integer, primary_key=True)
+    sport = Column(String(12), nullable=False)
+    match_key = Column(String(40), nullable=False)
+    voter_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    book = Column(String(30), nullable=True)
+    odds1 = Column(Float, nullable=False)
+    odds2 = Column(Float, nullable=False)
+    names = Column(Text, nullable=True)          # JSON [side 1, side 2]
+    label = Column(String(200), nullable=True)
+    start = Column(DateTime(timezone=True), nullable=True, index=True)
+    ref = Column(Text, nullable=True)            # JSON, as SportPick.ref
+    entered_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class BadmintonRanking(Base):
+    """BWF world ranking, week by week (badminton.sync_rankings): the top
+    RANK_DEPTH of each event. A pair is player1 + player2."""
+
+    __tablename__ = "badminton_rankings"
+    __table_args__ = (UniqueConstraint("week", "event", "player1", "player2", name="uq_badminton_ranking"),)
+
+    id = Column(Integer, primary_key=True)
+    week = Column(Date, nullable=False, index=True)
+    event = Column(String(2), nullable=False)
+    rank = Column(Integer, nullable=False)
+    player1 = Column(Integer, nullable=False, index=True)
+    player2 = Column(Integer, nullable=True)
+    points = Column(Float, nullable=True)
+    tournaments = Column(Integer, nullable=True)
+
+
 class DrinkBottle(Base):
     """A bottle (or can) one expense bought, as read from its description,
     notes and receipt (bottles.py): "Old Monk", half (375 ml), 1, Rs 640.

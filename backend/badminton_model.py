@@ -33,16 +33,20 @@ HOME = 0.02         # a side playing in its own country: this much more rally lo
                     # head-to-head over and above the ratings was tried and added nothing)
 FATIGUE = 0.02      # per hour on court at this event in the last two days (more than the other side)
 WIN = 0.02          # winning counts a little on top of the points share
-# Tried on the history and left out: recent form as its own signal (the rating already carries
-# it - more weight made it worse at every setting), head-to-head, decay when not playing.
+RANK = 0.02         # BWF ranking going in: x log(ranking points of side 1 / side 2) (fitted on the
+UNRANKED = 3000.0   # weeks on file, ~60 back); outside the top 200 counts as this many points
+FORM = 0.02         # recent form - wins over the last FORM_N matches beyond what was expected,
+FORM_N = 10         # side 1 minus side 2. Kept light: on the history every weight tried made the
+                    # predictions a little worse (the rating already carries form), this the least
+# Tried and left out: head-to-head, decay when not playing.
 T3 = (-0.5, 0.65)   # the 3-games chance recalibrated on its log-odds (fitted 2018-23: rallies
                     # aren't quite independent, so the raw chance runs high in close matches)
 TEST_FROM = date(2024, 1, 1)
 CHECK_EVERY = 10 * 60
-VERSION = "rally-v4"
+VERSION = "rally-v5"
 
 _lock = threading.Lock()
-_state: dict = {"R": {}, "N": {}, "past": {}, "tc": {}, "M": {}, "built": 0.0, "mark": None, "record": None}
+_state: dict = {"R": {}, "N": {}, "past": {}, "tc": {}, "M": {}, "F": {}, "RK": {}, "built": 0.0, "mark": None, "record": None}
 IOC = {"China": "CHN", "Indonesia": "INA", "India": "IND", "Malaysia": "MAS", "Thailand": "THA", "France": "FRA",
        "Japan": "JPN", "Germany": "GER", "Korea": "KOR", "South Korea": "KOR", "Korea, Republic of": "KOR",
        "Chinese Taipei": "TPE", "Taiwan": "TPE", "Denmark": "DEN", "England": "ENG", "United Kingdom": "ENG",
@@ -116,7 +120,13 @@ def _rows(db):
 def build(db) -> dict:
     from sqlalchemy import text
     tc = {i: IOC.get(c, c) for i, c in db.execute(text("SELECT id, country FROM badminton_tournaments")).fetchall()}
+    from collections import deque
     R, N, past, M = {}, defaultdict(int), {}, defaultdict(list)
+    F = defaultdict(lambda: deque(maxlen=FORM_N))
+    RK = defaultdict(list)
+    for week, ev_, p1, p2, pts in db.execute(text(
+            "SELECT week, event, player1, player2, points FROM badminton_rankings ORDER BY week")).fetchall():
+        RK[(ev_, frozenset(x for x in (p1, p2) if x))].append((week, pts))
     rec = {"n": 0, "right": 0, "ll": 0.0, "brier": 0.0, "n3": 0, "ll3": 0.0, "bands": defaultdict(lambda: [0, 0, 0.0])}
     for mid, ev, day, w, ss, p1a, p1b, p2a, p2b, score, c1, c2, tid, _country, mins in _rows(db):
         s1, s2 = [p for p in (p1a, p1b) if p], [p for p in (p2a, p2b) if p]
@@ -124,7 +134,9 @@ def build(db) -> dict:
         r2 = sum(R.get((ev, p), 0.0) for p in s2) / len(s2)
         h = HOME * _home(c1, c2, tc.get(tid))
         tired = _hours(M, s1, tid, day) - _hours(M, s2, tid, day)
-        pw, p3 = probs(r1 - r2 + h - FATIGUE * tired)
+        base = r1 - r2 + h - FATIGUE * tired
+        pw0 = probs(base)[0]
+        pw, p3 = probs(base + _rank_term(RK, ev, s1, s2, day) + FORM * (_form(F, ev, s1) - _form(F, ev, s2)))
         past[mid] = (pw, p3, min(N[(ev, p)] for p in s1 + s2) < 3)
         if ss == 1:                            # a walkover: nothing to learn
             continue
@@ -152,6 +164,7 @@ def build(db) -> dict:
                 k = (ev, p)
                 R[k] = R.get(k, 0.0) + sign * LR * (KNEW if N[k] < NEW else 1.0) * g
                 N[k] += 1
+                F[k].append((1.0 if (w == 1) == (sign == 1) else 0.0) - (pw0 if sign == 1 else 1 - pw0))
         if mins:
             for p in s1 + s2:
                 M[p] = (M[p] + [(day, tid, mins)])[-6:]
@@ -164,8 +177,31 @@ def build(db) -> dict:
                         for k, v in sorted(rec["bands"].items()) if v[0]],
               "version": VERSION}
     with _lock:
-        _state.update(R=R, N=dict(N), past=past, tc=tc, M=dict(M), built=time.time(), record=record)
+        _state.update(R=R, N=dict(N), past=past, tc=tc, M=dict(M), F=dict(F), RK=dict(RK), built=time.time(), record=record)
     return record
+
+
+def _rank_points(RK, ev, side, day):
+    """Side's ranking points in the latest week before `day` (within 3 weeks), else None."""
+    v = RK.get((ev, frozenset(side)))
+    if not v:
+        return None
+    for week, pts in reversed(v):
+        if week < day:
+            return pts if (day - week).days <= 21 else None
+    return None
+
+
+def _rank_term(RK, ev, s1, s2, day) -> float:
+    a, b = _rank_points(RK, ev, s1, day), _rank_points(RK, ev, s2, day)
+    if a is None and b is None:
+        return 0.0                         # neither ranked (or before the weeks on file): no say
+    return RANK * (math.log(a or UNRANKED) - math.log(b or UNRANKED))
+
+
+def _form(F, ev, side) -> float:
+    xs = [sum(F.get((ev, p), ())) / max(len(F.get((ev, p), ())), 1) for p in side]
+    return sum(xs) / len(xs) if xs else 0.0
 
 
 def _hours(M, side, tid, day) -> float:
@@ -210,7 +246,7 @@ def shape(pw: float, p3: float, thin: bool) -> dict:
             "three": _odds(p3), "two": _odds(1 - p3), "thin": thin, "source": "model"}
 
 
-def predict(event: str, s1: list, s2: list, home: int = 0, tired: float = 0.0) -> dict | None:
+def predict(event: str, s1: list, s2: list, home: int = 0, tired: float = 0.0, day: date | None = None) -> dict | None:
     """Now, from today's ratings. `thin`: someone has under 3 matches on file."""
     s1, s2 = [p for p in s1 if p], [p for p in s2 if p]
     if not s1 or not s2 or not _state["built"]:
@@ -218,8 +254,18 @@ def predict(event: str, s1: list, s2: list, home: int = 0, tired: float = 0.0) -
     R, N = _state["R"], _state["N"]
     r1 = sum(R.get((event, p), 0.0) for p in s1) / len(s1)
     r2 = sum(R.get((event, p), 0.0) for p in s2) / len(s2)
-    pw, p3 = probs(r1 - r2 + HOME * home - FATIGUE * tired)
-    return shape(pw, p3, min(N.get((event, p), 0) for p in s1 + s2) < 3)
+    day = day or date.today()
+    base = r1 - r2 + HOME * home - FATIGUE * tired
+    rank = _rank_term(_state["RK"], event, s1, s2, day)
+    form = FORM * (_form(_state["F"], event, s1) - _form(_state["F"], event, s2))
+    pw, p3 = probs(base + rank + form)
+    out = shape(pw, p3, min(N.get((event, p), 0) for p in s1 + s2) < 3)
+    # what each piece did to side 1's chance - the match page shows it
+    out["parts"] = {"rating": round(probs(r1 - r2)[0], 3), "home": round(probs(r1 - r2 + HOME * home)[0], 3),
+                    "fatigue": round(probs(base)[0], 3), "ranking": round(probs(base + rank)[0], 3), "form": round(pw, 3),
+                    "points": [_rank_points(_state["RK"], event, s, day) for s in (s1, s2)],
+                    "form_sides": [round(_form(_state["F"], event, s), 3) for s in (s1, s2)]}
+    return out
 
 
 def before(match_id) -> dict | None:
@@ -242,7 +288,7 @@ def for_match(m: dict) -> dict | None:
         day = date.today()
     s1, s2 = [i for i in ids(m.get("side1")) if i], [i for i in ids(m.get("side2")) if i]
     tired = _hours(_state["M"], s1, tid, day) - _hours(_state["M"], s2, tid, day) if s1 and s2 else 0.0
-    return predict(m.get("event") or "", s1, s2, home, tired)
+    return predict(m.get("event") or "", s1, s2, home, tired, day)
 
 
 def record() -> dict | None:
