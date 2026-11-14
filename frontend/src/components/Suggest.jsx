@@ -63,10 +63,17 @@ export function SuggestTag({ s, className = '' }) {
       </p>
     )
   }
+  // no price yet: the model's pick (its favourite), and the price that would make it worth it
+  const fav = s.probs[0] >= s.probs[1] ? 0 : 1
+  const p = s.probs[fav]
+  const strong = p >= 0.7
   return (
     <p className={`text-[10px] text-gray-500 mt-1 ${className}`}>
-      Worth it at ≥ <b className="tabular-nums">{s.min_price[0]?.toFixed(2)}</b> {last(s.names[0])} or ≥ <b className="tabular-nums">{s.min_price[1]?.toFixed(2)}</b> {last(s.names[1])}
-      <span className="text-gray-400"> - enter the bookmaker's odds to check</span>
+      <span className={`font-bold rounded px-1 py-px mr-1 border ${strong ? 'text-brand-800 bg-brand-50 border-brand-200' : 'text-gray-700 bg-gray-50 border-gray-200'}`}>
+        Model pick: {last(s.names[fav])} {Math.round(100 * p)}%{p < 0.55 ? ' (close)' : ''}
+      </span>
+      worth it at ≥ <b className="tabular-nums">{s.min_price[fav]?.toFixed(2)}</b>
+      <span className="text-gray-400"> · {last(s.names[1 - fav])} at ≥ {s.min_price[1 - fav]?.toFixed(2)} · enter the bookmaker's odds to check</span>
     </p>
   )
 }
