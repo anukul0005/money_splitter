@@ -11,7 +11,7 @@ teach nothing; a retirement only nudges.
 From the rally chance a game to 21 (win by 2, capped at 30) and a best-of-3
 are worked out exactly: the chance each side wins, and that it goes to 3
 games. The winner's chance is taken on a damped difference (C), which
-calibrates it, and the 3-games chance is recalibrated likewise (T3) - fitted on the history, tested on 2024 on (the backtest in
+calibrates it; a side in its own country gets a small edge (HOME); and the 3-games chance is recalibrated likewise (T3) - fitted on the history, tested on 2024 on (the backtest in
 `record`): what we say is 75% comes in ~75% of the time.
 
 The replay runs in order, so every finished match gets the prediction it had
@@ -29,20 +29,36 @@ from datetime import date
 LR = 0.3            # rating step per unit of point share off the expected
 KNEW, NEW = 2.5, 10  # faster for a player's first NEW matches in an event
 C = 0.75            # damping of the difference for the winner's chance (calibration)
+HOME = 0.02         # a side playing in its own country: this much more rally log-odds (fitted;
+                    # head-to-head over and above the ratings was tried and added nothing)
 T3 = (-0.5, 0.65)   # the 3-games chance recalibrated on its log-odds (fitted 2018-23: rallies
                     # aren't quite independent, so the raw chance runs high in close matches)
 TEST_FROM = date(2024, 1, 1)
 CHECK_EVERY = 10 * 60
-VERSION = "rally-v2"
+VERSION = "rally-v3"
 
 _lock = threading.Lock()
-_state: dict = {"R": {}, "N": {}, "past": {}, "built": 0.0, "mark": None, "record": None}
+_state: dict = {"R": {}, "N": {}, "past": {}, "tc": {}, "built": 0.0, "mark": None, "record": None}
+IOC = {"China": "CHN", "Indonesia": "INA", "India": "IND", "Malaysia": "MAS", "Thailand": "THA", "France": "FRA",
+       "Japan": "JPN", "Germany": "GER", "Korea": "KOR", "South Korea": "KOR", "Korea, Republic of": "KOR",
+       "Chinese Taipei": "TPE", "Taiwan": "TPE", "Denmark": "DEN", "England": "ENG", "United Kingdom": "ENG",
+       "Singapore": "SGP", "Hong Kong": "HKG", "Hong Kong China": "HKG", "Macau": "MAC", "Macau China": "MAC",
+       "Macao China": "MAC", "Canada": "CAN", "USA": "USA", "United States": "USA", "Spain": "ESP",
+       "Switzerland": "SUI", "Australia": "AUS", "New Zealand": "NZL", "Vietnam": "VIE", "Viet Nam": "VIE",
+       "Philippines": "PHI", "Netherlands": "NED", "Finland": "FIN", "Brazil": "BRA", "Mexico": "MEX",
+       "Scotland": "SCO", "Ireland": "IRL", "Belgium": "BEL", "Poland": "POL", "Austria": "AUT", "Sweden": "SWE",
+       "Italy": "ITA", "Turkey": "TUR", "United Arab Emirates": "UAE", "Sri Lanka": "SRI", "Bangladesh": "BAN"}
+
+
+def _home(c1, c2, ioc) -> int:
+    """+1 side 1 at home, -1 side 2, 0 neither (or both)."""
+    return (1 if c1 and c1 == ioc else 0) - (1 if c2 and c2 == ioc else 0) if ioc else 0
 _games: dict[float, float] = {}
 
 
 def _game(q: float) -> float:
     """The chance of winning a game from 0-0 at rally chance q."""
-    q = round(q, 3)
+    q = round(q, 4)                   # finer would only fill the cache; 3 places snapped close matches to 50/50
     if q in _games:
         return _games[q]
     memo: dict = {}
@@ -86,20 +102,24 @@ def _points(score: str | None):
 def _rows(db):
     from sqlalchemy import text
     return db.execute(text("""
-        SELECT r.id, r.event, r.day, r.winner, r.score_status, r.p1a, r.p1b, r.p2a, r.p2b, r.score
-        FROM badminton_results r
+        SELECT r.id, r.event, r.day, r.winner, r.score_status, r.p1a, r.p1b, r.p2a, r.p2b, r.score,
+               r.c1, r.c2, r.tournament_id, t.country
+        FROM badminton_results r LEFT JOIN badminton_tournaments t ON t.id = r.tournament_id
         WHERE r.winner IN (1, 2) AND r.p1a IS NOT NULL AND r.p2a IS NOT NULL AND r.day IS NOT NULL
         ORDER BY r.day, r.time_utc NULLS LAST, r.id""")).fetchall()
 
 
 def build(db) -> dict:
+    from sqlalchemy import text
+    tc = {i: IOC.get(c, c) for i, c in db.execute(text("SELECT id, country FROM badminton_tournaments")).fetchall()}
     R, N, past = {}, defaultdict(int), {}
     rec = {"n": 0, "right": 0, "ll": 0.0, "brier": 0.0, "n3": 0, "ll3": 0.0, "bands": defaultdict(lambda: [0, 0, 0.0])}
-    for mid, ev, day, w, ss, p1a, p1b, p2a, p2b, score in _rows(db):
+    for mid, ev, day, w, ss, p1a, p1b, p2a, p2b, score, c1, c2, tid, _country in _rows(db):
         s1, s2 = [p for p in (p1a, p1b) if p], [p for p in (p2a, p2b) if p]
         r1 = sum(R.get((ev, p), 0.0) for p in s1) / len(s1)
         r2 = sum(R.get((ev, p), 0.0) for p in s2) / len(s2)
-        pw, p3 = probs(r1 - r2)
+        h = HOME * _home(c1, c2, tc.get(tid))
+        pw, p3 = probs(r1 - r2 + h)
         past[mid] = (pw, p3, min(N[(ev, p)] for p in s1 + s2) < 3)
         if ss == 1:                            # a walkover: nothing to learn
             continue
@@ -119,7 +139,7 @@ def build(db) -> dict:
                 p3c = min(max(p3, 1e-4), 1 - 1e-4)
                 rec["n3"] += 1
                 rec["ll3"] -= y3 * math.log(p3c) + (1 - y3) * math.log(1 - p3c)
-        q = _sig(r1 - r2)
+        q = _sig(r1 - r2 + h)
         g = (pts[0] / (pts[0] + pts[1]) - q) if pts else ((1.0 if w == 1 else 0.0) - pw) * 0.02
         for side, sign in ((s1, 1), (s2, -1)):
             for p in side:
@@ -135,7 +155,7 @@ def build(db) -> dict:
                         for k, v in sorted(rec["bands"].items()) if v[0]],
               "version": VERSION}
     with _lock:
-        _state.update(R=R, N=dict(N), past=past, built=time.time(), record=record)
+        _state.update(R=R, N=dict(N), past=past, tc=tc, built=time.time(), record=record)
     return record
 
 
@@ -176,7 +196,7 @@ def shape(pw: float, p3: float, thin: bool) -> dict:
             "three": _odds(p3), "two": _odds(1 - p3), "thin": thin, "source": "model"}
 
 
-def predict(event: str, s1: list, s2: list) -> dict | None:
+def predict(event: str, s1: list, s2: list, home: int = 0) -> dict | None:
     """Now, from today's ratings. `thin`: someone has under 3 matches on file."""
     s1, s2 = [p for p in s1 if p], [p for p in s2 if p]
     if not s1 or not s2 or not _state["built"]:
@@ -184,7 +204,7 @@ def predict(event: str, s1: list, s2: list) -> dict | None:
     R, N = _state["R"], _state["N"]
     r1 = sum(R.get((event, p), 0.0) for p in s1) / len(s1)
     r2 = sum(R.get((event, p), 0.0) for p in s2) / len(s2)
-    pw, p3 = probs(r1 - r2)
+    pw, p3 = probs(r1 - r2 + HOME * home)
     return shape(pw, p3, min(N.get((event, p), 0) for p in s1 + s2) < 3)
 
 
@@ -199,7 +219,9 @@ def for_match(m: dict) -> dict | None:
     if m.get("state") == "finished" and m.get("id") in _state["past"]:
         return before(m["id"])
     ids = lambda s: [p.get("id") for p in (s or {}).get("players") or []]
-    return predict(m.get("event") or "", ids(m.get("side1")), ids(m.get("side2")))
+    home = _home((m.get("side1") or {}).get("country"), (m.get("side2") or {}).get("country"),
+                 _state["tc"].get(m.get("tournament_id")))
+    return predict(m.get("event") or "", ids(m.get("side1")), ids(m.get("side2")), home)
 
 
 def record() -> dict | None:
