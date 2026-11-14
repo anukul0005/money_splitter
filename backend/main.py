@@ -66,6 +66,9 @@ async def lifespan(app: FastAPI):
     threading.Thread(target=badminton_model.loop, daemon=True, name="badminton-model").start()
     import tennis_model
     threading.Thread(target=tennis_model.loop, daemon=True, name="tennis-model").start()
+    threading.Thread(target=hockey.history_loop, daemon=True, name="hockey-history").start()
+    import hockey_model
+    threading.Thread(target=hockey_model.loop, daemon=True, name="hockey-model").start()
     import hockey
     threading.Thread(target=hockey.keep_live, daemon=True, name="hockey-live").start()
     # Woken after 12:30 IST with today's daily jobs not yet run (the cron

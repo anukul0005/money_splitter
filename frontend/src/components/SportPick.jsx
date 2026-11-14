@@ -85,15 +85,22 @@ export function BookOdds({ sport, mkey, names, entry, onSaved, ours, open }) {
   const [err, setErr] = useState('')
   const [o1, setO1] = useState('')
   const [o2, setO2] = useState('')
+  const [od, setOd] = useState('')
+  const threeWay = sport === 'hockey'
   const [book, setBook] = useState(() => { try { return localStorage.getItem(BOOK_KEY) || '1xBet' } catch { return '1xBet' } })
   const last = (n) => (n || '').split(' / ').map((x) => x.split(' ').slice(-1)[0]).join(' / ')
-  const start = () => { setO1(entry ? String(entry.odds[0]) : ''); setO2(entry ? String(entry.odds[1]) : ''); setErr(''); setEdit(true) }
+  const start = () => {
+    setO1(entry ? String(entry.odds[0]) : ''); setO2(entry ? String(entry.odds[1]) : ''); setOd(entry?.draw ? String(entry.draw) : '')
+    setErr(''); setEdit(true)
+  }
   const save = () => {
     const a = Number(o1), b = Number(o2)
     if (!(a >= 1.01 && b >= 1.01)) { setErr('Both prices, decimal - like 1.73 and 2.00'); return }
     setBusy(true); setErr('')
     try { localStorage.setItem(BOOK_KEY, book) } catch { /* private mode */ }
-    bookOddsSave({ sport, key: mkey, odds1: a, odds2: b, book }).then((r) => { onSaved(r.data); setEdit(false) })
+    const dr = Number(od)
+    if (threeWay && od && !(dr >= 1.01)) { setErr('The draw price, decimal - like 4.50'); return }
+    bookOddsSave({ sport, key: mkey, odds1: a, odds2: b, odds_draw: threeWay && od ? dr : null, book }).then((r) => { onSaved(r.data); setEdit(false) })
       .catch((e) => setErr(e?.response?.data?.detail || "Couldn't save"))
       .finally(() => setBusy(false))
   }
@@ -111,6 +118,14 @@ export function BookOdds({ sport, mkey, names, entry, onSaved, ours, open }) {
               className="w-12 rounded border border-gray-300 px-1 py-0.5 text-[11px] font-bold tabular-nums text-gray-800" />
           </label>
         ))}
+        {threeWay && (
+          <label className="flex items-center gap-1 text-gray-500">
+            Draw
+            <input value={od} onChange={(e) => setOd(e.target.value)} inputMode="decimal" placeholder="opt."
+              onKeyDown={(e) => e.key === 'Enter' && save()}
+              className="w-12 rounded border border-gray-300 px-1 py-0.5 text-[11px] font-bold tabular-nums text-gray-800" />
+          </label>
+        )}
         <button disabled={busy} onClick={save} className="rounded bg-brand-600 text-white px-2 py-0.5 font-black">Save</button>
         <button onClick={() => setEdit(false)} className="text-gray-400 font-bold">Cancel</button>
         {err && <span className="text-red-600">{err}</span>}
@@ -128,7 +143,7 @@ export function BookOdds({ sport, mkey, names, entry, onSaved, ours, open }) {
   return (
     <div className="pl-9 mt-0.5 text-[10px] text-gray-500 flex items-center gap-1.5 flex-wrap" onClick={stop}>
       <span className="font-black text-gray-700">{entry.book || 'Bookmaker'}</span>
-      <span className="tabular-nums font-bold text-gray-800">{entry.odds[0].toFixed(2)} / {entry.odds[1].toFixed(2)}</span>
+      <span className="tabular-nums font-bold text-gray-800">{entry.odds[0].toFixed(2)} / {entry.odds[1].toFixed(2)}{entry.draw ? ` · draw ${entry.draw.toFixed(2)}` : ''}</span>
       <span className="tabular-nums">({Math.round((100 * i1) / (i1 + i2))}% / {Math.round((100 * i2) / (i1 + i2))}%, {(100 * entry.margin).toFixed(1)}% margin)</span>
       {ours && <span className="tabular-nums">· ours {ours[0].toFixed(2)} / {ours[1].toFixed(2)}</span>}
       {entry.late && <span className="text-amber-600 font-bold">entered after the start</span>}

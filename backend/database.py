@@ -193,6 +193,7 @@ def create_tables():
 # tables it has never seen and never touches an existing one's columns.
 # (table, column, type/definition)
 _ADDED_COLUMNS = [
+    ("book_odds", "odds_draw", "DOUBLE PRECISION"),
     ("users", "full_access", "BOOLEAN NOT NULL DEFAULT FALSE"),
     ("users", "full_name", "VARCHAR(100)"),
     ("users", "access_code_hash", "VARCHAR(128)"),

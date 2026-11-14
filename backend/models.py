@@ -1139,6 +1139,7 @@ class BookOdds(Base):
     book = Column(String(30), nullable=True)
     odds1 = Column(Float, nullable=False)
     odds2 = Column(Float, nullable=False)
+    odds_draw = Column(Float, nullable=True)     # hockey: the draw, normal time (then odds1/odds2 are normal-time wins)
     names = Column(Text, nullable=True)          # JSON [side 1, side 2]
     label = Column(String(200), nullable=True)
     start = Column(DateTime(timezone=True), nullable=True, index=True)

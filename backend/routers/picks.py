@@ -146,6 +146,15 @@ def history(sport: str, db: Session = Depends(get_db), caller: User = Depends(ow
             row["other_odds"] = b.odds2 if p.side == 1 else b.odds1
             if not p.odds:
                 row["odds"], row["odds_source"] = row["book_odds"], "book"
+        if p.sport == "hockey" and not row["odds"]:
+            try:
+                import hockey_model as hm
+                m = hm.before(json.loads(p.ref or "{}").get("id"))
+            except ImportError:
+                m = None
+            if m:
+                row["model_odds"] = m["odds"][p.side - 1]
+                row["odds"], row["odds_source"] = row["model_odds"], "model"
         if p.sport == "badminton":            # our model's price from before the start, where I typed none
             import badminton_model as bm
             m = bm.before(int(json.loads(p.ref or "{}").get("id") or 0))
@@ -166,13 +175,14 @@ class BookIn(BaseModel):
     key: str
     odds1: float
     odds2: float
+    odds_draw: float | None = None
     book: str | None = None
 
 
 def _book_row(b: BookOdds) -> dict:
     late = bool(b.start and b.entered_at > b.start)
-    return {"key": b.match_key, "book": b.book, "odds": [b.odds1, b.odds2], "names": json.loads(b.names or "[]"),
-            "margin": round(1 / b.odds1 + 1 / b.odds2 - 1, 4), "start": b.start.isoformat() if b.start else None,
+    return {"key": b.match_key, "book": b.book, "odds": [b.odds1, b.odds2], "draw": b.odds_draw, "names": json.loads(b.names or "[]"),
+            "margin": round(1 / b.odds1 + 1 / b.odds2 + (1 / b.odds_draw if b.odds_draw else 0) - 1, 4), "start": b.start.isoformat() if b.start else None,
             "entered_at": b.entered_at.isoformat(), "late": late, "label": b.label}
 
 
@@ -192,8 +202,11 @@ def book(body: BookIn, db: Session = Depends(get_db), caller: User = Depends(own
         raise HTTPException(400, "Unknown sport")
     if not (1.01 <= body.odds1 <= 1000 and 1.01 <= body.odds2 <= 1000):
         raise HTTPException(400, "Odds are decimal, like 1.85")
-    if 1 / body.odds1 + 1 / body.odds2 < 0.98:
-        raise HTTPException(400, "Those two prices can't both be right - check them")
+    if body.odds_draw is not None and not (1.01 <= body.odds_draw <= 1000):
+        raise HTTPException(400, "Odds are decimal, like 1.85")
+    total = 1 / body.odds1 + 1 / body.odds2 + (1 / body.odds_draw if body.odds_draw else 0)
+    if total < 0.98:
+        raise HTTPException(400, "Those prices can't all be right - check them")
     m = _find(body.sport, body.key)
     if not m or m["state"] == "finished":
         raise HTTPException(409, "Only for a match on the Live tab that isn't over")
@@ -202,6 +215,7 @@ def book(body: BookIn, db: Session = Depends(get_db), caller: User = Depends(own
         b = BookOdds(sport=body.sport, match_key=body.key, voter_id=caller.id)
         db.add(b)
     b.odds1, b.odds2 = round(body.odds1, 3), round(body.odds2, 3)
+    b.odds_draw = round(body.odds_draw, 3) if body.odds_draw and body.sport == "hockey" else None
     b.book = (body.book or "").strip()[:30] or None
     b.names, b.label, b.start, b.ref = json.dumps(m["names"]), m["label"], m["start"], json.dumps(m["ref"])
     b.entered_at = datetime.now(timezone.utc)
@@ -426,14 +440,20 @@ def _book_suggested(db, caller, sport, since, edge) -> list:
             mod = hm.before(ref.get("id")) if m else None
             if not m or not mod or m["state"] != "finished":
                 continue
-            v = suggest.verdict([mod["win"][0], mod["win"][1]], [b.odds1, b.odds2], edge)
-            winner = m["winner"]
-            if not winner:
-                continue
+            hg, ag = m["home"]["goals"], m["away"]["goals"]
+            if b.odds_draw:                   # normal time: home / away / draw
+                v = suggest.verdict(mod["probs"], [b.odds1, b.odds2, b.odds_draw], edge)
+                winner = 1 if hg > ag else 2 if ag > hg else 3
+            else:
+                v = suggest.verdict([mod["win"][0], mod["win"][1]], [b.odds1, b.odds2], edge)
+                winner = m["winner"]
+                if not winner:
+                    continue
         if v["verdict"] != "consider":
             continue
-        bets.append({"date": b.start.date().isoformat(), "label": b.label, "pick": names[v["side"] - 1],
-                     "other": names[2 - v["side"]], "odds": v["price"], "expected": v["expected"],
+        bets.append({"date": b.start.date().isoformat(), "label": b.label,
+                     "pick": names[v["side"] - 1] if v["side"] < 3 else "Draw", "other": " v ".join(names) if v["side"] == 3 else names[2 - v["side"]],
+                     "odds": v["price"], "expected": v["expected"],
                      "status": "won" if winner == v["side"] else "lost", "kind": "suggested"})
     return bets
 

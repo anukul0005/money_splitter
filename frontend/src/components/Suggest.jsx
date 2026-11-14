@@ -50,7 +50,7 @@ export function SuggestTag({ s, className = '' }) {
   if (s.verdict === 'consider') {
     return (
       <p className={`text-[10px] font-bold text-green-800 bg-green-50 border border-green-200 rounded px-1.5 py-0.5 mt-1 inline-block ${className}`}>
-        ✓ Consider {last(s.names[s.side - 1])} @ {s.price.toFixed(2)} · {pc(s.expected)} expected
+        ✓ Consider {s.side === 3 ? 'the draw' : last(s.names[s.side - 1])} @ {s.price.toFixed(2)} · {pc(s.expected)} expected
         <span className="font-normal text-green-700"> (we say {Math.round(100 * s.probs[s.side - 1])}%)</span>
       </p>
     )
@@ -58,7 +58,7 @@ export function SuggestTag({ s, className = '' }) {
   if (s.verdict === 'skip') {
     return (
       <p className={`text-[10px] text-gray-400 mt-1 ${className}`}>
-        Skip - best is {last(s.names[s.best_side - 1])} at {pc(s.best_expected)} expected, needs {Math.round(100 * s.edge_needed)}%
+        Skip - best is {s.best_side === 3 ? 'the draw' : last(s.names[s.best_side - 1])} at {pc(s.best_expected)} expected, needs {Math.round(100 * s.edge_needed)}%
         {' '}(worth it at ≥ {s.min_price.map((x) => (x ? x.toFixed(2) : '—')).slice(0, 2).join(' / ')})
       </p>
     )
