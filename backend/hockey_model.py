@@ -1,5 +1,5 @@
 """Our own field-hockey odds, from the FIH results on file (hockey_matches:
-senior outdoor internationals, 2012 on - hockey.sync_history).
+senior outdoor internationals, 2016 on - hockey.sync_history).
 
 Each team has an attack and a defence strength. Expected goals for a side =
 exp(base + its attack - the other's defence); after each match the strengths
@@ -7,8 +7,8 @@ move by LR x (goals scored - expected), faster for a team's first matches.
 Goals are taken as Poisson, which gives the chance of each side winning in
 normal time and of a draw - and of winning overall, a draw going to a
 shoot-out about evenly. Fitted on the history and tested on 2024 on: the
-winner of 68.6% of decided matches picked, and the win / draw / loss call
-scores 0.911 log-loss against 0.979 for the base rates alone (`record`).
+winner of 68.7% of decided matches picked, and the win / draw / loss call
+scores 0.939 log-loss against 0.979 for the base rates alone (`record`).
 
 Teams are FIH's team ids (men's and women's sides are different ids).
 """
@@ -24,6 +24,7 @@ LR = 0.06           # strength step per goal off the expected
 KNEW, NEW = 1.5, 8  # faster for a team's first NEW matches
 LR_BASE = 0.005     # how fast the scoring level (per gender) drifts
 SO_EDGE = 0.0       # shoot-outs: no edge for the stronger side (close to a coin toss)
+FROM = date(2016, 1, 1)     # results used from here on
 TEST_FROM = date(2024, 1, 1)
 CHECK_EVERY = 30 * 60
 VERSION = "poisson-v1"
@@ -66,8 +67,8 @@ def build(db, lr: float = LR, keep: bool = True) -> dict:
     n = n2 = ll3 = ll2 = right = 0
     for mid, g, day, h, a, gh, ga, sh, sa in db.execute(text("""
             SELECT id, gender, day, home_id, away_id, home_goals, away_goals, home_so, away_so
-            FROM hockey_matches WHERE home_goals IS NOT NULL AND away_goals IS NOT NULL AND day IS NOT NULL
-            ORDER BY day, start NULLS LAST, id""")):
+            FROM hockey_matches WHERE day >= :since AND home_goals IS NOT NULL AND away_goals IS NOT NULL AND day IS NOT NULL
+            ORDER BY day, start NULLS LAST, id"""), {"since": FROM}):
         lh, la = _lams(A, D, base, g, h, a)
         thin = min(N[h], N[a]) < 5
         past[mid] = (lh, la, thin)

@@ -7,7 +7,7 @@ The pages read live: hockey has a few dozen international tournaments a
 year, each read whole in one request, so every answer is fetched when asked
 and held in memory a while - seconds for a tournament with a match on,
 hours for one that's over. Only the results history is stored
-(sync_history: senior outdoor internationals from 2012, for the odds model).
+(sync_history: senior outdoor internationals from 2016, for the odds model).
 """
 from __future__ import annotations
 
@@ -298,6 +298,7 @@ def rankings(gender: str) -> dict:
 
 # ── Results history (for the odds model) ────────────────────────────────────
 
+HISTORY_FROM = date(2016, 1, 1)   # tournaments starting before this aren't kept
 HISTORY_PACE = 2.0           # seconds between tournament reads
 HISTORY_EVERY = 6 * 3600     # new finished tournaments looked for this often
 _GENDER_OF = {"Senior Men's Outdoor": "M", "Senior Women's Outdoor": "F"}
@@ -335,6 +336,8 @@ def sync_history(db, limit: int | None = None) -> int:
     for page in range(1, (first.get("pages") or 1) + 1):
         for e in (first if page == 1 else events("r", page, 100))["events"]:
             if e["id"] in have or e.get("discipline") not in _GENDER_OF:
+                continue
+            if (_day(e.get("start")) or date.max) < HISTORY_FROM:
                 continue
             try:
                 n = _store_series(db, e)
