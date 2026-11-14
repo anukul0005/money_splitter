@@ -31,14 +31,18 @@ KNEW, NEW = 2.5, 10  # faster for a player's first NEW matches in an event
 C = 0.75            # damping of the difference for the winner's chance (calibration)
 HOME = 0.02         # a side playing in its own country: this much more rally log-odds (fitted;
                     # head-to-head over and above the ratings was tried and added nothing)
+FATIGUE = 0.02      # per hour on court at this event in the last two days (more than the other side)
+WIN = 0.02          # winning counts a little on top of the points share
+# Tried on the history and left out: recent form as its own signal (the rating already carries
+# it - more weight made it worse at every setting), head-to-head, decay when not playing.
 T3 = (-0.5, 0.65)   # the 3-games chance recalibrated on its log-odds (fitted 2018-23: rallies
                     # aren't quite independent, so the raw chance runs high in close matches)
 TEST_FROM = date(2024, 1, 1)
 CHECK_EVERY = 10 * 60
-VERSION = "rally-v3"
+VERSION = "rally-v4"
 
 _lock = threading.Lock()
-_state: dict = {"R": {}, "N": {}, "past": {}, "tc": {}, "built": 0.0, "mark": None, "record": None}
+_state: dict = {"R": {}, "N": {}, "past": {}, "tc": {}, "M": {}, "built": 0.0, "mark": None, "record": None}
 IOC = {"China": "CHN", "Indonesia": "INA", "India": "IND", "Malaysia": "MAS", "Thailand": "THA", "France": "FRA",
        "Japan": "JPN", "Germany": "GER", "Korea": "KOR", "South Korea": "KOR", "Korea, Republic of": "KOR",
        "Chinese Taipei": "TPE", "Taiwan": "TPE", "Denmark": "DEN", "England": "ENG", "United Kingdom": "ENG",
@@ -103,7 +107,7 @@ def _rows(db):
     from sqlalchemy import text
     return db.execute(text("""
         SELECT r.id, r.event, r.day, r.winner, r.score_status, r.p1a, r.p1b, r.p2a, r.p2b, r.score,
-               r.c1, r.c2, r.tournament_id, t.country
+               r.c1, r.c2, r.tournament_id, t.country, r.minutes
         FROM badminton_results r LEFT JOIN badminton_tournaments t ON t.id = r.tournament_id
         WHERE r.winner IN (1, 2) AND r.p1a IS NOT NULL AND r.p2a IS NOT NULL AND r.day IS NOT NULL
         ORDER BY r.day, r.time_utc NULLS LAST, r.id""")).fetchall()
@@ -112,14 +116,15 @@ def _rows(db):
 def build(db) -> dict:
     from sqlalchemy import text
     tc = {i: IOC.get(c, c) for i, c in db.execute(text("SELECT id, country FROM badminton_tournaments")).fetchall()}
-    R, N, past = {}, defaultdict(int), {}
+    R, N, past, M = {}, defaultdict(int), {}, defaultdict(list)
     rec = {"n": 0, "right": 0, "ll": 0.0, "brier": 0.0, "n3": 0, "ll3": 0.0, "bands": defaultdict(lambda: [0, 0, 0.0])}
-    for mid, ev, day, w, ss, p1a, p1b, p2a, p2b, score, c1, c2, tid, _country in _rows(db):
+    for mid, ev, day, w, ss, p1a, p1b, p2a, p2b, score, c1, c2, tid, _country, mins in _rows(db):
         s1, s2 = [p for p in (p1a, p1b) if p], [p for p in (p2a, p2b) if p]
         r1 = sum(R.get((ev, p), 0.0) for p in s1) / len(s1)
         r2 = sum(R.get((ev, p), 0.0) for p in s2) / len(s2)
         h = HOME * _home(c1, c2, tc.get(tid))
-        pw, p3 = probs(r1 - r2 + h)
+        tired = _hours(M, s1, tid, day) - _hours(M, s2, tid, day)
+        pw, p3 = probs(r1 - r2 + h - FATIGUE * tired)
         past[mid] = (pw, p3, min(N[(ev, p)] for p in s1 + s2) < 3)
         if ss == 1:                            # a walkover: nothing to learn
             continue
@@ -141,11 +146,15 @@ def build(db) -> dict:
                 rec["ll3"] -= y3 * math.log(p3c) + (1 - y3) * math.log(1 - p3c)
         q = _sig(r1 - r2 + h)
         g = (pts[0] / (pts[0] + pts[1]) - q) if pts else ((1.0 if w == 1 else 0.0) - pw) * 0.02
+        g += WIN * ((1.0 if w == 1 else 0.0) - probs(r1 - r2 + h)[0])
         for side, sign in ((s1, 1), (s2, -1)):
             for p in side:
                 k = (ev, p)
                 R[k] = R.get(k, 0.0) + sign * LR * (KNEW if N[k] < NEW else 1.0) * g
                 N[k] += 1
+        if mins:
+            for p in s1 + s2:
+                M[p] = (M[p] + [(day, tid, mins)])[-6:]
     n = max(rec["n"], 1)
     record = {"since": TEST_FROM.isoformat(), "matches": rec["n"], "right": round(rec["right"] / n, 3),
               "log_loss": round(rec["ll"] / n, 4), "brier": round(rec["brier"] / n, 4),
@@ -155,8 +164,13 @@ def build(db) -> dict:
                         for k, v in sorted(rec["bands"].items()) if v[0]],
               "version": VERSION}
     with _lock:
-        _state.update(R=R, N=dict(N), past=past, tc=tc, built=time.time(), record=record)
+        _state.update(R=R, N=dict(N), past=past, tc=tc, M=dict(M), built=time.time(), record=record)
     return record
+
+
+def _hours(M, side, tid, day) -> float:
+    """The most court time anyone on the side has had at this event in the two days up to `day`."""
+    return max((sum(m for d, t, m in M.get(p, ()) if t == tid and 0 <= (day - d).days <= 1) for p in side), default=0) / 60
 
 
 def _mark(db):
@@ -196,7 +210,7 @@ def shape(pw: float, p3: float, thin: bool) -> dict:
             "three": _odds(p3), "two": _odds(1 - p3), "thin": thin, "source": "model"}
 
 
-def predict(event: str, s1: list, s2: list, home: int = 0) -> dict | None:
+def predict(event: str, s1: list, s2: list, home: int = 0, tired: float = 0.0) -> dict | None:
     """Now, from today's ratings. `thin`: someone has under 3 matches on file."""
     s1, s2 = [p for p in s1 if p], [p for p in s2 if p]
     if not s1 or not s2 or not _state["built"]:
@@ -204,7 +218,7 @@ def predict(event: str, s1: list, s2: list, home: int = 0) -> dict | None:
     R, N = _state["R"], _state["N"]
     r1 = sum(R.get((event, p), 0.0) for p in s1) / len(s1)
     r2 = sum(R.get((event, p), 0.0) for p in s2) / len(s2)
-    pw, p3 = probs(r1 - r2 + HOME * home)
+    pw, p3 = probs(r1 - r2 + HOME * home - FATIGUE * tired)
     return shape(pw, p3, min(N.get((event, p), 0) for p in s1 + s2) < 3)
 
 
@@ -221,7 +235,14 @@ def for_match(m: dict) -> dict | None:
     ids = lambda s: [p.get("id") for p in (s or {}).get("players") or []]
     home = _home((m.get("side1") or {}).get("country"), (m.get("side2") or {}).get("country"),
                  _state["tc"].get(m.get("tournament_id")))
-    return predict(m.get("event") or "", ids(m.get("side1")), ids(m.get("side2")), home)
+    tid = m.get("tournament_id")
+    try:
+        day = date.fromisoformat(str(m.get("time_utc") or m.get("day") or "")[:10])
+    except ValueError:
+        day = date.today()
+    s1, s2 = [i for i in ids(m.get("side1")) if i], [i for i in ids(m.get("side2")) if i]
+    tired = _hours(_state["M"], s1, tid, day) - _hours(_state["M"], s2, tid, day) if s1 and s2 else 0.0
+    return predict(m.get("event") or "", s1, s2, home, tired)
 
 
 def record() -> dict | None:
