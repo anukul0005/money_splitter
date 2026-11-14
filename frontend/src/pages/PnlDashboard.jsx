@@ -17,13 +17,14 @@ const pct = (x) => (x == null ? '—' : `${x > 0 ? '+' : ''}${(100 * x).toFixed(
 const tone = (x) => (x > 0 ? 'text-green-700' : x < 0 ? 'text-red-600' : 'text-gray-900')
 const fmtDay = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
 
-function Tile({ label, value, sub, cls }) {
+function Tile({ label, value, sub, cls, onClick }) {
+  const Box = onClick ? 'button' : 'div'
   return (
-    <div className="flex-1 min-w-[90px] rounded-md bg-white border border-amber-100 px-3 py-2">
-      <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">{label}</p>
+    <Box onClick={onClick} className="flex-1 min-w-[90px] text-left rounded-md bg-white border border-amber-100 px-3 py-2">
+      <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap truncate">{label}</p>
       <p className={`text-base font-black tabular-nums ${cls || 'text-gray-900'}`}>{value}</p>
       {sub && <p className="text-[10px] text-gray-400">{sub}</p>}
-    </div>
+    </Box>
   )
 }
 
@@ -32,17 +33,17 @@ function Split({ s, stake }) {
     <tr className="border-t border-gray-100">
       <td className="py-1.5 pl-1 font-semibold text-gray-800">{label}</td>
       <td className="py-1.5 text-right tabular-nums">{x.bets}</td>
-      <td className="py-1.5 text-right tabular-nums">{x.bets ? `${Math.round((100 * x.won) / x.bets)}%` : '—'}</td>
-      <td className={`py-1.5 text-right tabular-nums font-black ${tone(x.pl)}`}>{x.bets ? rupees(x.pl) : '—'}</td>
-      <td className={`py-1.5 text-right tabular-nums ${tone(x.pl)}`}>{pct(x.roi)}</td>
+      <td className="py-1.5 pl-2 text-right tabular-nums whitespace-nowrap">{x.bets ? `${Math.round((100 * x.won) / x.bets)}%` : '—'}</td>
+      <td className={`py-1.5 pl-2 text-right tabular-nums font-black whitespace-nowrap ${tone(x.pl)}`}>{x.bets ? rupees(x.pl) : '—'}</td>
+      <td className={`py-1.5 pl-2 text-right tabular-nums whitespace-nowrap ${tone(x.pl)}`}>{pct(x.roi)}</td>
     </tr>
   )
   return (
     <table className="w-full text-xs mt-2">
       <thead>
         <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
-          <th className="py-1 text-left">Bets</th><th className="py-1 text-right">Count</th><th className="py-1 text-right">Won</th>
-          <th className="py-1 text-right">P/L</th><th className="py-1 text-right">Return</th>
+          <th className="py-1 text-left">Bets</th><th className="py-1 pl-2 text-right">Count</th><th className="py-1 pl-2 text-right">Won</th>
+          <th className="py-1 pl-2 text-right">P/L</th><th className="py-1 pl-2 text-right">Return</th>
         </tr>
       </thead>
       <tbody>
@@ -206,6 +207,8 @@ export default function PnlDashboard() {
   const nav = useNavigate()
   const [days, setDays] = useState(30)
   const [stake, setStake] = useState(100)
+  const [view, setView] = useState(() => { try { return sessionStorage.getItem('pnl.view') || 'all' } catch { return 'all' } })
+  const pick = (v) => { setView(v); try { sessionStorage.setItem('pnl.view', v) } catch { /* private mode */ } }
   const [d, setD] = useState(null)
   const [err, setErr] = useState(false)
   useEffect(() => {
@@ -214,10 +217,10 @@ export default function PnlDashboard() {
     const t = setTimeout(() => pnlBacktest(days, stake).then((r) => { if (alive) setD(r.data) }).catch(() => { if (alive) setErr(true) }), 300)
     return () => { alive = false; clearTimeout(t) }
   }, [days, stake])
-  const series = d ? [
+  const series = !d ? [] : view === 'all' ? [
     { key: 'total', name: 'All sports', color: INK, curve: d.total.curve },
     ...Object.entries(d.sports).filter(([, s]) => s.bets > 0).map(([k, s]) => ({ key: k, name: SPORT[k].name, color: SPORT[k].color, curve: s.curve })),
-  ] : []
+  ] : [{ key: view, name: SPORT[view].name, color: SPORT[view].color, curve: d.sports[view].curve }]
   const t = d?.total
   return (
     <div className="pb-28 md:pb-10">
@@ -237,6 +240,12 @@ export default function PnlDashboard() {
               className="w-20 rounded-md border border-amber-300 px-2 py-0.5 text-[12px] font-black tabular-nums" />
           </label>
         </div>
+        <div className="grid grid-cols-4 mt-2.5 rounded-md border border-amber-300 overflow-hidden">
+          {[['all', 'All'], ...Object.entries(SPORT).map(([k, m]) => [k, `${m.icon} ${m.name}`])].map(([k, l]) => (
+            <button key={k} onClick={() => pick(k)}
+              className={`py-1.5 text-[11px] font-bold whitespace-nowrap ${view === k ? 'bg-brand-400 text-white' : 'bg-white text-gray-600'}`}>{l}</button>
+          ))}
+        </div>
       </div>
 
       <div className="px-5 pt-4 space-y-3">
@@ -244,25 +253,29 @@ export default function PnlDashboard() {
         {err && <p className="text-sm text-red-600 text-center py-8">Couldn't work it out - try again in a moment.</p>}
         {d && (
           <>
+            {view === 'all' && (
             <div className="card">
               <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">All sports · {fmtDay(d.since)} to today</p>
               <p className={`text-3xl font-black tabular-nums mt-1 ${tone(t.pl)}`}>{rupees(t.pl)}</p>
               <p className="text-[11px] text-gray-500">{pct(t.roi)} on ₹{Math.round(t.staked).toLocaleString('en-IN')} staked over {t.bets.toLocaleString('en-IN')} bets · {t.bets ? Math.round((100 * t.won) / t.bets) : 0}% won</p>
               <div className="flex gap-2 mt-3 flex-wrap">
                 {Object.entries(d.sports).map(([k, s]) => (
-                  <Tile key={k} label={`${SPORT[k].icon} ${SPORT[k].name}`} value={s.bets ? rupees(s.pl) : '—'} cls={tone(s.pl)}
+                  <Tile key={k} onClick={() => pick(k)} label={`${SPORT[k].icon} ${SPORT[k].name}`} value={s.bets ? rupees(s.pl) : '—'} cls={tone(s.pl)}
                     sub={s.bets ? `${s.bets} bets · ${pct(s.roi)}` : 'no bets'} />
                 ))}
               </div>
               <Split s={t} stake={stake} />
             </div>
+            )}
 
-            <div className="card">
-              <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Running P/L by day</p>
-              <Curve series={series} />
-            </div>
+            {series.some((x) => x.curve.length) && (
+              <div className="card">
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Running P/L by day{view !== 'all' ? ` · ${SPORT[view].name}` : ''}</p>
+                <Curve series={series} />
+              </div>
+            )}
 
-            {Object.entries(d.sports).map(([k, s]) => <SportCard key={k} k={k} s={s} stake={stake} />)}
+            {view !== 'all' && <SportCard k={view} s={d.sports[view]} stake={stake} />}
 
             <p className="text-[10px] text-gray-400 text-center">
               Decimal odds: a win pays stake × (odds − 1), a loss costs the stake; walkovers and draws are void.
