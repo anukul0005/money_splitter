@@ -14,6 +14,7 @@ from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 import badminton as bwf
+import badminton_model as bm
 from database import get_db
 from models import BadmintonPlayer, BadmintonResult, BadmintonTournament, User
 from routers.tennis import owner
@@ -58,6 +59,12 @@ def _p(people, pid) -> dict | None:
 
 def _match(r: BadmintonResult, people, tournaments=None) -> dict:
     t = (tournaments or {}).get(r.tournament_id)
+    out = _match_row(r, people, t)
+    out["model"] = bm.for_match(out)
+    return out
+
+
+def _match_row(r: BadmintonResult, people, t) -> dict:
     return {"id": r.id, "code": r.code, "tournament_id": r.tournament_id,
             "tournament": t.name if t else None, "level": t.level if t else None,
             "event": r.event, "round": r.round, "day": r.day.isoformat() if r.day else None,
@@ -88,9 +95,17 @@ def summary(db: Session = Depends(get_db), _: User = Depends(owner)):
 @router.get("/live", response_model=dict)
 def live(_: User = Depends(owner)):
     try:
-        return bwf.live()
+        out = bwf.live()
+        return {**out, "tournaments": [{**t, "matches": [{**m, "model": bm.for_match(m)} for m in t.get("matches", [])]}
+                                       for t in out.get("tournaments", [])]}
     except Exception as e:
         raise HTTPException(502, f"BWF's live scores didn't answer: {e}")
+
+
+@router.get("/model", response_model=dict)
+def model(_: User = Depends(owner)):
+    """How our own odds have done: every match since TEST_FROM predicted before it was played."""
+    return bm.record() or {"building": True}
 
 
 @router.get("/match/{tournament_id}/{code}", response_model=dict)

@@ -14,7 +14,7 @@ export function useSportPicks(sport, active) {
 /** Under a badminton / hockey match on the Live tab: pick the winner before
  *  it starts and, if I like, the price I got - My picks settles mock bets at
  *  it (no bookmaker feed covers these sports). After the start: my pick. */
-export default function SportPick({ sport, mkey, names, upcoming, pick, onSaved }) {
+export default function SportPick({ sport, mkey, names, upcoming, pick, onSaved, model }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [odds, setOdds] = useState(pick?.odds ? String(pick.odds) : '')
@@ -23,7 +23,7 @@ export default function SportPick({ sport, mkey, names, upcoming, pick, onSaved 
   if (!upcoming) {
     return pick ? (
       <p className="text-[10px] font-bold text-green-700 pl-9 mt-0.5">
-        ✓ My pick {last(pick.pick)}{pick.odds ? ` @ ${pick.odds.toFixed(2)}` : ''}
+        ✓ My pick {last(pick.pick)}{pick.odds ? ` @ ${pick.odds.toFixed(2)}` : model && pick.side ? ` @ ${model[pick.side - 1].toFixed(2)} (ours)` : ''}
       </p>
     ) : null
   }
@@ -56,7 +56,7 @@ export default function SportPick({ sport, mkey, names, upcoming, pick, onSaved 
           @
           <input value={odds} onChange={(e) => setOdds(e.target.value)} onBlur={saveOdds}
             onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-            inputMode="decimal" placeholder="odds"
+            inputMode="decimal" placeholder={model && pick?.side ? model[pick.side - 1].toFixed(2) : 'odds'}
             className="w-14 rounded border border-gray-300 px-1 py-0.5 text-[11px] font-bold tabular-nums text-gray-800" />
         </label>
       )}

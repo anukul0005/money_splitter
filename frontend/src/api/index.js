@@ -313,6 +313,7 @@ export const tennisSummary  = ()                 => remembered('/tennis/summary'
 // Badminton - BWF live scores, results from 2018, players, stats (backend routers/badminton.py)
 export const badmintonSummary     = ()               => remembered('/badminton/summary', null, MIN)
 export const badmintonLive        = ()               => remembered('/badminton/live', null, 8_000)
+export const badmintonModel       = ()               => remembered('/badminton/model', null, 30 * 60_000)
 export const badmintonTournaments = (year)           => remembered('/badminton/tournaments', { year }, 5 * MIN)
 export const badmintonTournament  = (id)             => remembered(`/badminton/tournament/${id}`, null, 2 * MIN)
 export const badmintonMatch       = (tid, code, finished) => remembered(`/badminton/match/${tid}/${code}`, { finished }, finished ? 60 * MIN : 15_000)

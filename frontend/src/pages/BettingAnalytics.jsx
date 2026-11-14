@@ -1419,7 +1419,7 @@ function MyPicks({ active, sport = 'tennis' }) {
           <Stat label="Staked" v={`₹${staked.toLocaleString('en-IN')}`} />
         </div>
         <p className="text-[10px] text-gray-400 mt-2">
-          {sport === 'tennis' ? "Settled at the bookmakers' pre-match price for the player picked" : 'Settled at the odds you typed in beside each pick on the Live tab (no bookmaker feed covers this sport)'} - decimal: a win pays stake × (odds − 1), a loss costs the stake.
+          {sport === 'tennis' ? "Settled at the bookmakers' pre-match price for the player picked" : sport === 'badminton' ? "Settled at the odds you typed in beside a pick, else our own pre-match odds (m - from every BWF result since 2018)" : 'Settled at the odds you typed in beside each pick on the Live tab (no bookmaker feed covers this sport)'} - decimal: a win pays stake × (odds − 1), a loss costs the stake.
           {favs.length > 0 && ` Backed the favourite ${favs.length} time${favs.length === 1 ? '' : 's'}, the outsider ${settled.length - favs.length}.`}
           {d.length - settled.length > 0 && ` ${d.filter((p) => p.status === 'pending').length} still to play`}
           {d.filter((p) => p.status !== 'pending' && !p.odds).length > 0 && ` · ${d.filter((p) => p.status !== 'pending' && !p.odds).length} ${sport === 'tennis' ? 'without a kept price' : 'with no odds typed in'} (not counted)`}
@@ -1444,7 +1444,7 @@ function MyPicks({ active, sport = 'tennis' }) {
                     <span className="font-bold text-gray-900">{p.pick}</span>
                     <span className="block text-[10px] text-gray-400 truncate max-w-[150px]">v {p.other}{p.tournament ? ` · ${p.tournament}` : ''}</span>
                   </td>
-                  <td className={`py-1.5 text-right tabular-nums font-black ${p.other_odds && p.odds < p.other_odds ? 'text-gray-900' : 'text-gray-600'}`}>{p.odds ? p.odds.toFixed(2) : '—'}</td>
+                  <td className={`py-1.5 text-right tabular-nums font-black ${p.other_odds && p.odds < p.other_odds ? 'text-gray-900' : 'text-gray-600'}`}>{p.odds ? p.odds.toFixed(2) : '—'}{p.odds_source === 'model' && <span className="text-[9px] font-normal text-gray-400"> m</span>}</td>
                   <td className="py-1.5 text-right tabular-nums text-gray-400">{p.other_odds ? p.other_odds.toFixed(2) : '—'}</td>
                   <td className="py-1.5 text-center">
                     {p.status === 'won' ? <span className="font-black text-green-700">Won</span>

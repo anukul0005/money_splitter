@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { badmintonGame, badmintonLive } from '../api'
+import { badmintonGame, badmintonLive, badmintonModel } from '../api'
 import { CardHead, Detail, EVENT, Match, ROUND, Side, Tile, fmtDate } from './Badminton'
 
 /**
@@ -90,6 +90,8 @@ export default function BadmintonMatch() {
           </div>
         </div>
 
+        {m.model && <OurOdds m={m} />}
+
         <div className="flex flex-wrap gap-2">
           <Tile label="Head-to-head" value={`${d.h2h.wins[0]}–${d.h2h.wins[1]}`} sub={`${short(m.side1)} first`} />
           {d.form.map((f, i) => (
@@ -106,6 +108,62 @@ export default function BadmintonMatch() {
 
         {d.form.map((f, i) => <Form key={i} f={f} side={i ? m.side2 : m.side1} />)}
       </div>
+    </div>
+  )
+}
+
+/** Our own odds for the match (backend badminton_model): each side's chance
+ *  and fair price, and whether it goes to 3 games - from before the match
+ *  once it's played - with how the model has done on past matches. */
+function OurOdds({ m }) {
+  const [rec, setRec] = useState(null)
+  useEffect(() => { badmintonModel().then((r) => setRec(r.data)).catch(() => {}) }, [])
+  const o = m.model
+  const name = (s) => s.players.map((p) => p.name.split(' ').slice(-1)[0]).join(' / ')
+  const pct = (p) => `${Math.round(100 * p)}%`
+  const done = m.state === 'finished'
+  const right = done && m.winner ? (o.p1 >= 0.5) === (m.winner === 1) : null
+  const three = done && m.games?.length ? m.games.length === 3 : null
+  return (
+    <div className="card">
+      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">{done ? 'Our odds before the match' : 'Our odds'}</p>
+      <table className="w-full text-xs mt-1.5">
+        <thead>
+          <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
+            <th className="py-1 text-left">Side</th><th className="py-1 text-right">Chance</th><th className="py-1 text-right">Odds</th>
+          </tr>
+        </thead>
+        <tbody>
+          {[m.side1, m.side2].map((s, i) => {
+            const p = i ? 1 - o.p1 : o.p1
+            return (
+              <tr key={i} className="border-t border-gray-100">
+                <td className="py-1.5 pl-1 font-bold text-gray-900 truncate max-w-[160px]">
+                  {name(s)}{m.winner === i + 1 && <span className="ml-1 text-green-600 font-black">✓</span>}
+                </td>
+                <td className="py-1.5 text-right tabular-nums text-gray-500">{pct(p)}</td>
+                <td className={`py-1.5 text-right tabular-nums ${p >= 0.5 ? 'font-black text-gray-900' : 'font-semibold text-gray-600'}`}>{o.odds[i].toFixed(2)}</td>
+              </tr>
+            )
+          })}
+          <tr className="border-t border-gray-100">
+            <td className="py-1.5 pl-1 text-gray-800 font-semibold">Goes to 3 games{three != null && <span className={`ml-1 font-black ${three ? 'text-green-600' : 'text-gray-400'}`}>{three ? '✓' : '✗'}</span>}</td>
+            <td className="py-1.5 text-right tabular-nums text-gray-500">{pct(o.p3)}</td>
+            <td className="py-1.5 text-right tabular-nums font-semibold text-gray-700">{o.three.toFixed(2)} <span className="text-gray-400 font-normal">/ 2 games {o.two.toFixed(2)}</span></td>
+          </tr>
+        </tbody>
+      </table>
+      {right != null && (
+        <p className={`text-[11px] font-bold mt-2 ${right ? 'text-green-700' : 'text-red-600'}`}>
+          {right ? '✓ The favourite won' : '✗ The outsider won'}
+        </p>
+      )}
+      <p className="text-[10px] text-gray-400 mt-2">
+        Worked out from every BWF result since 2018: each player's rally strength in this event (a pair as the two together), moved by the share of points won in each match.
+        Fair prices - no bookmaker margin, so a bookmaker would offer a little less.
+        {o.thin && ' Someone here has under 3 matches on file, so take these with a pinch of salt.'}
+        {rec?.matches > 0 && ` Since ${fmtDate(rec.since)} it has picked the winner of ${Math.round(100 * rec.right)}% of ${rec.matches.toLocaleString('en-IN')} matches, and what it calls 75% comes in about ${Math.round(100 * (rec.bands.find((b) => b.from === 70)?.came_in || 0.75))}% of the time.`}
+      </p>
     </div>
   )
 }

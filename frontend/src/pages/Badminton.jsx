@@ -62,6 +62,12 @@ export function Side({ side, no, m, onPlayer }) {
         {side.seed && <span className="ml-1 text-[10px] font-semibold text-gray-400">({side.seed})</span>}
         {live && m.serve === no && <span title="Serving" className="ml-1.5 inline-block w-2 h-2 rounded-full bg-lime-400 ring-1 ring-lime-600 align-middle" />}
       </span>
+      {m.model && (                  /* our model's fair price for this side - before the match, kept after */
+        <span title={m.state === 'finished' ? 'Our odds before the match' : 'Our odds'}
+          className={`w-8 text-right text-[10px] tabular-nums ${m.model.odds[no - 1] <= m.model.odds[2 - no] ? 'font-black text-brand-700' : 'text-gray-400'}`}>
+          {m.model.odds[no - 1].toFixed(2)}
+        </span>
+      )}
       <span className="w-3.5 text-center text-[10px] text-green-600 font-black">{won ? '✓' : ''}</span>
       {m.games.map((g, k) => {
         const mine = g[no - 1], theirs = g[2 - no]
@@ -213,7 +219,7 @@ function Live({ active, onPlayer }) {
                   <div key={m.id}>
                     <Match m={m} onPlayer={onPlayer} showEvent />
                     {picks && m.side1.players[0]?.name !== 'TBD' && m.side2.players[0]?.name !== 'TBD' && (
-                      <SportPick sport="badminton" mkey={String(m.id)} pick={picks[String(m.id)]} onSaved={setPick}
+                      <SportPick sport="badminton" mkey={String(m.id)} pick={picks[String(m.id)]} onSaved={setPick} model={m.model?.odds}
                         upcoming={m.state === 'upcoming' && !!m.time_utc && new Date(`${m.time_utc.replace(' ', 'T')}Z`) > new Date()}
                         names={[m.side1, m.side2].map((s) => s.players.map((p) => p.name).join(' / '))} />
                     )}
@@ -225,6 +231,7 @@ function Live({ active, onPlayer }) {
         </div>
       ))}
       <p className="text-[10px] text-gray-400 text-center">
+        Odds beside each side are ours - worked out from every BWF result since 2018, fair prices with no bookmaker margin.<br />
         From bwfbadminton.com · updates every 30 seconds · {new Date(d.updated).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}
       </p>
     </div>

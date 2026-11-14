@@ -137,5 +137,14 @@ def history(sport: str, db: Session = Depends(get_db), caller: User = Depends(ow
     out = []
     for p in rows:
         status, score = _result(p, db) if p.start <= datetime.now(timezone.utc) else ("pending", None)
-        out.append({**_row(p), "status": status, "score": score, "tournament": p.label, "other_odds": None})
+        row = {**_row(p), "status": status, "score": score, "tournament": p.label, "other_odds": None, "odds_source": "mine" if p.odds else None}
+        if p.sport == "badminton":            # our model's price from before the start, where I typed none
+            import badminton_model as bm
+            m = bm.before(int(json.loads(p.ref or "{}").get("id") or 0))
+            if m:
+                row["model_odds"] = m["odds"][p.side - 1]
+                row["other_odds"] = m["odds"][2 - p.side]
+                if not p.odds:
+                    row["odds"], row["odds_source"] = row["model_odds"], "model"
+        out.append(row)
     return {"picks": out}
