@@ -340,10 +340,16 @@ def backtest(days: int = 30, stake: float = 100, edge: float = 0.20, db: Session
         BadmintonTournament.id.in_({r.tournament_id for r in rows})).all()} if rows else {}
     side = lambda a, b: " / ".join(names.get(i, "?") for i in (a, b) if i)
     no_price = 0
+    every = []                                           # every played match, for the chance analysis
     for r in rows:
-        if r.id in taken or r.score_status == 1:          # mine, or a walkover (void)
+        if r.score_status == 1:                          # a walkover (void)
             continue
         m = bm.before(r.id)
+        if m:
+            fp = max(m["p1"], 1 - m["p1"])
+            every.append({"p": fp, "won": r.winner == (1 if m["p1"] >= 0.5 else 2), "event": r.event})
+        if r.id in taken:                                # mine: counted as recorded
+            continue
         if not m:
             no_price += 1
             continue
@@ -357,6 +363,7 @@ def backtest(days: int = 30, stake: float = 100, edge: float = 0.20, db: Session
     s = _summary(bets, stake, {"no_price": no_price, "auto_rule": "our model's favourite at our pre-match price"})
     auto = [b for b in bets if b["kind"] == "auto"]
     s["at_book_margin"] = round(sum(_settle(b["book_odds"], b["status"], stake) for b in auto), 2) if auto else 0
+    s["chance"] = _chance_stats(every, stake, bm.record())
     out["badminton"] = s
     s["suggested"] = _summary(_book_suggested(db, caller, "badminton", since, edge), stake, {})
 
@@ -376,6 +383,35 @@ def backtest(days: int = 30, stake: float = 100, edge: float = 0.20, db: Session
     import suggest
     return {"days": days, "stake": stake, "edge": suggest.clamp_edge(edge), "since": since.isoformat(),
             "total": total, "sports": out}
+
+
+BOOK_MARGIN = 0.08
+
+
+def _chance_stats(every, stake, rec) -> dict:
+    """Badminton without bookmakers' prices: ₹stake on our favourite in every
+    played match, grouped by how sure we were. Settled at our fair price
+    (1 / our chance) and at the price a bookmaker who agreed with us would
+    offer after its ~8% margin. Break-even = the lowest price that would have
+    paid on what actually came in."""
+    def agg(xs):
+        n = len(xs)
+        if not n:
+            return {"bets": 0}
+        w = sum(x["won"] for x in xs)
+        fair = sum(stake * (1 / x["p"] - 1) if x["won"] else -stake for x in xs)
+        book = sum(stake * (1 / (x["p"] * (1 + BOOK_MARGIN)) - 1) if x["won"] else -stake for x in xs)
+        return {"bets": n, "won": w, "said": round(sum(x["p"] for x in xs) / n, 3), "came_in": round(w / n, 3),
+                "pl_fair": round(fair, 2), "pl_book": round(book, 2), "roi_book": round(book / (n * stake), 4),
+                "break_even": round(n / w, 2) if w else None}
+    bands = [dict(agg([x for x in every if lo / 100 <= x["p"] < hi / 100]), **{"from": lo, "to": hi})
+             for lo, hi in ((50, 60), (60, 70), (70, 80), (80, 90), (90, 101))]
+    at_least = [dict(agg([x for x in every if x["p"] >= lo / 100]), **{"from": lo}) for lo in (50, 60, 70, 80, 90)]
+    names = {"MS": "Men's singles", "WS": "Women's singles", "MD": "Men's doubles", "WD": "Women's doubles", "XD": "Mixed doubles"}
+    events = [dict(agg([x for x in every if x["event"] == e]), event=e, name=n) for e, n in names.items()]
+    return {"margin": BOOK_MARGIN, "all": agg(every), "bands": bands, "at_least": at_least,
+            "events": [e for e in events if e["bets"]],
+            "long": (rec or {}).get("bands"), "long_since": (rec or {}).get("since"), "long_matches": (rec or {}).get("matches")}
 
 
 def _tennis_suggested(db, since, edge) -> list:

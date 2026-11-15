@@ -171,6 +171,67 @@ function Bets({ bets, suggested }) {
   )
 }
 
+/** Badminton has no bookmakers' prices, so: our favourite in every played
+ *  match, by how sure we were - at our own fair price and at a bookmaker-like
+ *  price (ours less ~8% margin). Backend picks._chance_stats. */
+function Chance({ c, stake }) {
+  const [by, setBy] = useState('bands')
+  if (!c.all?.bets) return null
+  const rows = by === 'bands' ? c.bands.map((b) => [`${b.from}-${Math.min(b.to, 100)}%`, b])
+    : by === 'min' ? c.at_least.map((b) => [`${b.from}%+`, b])
+      : c.events.map((b) => [b.name, b])
+  const long = Object.fromEntries((c.long || []).map((b) => [b.from, b]))
+  const m = Math.round(100 * c.margin)
+  return (
+    <div className="mt-3 border-t border-gray-100 pt-2">
+      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Our chance analysis · every played match</p>
+      <p className="text-[11px] text-gray-600 mt-1">
+        ₹{stake} on our favourite in all {c.all.bets.toLocaleString('en-IN')} matches: we said {Math.round(100 * c.all.said)}% on average, it won {Math.round(100 * c.all.came_in)}%.
+        {' '}At our own prices <b className={tone(c.all.pl_fair)}>{rupees(c.all.pl_fair)}</b>; at a bookmaker's price (ours less {m}%) <b className={tone(c.all.pl_book)}>{rupees(c.all.pl_book)}</b>.
+      </p>
+      <div className="flex gap-1 mt-2">
+        {[['bands', 'By how sure'], ['min', 'Only when ≥'], ['events', 'By event']].map(([k, l]) => (
+          <button key={k} onClick={() => setBy(k)}
+            className={`px-2 py-0.5 rounded-full border text-[11px] font-bold ${by === k ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-600 border-gray-300'}`}>{l}</button>
+        ))}
+      </div>
+      <table className="w-full text-[11px] mt-1.5">
+        <thead>
+          <tr className="text-[9px] text-gray-400 uppercase tracking-wider">
+            <th className="text-left font-black py-1">We said</th>
+            <th className="text-right font-black">Bets</th>
+            <th className="text-right font-black">Won</th>
+            <th className="text-right font-black">P/L ours</th>
+            <th className="text-right font-black">P/L −{m}%</th>
+            <th className="text-right font-black">Pays at ≥</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.filter(([, b]) => b.bets).map(([l, b]) => (
+            <tr key={l} className="border-t border-gray-100">
+              <td className="py-1.5 font-semibold text-gray-700">{l}<span className="font-normal text-gray-400"> · {Math.round(100 * b.said)}%</span></td>
+              <td className="text-right tabular-nums">{b.bets}</td>
+              <td className="text-right tabular-nums">{Math.round(100 * b.came_in)}%</td>
+              <td className={`text-right tabular-nums font-bold whitespace-nowrap ${tone(b.pl_fair)}`}>{rupees(b.pl_fair)}</td>
+              <td className={`text-right tabular-nums font-bold whitespace-nowrap ${tone(b.pl_book)}`}>{rupees(b.pl_book)}</td>
+              <td className="text-right tabular-nums font-black text-gray-900">{b.break_even ? b.break_even.toFixed(2) : '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {by === 'bands' && c.long && (
+        <p className="text-[10px] text-gray-500 mt-1.5">
+          Over a longer run ({c.long_matches?.toLocaleString('en-IN')} matches since {fmtDay(c.long_since)}), what came in: {c.bands.map((b) => long[b.from] && `${b.from}s ${Math.round(100 * long[b.from].came_in)}% (pays at ≥ ${(1 / long[b.from].came_in).toFixed(2)})`).filter(Boolean).join(' · ')}.
+        </p>
+      )}
+      <p className="text-[10px] text-gray-400 mt-1">
+        "Pays at ≥" is the lowest price at which that group would have made money - if a bookmaker offers more than that on our favourite, it's worth a look.
+        One month is a small sample; the longer run is the steadier guide. The −{m}% column assumes a bookmaker that agrees with us; real ones differ match to match.
+      </p>
+    </div>
+  )
+}
+
 function SportCard({ k, s, stake, edge }) {
   const meta = SPORT[k]
   return (
@@ -199,6 +260,7 @@ function SportCard({ k, s, stake, edge }) {
             {s.pending > 0 && `${s.pending} still to play. `}
             {s.unsettled > 0 && `${s.unsettled} without a price (not counted).`}
           </p>
+          {s.chance && <Chance c={s.chance} stake={stake} />}
           <Bets bets={s.recent} suggested={s.suggested?.recent || []} />
         </>
       )}
