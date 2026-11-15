@@ -191,7 +191,9 @@ function OurOdds({ m }) {
 /** How side 1's chance was built up, factor by factor (backend badminton_model.predict). */
 function Parts({ parts, first }) {
   const steps = [['Rating (results since 2018)', parts.rating], ['+ home country', parts.home], ['+ tiredness at this event', parts.fatigue],
-    ['+ world ranking', parts.ranking], ['+ recent form', parts.form]]
+    ['+ world ranking', parts.ranking], ['+ recent form', parts.form],
+    ...(parts.h2h != null ? [['+ head-to-head', parts.h2h]] : [])]
+  const hh = parts.h2h_info
   const pts = (x) => (x == null ? 'outside top 200' : `${Math.round(x).toLocaleString('en-IN')} pts`)
   const fm = (x) => `${x > 0 ? '+' : ''}${Math.round(100 * x)}%`
   return (
@@ -210,6 +212,16 @@ function Parts({ parts, first }) {
       <p className="text-[10px] text-gray-400 mt-0.5">
         Ranking points {pts(parts.points[0])} v {pts(parts.points[1])}. Form, last 10 matches - won beyond what was expected: {fm(parts.form_sides[0])} v {fm(parts.form_sides[1])}.
       </p>
+      {hh && (
+        <p className="text-[10px] text-gray-400 mt-0.5">
+          {hh.meetings
+            ? <>Head-to-head (since 2018): {first} {hh.wins[0]}-{hh.wins[1]} in {hh.meetings} meetings, {fm(hh.beyond)} wins a meeting beyond what we expected. </>
+            : 'Not met before (since 2018). '}
+          {hh.applied ? <b className="text-gray-600">A consistent pattern over 6+ meetings - counted.</b>
+            : hh.meetings >= 6 ? 'No consistent pattern - not counted.'
+              : hh.meetings ? 'Under 6 meetings - not counted.' : ''}
+        </p>
+      )}
     </div>
   )
 }

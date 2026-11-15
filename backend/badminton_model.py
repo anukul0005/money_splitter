@@ -29,8 +29,7 @@ from datetime import date
 LR = 0.3            # rating step per unit of point share off the expected
 KNEW, NEW = 2.5, 10  # faster for a player's first NEW matches in an event
 C = 0.75            # damping of the difference for the winner's chance (calibration)
-HOME = 0.02         # a side playing in its own country: this much more rally log-odds (fitted;
-                    # head-to-head over and above the ratings was tried and added nothing)
+HOME = 0.02         # a side playing in its own country: this much more rally log-odds (fitted)
 FATIGUE = 0.02      # per hour on court at this event in the last two days (more than the other side)
 WIN = 0.02          # winning counts a little on top of the points share
 RANK = 0.02         # BWF ranking going in: x log(ranking points of side 1 / side 2) (fitted on the
@@ -38,15 +37,21 @@ UNRANKED = 3000.0   # weeks on file, ~60 back); outside the top 200 counts as th
 FORM = 0.02         # recent form - wins over the last FORM_N matches beyond what was expected,
 FORM_N = 10         # side 1 minus side 2. Kept light: on the history every weight tried made the
                     # predictions a little worse (the rating already carries form), this the least
-# Tried and left out: head-to-head, decay when not playing.
+H2H = 0.25          # head-to-head: only for sides that have met H2H_MIN+ times AND whose wins against
+H2H_MIN = 6         # each other ran consistently off what we expected (|t| >= H2H_Z over the last
+H2H_Z = 1.5         # H2H_LAST meetings) - this x the average wins beyond expected per meeting. On the
+H2H_LAST = 20       # history (~200 such matches since 2024) it helps a little, in the 2018-23 fit and
+                    # since; heavier weights, or rally share instead of wins, made things worse - the
+                    # ratings already carry past meetings, and most "patterns" don't last
+# Tried and left out: decay when not playing.
 T3 = (-0.5, 0.65)   # the 3-games chance recalibrated on its log-odds (fitted 2018-23: rallies
                     # aren't quite independent, so the raw chance runs high in close matches)
 TEST_FROM = date(2024, 1, 1)
 CHECK_EVERY = 10 * 60
-VERSION = "rally-v5"
+VERSION = "rally-v6"
 
 _lock = threading.Lock()
-_state: dict = {"R": {}, "N": {}, "past": {}, "tc": {}, "M": {}, "F": {}, "RK": {}, "built": 0.0, "mark": None, "record": None}
+_state: dict = {"R": {}, "N": {}, "past": {}, "tc": {}, "M": {}, "F": {}, "RK": {}, "HW": {}, "built": 0.0, "mark": None, "record": None}
 IOC = {"China": "CHN", "Indonesia": "INA", "India": "IND", "Malaysia": "MAS", "Thailand": "THA", "France": "FRA",
        "Japan": "JPN", "Germany": "GER", "Korea": "KOR", "South Korea": "KOR", "Korea, Republic of": "KOR",
        "Chinese Taipei": "TPE", "Taiwan": "TPE", "Denmark": "DEN", "England": "ENG", "United Kingdom": "ENG",
@@ -124,6 +129,7 @@ def build(db) -> dict:
     R, N, past, M = {}, defaultdict(int), {}, defaultdict(list)
     F = defaultdict(lambda: deque(maxlen=FORM_N))
     RK = defaultdict(list)
+    HW = defaultdict(list)          # pair -> [(1 if the key's first side won, its win beyond expected)]
     for week, ev_, p1, p2, pts in db.execute(text(
             "SELECT week, event, player1, player2, points FROM badminton_rankings ORDER BY week")).fetchall():
         RK[(ev_, frozenset(x for x in (p1, p2) if x))].append((week, pts))
@@ -136,11 +142,17 @@ def build(db) -> dict:
         tired = _hours(M, s1, tid, day) - _hours(M, s2, tid, day)
         base = r1 - r2 + h - FATIGUE * tired
         pw0 = probs(base)[0]
-        pw, p3 = probs(base + _rank_term(RK, ev, s1, s2, day) + FORM * (_form(F, ev, s1) - _form(F, ev, s2)))
+        full = base + _rank_term(RK, ev, s1, s2, day) + FORM * (_form(F, ev, s1) - _form(F, ev, s2))
+        pf = probs(full)[0]
+        pw, p3 = probs(full + _h2h(HW, ev, s1, s2)[0])
         past[mid] = (pw, p3, min(N[(ev, p)] for p in s1 + s2) < 3)
         if ss == 1:                            # a walkover: nothing to learn
             continue
         pts = _points(score) if ss == 0 else None
+        key, flip = _pair(ev, s1, s2)
+        if key:
+            won_first = 1 if (w == 1) == (flip == 1) else 0
+            HW[key].append((won_first, flip * ((1.0 if w == 1 else 0.0) - pf)))
         if day >= TEST_FROM:
             y = 1 if w == 1 else 0
             pc = min(max(pw, 1e-4), 1 - 1e-4)
@@ -177,8 +189,37 @@ def build(db) -> dict:
                         for k, v in sorted(rec["bands"].items()) if v[0]],
               "version": VERSION}
     with _lock:
-        _state.update(R=R, N=dict(N), past=past, tc=tc, M=dict(M), F=dict(F), RK=dict(RK), built=time.time(), record=record)
+        _state.update(R=R, N=dict(N), past=past, tc=tc, M=dict(M), F=dict(F), RK=dict(RK), HW=dict(HW), built=time.time(), record=record)
     return record
+
+
+def _pair(ev, s1, s2):
+    """(key, flip): the same key whichever side is listed first; flip +1 if side 1 is the key's first."""
+    a, b = tuple(sorted(s1)), tuple(sorted(s2))
+    if a == b:
+        return None, 1
+    return ((ev, a, b), 1) if a < b else ((ev, b, a), -1)
+
+
+def _h2h(HW, ev, s1, s2) -> tuple[float, dict]:
+    """The head-to-head nudge for side 1 (rally log-odds) and what it rests on, from side 1's view."""
+    key, flip = _pair(ev, s1, s2)
+    res = HW.get(key, []) if key else []
+    info = {"meetings": len(res), "wins": [0, 0], "beyond": 0.0, "applied": False}
+    if not res:
+        return 0.0, info
+    w1 = sum(1 for won, _ in res if (won == 1) == (flip == 1))
+    info["wins"] = [w1, len(res) - w1]
+    xs = [r for _, r in res[-H2H_LAST:]]
+    m = sum(xs) / len(xs)
+    info["beyond"] = round(flip * m, 3)
+    if len(res) < H2H_MIN:
+        return 0.0, info
+    sd = math.sqrt(sum((x - m) ** 2 for x in xs) / len(xs)) or 1e-6
+    if abs(m / (sd / math.sqrt(len(xs)))) < H2H_Z:
+        return 0.0, info                   # no consistent pattern: leave it to the ratings
+    info["applied"] = True
+    return flip * H2H * m, info
 
 
 def _rank_points(RK, ev, side, day):
@@ -258,11 +299,14 @@ def predict(event: str, s1: list, s2: list, home: int = 0, tired: float = 0.0, d
     base = r1 - r2 + HOME * home - FATIGUE * tired
     rank = _rank_term(_state["RK"], event, s1, s2, day)
     form = FORM * (_form(_state["F"], event, s1) - _form(_state["F"], event, s2))
-    pw, p3 = probs(base + rank + form)
+    h2h, h2h_info = _h2h(_state["HW"], event, s1, s2)
+    pf = probs(base + rank + form)[0]
+    pw, p3 = probs(base + rank + form + h2h)
     out = shape(pw, p3, min(N.get((event, p), 0) for p in s1 + s2) < 3)
     # what each piece did to side 1's chance - the match page shows it
     out["parts"] = {"rating": round(probs(r1 - r2)[0], 3), "home": round(probs(r1 - r2 + HOME * home)[0], 3),
-                    "fatigue": round(probs(base)[0], 3), "ranking": round(probs(base + rank)[0], 3), "form": round(pw, 3),
+                    "fatigue": round(probs(base)[0], 3), "ranking": round(probs(base + rank)[0], 3), "form": round(pf, 3), "h2h": round(pw, 3),
+                    "h2h_info": h2h_info,
                     "points": [_rank_points(_state["RK"], event, s, day) for s in (s1, s2)],
                     "form_sides": [round(_form(_state["F"], event, s), 3) for s in (s1, s2)]}
     return out
