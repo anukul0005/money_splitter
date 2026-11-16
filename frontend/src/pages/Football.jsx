@@ -13,7 +13,7 @@ import { peek, footballLive, footballModel, footballTable } from '../api'
  * dashboard.)
  */
 export const F_TABS = [['matches', 'Matches'], ['tables', 'Tables'], ['model', 'Model']]
-const COMPS = [['all', 'All'], ['mine', '★ My teams'], ['PL', 'EPL'], ['PD', 'LaLiga'], ['SA', 'Serie A'], ['BL1', 'Bund.'], ['FL1', 'Ligue 1'], ['CL', 'UCL'], ['WC', 'WC'], ['EC', 'Euro']]
+const COMPS = [['all', 'All'], ['mine', '★'], ['PL', 'EPL'], ['PD', 'LaLiga'], ['SA', 'Serie A'], ['BL1', 'Bund.'], ['FL1', 'Ligue 1'], ['CL', 'UCL'], ['WC', 'WC'], ['EC', 'Euro']]
 const SHORT = Object.fromEntries(COMPS)
 
 const fmtTime = (iso) => (iso ? new Date(iso).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true }) : '')
@@ -33,8 +33,13 @@ function Chips({ value, onChange, options }) {
   return (
     <div className="flex gap-1 overflow-x-auto no-scrollbar -mx-1 px-1 pb-1">
       {options.map(([k, l]) => (
-        <button key={k} onClick={() => onChange(k)}
-          className={`shrink-0 px-2.5 py-1 rounded-full border text-[11px] font-bold ${value === k ? 'bg-field-950 text-white border-field-950' : 'bg-white text-gray-600 border-gray-300'}`}>{l}</button>
+        k === 'mine' ? (            /* my teams: a star alone, in amber */
+          <button key={k} onClick={() => onChange(k)} title="My teams" aria-label="My teams"
+            className={`shrink-0 w-8 py-1 rounded-full border text-[13px] leading-none font-black ${value === k ? 'bg-amber-500 text-white border-amber-500' : 'bg-amber-50 text-amber-500 border-amber-300'}`}>{l}</button>
+        ) : (
+          <button key={k} onClick={() => onChange(k)}
+            className={`shrink-0 px-2.5 py-1 rounded-full border text-[11px] font-bold ${value === k ? 'bg-field-950 text-white border-field-950' : 'bg-white text-gray-600 border-gray-300'}`}>{l}</button>
+        )
       ))}
     </div>
   )
@@ -81,7 +86,6 @@ function Row({ m, books, setBook }) {
         {live ? <span className="font-black text-red-600 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-red-600 animate-pulse" />LIVE</span>
           : <span className="font-bold text-gray-500">{done ? 'FT' : fmtTime(m.start)}</span>}
         <span className="font-bold text-gray-500">{SHORT[m.comp] || m.comp_name}</span>
-        {m.mine && <span className="font-black text-amber-600" title="one of my teams">★</span>}
         {m.matchday && <span className="text-gray-400">MD {m.matchday}</span>}
         {m.model?.thin && <span className="text-amber-600">few matches on file</span>}
         {m.state === 'upcoming' && books && !m.book && (
