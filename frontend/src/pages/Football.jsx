@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { CardHead, Tile } from './Badminton'
 import { BookOdds, useBookOdds } from '../components/SportPick'
-import { SuggestTag, getEdge, useEdge } from '../components/Suggest'
 import { peek, footballLive, footballModel, footballTable } from '../api'
 
 /**
@@ -9,8 +8,9 @@ import { peek, footballLive, footballModel, footballTable } from '../api'
  * leagues, the Champions League, the World Cup and the Euros - fixtures, live
  * scores and results from football-data.org, each match with our odds
  * (backend football_model.py), the bookmakers' average where
- * football-data.co.uk has it, and consider / skip; league tables; how the
- * model has done.
+ * football-data.co.uk has it; league tables; how the model has done. (No
+ * consider / skip here for now - the backers'-favourite record is on the P/L
+ * dashboard.)
  */
 export const F_TABS = [['matches', 'Matches'], ['tables', 'Tables'], ['model', 'Model']]
 const COMPS = [['all', 'All'], ['PL', 'EPL'], ['PD', 'LaLiga'], ['SA', 'Serie A'], ['BL1', 'Bund.'], ['FL1', 'Ligue 1'], ['CL', 'UCL'], ['WC', 'WC'], ['EC', 'Euro']]
@@ -90,7 +90,6 @@ function Row({ m, books, setBook }) {
       <Side t={m.home} won={w == null ? null : w === 1} live={live} />
       <Side t={m.away} won={w == null ? null : w === 2} live={live} />
       <Odds m={m} />
-      {m.state === 'upcoming' && <SuggestTag s={m.suggest} />}
       {open && books && (
         <BookOdds sport="football" mkey={String(m.id)} entry={books[String(m.id)]} onSaved={setBook} open names={[m.home.name, m.away.name]} />
       )}
@@ -99,20 +98,19 @@ function Row({ m, books, setBook }) {
 }
 
 function Matches({ active }) {
-  const [edge] = useEdge()
-  const [d, setD] = useState(() => peek('/football/live', { edge: getEdge() }) || null)   // the last list at once
+  const [d, setD] = useState(() => peek('/football/live') || null)   // the last list at once
   const [err, setErr] = useState('')
   const [comp, setComp] = useState(() => { try { return sessionStorage.getItem('fb.comp') || 'all' } catch { return 'all' } })
   const [books, setBook] = useBookOdds('football', active)
   useEffect(() => {
     if (!active) return undefined
     let alive = true
-    const load = () => footballLive(edge).then((r) => { if (alive) { setD(r.data); setErr('') } })
+    const load = () => footballLive().then((r) => { if (alive) { setD(r.data); setErr('') } })
       .catch((e) => { if (alive) setErr(e?.response?.data?.detail || 'Could not load the matches.') })
     load()
     const t = setInterval(() => { if (!document.hidden) load() }, 60000)
     return () => { alive = false; clearInterval(t) }
-  }, [active, edge, books])
+  }, [active, books])
   const pick = (k) => { setComp(k); try { sessionStorage.setItem('fb.comp', k) } catch { /* private mode */ } }
   const days = useMemo(() => {
     const ms = (d?.matches || []).filter((m) => comp === 'all' || m.comp === comp)
@@ -127,12 +125,10 @@ function Matches({ active }) {
     return { live, by }
   }, [d, comp])
   if (!d && !err) return <p className="text-xs text-gray-400 py-8 text-center">Loading the week's matches…</p>
-  const consider = (d?.matches || []).filter((m) => m.suggest?.verdict === 'consider').length
   return (
     <div className="space-y-3">
       <Chips value={comp} onChange={pick} options={COMPS} />
       {err && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{err}</p>}
-      {consider > 0 && <p className="text-[11px] font-bold text-green-800">✓ {consider} match{consider > 1 ? 'es' : ''} to consider at your {Math.round(100 * edge)}% threshold</p>}
       {days.live.length > 0 && (
         <div className="card">
           <CardHead title="Live now" sub={`${days.live.length}`} />
@@ -218,7 +214,7 @@ function Model({ active }) {
             </div>
             <p className="text-[11px] text-gray-500 mt-2">
               Same matches, scored the same way: a sharp bookmaker's closing price is better than our model, as it is in every sport -
-              so treat "consider" as a price that looks out of line, not a sure thing. Guessing from how often home / draw / away
+              so our odds are a guide, not bets to follow. Guessing from how often home / draw / away
               happen scores {c.base_log_loss?.toFixed(3)}.
             </p>
           </>

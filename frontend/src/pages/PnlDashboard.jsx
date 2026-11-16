@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { pnlBacktest } from '../api'
 import { EDGES, useEdge } from '../components/Suggest'
@@ -233,38 +233,54 @@ function Chance({ c, stake }) {
   )
 }
 
-/** Football: the model's suggested bets at each threshold - this period and
- *  since 2023/24 - all at the market's closing average (backend picks._football). */
-function EdgeTable({ s, stake, edge }) {
+/** Football: Rs stake on the bookmakers' favourite in every top-five league
+ *  match over the last 30, 60 and 90 days, at the market's closing average
+ *  (backend routers/football.favourites). Tap a period for its leagues. */
+function FavWindows({ s, stake }) {
+  const [open, setOpen] = useState(null)
   return (
     <div className="mt-3 border-t border-gray-100 pt-2">
-      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">The model's suggested bets, by threshold</p>
+      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Backing the favourite · ₹{stake} a match</p>
       <table className="w-full text-[11px] mt-1">
         <thead>
           <tr className="text-[9px] text-gray-400 uppercase tracking-wider">
-            <th className="text-left font-black py-1">Expected ≥</th>
-            <th className="text-right font-black">This period</th>
-            <th className="text-right font-black">Since {fmtDay(s.long_since)}</th>
+            <th className="text-left font-black py-1">Last</th>
+            <th className="text-right font-black">Bets</th>
+            <th className="text-right font-black">Won</th>
+            <th className="text-right font-black">Avg odds</th>
+            <th className="text-right font-black">P/L</th>
+            <th className="text-right font-black">Return</th>
           </tr>
         </thead>
         <tbody>
-          {s.by_edge.map((r) => (
-            <tr key={r.edge} className={`border-t border-gray-100 ${Math.abs(r.edge - edge) < 1e-6 ? 'bg-green-50' : ''}`}>
-              <td className="py-1.5 font-bold text-gray-700">{Math.round(100 * r.edge)}%</td>
-              <td className="text-right tabular-nums">
-                {r.month.bets ? <><span className={`font-bold ${tone(r.month.pl)}`}>{rupees(r.month.pl)}</span><span className="text-gray-400"> · {r.month.bets} bets · {pct(r.month.roi)}</span></> : '—'}
-              </td>
-              <td className="text-right tabular-nums">
-                {r.long.bets ? <><span className={`font-bold ${tone(r.long.pl)}`}>{pct(r.long.roi)}</span><span className="text-gray-400"> · {r.long.bets.toLocaleString('en-IN')} bets</span></> : '—'}
-              </td>
-            </tr>
+          {s.windows.map((w) => (
+            <Fragment key={w.days}>
+              <tr onClick={() => setOpen(open === w.days ? null : w.days)} className="border-t border-gray-100 cursor-pointer">
+                <td className="py-1.5 font-bold text-gray-800">{w.days} days <span className="text-brand-600">{open === w.days ? '▴' : '▾'}</span></td>
+                <td className="text-right tabular-nums">{w.bets}</td>
+                <td className="text-right tabular-nums">{w.bets ? Math.round((100 * w.won) / w.bets) : 0}%</td>
+                <td className="text-right tabular-nums">{w.avg_odds?.toFixed(2) ?? '—'}</td>
+                <td className={`text-right tabular-nums font-bold whitespace-nowrap ${tone(w.pl)}`}>{rupees(w.pl)}</td>
+                <td className={`text-right tabular-nums font-bold ${tone(w.pl)}`}>{pct(w.roi)}</td>
+              </tr>
+              {open === w.days && w.leagues.filter((l) => l.bets).map((l) => (
+                <tr key={l.comp} className="text-gray-500">
+                  <td className="py-1 pl-3">{l.name}</td>
+                  <td className="text-right tabular-nums">{l.bets}</td>
+                  <td className="text-right tabular-nums">{Math.round((100 * l.won) / l.bets)}%</td>
+                  <td className="text-right tabular-nums">{l.avg_odds?.toFixed(2)}</td>
+                  <td className={`text-right tabular-nums whitespace-nowrap ${tone(l.pl)}`}>{rupees(l.pl)}</td>
+                  <td className={`text-right tabular-nums ${tone(l.pl)}`}>{pct(l.roi)}</td>
+                </tr>
+              ))}
+            </Fragment>
           ))}
         </tbody>
       </table>
       <p className="text-[10px] text-gray-500 mt-1.5">
-        At the closing prices the model's "edges" lose in the long run at every threshold: they are mostly underdogs it rates
-        higher than the market does, and the market is usually right. ₹{stake} a bet. Results on file up to {fmtDay(s.results_to)}
-        (football-data.co.uk updates them weekly).
+        Every Premier League, La Liga, Serie A, Bundesliga and Ligue 1 match, the bookmakers' favourite at the market's closing
+        average (football-data.co.uk) - draws count as lost. Results on file up to {fmtDay(s.results_to)}; the source updates weekly.
+        No model suggestions for football for now.
       </p>
     </div>
   )
@@ -299,7 +315,7 @@ function SportCard({ k, s, stake, edge }) {
             {s.unsettled > 0 && `${s.unsettled} without a price (not counted).`}
           </p>
           {s.chance && <Chance c={s.chance} stake={stake} />}
-          {s.by_edge && <EdgeTable s={s} stake={stake} edge={edge} />}
+          {s.windows && <FavWindows s={s} stake={stake} />}
           <Bets bets={s.recent} suggested={s.suggested?.recent || []} />
         </>
       )}
@@ -396,7 +412,7 @@ export default function PnlDashboard() {
             <p className="text-[10px] text-gray-400 text-center">
               Decimal odds: a win pays stake × (odds − 1), a loss costs the stake; walkovers and draws are void.
               My picks settle at the prices My picks uses; every other played match is a ₹{stake} bet on the favourite.
-              Suggested bets are a separate line (not in the totals above): the matches where our chance × the price cleared {Math.round(100 * d.edge)}% expected return - tennis at the bookmakers' kept price, football at the market's closing average, badminton and hockey where you entered one before the start. A threshold is a filter, not a promise: big apparent edges are often the model missing news.
+              Suggested bets are a separate line (not in the totals above): the matches where our chance × the price cleared {Math.round(100 * d.edge)}% expected return - tennis at the bookmakers' kept price, badminton and hockey where you entered one before the start. A threshold is a filter, not a promise: big apparent edges are often the model missing news.
             </p>
           </>
         )}

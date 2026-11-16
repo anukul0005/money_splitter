@@ -328,7 +328,7 @@ export const badmintonStats       = (event, since)   => remembered('/badminton/s
 // Hockey - FIH live scores, tournaments, standings, stats, rankings (backend routers/hockey.py)
 export const hockeyLive     = ()                 => remembered('/hockey/live', null, 8_000)
 // Football - fixtures, scores, our odds and tables (backend routers/football.py)
-export const footballLive   = (edge)             => remembered('/football/live', { edge }, 20_000)
+export const footballLive   = ()                 => remembered('/football/live', null, 20_000)
 export const footballTable  = (comp)             => remembered(`/football/table/${comp}`, null, 30 * MIN)
 export const footballModel  = ()                 => remembered('/football/model', null, 10 * MIN)
 // My picks for badminton and hockey (backend routers/picks)
