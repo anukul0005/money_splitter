@@ -30,9 +30,9 @@ function Question({ title, options, chosen, onTap, limit }) {
           const m = chosen[t]
           return (
             <button key={t} onClick={() => onTap(t)}
-              className={`px-2 py-0.5 rounded-full border text-[11px] font-bold ${m === 'bet' ? 'bg-green-700 text-white border-green-700'
+              className={`px-2 py-0.5 rounded-none border text-[11px] font-bold ${m === 'bet' ? 'bg-green-700 text-white border-green-700'
                 : m === 'track' ? 'bg-sky-100 text-sky-800 border-sky-300' : 'bg-white text-gray-600 border-gray-300'}`}>
-              {m === 'bet' ? '₹ ' : m === 'track' ? '👁 ' : ''}{t}
+              {m === 'bet' ? '₹ ' : ''}{t}
             </button>
           )
         })}
@@ -61,11 +61,11 @@ function Chooser({ w, onSaved, onCancel }) {
   }
   const leagues = Object.entries(w.options.clubs)
   return (
-    <div className="card space-y-3">
+    <div className="card rounded-none space-y-3">
       <div>
         <p className="text-sm font-black text-gray-900">Choose your teams</p>
         <p className="text-[10px] text-gray-500 mt-0.5">
-          Tap a team once to <b className="text-sky-800">👁 track</b> it (results only), twice to <b className="text-green-700">₹ bet</b> on it
+          Tap a team once to <b className="text-sky-800">track</b> it (results only), twice to <b className="text-green-700">₹ bet</b> on it
           (counted in the P/L), a third time to drop it. Clubs are in this season's table order.
         </p>
       </div>
@@ -74,7 +74,7 @@ function Chooser({ w, onSaved, onCancel }) {
       ))}
       <Question title={`${leagues.length + 1}. National teams`} options={w.options.nations} chosen={draft.INTL || {}} onTap={tap('INTL')} limit={16} />
       <div className="flex gap-2">
-        <button disabled={busy} onClick={save} className="btn-primary py-2 text-xs flex-1">{busy ? 'Saving…' : 'Save'}</button>
+        <button disabled={busy} onClick={save} className="btn-primary rounded-none py-2 text-xs flex-1">{busy ? 'Saving…' : 'Save'}</button>
         {onCancel && <button onClick={onCancel} className="px-3 py-2 text-xs font-bold text-gray-500">Cancel</button>}
       </div>
       {err && <p className="text-xs text-red-600">{err}</p>}
@@ -104,7 +104,7 @@ export function BetRecord({ stake = 100, compact = false }) {
     <div>
       <div className="flex items-center gap-2 text-[11px] font-semibold text-gray-600">
         Back
-        <div className="flex rounded-md border border-amber-300 overflow-hidden">
+        <div className="flex rounded-none border border-amber-300 overflow-hidden">
           {[['mine', 'my team'], ['fav', "the bookmakers' favourite"]].map(([k, l]) => (
             <button key={k} onClick={() => pick(k)}
               className={`px-2 py-0.5 text-[11px] font-bold ${back === k ? 'bg-green-700 text-white' : 'bg-white text-gray-600'}`}>{l}</button>
@@ -184,13 +184,13 @@ function TeamCard({ t }) {
   return (
     <div className="py-2 border-t border-gray-100 first:border-t-0">
       <div className="flex items-center gap-2">
-        <span className={`text-[10px] font-black rounded px-1.5 py-0.5 ${t.mode === 'bet' ? 'bg-green-700 text-white' : 'bg-sky-100 text-sky-800'}`}>{t.mode === 'bet' ? '₹' : '👁'}</span>
+        <span className={`text-[10px] font-black rounded-none px-1.5 py-0.5 ${t.mode === 'bet' ? 'bg-green-700 text-white' : 'bg-sky-100 text-sky-800'}`}>{t.mode === 'bet' ? '₹ BET' : 'TRACK'}</span>
         <span className="flex-1 min-w-0">
           <span className="block text-[13px] font-black text-gray-900 truncate">{t.team}</span>
           <span className="block text-[10px] text-gray-400">{t.league}</span>
         </span>
         <span className="flex gap-0.5" title="last five, newest first">
-          {t.form.map((x, i) => <span key={i} className={`w-4 h-4 rounded-sm text-[9px] font-black text-white flex items-center justify-center ${RES[x]}`}>{x}</span>)}
+          {t.form.map((x, i) => <span key={i} className={`w-4 h-4 rounded-none text-[9px] font-black text-white flex items-center justify-center ${RES[x]}`}>{x}</span>)}
         </span>
       </div>
       {n ? (
@@ -213,7 +213,7 @@ function TeamCard({ t }) {
           <span className="w-12 text-gray-400 shrink-0">{fmtDay(g.day)}</span>
           <span className="flex-1 min-w-0 truncate">{g.home ? 'v' : '@'} {g.opp} <span className="text-gray-400">· {g.comp}</span></span>
           <span className="tabular-nums font-bold">{g.gf}–{g.ga}</span>
-          <span className={`w-4 h-4 rounded-sm text-[9px] font-black text-white flex items-center justify-center ${RES[g.res]}`}>{g.res}</span>
+          <span className={`w-4 h-4 rounded-none text-[9px] font-black text-white flex items-center justify-center ${RES[g.res]}`}>{g.res}</span>
         </div>
       ))}
     </div>
@@ -242,9 +242,9 @@ export default function FootballTeams() {
         <button onClick={() => nav(-1)} className="text-xs font-bold text-gray-400 mb-2">← Back</button>
         <div className="flex items-center gap-2">
           <h1 className="text-xl font-black tracking-tight flex-1">My teams</h1>
-          {w && !editing && <button onClick={() => setEditing(true)} className="px-2 py-1 rounded-md border border-amber-300 bg-white text-[11px] font-bold text-brand-600">Edit teams</button>}
+          {w && !editing && <button onClick={() => setEditing(true)} className="px-2 py-1 rounded-none border border-amber-300 bg-white text-[11px] font-bold text-brand-600">Edit teams</button>}
         </div>
-        <p className="mt-1 text-[11px] text-gray-400">👁 tracked for results · ₹ bet on, counted in the P/L</p>
+        <p className="mt-1 text-[11px] text-gray-400">Tracked for results · ₹ bet on, counted in the P/L</p>
       </div>
       <div className="px-5 pt-4 space-y-3 max-w-2xl">
         {err && <p className="text-xs text-red-600">{err}</p>}
@@ -256,15 +256,15 @@ export default function FootballTeams() {
         {w && !editing && (
           <>
             {bets.length > 0 && (
-              <div className="card">
+              <div className="card rounded-none">
                 <p className="text-sm font-black text-gray-900">₹ Teams I bet on</p>
                 <div className="mt-1">{bets.map((t) => <TeamCard key={`${t.comp}:${t.team}`} t={t} />)}</div>
                 <div className="mt-3 border-t border-gray-100 pt-2" key={tick}><BetRecord /></div>
               </div>
             )}
             {tracks.length > 0 && (
-              <div className="card">
-                <p className="text-sm font-black text-gray-900">👁 Teams I track</p>
+              <div className="card rounded-none">
+                <p className="text-sm font-black text-gray-900">Teams I track</p>
                 <div className="mt-1">{tracks.map((t) => <TeamCard key={`${t.comp}:${t.team}`} t={t} />)}</div>
               </div>
             )}
