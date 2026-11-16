@@ -5,7 +5,7 @@ import { footballWatch, footballWatchFeed, footballWatchResults, footballWatchSa
 /**
  * Football › My teams (/football/teams): the teams I follow, each one either
  * tracked (its form, next match and last results) or bet on (counted in the
- * P/L - backing it, or the favourite, in each of its matches). Chosen club by
+ * P/L - backing it in each of its matches). Chosen club by
  * club, league by league, and national teams; saved to my account
  * (backend routers/football watch*).
  */
