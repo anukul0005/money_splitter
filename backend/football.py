@@ -11,7 +11,9 @@ Two feeds, used together:
     from and is tested against - and the coming week's fixtures with prices.
 National teams' results come from the public international results set
 (github.com/martj42/international_results, CC0) - and, as it's kept up by
-hand and runs behind, from API-Football day by day (national_fixtures).
+hand and runs behind, from ESPN's public scoreboard (no key) for every day
+since its last result, and API-Football for yesterday to tomorrow
+(national_fixtures).
 
 Club names differ between the two feeds ("Wolverhampton" / "Wolves"), so a
 football-data.org team is matched onto the football-data.co.uk name already
@@ -276,7 +278,7 @@ def sync_internationals(db) -> int:
     from sqlalchemy import text
     db.execute(text("""
         DELETE FROM football_matches a USING football_matches b
-        WHERE a.comp = 'INTL' AND a.season = 'api' AND b.comp = 'INTL' AND b.season IS NULL
+        WHERE a.comp = 'INTL' AND a.season IN ('api', 'espn') AND b.comp = 'INTL' AND b.season IS NULL
           AND abs(a.day - b.day) <= 1
           AND ((a.home = b.home AND a.away = b.away) OR (a.home = b.away AND a.away = b.home))"""))
     db.commit()
@@ -551,11 +553,83 @@ def recent_loop() -> None:
         try:
             db = get_session_factory()()
             try:
-                n = sync_national_recent(db)
+                n = sync_national_espn(db)
+                try:
+                    n += sync_national_recent(db)
+                except Exception as e:
+                    print(f"[football] API-Football: {e}", flush=True)
                 if n:
-                    print(f"[football] {n} national-team result(s) from API-Football", flush=True)
+                    print(f"[football] {n} national-team result(s) from ESPN / API-Football", flush=True)
             finally:
                 db.close()
         except Exception as e:
             print(f"[football] national results: {e}", flush=True)
         time.sleep(2 * 3600)
+
+
+# ── National teams from ESPN (no key) ───────────────────────────────────────
+# ESPN's public scoreboard (the one tennis already reads) has every day's
+# matches, any date, one request a day for all competitions. It fills the
+# days between the end of the public results set and yesterday (season
+# "espn"); the public set's own rows replace these when it catches up.
+
+ESPN_SOCCER = "https://site.api.espn.com/apis/site/v2/sports/soccer"
+_espn_leagues: dict[str, str] = {}        # ESPN league id -> its name
+_espn_done: set[date] = set()             # days read whole (not re-read unless recent)
+
+
+def _espn_league(event_id: str, league_id: str) -> str:
+    if league_id not in _espn_leagues:
+        d = _get(f"{ESPN_SOCCER}/all/summary?event={event_id}")
+        _espn_leagues[league_id] = (((d.get("header") or {}).get("league") or {}).get("name") or "")
+        time.sleep(0.5)
+    return _espn_leagues[league_id]
+
+
+def espn_national_day(db, d: date) -> list[dict]:
+    """Senior men's national-team results on day `d` (UTC), as rows to store."""
+    data = _get(f"{ESPN_SOCCER}/all/scoreboard?dates={d.strftime('%Y%m%d')}")
+    rows = []
+    for e in data.get("events") or []:
+        comp = (e.get("competitions") or [{}])[0]
+        cs = comp.get("competitors") or []
+        home = next((c for c in cs if c.get("homeAway") == "home"), None)
+        away = next((c for c in cs if c.get("homeAway") == "away"), None)
+        if not home or not away or not (((e.get("status") or {}).get("type") or {}).get("completed")):
+            continue
+        h, a = _nation(db, (home.get("team") or {}).get("displayName") or ""), _nation(db, (away.get("team") or {}).get("displayName") or "")
+        if not (h and a):
+            continue
+        lid = (e.get("uid") or "").split("~l:")[-1].split("~")[0]
+        league = _espn_league(e["id"], lid)
+        if not league or _YOUTH.search(league) or "women" in league.lower():
+            continue
+        try:
+            hg, ag = int(home.get("score")), int(away.get("score"))
+        except (TypeError, ValueError):
+            continue
+        rows.append({"comp": "INTL", "season": "espn", "tournament": league[:80], "day": date.fromisoformat(e["date"][:10]),
+                     "home": h[:80], "away": a[:80], "home_goals": hg, "away_goals": ag, "neutral": bool(comp.get("neutralSite")),
+                     "pin_h": None, "pin_d": None, "pin_a": None, "avg_h": None, "avg_d": None, "avg_a": None})
+    return rows
+
+
+def sync_national_espn(db, max_days: int = 45) -> int:
+    """Every day from the public set's last result to today, from ESPN."""
+    from sqlalchemy import text
+    last = db.execute(text("SELECT max(day) FROM football_matches WHERE comp = 'INTL' AND season IS NULL")).scalar()
+    today = date.today()
+    start = max((last or today) + timedelta(days=1), today - timedelta(days=max_days))
+    n, d = 0, start
+    while d <= today:
+        if d not in _espn_done or d >= today - timedelta(days=2):
+            try:
+                rows = {(r["day"], r["home"], r["away"]): r for r in espn_national_day(db, d)}
+                n += _upsert(db, list(rows.values()))
+                if d < today - timedelta(days=2):
+                    _espn_done.add(d)
+            except Exception as e:
+                print(f"[football] ESPN {d}: {e}", flush=True)
+            time.sleep(1.0)
+        d += timedelta(days=1)
+    return n
