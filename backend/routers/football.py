@@ -203,15 +203,15 @@ def put_watch(body: WatchIn, db: Session = Depends(get_db), caller: User = Depen
 
 @router.get("/watch/results", response_model=dict)
 def watch_results(back: str = "mine", stake: float = 100, skip1: bool = False, close: float = 0.5,
-                  skip2: bool = False, cap: float = 1.85, db: Session = Depends(get_db), caller: User = Depends(owner)):
+                  db: Session = Depends(get_db), caller: User = Depends(owner)):
     """The matches of the teams I bet on. Clubs: Rs stake a match at the
     market's closing average (the last price before kick-off), on my team
     (`back` mine; the better priced of two if both are mine) or the
     bookmakers' favourite (`back` fav) - the last 30 / 60 / 90 days and since
     2023/24. Bets can be skipped by pattern 1 - a close match, the two
-    sides' win prices within `close` of each other - and, as a check, also
-    when my team is priced `cap` (1.85) or more (`skip2`); what the skipped
-    ones would have made is given beside.
+    sides' win prices within `close` of each other - with what the skipped
+    ones would have made beside. (Skipping by my team's price - 1.60, 1.85 -
+    was tried: those bets made money, so it's gone.)
     National teams: there are no free prices, so each team's won / drawn / lost."""
     from datetime import timedelta
     from sqlalchemy import text
@@ -234,12 +234,10 @@ def watch_results(back: str = "mine", stake: float = 100, skip1: bool = False, c
         res = "H" if hg > ag else "A" if ag > hg else "D"
         won = pick == res
         p1 = abs(ph - pa) <= close + 1e-9                      # pattern 1: too close to call
-        p2 = pick != "D" and prices[pick] >= cap - 1e-9        # and my team priced cap (1.85) or more
         bets.append({"day": day, "comp": comp, "team": h if "H" in ours else a, "odds": prices[pick], "won": won,
                      "pl": round(stake * (prices[pick] - 1), 2) if won else -stake,
                      "pick": {"H": h, "A": a, "D": "Draw"}[pick], "match": f"{h} v {a} {hg}-{ag}",
-                     "rival": prices["A" if pick == "H" else "H"], "p1": p1, "p2": p2,
-                     "skip": (skip1 and p1) or (skip2 and p2)})
+                     "rival": prices["A" if pick == "H" else "H"], "p1": p1, "skip": skip1 and p1})
 
     def rec(xs):
         k = len(xs)
@@ -272,7 +270,7 @@ def watch_results(back: str = "mine", stake: float = 100, skip1: bool = False, c
     nations = [{"label": f"{d} days", "days": d, **wdl([g for g in games if g["day"] >= today - timedelta(days=d)])}
                for d in (30, 60, 90)] + [{"label": "Last 12 months", "days": 365, **wdl(games)}]
     recent = sorted((b for b in bets if b["day"] >= today - timedelta(days=90)), key=lambda b: b["day"], reverse=True)
-    return {"back": back, "stake": stake, "skip1": skip1, "close": close, "skip2": skip2, "cap": cap,
+    return {"back": back, "stake": stake, "skip1": skip1, "close": close,
             "teams": mine, "clubs": clubs, "nations": nations,
             "club_bets": [{**b, "day": b["day"].isoformat(), "league": names[b["comp"]]} for b in recent[:150]],
             "nation_games": [{**g, "day": g["day"].isoformat()} for g in sorted(games, key=lambda g: g["day"], reverse=True)[:60]]}
