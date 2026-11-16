@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
-  getLoans, createLoan, repayLoan, deleteLoan,
+  getLoans, createLoan, repayLoan, deleteLoan, setOffLoans,
   createBill, stopBill, stopBillMember, repayBill, updateBillDay, getFriends,
   listUpiIdsFor, createPaymentClaim,
 } from '../api'
@@ -238,6 +238,24 @@ export default function Loans() {
             {showForm ? 'Cancel' : tab === 'loans' ? '+ New loan' : '+ New recurring bill'}
           </button>
         )}
+
+        {/* loans running both ways with one person: kept separate unless set off here */}
+        {tab === 'loans' && (data.both_ways || []).map((b) => (
+          <div key={b.person} className="card border border-amber-200 bg-amber-50/50">
+            <p className="text-xs text-gray-700">
+              <b>{b.person}</b>: you owe {INR(b.i_owe)} · {b.person} owes you {INR(b.they_owe)}.
+              <span className="text-gray-500"> The loans stay separate - set them off to cancel {INR(b.set_off)} on both sides.</span>
+            </p>
+            <button type="button"
+              onClick={() => {
+                if (!window.confirm(`Mark ${INR(b.set_off)} as repaid on both sides with ${b.person}?`)) return
+                setOffLoans(b.person).then(load).catch(() => setError('Could not set off.'))
+              }}
+              className="mt-2 px-3 py-1.5 text-xs font-bold rounded-md border border-amber-300 bg-white text-gray-700">
+              Set off {INR(b.set_off)}
+            </button>
+          </div>
+        ))}
 
         {/* ── New loan ── */}
         {showForm && tab === 'loans' && (

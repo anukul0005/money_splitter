@@ -8,11 +8,12 @@ frontend adds to the group-derived ones.
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from auth import caller_groups, current_user, is_member
@@ -193,11 +194,13 @@ def _bill_out(bill: RecurringBill) -> dict:
 
 
 def _set_off(db: Session, me: str, loans: list[Loan]) -> None:
-    """Loans running both ways between the caller and one person cancel out:
-    Mom lent ₹15,000 (₹7,662 left) and owes ₹7,662 on a purchase passed on to
-    her - nobody owes anybody. The smaller side is recorded as repaid on
-    both, oldest loans first, each payment tagged with the loan it was set
-    against ("setoff:<id>", so deleting that loan takes it back)."""
+    """Loans running both ways between the caller and one person, cancelled
+    out - only when the caller asks (POST /loans/set-off): a new loan from
+    someone who owes you is its own loan until then. Mom lent ₹15,000 (₹7,662
+    left) and owes ₹7,662 on a purchase passed on to her - set off, nobody
+    owes anybody. The smaller side is recorded as repaid on both, oldest
+    loans first, each payment tagged with the loan it was set against
+    ("setoff:<id>", so deleting that loan takes it back)."""
     today = date.today().isoformat()
     by_person: dict[str, tuple[list, list]] = {}
     for l in loans:
@@ -234,7 +237,6 @@ def _set_off(db: Session, me: str, loans: list[Loan]) -> None:
 def list_all(db: Session = Depends(get_db), caller: User = Depends(current_user)):
     me = caller.name
     loans = [l for l in db.query(Loan).all() if _same(l.lender, me) or _same(l.borrower, me)]
-    _set_off(db, me, loans)
     # Someone who stopped a bill still sees it - what they owe on it, and
     # once paid, the record that they did.
     bills = [b for b in db.query(RecurringBill).filter(RecurringBill.active == True).all()  # noqa: E712
@@ -262,7 +264,20 @@ def list_all(db: Session = Depends(get_db), caller: User = Depends(current_user)
             elif _same(b.payer, me):
                 owed[c.member] = owed.get(c.member, 0) + c.due
 
+    # loans running both ways with one person: offered as a set-off, never done unasked
+    i_owe, they_owe = defaultdict(float), defaultdict(float)
+    names: dict[str, str] = {}
+    for l, row in zip(loans, loan_rows):
+        if row["total_due"] <= 0.01:
+            continue
+        other = l.lender if _same(l.borrower, me) else l.borrower
+        names.setdefault(other.lower(), other)
+        (i_owe if _same(l.borrower, me) else they_owe)[other.lower()] += row["total_due"]
+    both = [{"person": names[k], "i_owe": round(i_owe[k], 2), "they_owe": round(they_owe[k], 2),
+             "set_off": round(min(i_owe[k], they_owe[k]), 2)} for k in i_owe if k in they_owe]
+
     return {
+        "both_ways": both,
         "loans": sorted(loan_rows, key=lambda r: (r["paid"], r["due_date"])),
         "bills": [_bill_out(b) for b in bills],
         "totals": {
@@ -270,6 +285,23 @@ def list_all(db: Session = Depends(get_db), caller: User = Depends(current_user)
             "owe_people": sorted(owe), "owed_people": sorted(owed),
         },
     }
+
+
+class SetOffIn(BaseModel):
+    person: str = Field(min_length=1, max_length=100)
+
+
+@router.post("/set-off", response_model=dict)
+def set_off(payload: SetOffIn, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Cancel out the loans running both ways with one person, as asked."""
+    me = caller.name
+    loans = [l for l in db.query(Loan).all()
+             if (_same(l.lender, me) and _same(l.borrower, payload.person))
+             or (_same(l.borrower, me) and _same(l.lender, payload.person))]
+    if not loans:
+        raise HTTPException(404, "No loans with that person")
+    _set_off(db, me, loans)
+    return {"ok": True}
 
 
 @router.post("/", response_model=dict, status_code=201)
