@@ -20,6 +20,7 @@ from routers.tennis import owner
 
 router = APIRouter(prefix="/picks", tags=["picks"])
 SPORTS = ("badminton", "hockey")
+BOOK_SPORTS = SPORTS + ("football",)   # football: prices typed in (picks there come later)
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
@@ -46,6 +47,14 @@ def _find(sport: str, key: str) -> dict | None:
                             "names": [_badminton_names(m["side1"]), _badminton_names(m["side2"])],
                             "label": f"{t.get('name')} · {m.get('event') or ''}".strip(" ·"),
                             "ref": {"id": m.get("id"), "tournament_id": m.get("tournament_id"), "code": m.get("code")}}
+    elif sport == "football":
+        import football as fb
+        for m in fb.window(2, 7):
+            if str(m["id"]) == key:
+                state = {"live": "live", "finished": "finished"}.get(m["state"], "upcoming")
+                return {"start": _aware(m.get("start")), "state": state, "names": [m["home"]["name"], m["away"]["name"]],
+                        "label": " · ".join(str(x) for x in (m.get("comp_name"), m.get("matchday") and f"matchday {m['matchday']}") if x),
+                        "ref": {"id": m["id"], "comp": m.get("comp")}}
     else:
         import hockey as fih
         for t in fih.live().get("tournaments", []):
@@ -198,7 +207,7 @@ def books(sport: str, db: Session = Depends(get_db), caller: User = Depends(owne
 @router.post("/book", response_model=dict)
 def book(body: BookIn, db: Session = Depends(get_db), caller: User = Depends(owner)):
     """Both sides' prices from a bookmaker, for a match on the Live tab that isn't over."""
-    if body.sport not in SPORTS:
+    if body.sport not in BOOK_SPORTS:
         raise HTTPException(400, "Unknown sport")
     if not (1.01 <= body.odds1 <= 1000 and 1.01 <= body.odds2 <= 1000):
         raise HTTPException(400, "Odds are decimal, like 1.85")
@@ -215,7 +224,7 @@ def book(body: BookIn, db: Session = Depends(get_db), caller: User = Depends(own
         b = BookOdds(sport=body.sport, match_key=body.key, voter_id=caller.id)
         db.add(b)
     b.odds1, b.odds2 = round(body.odds1, 3), round(body.odds2, 3)
-    b.odds_draw = round(body.odds_draw, 3) if body.odds_draw and body.sport == "hockey" else None
+    b.odds_draw = round(body.odds_draw, 3) if body.odds_draw and body.sport in ("hockey", "football") else None
     b.book = (body.book or "").strip()[:30] or None
     b.names, b.label, b.start, b.ref = json.dumps(m["names"]), m["label"], m["start"], json.dumps(m["ref"])
     b.entered_at = datetime.now(timezone.utc)

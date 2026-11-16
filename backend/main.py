@@ -5,7 +5,7 @@ from database import create_tables, get_settings
 from routers import (
     groups, expenses, settlements, stats, users, payments, activity, recommend,
     food, knowledge_api, forecast, cron, receipts, push, loans, gmail_auth,
-    credit_cards, payment_claims, nudges, ledger, drinks, tennis, bets, badminton, hockey, picks, recipes, ask, salary, discussions,
+    credit_cards, payment_claims, nudges, ledger, drinks, tennis, bets, badminton, hockey, football, picks, recipes, ask, salary, discussions,
 )
 
 
@@ -71,6 +71,10 @@ async def lifespan(app: FastAPI):
     threading.Thread(target=hockey.history_loop, daemon=True, name="hockey-history").start()
     import hockey_model
     threading.Thread(target=hockey_model.loop, daemon=True, name="hockey-model").start()
+    import football
+    import football_model
+    threading.Thread(target=football.history_loop, daemon=True, name="football-history").start()
+    threading.Thread(target=football_model.loop, daemon=True, name="football-model").start()
     # Woken after 12:30 IST with today's daily jobs not yet run (the cron
     # ping was refused, say)? Run them now - see routers/cron.py.
     cron.maybe_catch_up()
@@ -141,6 +145,7 @@ app.include_router(tennis.router)
 app.include_router(bets.router)
 app.include_router(badminton.router)
 app.include_router(hockey.router)
+app.include_router(football.router)
 app.include_router(picks.router)
 app.include_router(recipes.router)
 app.include_router(ask.router)

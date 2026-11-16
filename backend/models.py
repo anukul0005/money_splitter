@@ -1185,6 +1185,35 @@ class HockeySeries(Base):
     read_at = Column(DateTime(timezone=True), nullable=False)
 
 
+class FootballMatch(Base):
+    """A played football match, for the odds model (football.sync_history):
+    the top five leagues from football-data.co.uk (with the bookmakers'
+    closing odds), the Champions League from football-data.org, and national
+    teams from the public international results set. Team names as the
+    source writes them - club names as football-data.co.uk does."""
+
+    __tablename__ = "football_matches"
+    __table_args__ = (UniqueConstraint("comp", "day", "home", "away", name="ux_football_matches_game"),)
+
+    id = Column(Integer, primary_key=True)
+    comp = Column(String(8), nullable=False, index=True)       # E0 SP1 I1 D1 F1 / CL / INTL
+    season = Column(String(4), nullable=True)                   # "2627" (clubs)
+    tournament = Column(String(80), nullable=True)              # internationals: "Friendly", "FIFA World Cup"...
+    day = Column(Date, nullable=False, index=True)
+    home = Column(String(80), nullable=False)
+    away = Column(String(80), nullable=False)
+    home_goals = Column(Integer, nullable=False)
+    away_goals = Column(Integer, nullable=False)
+    neutral = Column(Boolean, nullable=False, default=False)
+    # closing odds, home / draw / away: Pinnacle, and the market average
+    pin_h = Column(Float, nullable=True)
+    pin_d = Column(Float, nullable=True)
+    pin_a = Column(Float, nullable=True)
+    avg_h = Column(Float, nullable=True)
+    avg_d = Column(Float, nullable=True)
+    avg_a = Column(Float, nullable=True)
+
+
 class BadmintonRanking(Base):
     """BWF world ranking, week by week (badminton.sync_rankings): the top
     RANK_DEPTH of each event. A pair is player1 + player2."""

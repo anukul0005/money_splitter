@@ -86,7 +86,7 @@ export function BookOdds({ sport, mkey, names, entry, onSaved, ours, open }) {
   const [o1, setO1] = useState('')
   const [o2, setO2] = useState('')
   const [od, setOd] = useState('')
-  const threeWay = sport === 'hockey'
+  const threeWay = sport === 'hockey' || sport === 'football'
   const [book, setBook] = useState(() => { try { return localStorage.getItem(BOOK_KEY) || '1xBet' } catch { return '1xBet' } })
   const last = (n) => (n || '').split(' / ').map((x) => x.split(' ').slice(-1)[0]).join(' / ')
   const start = () => {

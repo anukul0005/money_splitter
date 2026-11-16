@@ -5,6 +5,7 @@ import { badmintonLive, bookCompare, badmintonSummary, hockeyLive, peek, tennisD
 import RankingList, { RankingSwitch } from '../components/RankingList'
 import Badminton, { B_TABS } from './Badminton'
 import Hockey, { H_TABS } from './Hockey'
+import Football, { F_TABS } from './Football'
 import DatePicker from '../components/DatePicker'
 
 /**
@@ -1599,12 +1600,16 @@ export default function BettingAnalytics() {
   // the tab and the open player live in the address, so Back from a match page returns to them
   const [params, setParams] = useSearchParams()
   // 🎾 tennis, 🏸 badminton (pages/Badminton.jsx) or 🏑 hockey (pages/Hockey.jsx), each with its own tabs
-  const sport = ['badminton', 'hockey'].includes(params.get('sport')) ? params.get('sport') : 'tennis'
+  const sport = ['badminton', 'hockey', 'football'].includes(params.get('sport')) ? params.get('sport') : 'tennis'
   const tab = params.get('tab') || 'results'
   const btab = params.get('btab') || 'live'
   const htab = params.get('htab') || 'live'
   const setHtab = (t) => startTransition(() => go({ htab: t, he: null }))
   const [hOpened, setHOpened] = useState(() => new Set([htab]))
+  const ftab = params.get('ftab') || 'matches'
+  const setFtab = (t) => startTransition(() => go({ ftab: t }))
+  const [fOpened, setFOpened] = useState(() => new Set([ftab]))
+  useEffect(() => { setFOpened((s) => (s.has(ftab) ? s : new Set([...s, ftab]))) }, [ftab])
   useEffect(() => { setHOpened((s) => (s.has(htab) ? s : new Set([...s, htab]))) }, [htab])
   const bp = params.get('bp') ? +params.get('bp') : null
   const pl = params.get('player')
@@ -1663,9 +1668,9 @@ export default function BettingAnalytics() {
       <div className="px-5 pt-10 md:pt-6 pb-3 bg-cream sticky top-0 z-10 border-b border-amber-100/60">
         <button onClick={() => nav(-1)} className="text-xs font-bold text-gray-400 mb-2">← Back</button>
         <div className="flex items-center gap-2">
-          <h1 className="text-xl font-black tracking-tight flex-1">{{ badminton: 'Badminton', hockey: 'Hockey' }[sport] || 'Betting analytics'}</h1>
+          <h1 className="text-xl font-black tracking-tight flex-1">{{ badminton: 'Badminton', hockey: 'Hockey', football: 'Football' }[sport] || 'Betting analytics'}</h1>
           <div className="flex rounded-md border border-amber-300 overflow-hidden">
-            {[['tennis', '🎾'], ['badminton', '🏸'], ['hockey', '🏑']].map(([k, l]) => (
+            {[['tennis', '🎾'], ['badminton', '🏸'], ['hockey', '🏑'], ['football', '⚽']].map(([k, l]) => (
               <button key={k} onClick={() => setSport(k)} aria-label={k} title={k[0].toUpperCase() + k.slice(1)}
                 className={`px-2.5 py-1 text-sm ${sport === k ? 'bg-field-950' : 'bg-white'}`}>{l}</button>
             ))}
@@ -1677,7 +1682,21 @@ export default function BettingAnalytics() {
             My bets ›
           </button>
         </div>
-        {sport === 'hockey' ? (
+        {sport === 'football' ? (
+          <>
+            <p className="mt-1 text-[11px] leading-snug text-gray-400">
+              Top five leagues, Champions League, World Cup & Euros
+              <br />
+              fixtures from football-data.org · odds from football-data.co.uk
+            </p>
+            <div className="grid grid-cols-3 mt-2.5 rounded-md border border-amber-300 overflow-hidden">
+              {F_TABS.map(([k, l]) => (
+                <button key={k} onClick={() => setFtab(k)}
+                  className={`py-1.5 text-[11px] font-bold ${ftab === k ? 'bg-brand-400 text-white' : 'bg-white text-gray-600'}`}>{l}</button>
+              ))}
+            </div>
+          </>
+        ) : sport === 'hockey' ? (
           <>
             <p className="mt-1 text-[11px] leading-snug text-gray-400">
               FIH tournaments, Pro League, World Cup & Olympics
@@ -1736,6 +1755,11 @@ export default function BettingAnalytics() {
         </>)}
       </div>
       <div className="px-5 mt-4 max-w-2xl">
+        {sport === 'football' && [...fOpened].map((k) => (
+          <Pane key={`f-${k}`} hidden={k !== ftab} deps={`${k === ftab}`}>
+            <Safe what="this tab"><Football tab={k} active={k === ftab} /></Safe>
+          </Pane>
+        ))}
         {sport === 'hockey' && [...hOpened].map((k) => (
           <Pane key={`h-${k}`} hidden={k !== htab} deps={`${k === htab}|${params.get('he') || ''}`}>
             <Safe what="this tab">
