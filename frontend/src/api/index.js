@@ -331,6 +331,7 @@ export const hockeyLive     = ()                 => remembered('/hockey/live', n
 export const footballLive   = ()                 => remembered('/football/live', null, 20_000)
 export const footballTable  = (comp)             => remembered(`/football/table/${comp}`, null, 30 * MIN)
 export const footballModel  = ()                 => remembered('/football/model', null, 10 * MIN)
+export const footballTop    = (q)                => api.get('/football/top-teams', { params: q })
 // My picks for badminton and hockey (backend routers/picks)
 export const sportPicks       = (sport)          => api.get('/picks/mine', { params: { sport } })
 export const sportPick        = (body)           => api.post('/picks', body)

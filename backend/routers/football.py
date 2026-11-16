@@ -122,6 +122,113 @@ def favourites(stake: float = 100, db: Session = Depends(get_db), _: User = Depe
                         "pl": round(stake * (b["odds"] - 1), 2) if b["won"] else -stake} for b in recent[:120]]}
 
 
+# -- Top teams only: where a side stood in its league on the day --------------
+
+EARLY = 5            # until a side has played this many, last season's final place counts
+
+
+def _ranked(db, since: date) -> list[dict]:
+    """Top-five league matches from `since`, each with both sides' league
+    places going into that day - from the season's results before it, or
+    last season's final table while the season is young (a promoted side:
+    the bottom). Never today's table: that would know who went on to win."""
+    from collections import defaultdict
+    from datetime import timedelta
+    from sqlalchemy import text
+    codes = [v[0] for v in fb.LEAGUES.values()]
+    rows = db.execute(text(
+        "SELECT comp, season, day, home, away, home_goals, away_goals, avg_h, avg_d, avg_a FROM football_matches "
+        "WHERE comp = ANY(:c) AND day >= :d ORDER BY comp, season, day"), {"c": codes, "d": since - timedelta(days=430)}).all()
+    out, final = [], {}
+    by = defaultdict(list)
+    for r in rows:
+        by[(r.comp, r.season)].append(r)
+    for (comp, season) in sorted(by, key=lambda k: (k[0], k[1])):
+        ms = by[(comp, season)]
+        prev = final.get((comp, f"{int(season[:2]) - 1:02d}{int(season[2:]) - 1:02d}"), {})
+        t = defaultdict(lambda: [0, 0, 0, 0])               # points, goal difference, goals for, played
+        order = lambda: sorted(t, key=lambda k: (-t[k][0], -t[k][1], -t[k][2], k))
+        i = 0
+        while i < len(ms):
+            day = ms[i].day
+            todays = [m for m in ms[i:] if m.day == day]
+            i += len(todays)
+            places = {k: n + 1 for n, k in enumerate(order())}
+            size = max(len({m.home for m in ms} | {m.away for m in ms}), 18)
+
+            def place(team):
+                if t[team][3] >= EARLY:
+                    return places[team]
+                return prev.get(team, size)                  # promoted / new: the bottom
+            for m in todays:
+                if m.day >= since and m.avg_h and m.avg_d and m.avg_a:
+                    out.append({"comp": comp, "day": m.day, "home": m.home, "away": m.away, "hg": m.home_goals,
+                                "ag": m.away_goals, "prices": {"H": m.avg_h, "D": m.avg_d, "A": m.avg_a},
+                                "rank": {"H": place(m.home), "A": place(m.away)}})
+            for m in todays:
+                for side, gf, ga in ((m.home, m.home_goals, m.away_goals), (m.away, m.away_goals, m.home_goals)):
+                    r = t[side]
+                    r[0] += 3 if gf > ga else 1 if gf == ga else 0
+                    r[1] += gf - ga
+                    r[2] += gf
+                    r[3] += 1
+        final[(comp, season)] = {k: n + 1 for n, k in enumerate(order())}
+    return out
+
+
+@router.get("/top-teams", response_model=dict)
+def top_teams(n: int = 5, leagues: str = "", matches: str = "any", back: str = "top", venue: str = "all",
+              stake: float = 100, db: Session = Depends(get_db), _: User = Depends(owner)):
+    """Only the matches of each league's top `n` (by place on the day):
+    `matches` any (a top side v anyone) / both (top v top) / rest (top v the
+    rest); `back` the top side (the higher placed, if both are) or the
+    bookmakers' favourite; `venue` all / home / away (where the top side
+    plays). Rs stake a match at the market's closing average; the last 30,
+    60 and 90 days and since 2023/24, overall and by league."""
+    from datetime import timedelta
+    n = max(1, min(n, 10))
+    stake = max(1.0, min(stake, 100000.0))
+    names = {v[0]: v[1] for v in fb.LEAGUES.values()}
+    want = [c for c in leagues.split(",") if c in names] or list(names)
+    long_from = fm.CLUB_TEST
+    bets = []
+    for m in _ranked(db, long_from):
+        if m["comp"] not in want:
+            continue
+        top = {s for s in ("H", "A") if m["rank"][s] <= n}
+        if not top or (matches == "both" and len(top) < 2) or (matches == "rest" and len(top) > 1):
+            continue
+        side = min(top, key=lambda s: m["rank"][s])         # the higher placed top side
+        if venue in ("home", "away") and side != venue[0].upper():
+            continue
+        pick = side if back == "top" else min(m["prices"], key=m["prices"].get)
+        res = "H" if m["hg"] > m["ag"] else "A" if m["ag"] > m["hg"] else "D"
+        odds = m["prices"][pick]
+        won = pick == res
+        team = {"H": m["home"], "A": m["away"], "D": "Draw"}[pick]
+        bets.append({"day": m["day"], "comp": m["comp"], "odds": odds, "won": won,
+                     "pl": round(stake * (odds - 1), 2) if won else -stake,
+                     "pick": team, "place": m["rank"].get(pick), "match": f"{m['home']} v {m['away']} {m['hg']}-{m['ag']}",
+                     "places": [m["rank"]["H"], m["rank"]["A"]]})
+
+    def rec(xs):
+        k = len(xs)
+        pl = sum(x["pl"] for x in xs)
+        return {"bets": k, "won": sum(x["won"] for x in xs), "pl": round(pl, 2), "roi": round(pl / (stake * k), 4) if k else None,
+                "avg_odds": round(sum(x["odds"] for x in xs) / k, 2) if k else None}
+
+    def window(xs, since, label, days=None):
+        ys = [x for x in xs if x["day"] >= since]
+        return {"label": label, "days": days, "since": since.isoformat(), **rec(ys),
+                "leagues": [{"comp": c, "name": names[c], **rec([y for y in ys if y["comp"] == c])} for c in want]}
+    today = date.today()
+    periods = [window(bets, today - timedelta(days=d), f"{d} days", d) for d in (30, 60, 90)]
+    periods.append(window(bets, long_from, "Since 2023/24"))
+    recent = sorted((b for b in bets if b["day"] >= today - timedelta(days=90)), key=lambda b: b["day"], reverse=True)[:150]
+    return {"n": n, "leagues": want, "matches": matches, "back": back, "venue": venue, "stake": stake, "periods": periods,
+            "recent": [{**b, "day": b["day"].isoformat(), "league": names[b["comp"]]} for b in recent]}
+
+
 @router.get("/table/{comp}", response_model=dict)
 def table(comp: str, _: User = Depends(owner)):
     if comp not in fb.COMPS:
