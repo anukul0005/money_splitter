@@ -423,20 +423,34 @@ export default function Loans() {
               const o = overall[key]
               if (seen.has(key) || !o) continue
               seen.add(key)
-              const open = data.loans.filter((x) => !x.paid && same(same(x.borrower, me) ? x.lender : x.borrower, other)).length
-              if (Math.abs(o.group) > 0.5 || open > 1) rows.push({ name: other, net: o.net, open, group: o.group })
+              const mine = data.loans.filter((x) => !x.paid && same(same(x.borrower, me) ? x.lender : x.borrower, other))
+              const iOwe = mine.filter((x) => same(x.borrower, me)).reduce((t, x) => t + x.total_due, 0)
+              const theyOwe = mine.filter((x) => !same(x.borrower, me)).reduce((t, x) => t + x.total_due, 0)
+              if (Math.abs(o.group) > 0.5 || mine.length > 1) rows.push({ name: other, net: o.net, open: mine.length, group: o.group, iOwe, theyOwe })
             }
             return rows.length > 0 && (
               <div className="card">
                 <p className="text-xs font-bold text-gray-500 mb-1">Overall with each person · loans and groups together</p>
                 {rows.map((r) => (
-                  <div key={r.name} className="flex items-center justify-between text-xs py-0.5">
-                    <span className="text-gray-700">
-                      {dn(r.name)} <span className="text-gray-400">· {r.open} loan{r.open !== 1 ? 's' : ''}{Math.abs(r.group) > 0.5 ? ' + groups' : ''}</span>
-                    </span>
-                    <span className={`font-bold tabular-nums ${Math.abs(r.net) <= 0.5 ? 'text-gray-400' : r.net > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {Math.abs(r.net) <= 0.5 ? 'Even' : r.net > 0 ? `owes you ${INR(r.net)}` : `you owe ${INR(-r.net)}`}
-                    </span>
+                  <div key={r.name} className="py-1.5 border-t border-gray-100 first:border-t-0">
+                    <p className="text-xs font-bold text-gray-800">
+                      {dn(r.name)} <span className="font-normal text-gray-400">· {r.open} loan{r.open !== 1 ? 's' : ''}{Math.abs(r.group) > 0.5 ? ' + groups' : ''}</span>
+                    </p>
+                    {/* each side on its own line - loans are never netted unless set off */}
+                    {r.iOwe > 0.5 && (
+                      <div className="flex justify-between text-xs"><span className="text-gray-500">You owe (loans)</span><span className="font-bold tabular-nums text-red-600">{INR(r.iOwe)}</span></div>
+                    )}
+                    {r.theyOwe > 0.5 && (
+                      <div className="flex justify-between text-xs"><span className="text-gray-500">{dn(r.name)} owes you (loans)</span><span className="font-bold tabular-nums text-green-600">{INR(r.theyOwe)}</span></div>
+                    )}
+                    {Math.abs(r.group) > 0.5 && (
+                      <div className="flex justify-between text-xs"><span className="text-gray-500">Groups</span>
+                        <span className={`font-bold tabular-nums ${r.group > 0 ? 'text-green-600' : 'text-red-600'}`}>{r.group > 0 ? `owes you ${INR(r.group)}` : `you owe ${INR(-r.group)}`}</span></div>
+                    )}
+                    <div className="flex justify-between text-[11px] text-gray-400">
+                      <span>Overall, if everything were set off</span>
+                      <span className="tabular-nums">{Math.abs(r.net) <= 0.5 ? 'even' : r.net > 0 ? `owes you ${INR(r.net)}` : `you owe ${INR(-r.net)}`}</span>
+                    </div>
                   </div>
                 ))}
               </div>
