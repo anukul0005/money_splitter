@@ -84,7 +84,6 @@ function Chooser({ w, onSaved, onCancel }) {
 
 /** The teams I bet on: their matches at the market's closing average. Also on the P/L dashboard. */
 export function BetRecord({ stake = 100, compact = false }) {
-  const [back, setBack] = useState(() => { try { return localStorage.getItem('fb.back') || 'mine' } catch { return 'mine' } })
   const [r, setR] = useState(null)
   const [err, setErr] = useState(false)
   const [open, setOpen] = useState(null)
@@ -92,27 +91,17 @@ export function BetRecord({ stake = 100, compact = false }) {
   useEffect(() => {
     let alive = true
     setErr(false)
-    footballWatchResults(back, stake).then((x) => { if (alive) setR(x.data) }).catch(() => { if (alive) setErr(true) })
+    footballWatchResults('mine', stake).then((x) => { if (alive) setR(x.data) }).catch(() => { if (alive) setErr(true) })
     return () => { alive = false }
-  }, [back, stake])
-  const pick = (b) => { setBack(b); try { localStorage.setItem('fb.back', b) } catch { /* private mode */ } }
+  }, [stake])
   if (err) return <p className="text-xs text-red-600">Couldn't work it out - try again.</p>
   if (!r) return <p className="text-xs text-gray-400">Settling…</p>
   const bet = Object.values(r.teams || {}).reduce((s, v) => s + v.length, 0)
   if (!bet) return <p className="text-xs text-gray-500">No teams to bet on yet - mark some ₹ on the My teams page.</p>
   return (
     <div>
-      <div className="flex items-center gap-2 text-[11px] font-semibold text-gray-600">
-        Back
-        <div className="flex rounded-none border border-amber-300 overflow-hidden">
-          {[['mine', 'my team'], ['fav', "the bookmakers' favourite"]].map(([k, l]) => (
-            <button key={k} onClick={() => pick(k)}
-              className={`px-2 py-0.5 text-[11px] font-bold ${back === k ? 'bg-green-700 text-white' : 'bg-white text-gray-600'}`}>{l}</button>
-          ))}
-        </div>
-      </div>
       {r.clubs.some((c) => c.bets) ? (
-        <table className="w-full text-[11px] mt-2">
+        <table className="w-full text-[11px]">
           <thead>
             <tr className="text-[9px] text-gray-400 uppercase tracking-wider">
               <th className="text-left font-black py-1">Last</th>
@@ -156,7 +145,7 @@ export function BetRecord({ stake = 100, compact = false }) {
         </p>
       )}
       <p className="text-[10px] text-gray-500 mt-1.5">
-        ₹{stake} a match at the market's closing average (football-data.co.uk), draws count as lost; two of your teams playing each other: the better priced one.
+        ₹{stake} on your team in each of its matches, at the market's closing average (football-data.co.uk); draws count as lost. Two of your teams playing each other: the better priced one.
       </p>
       {!compact && r.club_bets.length > 0 && (
         <div className="mt-2">
