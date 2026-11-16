@@ -383,6 +383,9 @@ def backtest(days: int = 30, stake: float = 100, edge: float = 0.20, db: Session
     out["hockey"] = _summary(bets, stake, {"auto_rule": None})
     out["hockey"]["suggested"] = _summary(_book_suggested(db, caller, "hockey", since, edge), stake, {})
 
+    # football - no picks yet: the favourite and the suggested bets at the market's closing average
+    out["football"] = _football(db, since, stake, edge)
+
     allb = [dict(b, sport=k) for k, v in out.items() for b in v.pop("_bets")]
     total = _summary(allb, stake, {})
     total.pop("_bets")
@@ -421,6 +424,60 @@ def _chance_stats(every, stake, rec) -> dict:
     return {"margin": BOOK_MARGIN, "all": agg(every), "bands": bands, "at_least": at_least,
             "events": [e for e in events if e["bets"]],
             "long": (rec or {}).get("bands"), "long_since": (rec or {}).get("since"), "long_matches": (rec or {}).get("matches")}
+
+
+def _football(db, since, stake, edge) -> dict:
+    """Top-five league matches played since `since`, settled at the market's
+    closing average (football-data.co.uk): Rs stake on the bookmakers'
+    favourite every match, and - as its own line - the bets the rule would
+    have made, our pre-match chance (football_model, from before the match)
+    against that price. Also each threshold's record over the period and
+    since 2023/24, for picking one."""
+    from sqlalchemy import text
+    import football as fb
+    import football_model as fm
+    import suggest
+    names = {v[0]: v[1] for v in fb.LEAGUES.values()}
+
+    def bets_from(day0, edge_):
+        auto, sugg = [], []
+        for comp, day, h, a, hg, ag, ah, ad, aa in db.execute(text(
+                "SELECT comp, day, home, away, home_goals, away_goals, avg_h, avg_d, avg_a FROM football_matches "
+                "WHERE comp = ANY(:c) AND day >= :d AND avg_h IS NOT NULL ORDER BY day"), {"c": list(names), "d": day0}):
+            res = 1 if hg > ag else 2 if ag > hg else 3                 # home, away, draw
+            prices = [ah, aa, ad]
+            label = f"{names[comp]} · {h} v {a} {hg}-{ag}"
+            side_name = lambda k: h if k == 1 else a if k == 2 else "Draw"
+            other = lambda k: a if k == 1 else h if k == 2 else f"{h} v {a}"
+            fav = min(range(3), key=lambda k: prices[k]) + 1
+            auto.append({"date": day.isoformat(), "label": label, "pick": side_name(fav), "other": other(fav),
+                         "odds": prices[fav - 1], "status": "won" if fav == res else "lost", "kind": "auto"})
+            m = fm.before(comp, day, h, a)
+            if not m or m["thin"]:
+                continue
+            v = suggest.verdict(m["probs"], prices, edge_)
+            if v["verdict"] == "consider":
+                k = v["side"]
+                sugg.append({"date": day.isoformat(), "label": label, "pick": side_name(k), "other": other(k),
+                             "odds": v["price"], "expected": v["expected"], "status": "won" if k == res else "lost",
+                             "kind": "suggested"})
+        return auto, sugg
+
+    auto, sugg = bets_from(since, edge)
+    out = _summary(auto, stake, {"auto_rule": "the bookmakers' favourite at the market's closing average"})
+    out["suggested"] = _summary(sugg, stake, {})
+
+    def rec(xs):
+        n = len(xs)
+        pl = sum(stake * (b["odds"] - 1) if b["status"] == "won" else -stake for b in xs)
+        return {"bets": n, "won": sum(b["status"] == "won" for b in xs), "pl": round(pl, 2),
+                "roi": round(pl / (stake * n), 4) if n else None}
+    out["by_edge"] = [{"edge": e, "month": rec(bets_from(since, e)[1]), "long": rec(bets_from(fm.CLUB_TEST, e)[1])}
+                      for e in suggest.EDGES]
+    out["long_since"] = fm.CLUB_TEST.isoformat()
+    last = db.execute(text("SELECT max(day) FROM football_matches WHERE comp = ANY(:c)"), {"c": list(names)}).scalar()
+    out["results_to"] = last.isoformat() if last else None
+    return out
 
 
 def _tennis_suggested(db, since, edge) -> list:
