@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getFoodMeta, getFoodRecommendation, getFriends, searchFood, listPlaceNames, getMyPlaces, understandRecommend } from '../api'
+import { getFoodMeta, getFoodRecommendation, getFriends, searchFood, listPlaceNames, understandRecommend } from '../api'
+import { cachedPlaces, loadMyPlaces } from '../components/myPlacesCache'
 
 import Dropdown from '../components/Dropdown'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -53,9 +54,18 @@ const BUDGET_STEP = 50
 // opens the full list (/food/places, pages/MyPlaces.jsx).
 function YourPlaces() {
   const nav = useNavigate()
-  const [places, setPlaces] = useState(null)
-  useEffect(() => { getMyPlaces().then((r) => setPlaces(r.data)).catch(() => setPlaces([])) }, [])
-  if (!places || places.length === 0) return null
+  const [places, setPlaces] = useState(cachedPlaces)
+  useEffect(() => { loadMyPlaces().then(setPlaces).catch(() => setPlaces((p) => p || [])) }, [])
+  if (places && places.length === 0) return null
+  if (!places) {
+    return (                      // first visit on this device: hold the space rather than pop in later
+      <div className="card w-full animate-pulse">
+        <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Places I've eaten at</p>
+        <div className="h-3.5 w-40 bg-gray-100 rounded mt-2" />
+        <div className="h-3 w-56 bg-gray-100 rounded mt-1.5" />
+      </div>
+    )
+  }
   return (
     <button onClick={() => nav('/food/places')} className="card w-full text-left active:scale-[0.99] transition-transform">
       <div className="flex items-center justify-between gap-3">

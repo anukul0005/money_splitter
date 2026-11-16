@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getMyPlaces, getMyPlaceVisits } from '../api'
+import { getMyPlaceVisits } from '../api'
+import { cachedPlaces, loadMyPlaces } from '../components/myPlacesCache'
 import Dropdown from '../components/Dropdown'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
@@ -63,11 +64,11 @@ function Place({ p, nav }) {
  */
 export default function MyPlaces() {
   const nav = useNavigate()
-  const [places, setPlaces] = useState(null)
+  const [places, setPlaces] = useState(cachedPlaces)
   const [error, setError] = useState('')
   const [q, setQ] = useState('')
   const [sort, setSort] = useState('visits')
-  useEffect(() => { getMyPlaces().then((r) => setPlaces(r.data)).catch(() => setError('Could not load your places.')) }, [])
+  useEffect(() => { loadMyPlaces().then(setPlaces).catch(() => setError('Could not load your places.')) }, [])
 
   const shown = (places || [])
     .filter((p) => !q.trim() || p.name.toLowerCase().includes(q.trim().toLowerCase()))
