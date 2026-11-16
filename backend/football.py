@@ -10,7 +10,8 @@ Two feeds, used together:
     with the bookmakers' closing odds, from 2012/13 - what the model learns
     from and is tested against - and the coming week's fixtures with prices.
 National teams' results come from the public international results set
-(github.com/martj42/international_results, CC0).
+(github.com/martj42/international_results, CC0) - and, as it's kept up by
+hand and runs behind, from API-Football day by day (national_fixtures).
 
 Club names differ between the two feeds ("Wolverhampton" / "Wolves"), so a
 football-data.org team is matched onto the football-data.co.uk name already
@@ -271,7 +272,16 @@ def sync_internationals(db) -> int:
                "away_goals": int(r["away_score"]), "neutral": r.get("neutral") == "TRUE",
                "pin_h": None, "pin_d": None, "pin_a": None, "avg_h": None, "avg_d": None, "avg_a": None}
         rows[(d, row["home"], row["away"])] = row
-    return _upsert(db, list(rows.values()))
+    n = _upsert(db, list(rows.values()))
+    from sqlalchemy import text
+    db.execute(text("""
+        DELETE FROM football_matches a USING football_matches b
+        WHERE a.comp = 'INTL' AND a.season = 'api' AND b.comp = 'INTL' AND b.season IS NULL
+          AND abs(a.day - b.day) <= 1
+          AND ((a.home = b.home AND a.away = b.away) OR (a.home = b.away AND a.away = b.home))"""))
+    db.commit()
+    _nations_known.clear()
+    return n
 
 
 def sync_champions_league(db, seasons: list[int] | None = None) -> int:
@@ -405,3 +415,134 @@ def standings(comp: str) -> dict:
                  "form": r.get("form")} for r in s.get("table") or []]})
         return {"comp": comp, "name": COMPS.get(comp), "season": (d.get("season") or {}).get("startDate"), "tables": tables}
     return _hold(f"s{comp}", 3600, read)
+
+
+# ── National teams, day by day (API-Football) ───────────────────────────────
+# The public results set is kept up by hand and can be weeks behind. API-
+# Football (key APIFOOTBALL_KEY, free plan: 100 requests a day, and only
+# yesterday / today / tomorrow by date) fills the gap from here on: each
+# national-team result is stored the day it's played (season "api"), and
+# tomorrow's fixtures are shown. When the public set catches up, its row for
+# the same match replaces ours (sync_internationals).
+
+APIF = "https://v3.football.api-sports.io"
+_YOUTH = re.compile(r"\b(U-?\d\d|Under|Youth|Women|Olympic|Elite League)\b", re.I)
+# API-Football's national team names -> the public results set's
+_APIF_NATIONS = {"USA": "United States", "Korea Republic": "South Korea", "South Korea": "South Korea",
+                 "China": "China PR", "Cape Verde Islands": "Cape Verde", "Congo DR": "DR Congo",
+                 "Bosnia & Herzegovina": "Bosnia and Herzegovina", "Chinese Taipei": "Taiwan", "Curacao": "Curaçao",
+                 "Kyrgyz Republic": "Kyrgyzstan", "Türkiye": "Turkey", "Czechia": "Czech Republic", "Ivory Coast": "Ivory Coast",
+                 "Cote D'Ivoire": "Ivory Coast", "Korea DPR": "North Korea", "Macedonia": "North Macedonia",
+                 "Swaziland": "Eswatini", "Gambia": "Gambia", "Congo": "Congo", "Brunei": "Brunei"}
+_apif_lock = threading.Lock()
+_apif_last = [0.0]
+_nations_known: set[str] = set()
+
+
+def _apif(path: str):
+    k = os.environ.get("APIFOOTBALL_KEY")
+    if not k:
+        raise RuntimeError("APIFOOTBALL_KEY isn't set")
+    with _apif_lock:
+        wait = 6.5 - (time.time() - _apif_last[0])
+        if wait > 0:
+            time.sleep(wait)
+        try:
+            d = _get(f"{APIF}{path}", {"x-apisports-key": k})
+        finally:
+            _apif_last[0] = time.time()
+    if d.get("errors"):
+        raise RuntimeError(str(d["errors"])[:200])
+    return d.get("response") or []
+
+
+def _nations(db) -> set[str]:
+    if not _nations_known:
+        from sqlalchemy import text
+        _nations_known.update(n for (n,) in db.execute(text(
+            "SELECT home FROM football_matches WHERE comp = 'INTL' UNION SELECT away FROM football_matches WHERE comp = 'INTL'")))
+    return _nations_known
+
+
+def _nation(db, name: str) -> str | None:
+    n = _APIF_NATIONS.get(name, name)
+    return n if n in _nations(db) else None
+
+
+def apif_day(d: date) -> list[dict]:
+    """Every fixture API-Football has on day `d` - today's every half hour,
+    tomorrow's every three, yesterday's every six."""
+    t = date.today()
+    ttl = 1800 if d == t else 3 * 3600 if d > t else 6 * 3600
+    return _hold(f"af{d.isoformat()}", ttl, lambda: _apif(f"/fixtures?date={d.isoformat()}"))
+
+
+def national_fixtures(db) -> list[dict]:
+    """Senior men's national-team matches from yesterday to tomorrow, in the
+    shape the Matches tab uses (comp "NT"), names as the results set has them."""
+    out = []
+    t = date.today()
+    for d in (t - timedelta(days=1), t, t + timedelta(days=1)):
+        try:
+            fx = apif_day(d)
+        except Exception as e:
+            print(f"[football] API-Football {d}: {e}", flush=True)
+            continue
+        for f in fx:
+            lg = f.get("league") or {}
+            if _YOUTH.search(lg.get("name") or "") or (lg.get("name") or "").startswith("Friendlies Clubs"):
+                continue
+            th, ta = (f.get("teams") or {}).get("home") or {}, (f.get("teams") or {}).get("away") or {}
+            h, a = _nation(db, th.get("name") or ""), _nation(db, ta.get("name") or "")
+            if not (h and a):
+                continue
+            st = ((f.get("fixture") or {}).get("status") or {}).get("short") or ""
+            state = "finished" if st in ("FT", "AET", "PEN", "AWD", "WO") else "live" if st in ("1H", "HT", "2H", "ET", "BT", "P", "LIVE", "INT") \
+                else "off" if st in ("PST", "CANC", "ABD", "SUSP") else "upcoming"
+            g = f.get("goals") or {}
+            ft = ((f.get("score") or {}).get("fulltime") or {})
+            hg = ft.get("home") if ft.get("home") is not None else g.get("home")
+            ag = ft.get("away") if ft.get("away") is not None else g.get("away")
+            winner = None
+            if state == "finished" and hg is not None:
+                winner = "HOME_TEAM" if hg > ag else "AWAY_TEAM" if ag > hg else "DRAW"
+            out.append({"id": f"af{f['fixture']['id']}", "comp": "NT", "comp_name": lg.get("name"), "start": f["fixture"]["date"],
+                        "status": st, "state": state, "matchday": None, "stage": (lg.get("round") or None), "group": None,
+                        "home": {"id": th.get("id"), "name": h, "full": th.get("name"), "crest": th.get("logo"), "tla": None, "goals": hg},
+                        "away": {"id": ta.get("id"), "name": a, "full": ta.get("name"), "crest": ta.get("logo"), "tla": None, "goals": ag},
+                        "half": [None, None], "winner": winner, "nation": True,
+                        "raw_home": {"name": h}, "raw_away": {"name": a}})
+    return out
+
+
+def sync_national_recent(db) -> int:
+    """Store the national-team results API-Football has (yesterday, today)."""
+    rows = {}
+    for m in national_fixtures(db):
+        if m["state"] != "finished" or m["home"]["goals"] is None:
+            continue
+        day = date.fromisoformat(m["start"][:10])
+        rows[(day, m["home"]["name"], m["away"]["name"])] = {
+            "comp": "INTL", "season": "api", "tournament": (m["comp_name"] or "")[:80], "day": day,
+            "home": m["home"]["name"][:80], "away": m["away"]["name"][:80], "home_goals": int(m["home"]["goals"]),
+            "away_goals": int(m["away"]["goals"]), "neutral": False,
+            "pin_h": None, "pin_d": None, "pin_a": None, "avg_h": None, "avg_d": None, "avg_a": None}
+    return _upsert(db, list(rows.values()))
+
+
+def recent_loop() -> None:
+    """National-team results into the store a few times a day."""
+    from database import get_session_factory
+    time.sleep(90)
+    while True:
+        try:
+            db = get_session_factory()()
+            try:
+                n = sync_national_recent(db)
+                if n:
+                    print(f"[football] {n} national-team result(s) from API-Football", flush=True)
+            finally:
+                db.close()
+        except Exception as e:
+            print(f"[football] national results: {e}", flush=True)
+        time.sleep(2 * 3600)

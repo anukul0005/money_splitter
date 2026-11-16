@@ -74,6 +74,7 @@ async def lifespan(app: FastAPI):
     import football
     import football_model
     threading.Thread(target=football.history_loop, daemon=True, name="football-history").start()
+    threading.Thread(target=football.recent_loop, daemon=True, name="football-nations").start()
     threading.Thread(target=football_model.loop, daemon=True, name="football-model").start()
     # Woken after 12:30 IST with today's daily jobs not yet run (the cron
     # ping was refused, say)? Run them now - see routers/cron.py.

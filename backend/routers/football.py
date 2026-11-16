@@ -27,6 +27,8 @@ router = APIRouter(prefix="/football", tags=["football"])
 def _names(db, m: dict) -> tuple[str, str | None, str | None, bool]:
     """(the model's competition, home, away, neutral ground) for a football-data.org match."""
     comp = m["comp"]
+    if m.get("nation"):
+        return "INTL", m["home"]["name"], m["away"]["name"], False
     if comp in fb.LEAGUES:
         code = fb.LEAGUES[comp][0]
         return code, fb.club_name(db, m["raw_home"], [code]), fb.club_name(db, m["raw_away"], [code]), False
@@ -34,6 +36,14 @@ def _names(db, m: dict) -> tuple[str, str | None, str | None, bool]:
         name = lambda t: fb.club_name(db, t, list(fb.CO_UK_OF)) or t.get("shortName") or t.get("name")
         return "CL", name(m["raw_home"]), name(m["raw_away"]), (m.get("stage") or "") == "FINAL"
     return "INTL", fb.nation_name(m["raw_home"].get("name")), fb.nation_name(m["raw_away"].get("name")), True
+
+
+def _nation_window(db) -> list[dict]:
+    """National-team matches, yesterday to tomorrow (API-Football); none if it's down."""
+    try:
+        return fb.national_fixtures(db)
+    except Exception:
+        return []
 
 
 def _annotate(db, m: dict, books: dict, mine: dict, watch: set) -> dict:
@@ -74,6 +84,7 @@ def live(db: Session = Depends(get_db), caller: User = Depends(owner)):
         ms = fb.window(2, 7)
     except Exception as e:
         raise HTTPException(502, f"football-data.org didn't answer: {type(e).__name__}")
+    ms = ms + _nation_window(db)
     try:
         books = fb.book_prices()
     except Exception:
@@ -83,7 +94,7 @@ def live(db: Session = Depends(get_db), caller: User = Depends(owner)):
     out = [_annotate(db, m, books, mine, watch) for m in ms if m["state"] != "off"]
     order = list(fb.COMPS)
     out.sort(key=lambda m: (m["start"] or "", order.index(m["comp"]) if m["comp"] in order else 99))
-    return {"matches": out, "comps": fb.COMPS}
+    return {"matches": out, "comps": {**fb.COMPS, "NT": "National teams"}}
 
 
 @router.get("/favourites", response_model=dict)
@@ -309,6 +320,7 @@ def watch_feed(db: Session = Depends(get_db), caller: User = Depends(owner)):
         books = fb.book_prices()
     except Exception:
         ms, books = [], {}
+    ms = ms + _nation_window(db)
     for m in ms:
         if m["state"] not in ("upcoming", "live"):
             continue

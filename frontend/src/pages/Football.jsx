@@ -13,7 +13,7 @@ import { peek, footballLive, footballModel, footballTable } from '../api'
  * dashboard.)
  */
 export const F_TABS = [['matches', 'Matches'], ['tables', 'Tables'], ['model', 'Model']]
-const COMPS = [['all', 'All'], ['mine', '★'], ['PL', 'EPL'], ['PD', 'LaLiga'], ['SA', 'Serie A'], ['BL1', 'Bund.'], ['FL1', 'Ligue 1'], ['CL', 'UCL'], ['WC', 'WC'], ['EC', 'Euro']]
+const COMPS = [['all', 'All'], ['mine', '★'], ['PL', 'EPL'], ['PD', 'LaLiga'], ['SA', 'Serie A'], ['BL1', 'Bund.'], ['FL1', 'Ligue 1'], ['CL', 'UCL'], ['NT', 'Nations'], ['WC', 'WC'], ['EC', 'Euro']]
 const SHORT = Object.fromEntries(COMPS)
 
 const fmtTime = (iso) => (iso ? new Date(iso).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true }) : '')
