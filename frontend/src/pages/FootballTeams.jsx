@@ -106,13 +106,13 @@ export function BetRecord({ stake = 100, compact = false }) {
   const [open, setOpen] = useState(null)
   const [more, setMore] = useState(false)
   // pattern 1: skip a close match (the two win prices within `close`)
-  const DEF = { skip1: true, close: 0.5 }
+  const DEF = { skip1: true, close: 0.6 }   // 0.6: the best gap on the history (0.5-0.6 lose in 2012-23 and since)
   const [skip, setSkip] = useState(() => {
-    try { const x = JSON.parse(localStorage.getItem('fb.skip.v3') || '{}'); return { skip1: x.skip1 ?? true, close: x.close ?? 0.5 } } catch { return DEF }
+    try { const x = JSON.parse(localStorage.getItem('fb.skip.v4') || '{}'); return { skip1: x.skip1 ?? true, close: x.close ?? 0.6 } } catch { return DEF }
   })
   const change = (k, v) => setSkip((x) => {
     const y = { ...x, [k]: v }
-    try { localStorage.setItem('fb.skip.v3', JSON.stringify(y)) } catch { /* private mode */ }
+    try { localStorage.setItem('fb.skip.v4', JSON.stringify(y)) } catch { /* private mode */ }
     return y
   })
   useEffect(() => {
@@ -129,7 +129,7 @@ export function BetRecord({ stake = 100, compact = false }) {
     <div>
       <div className="space-y-1.5 mb-2">
         <SkipRow on={skip.skip1} onToggle={() => change('skip1', !skip.skip1)} label="Skip pattern 1 - a close match: the two win prices within"
-          value={skip.close} options={[0.3, 0.5, 0.8]} onPick={(v) => change('close', v)} />
+          value={skip.close} options={[0.3, 0.5, 0.6, 0.8]} onPick={(v) => change('close', v)} />
       </div>
       {r.clubs.some((c) => c.all?.bets) ? (
         <table className="w-full text-[11px]">
