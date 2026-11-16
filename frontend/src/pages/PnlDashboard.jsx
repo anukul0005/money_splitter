@@ -128,7 +128,7 @@ function Curve({ series }) {
   )
 }
 
-function Bets({ bets, suggested }) {
+function Bets({ bets, suggested, noFav }) {
   const [kind, setKind] = useState('all')
   const [more, setMore] = useState(false)
   const shown = kind === 'suggested' ? suggested : bets.filter((b) => kind === 'all' || b.kind === kind)
@@ -136,7 +136,7 @@ function Bets({ bets, suggested }) {
     <div className="mt-3">
       <div className="flex flex-wrap gap-1.5 text-[11px]">
         {[['all', 'All'], ['mine', 'My picks'], ['auto', 'Favourite'], ['suggested', `Suggested (${suggested.length})`]]
-          .filter(([k]) => k !== 'suggested' || suggested.length).map(([k, l]) => (
+          .filter(([k]) => (k !== 'suggested' || suggested.length) && !(noFav && k === 'auto')).map(([k, l]) => (
           <button key={k} onClick={() => setKind(k)}
             className={`rounded-full border px-2 py-0.5 font-bold ${kind === k ? 'bg-brand-600 border-brand-600 text-white' : 'border-gray-300 text-gray-500'}`}>{l}</button>
         ))}
@@ -330,7 +330,7 @@ function SportCard({ k, s, stake, edge }) {
           </p>
           {s.chance && <Chance c={s.chance} stake={stake} />}
           {s.windows && <FavWindows s={s} stake={stake} />}
-          <Bets bets={s.recent} suggested={s.suggested?.recent || []} />
+          <Bets bets={s.recent} suggested={s.suggested?.recent || []} noFav={k === 'football'} />
         </>
       )}
     </div>
