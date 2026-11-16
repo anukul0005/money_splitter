@@ -89,12 +89,12 @@ function SkipRow({ on, onToggle, label, value, options, onPick }) {
       <button onClick={onToggle}
         className={`w-4 h-4 border rounded-none flex items-center justify-center text-[10px] font-black ${on ? 'bg-green-700 border-green-700 text-white' : 'bg-white border-gray-400 text-transparent'}`}>✓</button>
       <span className={on ? 'text-gray-700 font-semibold' : 'text-gray-400'}>{label}</span>
-      <span className="flex border border-amber-300 rounded-none overflow-hidden">
+      {options && <span className="flex border border-amber-300 rounded-none overflow-hidden">
         {options.map((v) => (
           <button key={v} onClick={() => onPick(v)}
             className={`px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${value === v ? 'bg-field-950 text-white' : 'bg-white text-gray-600'}`}>{v.toFixed(2)}</button>
         ))}
-      </span>
+      </span>}
     </div>
   )
 }
@@ -105,13 +105,14 @@ export function BetRecord({ stake = 100, compact = false }) {
   const [err, setErr] = useState(false)
   const [open, setOpen] = useState(null)
   const [more, setMore] = useState(false)
-  // the skip patterns: 1 a close match (the two win prices within `close`), 2 my team at `cap` or more
+  // pattern 1: skip a close match (the two win prices within `close`); and, to check, also when my team is 1.85 or more
+  const DEF = { skip1: true, close: 0.5, skip2: false, cap: 1.85 }
   const [skip, setSkip] = useState(() => {
-    try { return { skip1: true, close: 0.5, skip2: true, cap: 1.6, ...JSON.parse(localStorage.getItem('fb.skip') || '{}') } } catch { return { skip1: true, close: 0.5, skip2: true, cap: 1.6 } }
+    try { return { ...DEF, ...JSON.parse(localStorage.getItem('fb.skip.v2') || '{}'), cap: 1.85 } } catch { return DEF }
   })
   const change = (k, v) => setSkip((x) => {
     const y = { ...x, [k]: v }
-    try { localStorage.setItem('fb.skip', JSON.stringify(y)) } catch { /* private mode */ }
+    try { localStorage.setItem('fb.skip.v2', JSON.stringify(y)) } catch { /* private mode */ }
     return y
   })
   useEffect(() => {
@@ -129,8 +130,9 @@ export function BetRecord({ stake = 100, compact = false }) {
       <div className="space-y-1.5 mb-2">
         <SkipRow on={skip.skip1} onToggle={() => change('skip1', !skip.skip1)} label="Skip pattern 1 - a close match: the two win prices within"
           value={skip.close} options={[0.3, 0.5, 0.8]} onPick={(v) => change('close', v)} />
-        <SkipRow on={skip.skip2} onToggle={() => change('skip2', !skip.skip2)} label="Skip pattern 2 - my team priced at or above"
-          value={skip.cap} options={[1.5, 1.6, 1.8]} onPick={(v) => change('cap', v)} />
+        <div className="pl-5">
+          <SkipRow on={skip.skip2} onToggle={() => change('skip2', !skip.skip2)} label="also skip when my team is priced 1.85 or more" />
+        </div>
       </div>
       {r.clubs.some((c) => c.all?.bets) ? (
         <table className="w-full text-[11px]">
@@ -191,7 +193,7 @@ export function BetRecord({ stake = 100, compact = false }) {
         <div className="mt-2">
           {r.club_bets.slice(0, more ? 150 : 5).map((b, i) => (
             <div key={i} className={`flex items-center gap-2 text-[11px] py-1 border-t border-gray-100 ${b.skip ? 'opacity-40 line-through' : ''}`}
-              title={b.skip ? `skipped - ${[b.p1 && r.skip1 && 'pattern 1', b.p2 && r.skip2 && 'pattern 2'].filter(Boolean).join(', ')}` : ''}>
+              title={b.skip ? `skipped - ${[b.p1 && r.skip1 && 'close match', b.p2 && r.skip2 && 'priced 1.85+'].filter(Boolean).join(', ')}` : ''}>
               <span className="w-12 text-gray-400 shrink-0">{fmtDay(b.day)}</span>
               <span className="flex-1 min-w-0 truncate"><b className="text-gray-800">{b.pick}</b><span className="text-gray-400"> · {b.match}</span></span>
               <span className="w-10 text-right tabular-nums text-gray-500 shrink-0">{b.odds.toFixed(2)}</span>
