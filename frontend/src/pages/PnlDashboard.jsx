@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { footballTop, pnlBacktest } from '../api'
+import { footballWatch, footballWatchResults, footballWatchSave, pnlBacktest } from '../api'
 import { EDGES, useEdge } from '../components/Suggest'
 
 /** P/L across the sports (backend routers/picks.backtest): my own picks as
@@ -286,131 +286,198 @@ function FavWindows({ s, stake }) {
   )
 }
 
-/** Football, top teams only: a few questions narrow the record to each
- *  league's top sides (by place on the match day, never today's table) -
- *  backend routers/football.top_teams. Answers kept on this device. */
-const TOP_KEY = 'fb.top'
-const TOP_DEFAULT = { n: 5, leagues: ['E0', 'SP1', 'I1', 'D1', 'F1'], matches: 'any', venue: 'home', back: 'fav' }   // the steadiest over 2023/24 on
-const LEAGUE_NAMES = [['E0', 'Premier League'], ['SP1', 'La Liga'], ['I1', 'Serie A'], ['D1', 'Bundesliga'], ['F1', 'Ligue 1']]
-
-function Question({ q, value, onChange, options, multi }) {
-  const on = (k) => (multi ? value.includes(k) : value === k)
-  const flip = (k) => (multi ? onChange(on(k) ? (value.length > 1 ? value.filter((x) => x !== k) : value) : [...value, k]) : onChange(k))
+/** Football, my teams: a questionnaire I fill in - which clubs in each
+ *  league and which national teams I follow for betting - then only their
+ *  matches (backend routers/football watch*). Saved to my account. */
+function Pickers({ title, sub, options, chosen, onToggle, limit }) {
+  const [all, setAll] = useState(false)
+  const shown = all ? options : options.slice(0, limit)
   return (
     <div>
-      <p className="text-[11px] font-bold text-gray-700">{q}</p>
+      <p className="text-[11px] font-bold text-gray-700">{title} <span className="font-normal text-gray-400">{sub}</span></p>
       <div className="flex gap-1 flex-wrap mt-1">
-        {options.map(([k, l]) => (
-          <button key={k} onClick={() => flip(k)}
-            className={`px-2.5 py-1 rounded-full border text-[11px] font-bold ${on(k) ? 'bg-field-950 text-white border-field-950' : 'bg-white text-gray-600 border-gray-300'}`}>{l}</button>
+        {shown.map((t) => (
+          <button key={t} onClick={() => onToggle(t)}
+            className={`px-2 py-0.5 rounded-full border text-[11px] font-bold ${chosen.includes(t) ? 'bg-field-950 text-white border-field-950' : 'bg-white text-gray-600 border-gray-300'}`}>
+            {chosen.includes(t) ? '✓ ' : ''}{t}
+          </button>
         ))}
+        {options.length > limit && (
+          <button onClick={() => setAll((x) => !x)} className="px-2 py-0.5 text-[11px] font-bold text-brand-600">{all ? 'fewer' : `+${options.length - limit} more`}</button>
+        )}
       </div>
     </div>
   )
 }
 
-function TopTeams({ stake }) {
-  const [a, setA] = useState(() => { try { return { ...TOP_DEFAULT, ...JSON.parse(localStorage.getItem(TOP_KEY) || '{}') } } catch { return TOP_DEFAULT } })
-  const [d, setD] = useState(null)
-  const [err, setErr] = useState(false)
+function MyTeams({ stake }) {
+  const [w, setW] = useState(null)              // {teams, options}
+  const [draft, setDraft] = useState(null)
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [back, setBack] = useState(() => { try { return localStorage.getItem('fb.back') || 'mine' } catch { return 'mine' } })
+  const [r, setR] = useState(null)
   const [open, setOpen] = useState(null)
   const [more, setMore] = useState(false)
-  const set = (k) => (v) => setA((x) => {
-    const y = { ...x, [k]: v }
-    try { localStorage.setItem(TOP_KEY, JSON.stringify(y)) } catch { /* private mode */ }
-    return y
-  })
+  const [err, setErr] = useState('')
   useEffect(() => {
+    footballWatch().then((x) => {
+      setW(x.data)
+      setDraft(x.data.teams)
+      if (!Object.values(x.data.teams).some((v) => v.length)) setEditing(true)   // nothing chosen yet: start with the questions
+    }).catch(() => setErr('Could not load your teams.'))
+  }, [])
+  const count = w ? Object.values(w.teams).reduce((s, v) => s + v.length, 0) : 0
+  useEffect(() => {
+    if (!w || !count) { setR(null); return undefined }
     let alive = true
-    setErr(false)
-    const t = setTimeout(() => footballTop({ n: a.n, leagues: a.leagues.join(','), matches: a.matches, venue: a.venue, back: a.back, stake })
-      .then((r) => { if (alive) setD(r.data) }).catch(() => { if (alive) setErr(true) }), 250)
-    return () => { alive = false; clearTimeout(t) }
-  }, [a, stake])
-  const shown = (d?.recent || []).slice(0, more ? 150 : 15)
+    footballWatchResults(back, stake).then((x) => { if (alive) setR(x.data) }).catch(() => { if (alive) setErr('Could not work out the results.') })
+    return () => { alive = false }
+  }, [w, back, stake, count])
+  const toggle = (comp) => (t) => setDraft((d) => {
+    const cur = d[comp] || []
+    return { ...d, [comp]: cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t] }
+  })
+  const save = () => {
+    setSaving(true)
+    footballWatchSave(draft).then((x) => { setW((o) => ({ ...o, teams: x.data.teams })); setEditing(false) })
+      .catch(() => setErr('Could not save - try again.')).finally(() => setSaving(false))
+  }
+  const pickBack = (b) => { setBack(b); try { localStorage.setItem('fb.back', b) } catch { /* private mode */ } }
+  if (err && !w) return <div className="card"><p className="text-xs text-red-600">{err}</p></div>
+  if (!w || !draft) return <div className="card"><p className="text-xs text-gray-400">Loading your teams…</p></div>
+  const leagues = Object.entries(w.options.clubs)
   return (
     <div className="card">
-      <p className="text-sm font-black text-gray-900">⚽ Top teams only</p>
-      <p className="text-[10px] text-gray-500 mt-0.5">
-        Narrow the record to each league's best sides. A side's place is its league position on the match day - never today's
-        table, which already knows who won.
-      </p>
-      <div className="mt-3 space-y-2.5">
-        <Question q="1. How many top teams per league?" value={a.n} onChange={set('n')} options={[[3, 'Top 3'], [5, 'Top 5'], [7, 'Top 7']]} />
-        <Question q="2. Which leagues?" value={a.leagues} onChange={set('leagues')} options={LEAGUE_NAMES} multi />
-        <Question q="3. Which of their matches?" value={a.matches} onChange={set('matches')}
-          options={[['any', 'Against anyone'], ['rest', 'Only against the rest'], ['both', 'Only top v top']]} />
-        <Question q="4. Where does the top team play?" value={a.venue} onChange={set('venue')}
-          options={[['all', 'Home & away'], ['home', 'At home'], ['away', 'Away']]} />
-        <Question q="5. Who do you back?" value={a.back} onChange={set('back')}
-          options={[['top', 'The top team'], ['fav', "The bookmakers' favourite"]]} />
+      <div className="flex items-center gap-2">
+        <p className="text-sm font-black text-gray-900 flex-1">⚽ My teams</p>
+        {!editing && <button onClick={() => { setDraft(w.teams); setEditing(true) }} className="text-[11px] font-bold text-brand-600">Edit answers</button>}
       </div>
-      {err && <p className="text-xs text-red-600 mt-3">Couldn't work it out - try again.</p>}
-      {!d && !err && <p className="text-xs text-gray-400 mt-3">Settling…</p>}
-      {d && (
+      {editing ? (
+        <div className="mt-2 space-y-3">
+          <p className="text-[10px] text-gray-500">Tick the teams whose matches you want to consider for betting. Clubs are listed in this season's table order.</p>
+          {leagues.map(([code, l], i) => (
+            <Pickers key={code} title={`${i + 1}. Which ${l.name} teams?`} sub={`${(draft[code] || []).length} chosen`}
+              options={l.teams} chosen={draft[code] || []} onToggle={toggle(code)} limit={8} />
+          ))}
+          <Pickers title={`${leagues.length + 1}. Which national teams?`} sub={`${(draft.INTL || []).length} chosen · strongest first`}
+            options={w.options.nations} chosen={draft.INTL || []} onToggle={toggle('INTL')} limit={16} />
+          <div className="flex gap-2">
+            <button disabled={saving} onClick={save} className="btn-primary py-2 text-xs flex-1">{saving ? 'Saving…' : 'Save my teams'}</button>
+            {count > 0 && <button onClick={() => setEditing(false)} className="px-3 py-2 text-xs font-bold text-gray-500">Cancel</button>}
+          </div>
+          {err && <p className="text-xs text-red-600">{err}</p>}
+        </div>
+      ) : (
         <>
-          <table className="w-full text-[11px] mt-3">
-            <thead>
-              <tr className="text-[9px] text-gray-400 uppercase tracking-wider">
-                <th className="text-left font-black py-1">Last</th>
-                <th className="text-right font-black">Bets</th>
-                <th className="text-right font-black">Won</th>
-                <th className="text-right font-black">Avg odds</th>
-                <th className="text-right font-black">P/L</th>
-                <th className="text-right font-black">Return</th>
-              </tr>
-            </thead>
-            <tbody>
-              {d.periods.map((w) => (
-                <Fragment key={w.label}>
-                  <tr onClick={() => setOpen(open === w.label ? null : w.label)}
-                    className={`border-t border-gray-100 cursor-pointer ${w.days ? '' : 'bg-amber-50/60'}`}>
-                    <td className="py-1.5 font-bold text-gray-800 whitespace-nowrap">{w.label} <span className="text-brand-600">{open === w.label ? '▴' : '▾'}</span></td>
-                    <td className="text-right tabular-nums">{w.bets.toLocaleString('en-IN')}</td>
-                    <td className="text-right tabular-nums">{w.bets ? Math.round((100 * w.won) / w.bets) : 0}%</td>
-                    <td className="text-right tabular-nums">{w.avg_odds?.toFixed(2) ?? '—'}</td>
-                    <td className={`text-right tabular-nums font-bold whitespace-nowrap ${tone(w.pl)}`}>{rupees(w.pl)}</td>
-                    <td className={`text-right tabular-nums font-bold ${tone(w.pl)}`}>{pct(w.roi)}</td>
-                  </tr>
-                  {open === w.label && w.leagues.filter((l) => l.bets).map((l) => (
-                    <tr key={l.comp} className="text-gray-500">
-                      <td className="py-1 pl-3">{l.name}</td>
-                      <td className="text-right tabular-nums">{l.bets}</td>
-                      <td className="text-right tabular-nums">{Math.round((100 * l.won) / l.bets)}%</td>
-                      <td className="text-right tabular-nums">{l.avg_odds?.toFixed(2)}</td>
-                      <td className={`text-right tabular-nums whitespace-nowrap ${tone(l.pl)}`}>{rupees(l.pl)}</td>
-                      <td className={`text-right tabular-nums ${tone(l.pl)}`}>{pct(l.roi)}</td>
-                    </tr>
-                  ))}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
-          <p className="text-[10px] text-gray-500 mt-1.5">
-            ₹{stake} a match at the market's closing average; draws count as lost. Trust the "Since 2023/24" row more than the
-            short ones - a month is a few dozen matches, and the setting that looks best over a month is often just luck.
+          <p className="text-[11px] text-gray-600 mt-1">
+            {[...leagues.map(([code]) => w.teams[code] || []).flat(), ...(w.teams.INTL || [])].join(' · ')}
           </p>
-          {shown.length > 0 && (
-            <div className="mt-3">
-              <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">The bets · last 90 days</p>
-              {shown.map((b, i) => (
-                <div key={i} className="flex items-center gap-2 text-[11px] py-1 border-t border-gray-100">
-                  <span className="w-12 text-gray-400 shrink-0">{fmtDay(b.day)}</span>
-                  <span className="flex-1 min-w-0 truncate">
-                    <b className="text-gray-800">{b.pick}</b>{b.place ? <span className="text-gray-400"> #{b.place}</span> : ''}
-                    <span className="text-gray-400"> · {b.match}</span>
-                  </span>
-                  <span className="tabular-nums text-gray-500">{b.odds.toFixed(2)}</span>
-                  <span className={`w-14 text-right tabular-nums font-bold ${tone(b.pl)}`}>{rupees(b.pl)}</span>
-                </div>
+          <div className="flex items-center gap-2 mt-2 text-[11px] font-semibold text-gray-600">
+            Back
+            <div className="flex rounded-md border border-amber-300 overflow-hidden">
+              {[['mine', 'my team'], ['fav', "the bookmakers' favourite"]].map(([k, l]) => (
+                <button key={k} onClick={() => pickBack(k)}
+                  className={`px-2 py-0.5 text-[11px] font-bold ${back === k ? 'bg-green-700 text-white' : 'bg-white text-gray-600'}`}>{l}</button>
               ))}
-              {d.recent.length > 15 && (
-                <button onClick={() => setMore((m) => !m)} className="text-[11px] font-bold text-brand-600 mt-1">
-                  {more ? 'Show fewer' : `Show all ${d.recent.length}`}
-                </button>
-              )}
             </div>
+          </div>
+          {!r && <p className="text-xs text-gray-400 mt-3">Settling…</p>}
+          {r && (
+            <>
+              {r.clubs.some((c) => c.bets) && (
+                <table className="w-full text-[11px] mt-3">
+                  <thead>
+                    <tr className="text-[9px] text-gray-400 uppercase tracking-wider">
+                      <th className="text-left font-black py-1">Clubs · last</th>
+                      <th className="text-right font-black">Bets</th>
+                      <th className="text-right font-black">Won</th>
+                      <th className="text-right font-black">Avg odds</th>
+                      <th className="text-right font-black">P/L</th>
+                      <th className="text-right font-black">Return</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {r.clubs.map((p) => (
+                      <Fragment key={p.label}>
+                        <tr onClick={() => setOpen(open === p.label ? null : p.label)}
+                          className={`border-t border-gray-100 cursor-pointer ${p.days ? '' : 'bg-amber-50/60'}`}>
+                          <td className="py-1.5 font-bold text-gray-800 whitespace-nowrap">{p.label} <span className="text-brand-600">{open === p.label ? '▴' : '▾'}</span></td>
+                          <td className="text-right tabular-nums">{p.bets}</td>
+                          <td className="text-right tabular-nums">{p.bets ? Math.round((100 * p.won) / p.bets) : 0}%</td>
+                          <td className="text-right tabular-nums">{p.avg_odds?.toFixed(2) ?? '—'}</td>
+                          <td className={`text-right tabular-nums font-bold whitespace-nowrap ${tone(p.pl)}`}>{rupees(p.pl)}</td>
+                          <td className={`text-right tabular-nums font-bold ${tone(p.pl)}`}>{pct(p.roi)}</td>
+                        </tr>
+                        {open === p.label && p.teams.map((t) => (
+                          <tr key={t.team} className="text-gray-500">
+                            <td className="py-1 pl-3">{t.team}</td>
+                            <td className="text-right tabular-nums">{t.bets}</td>
+                            <td className="text-right tabular-nums">{Math.round((100 * t.won) / t.bets)}%</td>
+                            <td className="text-right tabular-nums">{t.avg_odds?.toFixed(2)}</td>
+                            <td className={`text-right tabular-nums whitespace-nowrap ${tone(t.pl)}`}>{rupees(t.pl)}</td>
+                            <td className={`text-right tabular-nums ${tone(t.pl)}`}>{pct(t.roi)}</td>
+                          </tr>
+                        ))}
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {(w.teams.INTL || []).length > 0 && (
+                <table className="w-full text-[11px] mt-3">
+                  <thead>
+                    <tr className="text-[9px] text-gray-400 uppercase tracking-wider">
+                      <th className="text-left font-black py-1">National teams · last</th>
+                      <th className="text-right font-black">Played</th>
+                      <th className="text-right font-black">W</th>
+                      <th className="text-right font-black">D</th>
+                      <th className="text-right font-black">L</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {r.nations.map((p) => (
+                      <tr key={p.label} className="border-t border-gray-100">
+                        <td className="py-1.5 font-bold text-gray-800">{p.label}</td>
+                        <td className="text-right tabular-nums">{p.played}</td>
+                        <td className="text-right tabular-nums text-green-700 font-bold">{p.won}</td>
+                        <td className="text-right tabular-nums">{p.drawn}</td>
+                        <td className="text-right tabular-nums text-red-600 font-bold">{p.lost}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              <p className="text-[10px] text-gray-500 mt-1.5">
+                Clubs: ₹{stake} a match at the market's closing average (football-data.co.uk), draws count as lost; with two of your
+                teams playing each other, the better priced one. National teams: no free prices, so won / drawn / lost only.
+              </p>
+              {(r.club_bets.length > 0 || r.nation_games.length > 0) && (
+                <div className="mt-3">
+                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Their matches</p>
+                  {r.club_bets.slice(0, more ? 150 : 12).map((b, i) => (
+                    <div key={`c${i}`} className="flex items-center gap-2 text-[11px] py-1 border-t border-gray-100">
+                      <span className="w-12 text-gray-400 shrink-0">{fmtDay(b.day)}</span>
+                      <span className="flex-1 min-w-0 truncate"><b className="text-gray-800">{b.pick}</b><span className="text-gray-400"> · {b.match}</span></span>
+                      <span className="tabular-nums text-gray-500">{b.odds.toFixed(2)}</span>
+                      <span className={`w-14 text-right tabular-nums font-bold ${tone(b.pl)}`}>{rupees(b.pl)}</span>
+                    </div>
+                  ))}
+                  {r.nation_games.slice(0, more ? 60 : 6).map((g, i) => (
+                    <div key={`n${i}`} className="flex items-center gap-2 text-[11px] py-1 border-t border-gray-100">
+                      <span className="w-12 text-gray-400 shrink-0">{fmtDay(g.day)}</span>
+                      <span className="flex-1 min-w-0 truncate"><b className="text-gray-800">{g.team}</b> {g.gf}–{g.ga} {g.opp}<span className="text-gray-400"> · {g.tournament}</span></span>
+                      <span className={`w-6 text-center font-black ${g.res === 'W' ? 'text-green-700' : g.res === 'L' ? 'text-red-600' : 'text-gray-500'}`}>{g.res}</span>
+                    </div>
+                  ))}
+                  {(r.club_bets.length > 12 || r.nation_games.length > 6) && (
+                    <button onClick={() => setMore((m) => !m)} className="text-[11px] font-bold text-brand-600 mt-1">{more ? 'Show fewer' : 'Show all'}</button>
+                  )}
+                </div>
+              )}
+            </>
           )}
+          {err && <p className="text-xs text-red-600 mt-2">{err}</p>}
         </>
       )}
     </div>
@@ -539,7 +606,7 @@ export default function PnlDashboard() {
             )}
 
             {view !== 'all' && <SportCard k={view} s={d.sports[view]} stake={stake} edge={d.edge} />}
-            {view === 'football' && <TopTeams stake={stake} />}
+            {view === 'football' && <MyTeams stake={stake} />}
 
             <p className="text-[10px] text-gray-400 text-center">
               Decimal odds: a win pays stake × (odds − 1), a loss costs the stake; walkovers and draws are void.

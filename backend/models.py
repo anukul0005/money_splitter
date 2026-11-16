@@ -1214,6 +1214,20 @@ class FootballMatch(Base):
     avg_a = Column(Float, nullable=True)
 
 
+class FootballWatch(Base):
+    """A team someone follows for betting (the P/L dashboard's football
+    questionnaire): a club in one of the five leagues, as football-data.co.uk
+    names it, or a national team (comp "INTL")."""
+
+    __tablename__ = "football_watch"
+    __table_args__ = (UniqueConstraint("user_id", "comp", "team", name="ux_football_watch"),)
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    comp = Column(String(8), nullable=False)
+    team = Column(String(80), nullable=False)
+
+
 class BadmintonRanking(Base):
     """BWF world ranking, week by week (badminton.sync_rankings): the top
     RANK_DEPTH of each event. A pair is player1 + player2."""

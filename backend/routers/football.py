@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 import football as fb
@@ -35,8 +36,11 @@ def _names(db, m: dict) -> tuple[str, str | None, str | None, bool]:
     return "INTL", fb.nation_name(m["raw_home"].get("name")), fb.nation_name(m["raw_away"].get("name")), True
 
 
-def _annotate(db, m: dict, books: dict, mine: dict) -> dict:
+def _annotate(db, m: dict, books: dict, mine: dict, watch: set) -> dict:
     comp, h, a, neutral = _names(db, m)
+    club_comp = comp if comp in fb.CO_UK_OF else None
+    follows = lambda t: bool(t) and (((club_comp, t) in watch) or (comp == "CL" and any((c, t) in watch for c in fb.CO_UK_OF))
+                                     or (comp == "INTL" and ("INTL", t) in watch))
     mod = None
     if h and a:
         if m["state"] == "finished":
@@ -47,6 +51,7 @@ def _annotate(db, m: dict, books: dict, mine: dict) -> dict:
         mod = mod or (fm.predict(comp, h, a, neutral) if m["state"] != "finished" else None)
     out = {k: v for k, v in m.items() if not k.startswith("raw_")}
     out["model"] = mod
+    out["mine"] = follows(h) or follows(a)
     book = books.get((comp, h, a)) if comp in fb.CO_UK_OF else None
     prices, src = None, None
     if book and all(book["avg"]):
@@ -74,7 +79,8 @@ def live(db: Session = Depends(get_db), caller: User = Depends(owner)):
     except Exception:
         books = {}
     mine = {b.match_key: b for b in db.query(BookOdds).filter(BookOdds.sport == "football", BookOdds.voter_id == caller.id)}
-    out = [_annotate(db, m, books, mine) for m in ms if m["state"] != "off"]
+    watch = {(c, t) for c, ts in _watch(db, caller.id).items() for t in ts}
+    out = [_annotate(db, m, books, mine, watch) for m in ms if m["state"] != "off"]
     order = list(fb.COMPS)
     out.sort(key=lambda m: (m["start"] or "", order.index(m["comp"]) if m["comp"] in order else 99))
     return {"matches": out, "comps": fb.COMPS}
@@ -122,111 +128,130 @@ def favourites(stake: float = 100, db: Session = Depends(get_db), _: User = Depe
                         "pl": round(stake * (b["odds"] - 1), 2) if b["won"] else -stake} for b in recent[:120]]}
 
 
-# -- Top teams only: where a side stood in its league on the day --------------
+# -- My teams: the questionnaire on the P/L dashboard -------------------------
 
-EARLY = 5            # until a side has played this many, last season's final place counts
+class WatchIn(BaseModel):
+    teams: dict[str, list[str]]          # {"E0": ["Arsenal", ...], ..., "INTL": ["India", ...]}
 
 
-def _ranked(db, since: date) -> list[dict]:
-    """Top-five league matches from `since`, each with both sides' league
-    places going into that day - from the season's results before it, or
-    last season's final table while the season is young (a promoted side:
-    the bottom). Never today's table: that would know who went on to win."""
-    from collections import defaultdict
-    from datetime import timedelta
-    from sqlalchemy import text
-    codes = [v[0] for v in fb.LEAGUES.values()]
-    rows = db.execute(text(
-        "SELECT comp, season, day, home, away, home_goals, away_goals, avg_h, avg_d, avg_a FROM football_matches "
-        "WHERE comp = ANY(:c) AND day >= :d ORDER BY comp, season, day"), {"c": codes, "d": since - timedelta(days=430)}).all()
-    out, final = [], {}
-    by = defaultdict(list)
-    for r in rows:
-        by[(r.comp, r.season)].append(r)
-    for (comp, season) in sorted(by, key=lambda k: (k[0], k[1])):
-        ms = by[(comp, season)]
-        prev = final.get((comp, f"{int(season[:2]) - 1:02d}{int(season[2:]) - 1:02d}"), {})
-        t = defaultdict(lambda: [0, 0, 0, 0])               # points, goal difference, goals for, played
-        order = lambda: sorted(t, key=lambda k: (-t[k][0], -t[k][1], -t[k][2], k))
-        i = 0
-        while i < len(ms):
-            day = ms[i].day
-            todays = [m for m in ms[i:] if m.day == day]
-            i += len(todays)
-            places = {k: n + 1 for n, k in enumerate(order())}
-            size = max(len({m.home for m in ms} | {m.away for m in ms}), 18)
-
-            def place(team):
-                if t[team][3] >= EARLY:
-                    return places[team]
-                return prev.get(team, size)                  # promoted / new: the bottom
-            for m in todays:
-                if m.day >= since and m.avg_h and m.avg_d and m.avg_a:
-                    out.append({"comp": comp, "day": m.day, "home": m.home, "away": m.away, "hg": m.home_goals,
-                                "ag": m.away_goals, "prices": {"H": m.avg_h, "D": m.avg_d, "A": m.avg_a},
-                                "rank": {"H": place(m.home), "A": place(m.away)}})
-            for m in todays:
-                for side, gf, ga in ((m.home, m.home_goals, m.away_goals), (m.away, m.away_goals, m.home_goals)):
-                    r = t[side]
-                    r[0] += 3 if gf > ga else 1 if gf == ga else 0
-                    r[1] += gf - ga
-                    r[2] += gf
-                    r[3] += 1
-        final[(comp, season)] = {k: n + 1 for n, k in enumerate(order())}
+def _watch(db, user_id: int) -> dict[str, list[str]]:
+    from models import FootballWatch
+    out: dict[str, list[str]] = {}
+    for w in db.query(FootballWatch).filter(FootballWatch.user_id == user_id).order_by(FootballWatch.team):
+        out.setdefault(w.comp, []).append(w.team)
     return out
 
 
-@router.get("/top-teams", response_model=dict)
-def top_teams(n: int = 5, leagues: str = "", matches: str = "any", back: str = "top", venue: str = "all",
-              stake: float = 100, db: Session = Depends(get_db), _: User = Depends(owner)):
-    """Only the matches of each league's top `n` (by place on the day):
-    `matches` any (a top side v anyone) / both (top v top) / rest (top v the
-    rest); `back` the top side (the higher placed, if both are) or the
-    bookmakers' favourite; `venue` all / home / away (where the top side
-    plays). Rs stake a match at the market's closing average; the last 30,
-    60 and 90 days and since 2023/24, overall and by league."""
+def _options(db) -> dict:
+    """What the questionnaire offers: each league's clubs this season, best
+    placed first; national teams that have played since 2022, strongest
+    first by our model (India always in)."""
+    from collections import defaultdict
     from datetime import timedelta
-    n = max(1, min(n, 10))
+    from sqlalchemy import text
+    season = fb._season_code(fb.current_season_start())
+    pts = defaultdict(lambda: [0, 0])
+    for comp, h, a, hg, ag in db.execute(text(
+            "SELECT comp, home, away, home_goals, away_goals FROM football_matches WHERE season = :s AND comp <> 'CL'"), {"s": season}):
+        for side, gf, ga in ((h, hg, ag), (a, ag, hg)):
+            r = pts[(comp, side)]
+            r[0] += 3 if gf > ga else 1 if gf == ga else 0
+            r[1] += gf - ga
+    clubs = {}
+    for code, name in ((v[0], v[1]) for v in fb.LEAGUES.values()):
+        teams = [t for (c, t) in pts if c == code]
+        clubs[code] = {"name": name, "teams": sorted(teams, key=lambda t: (-pts[(code, t)][0], -pts[(code, t)][1], t))}
+    since = date.today() - timedelta(days=4 * 366)
+    nations = {t for (t,) in db.execute(text(
+        "SELECT home FROM football_matches WHERE comp = 'INTL' AND day >= :d UNION SELECT away FROM football_matches "
+        "WHERE comp = 'INTL' AND day >= :d"), {"d": since})}
+    pool = fm._state.get("nations")
+    strength = (lambda t: pool.A.get(t, 0) + pool.D.get(t, 0)) if pool else (lambda t: 0)
+    ranked = sorted(nations, key=lambda t: -strength(t))
+    return {"clubs": clubs, "nations": ranked[:60] + (["India"] if "India" not in ranked[:60] else []),
+            "all_nations": sorted(nations)}
+
+
+@router.get("/watch", response_model=dict)
+def get_watch(db: Session = Depends(get_db), caller: User = Depends(owner)):
+    return {"teams": _watch(db, caller.id), "options": _options(db)}
+
+
+@router.put("/watch", response_model=dict)
+def put_watch(body: WatchIn, db: Session = Depends(get_db), caller: User = Depends(owner)):
+    """Replace the teams I follow with these."""
+    from models import FootballWatch
+    allowed = set(fb.CO_UK_OF) | {"INTL"}
+    rows = {(c, t.strip()[:80]) for c, ts in body.teams.items() if c in allowed for t in ts[:60] if t and t.strip()}
+    db.query(FootballWatch).filter(FootballWatch.user_id == caller.id).delete()
+    for c, t in rows:
+        db.add(FootballWatch(user_id=caller.id, comp=c, team=t))
+    db.commit()
+    return {"teams": _watch(db, caller.id)}
+
+
+@router.get("/watch/results", response_model=dict)
+def watch_results(back: str = "mine", stake: float = 100, db: Session = Depends(get_db), caller: User = Depends(owner)):
+    """The matches of the teams I follow. Clubs: Rs stake a match at the
+    market's closing average, on my team (`back` mine; the better priced of
+    two if both are mine) or the bookmakers' favourite (`back` fav) - the
+    last 30 / 60 / 90 days and since 2023/24. National teams: there are no
+    free prices, so each team's won / drawn / lost."""
+    from datetime import timedelta
+    from sqlalchemy import text
     stake = max(1.0, min(stake, 100000.0))
+    mine = _watch(db, caller.id)
     names = {v[0]: v[1] for v in fb.LEAGUES.values()}
-    want = [c for c in leagues.split(",") if c in names] or list(names)
+    today = date.today()
     long_from = fm.CLUB_TEST
     bets = []
-    for m in _ranked(db, long_from):
-        if m["comp"] not in want:
+    for comp, day, h, a, hg, ag, ph, pd, pa in db.execute(text(
+            "SELECT comp, day, home, away, home_goals, away_goals, avg_h, avg_d, avg_a FROM football_matches "
+            "WHERE comp = ANY(:c) AND day >= :d AND avg_h IS NOT NULL AND avg_d IS NOT NULL AND avg_a IS NOT NULL ORDER BY day"),
+            {"c": [c for c in names if mine.get(c)], "d": long_from}):
+        sel = set(mine.get(comp, []))
+        ours = [s for s, t in (("H", h), ("A", a)) if t in sel]
+        if not ours:
             continue
-        top = {s for s in ("H", "A") if m["rank"][s] <= n}
-        if not top or (matches == "both" and len(top) < 2) or (matches == "rest" and len(top) > 1):
-            continue
-        side = min(top, key=lambda s: m["rank"][s])         # the higher placed top side
-        if venue in ("home", "away") and side != venue[0].upper():
-            continue
-        pick = side if back == "top" else min(m["prices"], key=m["prices"].get)
-        res = "H" if m["hg"] > m["ag"] else "A" if m["ag"] > m["hg"] else "D"
-        odds = m["prices"][pick]
+        prices = {"H": ph, "D": pd, "A": pa}
+        pick = min(ours, key=lambda s: prices[s]) if back == "mine" else min(prices, key=prices.get)
+        res = "H" if hg > ag else "A" if ag > hg else "D"
         won = pick == res
-        team = {"H": m["home"], "A": m["away"], "D": "Draw"}[pick]
-        bets.append({"day": m["day"], "comp": m["comp"], "odds": odds, "won": won,
-                     "pl": round(stake * (odds - 1), 2) if won else -stake,
-                     "pick": team, "place": m["rank"].get(pick), "match": f"{m['home']} v {m['away']} {m['hg']}-{m['ag']}",
-                     "places": [m["rank"]["H"], m["rank"]["A"]]})
+        bets.append({"day": day, "comp": comp, "team": h if "H" in ours else a, "odds": prices[pick], "won": won,
+                     "pl": round(stake * (prices[pick] - 1), 2) if won else -stake,
+                     "pick": {"H": h, "A": a, "D": "Draw"}[pick], "match": f"{h} v {a} {hg}-{ag}"})
 
     def rec(xs):
         k = len(xs)
         pl = sum(x["pl"] for x in xs)
         return {"bets": k, "won": sum(x["won"] for x in xs), "pl": round(pl, 2), "roi": round(pl / (stake * k), 4) if k else None,
                 "avg_odds": round(sum(x["odds"] for x in xs) / k, 2) if k else None}
+    windows = [(f"{d} days", today - timedelta(days=d), d) for d in (30, 60, 90)] + [("Since 2023/24", long_from, None)]
+    clubs = [{"label": lbl, "days": d, **rec([b for b in bets if b["day"] >= s]),
+              "teams": sorted(({"team": t, **rec([b for b in bets if b["day"] >= s and b["team"] == t])}
+                               for t in {b["team"] for b in bets if b["day"] >= s}), key=lambda x: -x["pl"])}
+             for lbl, s, d in windows]
 
-    def window(xs, since, label, days=None):
-        ys = [x for x in xs if x["day"] >= since]
-        return {"label": label, "days": days, "since": since.isoformat(), **rec(ys),
-                "leagues": [{"comp": c, "name": names[c], **rec([y for y in ys if y["comp"] == c])} for c in want]}
-    today = date.today()
-    periods = [window(bets, today - timedelta(days=d), f"{d} days", d) for d in (30, 60, 90)]
-    periods.append(window(bets, long_from, "Since 2023/24"))
-    recent = sorted((b for b in bets if b["day"] >= today - timedelta(days=90)), key=lambda b: b["day"], reverse=True)[:150]
-    return {"n": n, "leagues": want, "matches": matches, "back": back, "venue": venue, "stake": stake, "periods": periods,
-            "recent": [{**b, "day": b["day"].isoformat(), "league": names[b["comp"]]} for b in recent]}
+    nat = set(mine.get("INTL", []))
+    games = []
+    if nat:
+        for day, h, a, hg, ag, tour in db.execute(text(
+                "SELECT day, home, away, home_goals, away_goals, tournament FROM football_matches WHERE comp = 'INTL' "
+                "AND day >= :d AND (home = ANY(:t) OR away = ANY(:t)) ORDER BY day"), {"d": today - timedelta(days=366), "t": list(nat)}):
+            for t, gf, ga, opp in ((h, hg, ag, a), (a, ag, hg, h)):
+                if t in nat:
+                    games.append({"day": day, "team": t, "opp": opp, "gf": gf, "ga": ga, "tournament": tour,
+                                  "res": "W" if gf > ga else "D" if gf == ga else "L"})
+
+    def wdl(xs):
+        return {"played": len(xs), "won": sum(x["res"] == "W" for x in xs), "drawn": sum(x["res"] == "D" for x in xs),
+                "lost": sum(x["res"] == "L" for x in xs)}
+    nations = [{"label": f"{d} days", "days": d, **wdl([g for g in games if g["day"] >= today - timedelta(days=d)])}
+               for d in (30, 60, 90)] + [{"label": "Last 12 months", "days": 365, **wdl(games)}]
+    recent = sorted((b for b in bets if b["day"] >= today - timedelta(days=90)), key=lambda b: b["day"], reverse=True)
+    return {"back": back, "stake": stake, "teams": mine, "clubs": clubs, "nations": nations,
+            "club_bets": [{**b, "day": b["day"].isoformat(), "league": names[b["comp"]]} for b in recent[:150]],
+            "nation_games": [{**g, "day": g["day"].isoformat()} for g in sorted(games, key=lambda g: g["day"], reverse=True)[:60]]}
 
 
 @router.get("/table/{comp}", response_model=dict)

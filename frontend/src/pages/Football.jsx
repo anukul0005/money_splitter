@@ -13,7 +13,7 @@ import { peek, footballLive, footballModel, footballTable } from '../api'
  * dashboard.)
  */
 export const F_TABS = [['matches', 'Matches'], ['tables', 'Tables'], ['model', 'Model']]
-const COMPS = [['all', 'All'], ['PL', 'EPL'], ['PD', 'LaLiga'], ['SA', 'Serie A'], ['BL1', 'Bund.'], ['FL1', 'Ligue 1'], ['CL', 'UCL'], ['WC', 'WC'], ['EC', 'Euro']]
+const COMPS = [['all', 'All'], ['mine', '★ My teams'], ['PL', 'EPL'], ['PD', 'LaLiga'], ['SA', 'Serie A'], ['BL1', 'Bund.'], ['FL1', 'Ligue 1'], ['CL', 'UCL'], ['WC', 'WC'], ['EC', 'Euro']]
 const SHORT = Object.fromEntries(COMPS)
 
 const fmtTime = (iso) => (iso ? new Date(iso).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true }) : '')
@@ -81,6 +81,7 @@ function Row({ m, books, setBook }) {
         {live ? <span className="font-black text-red-600 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-red-600 animate-pulse" />LIVE</span>
           : <span className="font-bold text-gray-500">{done ? 'FT' : fmtTime(m.start)}</span>}
         <span className="font-bold text-gray-500">{SHORT[m.comp] || m.comp_name}</span>
+        {m.mine && <span className="font-black text-amber-600" title="one of my teams">★</span>}
         {m.matchday && <span className="text-gray-400">MD {m.matchday}</span>}
         {m.model?.thin && <span className="text-amber-600">few matches on file</span>}
         {m.state === 'upcoming' && books && !m.book && (
@@ -113,7 +114,7 @@ function Matches({ active }) {
   }, [active, books])
   const pick = (k) => { setComp(k); try { sessionStorage.setItem('fb.comp', k) } catch { /* private mode */ } }
   const days = useMemo(() => {
-    const ms = (d?.matches || []).filter((m) => comp === 'all' || m.comp === comp)
+    const ms = (d?.matches || []).filter((m) => comp === 'all' || (comp === 'mine' ? m.mine : m.comp === comp))
     const live = ms.filter((m) => m.state === 'live')
     const rest = ms.filter((m) => m.state !== 'live')
     const by = []
@@ -141,7 +142,7 @@ function Matches({ active }) {
           {g.list.map((m) => <Row key={m.id} m={m} books={books} setBook={setBook} />)}
         </div>
       ))}
-      {d && !days.live.length && !days.by.length && <p className="text-xs text-gray-400 py-6 text-center">No matches in this competition this week.</p>}
+      {d && !days.live.length && !days.by.length && <p className="text-xs text-gray-400 py-6 text-center">{comp === 'mine' ? 'None of your teams play this week - choose them on the P/L dashboard (⚽ tab).' : 'No matches in this competition this week.'}</p>}
       <p className="text-[10px] text-gray-400 leading-snug">
         1 / X / 2: our chance and fair price for a home win, draw and away win; "b" the bookmakers' average
         (football-data.co.uk, top five leagues only - type a bookmaker's for the rest). Fixtures and scores: football-data.org.
@@ -161,7 +162,7 @@ function Tables({ active }) {
   }, [active, comp])
   return (
     <div className="space-y-3">
-      <Chips value={comp} onChange={setComp} options={COMPS.filter(([k]) => k !== 'all')} />
+      <Chips value={comp} onChange={setComp} options={COMPS.filter(([k]) => k !== 'all' && k !== 'mine')} />
       {err && <p className="text-xs text-red-600">{err}</p>}
       {!d && !err && <p className="text-xs text-gray-400 py-6 text-center">Loading…</p>}
       {d?.tables?.length === 0 && <p className="text-xs text-gray-400 py-6 text-center">No table for this one now.</p>}
