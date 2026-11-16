@@ -82,25 +82,57 @@ function Chooser({ w, onSaved, onCancel }) {
   )
 }
 
+/** A skip pattern: on / off, and its number. */
+function SkipRow({ on, onToggle, label, value, options, onPick }) {
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+      <button onClick={onToggle}
+        className={`w-4 h-4 border rounded-none flex items-center justify-center text-[10px] font-black ${on ? 'bg-green-700 border-green-700 text-white' : 'bg-white border-gray-400 text-transparent'}`}>✓</button>
+      <span className={on ? 'text-gray-700 font-semibold' : 'text-gray-400'}>{label}</span>
+      <span className="flex border border-amber-300 rounded-none overflow-hidden">
+        {options.map((v) => (
+          <button key={v} onClick={() => onPick(v)}
+            className={`px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${value === v ? 'bg-field-950 text-white' : 'bg-white text-gray-600'}`}>{v.toFixed(2)}</button>
+        ))}
+      </span>
+    </div>
+  )
+}
+
 /** The teams I bet on: their matches at the market's closing average. Also on the P/L dashboard. */
 export function BetRecord({ stake = 100, compact = false }) {
   const [r, setR] = useState(null)
   const [err, setErr] = useState(false)
   const [open, setOpen] = useState(null)
   const [more, setMore] = useState(false)
+  // the skip patterns: 1 a close match (the two win prices within `close`), 2 my team at `cap` or more
+  const [skip, setSkip] = useState(() => {
+    try { return { skip1: true, close: 0.5, skip2: true, cap: 1.6, ...JSON.parse(localStorage.getItem('fb.skip') || '{}') } } catch { return { skip1: true, close: 0.5, skip2: true, cap: 1.6 } }
+  })
+  const change = (k, v) => setSkip((x) => {
+    const y = { ...x, [k]: v }
+    try { localStorage.setItem('fb.skip', JSON.stringify(y)) } catch { /* private mode */ }
+    return y
+  })
   useEffect(() => {
     let alive = true
     setErr(false)
-    footballWatchResults('mine', stake).then((x) => { if (alive) setR(x.data) }).catch(() => { if (alive) setErr(true) })
+    footballWatchResults('mine', stake, skip).then((x) => { if (alive) setR(x.data) }).catch(() => { if (alive) setErr(true) })
     return () => { alive = false }
-  }, [stake])
+  }, [stake, skip])
   if (err) return <p className="text-xs text-red-600">Couldn't work it out - try again.</p>
   if (!r) return <p className="text-xs text-gray-400">Settling…</p>
   const bet = Object.values(r.teams || {}).reduce((s, v) => s + v.length, 0)
   if (!bet) return <p className="text-xs text-gray-500">No teams to bet on yet - mark some ₹ on the My teams page.</p>
   return (
     <div>
-      {r.clubs.some((c) => c.bets) ? (
+      <div className="space-y-1.5 mb-2">
+        <SkipRow on={skip.skip1} onToggle={() => change('skip1', !skip.skip1)} label="Skip pattern 1 - a close match: the two win prices within"
+          value={skip.close} options={[0.3, 0.5, 0.8]} onPick={(v) => change('close', v)} />
+        <SkipRow on={skip.skip2} onToggle={() => change('skip2', !skip.skip2)} label="Skip pattern 2 - my team priced at or above"
+          value={skip.cap} options={[1.5, 1.6, 1.8]} onPick={(v) => change('cap', v)} />
+      </div>
+      {r.clubs.some((c) => c.all?.bets) ? (
         <table className="w-full text-[11px]">
           <thead>
             <tr className="text-[9px] text-gray-400 uppercase tracking-wider">
@@ -123,6 +155,14 @@ export function BetRecord({ stake = 100, compact = false }) {
                   <td className={`text-right tabular-nums font-bold whitespace-nowrap ${tone(p.pl)}`}>{rupees(p.pl)}</td>
                   <td className={`text-right tabular-nums font-bold ${tone(p.pl)}`}>{pct(p.roi)}</td>
                 </tr>
+                {(r.skip1 || r.skip2) && p.all.bets > 0 && (
+                  <tr className="text-[10px] text-gray-400">
+                    <td colSpan={6} className="pb-1 pl-3">
+                      of {p.all.bets} bets ({rupees(p.all.pl)}, {pct(p.all.roi)}): {p.skipped.bets} skipped, which would have made{' '}
+                      <span className={`font-bold ${tone(p.skipped.pl)}`}>{rupees(p.skipped.pl)}</span>
+                    </td>
+                  </tr>
+                )}
                 {open === p.label && p.teams.map((t) => (
                   <tr key={t.team} className="text-gray-500">
                     <td className="py-1 pl-3 truncate max-w-[7rem]">{t.team}</td>
@@ -145,12 +185,13 @@ export function BetRecord({ stake = 100, compact = false }) {
         </p>
       )}
       <p className="text-[10px] text-gray-500 mt-1.5">
-        ₹{stake} on your team in each of its matches, at the market's closing average (football-data.co.uk); draws count as lost. Two of your teams playing each other: the better priced one.
+        ₹{stake} on your team in each of its matches, at the market's closing average - the last price before kick-off (football-data.co.uk); draws count as lost. Two of your teams playing each other: the better priced one. Skipped bets are struck through in the list.
       </p>
       {!compact && r.club_bets.length > 0 && (
         <div className="mt-2">
           {r.club_bets.slice(0, more ? 150 : 5).map((b, i) => (
-            <div key={i} className="flex items-center gap-2 text-[11px] py-1 border-t border-gray-100">
+            <div key={i} className={`flex items-center gap-2 text-[11px] py-1 border-t border-gray-100 ${b.skip ? 'opacity-40 line-through' : ''}`}
+              title={b.skip ? `skipped - ${[b.p1 && r.skip1 && 'pattern 1', b.p2 && r.skip2 && 'pattern 2'].filter(Boolean).join(', ')}` : ''}>
               <span className="w-12 text-gray-400 shrink-0">{fmtDay(b.day)}</span>
               <span className="flex-1 min-w-0 truncate"><b className="text-gray-800">{b.pick}</b><span className="text-gray-400"> · {b.match}</span></span>
               <span className="w-10 text-right tabular-nums text-gray-500 shrink-0">{b.odds.toFixed(2)}</span>

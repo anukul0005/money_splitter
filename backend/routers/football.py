@@ -202,12 +202,16 @@ def put_watch(body: WatchIn, db: Session = Depends(get_db), caller: User = Depen
 
 
 @router.get("/watch/results", response_model=dict)
-def watch_results(back: str = "mine", stake: float = 100, db: Session = Depends(get_db), caller: User = Depends(owner)):
+def watch_results(back: str = "mine", stake: float = 100, skip1: bool = False, close: float = 0.5,
+                  skip2: bool = False, cap: float = 1.6, db: Session = Depends(get_db), caller: User = Depends(owner)):
     """The matches of the teams I bet on. Clubs: Rs stake a match at the
-    market's closing average, on my team (`back` mine; the better priced of
-    two if both are mine) or the bookmakers' favourite (`back` fav) - the
-    last 30 / 60 / 90 days and since 2023/24. National teams: there are no
-    free prices, so each team's won / drawn / lost."""
+    market's closing average (the last price before kick-off), on my team
+    (`back` mine; the better priced of two if both are mine) or the
+    bookmakers' favourite (`back` fav) - the last 30 / 60 / 90 days and since
+    2023/24. Bets can be skipped by pattern - 1: a close match, the two
+    sides' win prices within `close` of each other; 2: my team priced `cap`
+    or more - and what the skipped ones would have made is given beside.
+    National teams: there are no free prices, so each team's won / drawn / lost."""
     from datetime import timedelta
     from sqlalchemy import text
     stake = max(1.0, min(stake, 100000.0))
@@ -228,9 +232,13 @@ def watch_results(back: str = "mine", stake: float = 100, db: Session = Depends(
         pick = min(ours, key=lambda s: prices[s]) if back == "mine" else min(prices, key=prices.get)
         res = "H" if hg > ag else "A" if ag > hg else "D"
         won = pick == res
+        p1 = abs(ph - pa) <= close + 1e-9                      # pattern 1: too close to call
+        p2 = pick != "D" and prices[pick] >= cap - 1e-9        # pattern 2: my team not short enough
         bets.append({"day": day, "comp": comp, "team": h if "H" in ours else a, "odds": prices[pick], "won": won,
                      "pl": round(stake * (prices[pick] - 1), 2) if won else -stake,
-                     "pick": {"H": h, "A": a, "D": "Draw"}[pick], "match": f"{h} v {a} {hg}-{ag}"})
+                     "pick": {"H": h, "A": a, "D": "Draw"}[pick], "match": f"{h} v {a} {hg}-{ag}",
+                     "rival": prices["A" if pick == "H" else "H"], "p1": p1, "p2": p2,
+                     "skip": (skip1 and p1) or (skip2 and p2)})
 
     def rec(xs):
         k = len(xs)
@@ -238,9 +246,12 @@ def watch_results(back: str = "mine", stake: float = 100, db: Session = Depends(
         return {"bets": k, "won": sum(x["won"] for x in xs), "pl": round(pl, 2), "roi": round(pl / (stake * k), 4) if k else None,
                 "avg_odds": round(sum(x["odds"] for x in xs) / k, 2) if k else None}
     windows = [(f"{d} days", today - timedelta(days=d), d) for d in (30, 60, 90)] + [("Since 2023/24", long_from, None)]
-    clubs = [{"label": lbl, "days": d, **rec([b for b in bets if b["day"] >= s]),
-              "teams": sorted(({"team": t, **rec([b for b in bets if b["day"] >= s and b["team"] == t])}
-                               for t in {b["team"] for b in bets if b["day"] >= s}), key=lambda x: -x["pl"])}
+    kept = [b for b in bets if not b["skip"]]
+    clubs = [{"label": lbl, "days": d, **rec([b for b in kept if b["day"] >= s]),
+              "all": rec([b for b in bets if b["day"] >= s]),
+              "skipped": rec([b for b in bets if b["day"] >= s and b["skip"]]),
+              "teams": sorted(({"team": t, **rec([b for b in kept if b["day"] >= s and b["team"] == t])}
+                               for t in {b["team"] for b in kept if b["day"] >= s}), key=lambda x: -x["pl"])}
              for lbl, s, d in windows]
 
     nat = set(mine.get("INTL", []))
@@ -260,7 +271,8 @@ def watch_results(back: str = "mine", stake: float = 100, db: Session = Depends(
     nations = [{"label": f"{d} days", "days": d, **wdl([g for g in games if g["day"] >= today - timedelta(days=d)])}
                for d in (30, 60, 90)] + [{"label": "Last 12 months", "days": 365, **wdl(games)}]
     recent = sorted((b for b in bets if b["day"] >= today - timedelta(days=90)), key=lambda b: b["day"], reverse=True)
-    return {"back": back, "stake": stake, "teams": mine, "clubs": clubs, "nations": nations,
+    return {"back": back, "stake": stake, "skip1": skip1, "close": close, "skip2": skip2, "cap": cap,
+            "teams": mine, "clubs": clubs, "nations": nations,
             "club_bets": [{**b, "day": b["day"].isoformat(), "league": names[b["comp"]]} for b in recent[:150]],
             "nation_games": [{**g, "day": g["day"].isoformat()} for g in sorted(games, key=lambda g: g["day"], reverse=True)[:60]]}
 
