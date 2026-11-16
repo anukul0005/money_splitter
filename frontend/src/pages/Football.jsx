@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { CardHead, Tile } from './Badminton'
 import { BookOdds, useBookOdds } from '../components/SportPick'
-import { peek, footballLive, footballModel, footballTable } from '../api'
+import DatePicker from '../components/DatePicker'
+import { peek, footballDay, footballLive, footballModel, footballTable } from '../api'
 
 /**
  * Football in the sports section (Betting analytics' ⚽ switch): the top five
@@ -28,6 +29,9 @@ const dayLabel = (iso) => {
   return d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
 }
 const pc = (x) => `${Math.round(100 * x)}%`
+const iso = (d) => d.toLocaleDateString('en-CA')                       // YYYY-MM-DD, local
+const shift = (s, n) => { const d = new Date(`${s}T00:00:00`); d.setDate(d.getDate() + n); return iso(d) }
+const longDay = (s) => new Date(`${s}T00:00:00`).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
 
 function Chips({ value, onChange, options }) {
   return (
@@ -103,19 +107,25 @@ function Row({ m, books, setBook }) {
 }
 
 function Matches({ active }) {
-  const [d, setD] = useState(() => peek('/football/live') || null)   // the last list at once
+  // '' = this week (two days back to a week on); a date = that one day, any day (the date bar, as in tennis)
+  const [date, setDate] = useState(() => { try { return sessionStorage.getItem('fb.date') || '' } catch { return '' } })
+  const [d, setD] = useState(() => (date ? peek('/football/day', { date }) : peek('/football/live')) || null)   // the last list at once
   const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
   const [comp, setComp] = useState(() => { try { return sessionStorage.getItem('fb.comp') || 'all' } catch { return 'all' } })
   const [books, setBook] = useBookOdds('football', active)
+  const go = (v) => { setDate(v); try { sessionStorage.setItem('fb.date', v) } catch { /* private mode */ } }
   useEffect(() => {
     if (!active) return undefined
     let alive = true
-    const load = () => footballLive().then((r) => { if (alive) { setD(r.data); setErr('') } })
+    setBusy(!!date && !peek('/football/day', { date }))
+    const load = () => (date ? footballDay(date) : footballLive()).then((r) => { if (alive) { setD(r.data); setErr('') } })
       .catch((e) => { if (alive) setErr(e?.response?.data?.detail || 'Could not load the matches.') })
+      .finally(() => { if (alive) setBusy(false) })
     load()
     const t = setInterval(() => { if (!document.hidden) load() }, 60000)
     return () => { alive = false; clearInterval(t) }
-  }, [active, books])
+  }, [active, books, date])
   const pick = (k) => { setComp(k); try { sessionStorage.setItem('fb.comp', k) } catch { /* private mode */ } }
   const days = useMemo(() => {
     const ms = (d?.matches || []).filter((m) => comp === 'all' || (comp === 'mine' ? m.mine : m.comp === comp))
@@ -129,10 +139,23 @@ function Matches({ active }) {
     }
     return { live, by }
   }, [d, comp])
-  if (!d && !err) return <p className="text-xs text-gray-400 py-8 text-center">Loading the week's matches…</p>
+  const today = iso(new Date())
+  const count = days.live.length + days.by.reduce((s, g) => s + g.list.length, 0)
   return (
     <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <button onClick={() => go(shift(date || today, -1))}
+          className="px-3 py-2 rounded-none border border-amber-300 bg-white text-sm font-black">‹</button>
+        <DatePicker value={date || today} onChange={(v) => v && go(v)} className="flex-1" />
+        <button onClick={() => go(shift(date || today, 1))}
+          className="px-3 py-2 rounded-none border border-amber-300 bg-white text-sm font-black">›</button>
+      </div>
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-bold text-gray-500">{date ? longDay(date) : 'This week'}{d ? ` · ${count} match${count === 1 ? '' : 'es'}` : ''}</p>
+        {date && <button onClick={() => go('')} className="text-[11px] font-bold text-brand-600">This week ›</button>}
+      </div>
       <Chips value={comp} onChange={pick} options={COMPS} />
+      {(busy || (!d && !err)) && <p className="text-xs text-gray-400 py-6 text-center">Loading…</p>}
       {err && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{err}</p>}
       {days.live.length > 0 && (
         <div className="card">
@@ -146,10 +169,14 @@ function Matches({ active }) {
           {g.list.map((m) => <Row key={m.id} m={m} books={books} setBook={setBook} />)}
         </div>
       ))}
-      {d && !days.live.length && !days.by.length && <p className="text-xs text-gray-400 py-6 text-center">{comp === 'mine' ? 'None of your teams play this week - choose them on the P/L dashboard (⚽ tab).' : 'No matches in this competition this week.'}</p>}
+      {d && !busy && !days.live.length && !days.by.length && (
+        <p className="text-xs text-gray-400 py-6 text-center">
+          {comp === 'mine' ? `None of your teams play ${date ? 'on this day' : 'this week'}.` : `No matches ${comp === 'all' ? '' : 'in this competition '}${date ? 'on this day' : 'this week'}.`}
+        </p>
+      )}
       <p className="text-[10px] text-gray-400 leading-snug">
         1 / X / 2: our chance and fair price for a home win, draw and away win; "b" the bookmakers' average
-        (football-data.co.uk, top five leagues only - type a bookmaker's for the rest). Fixtures and scores: football-data.org.
+        (football-data.co.uk, top five leagues only - type a bookmaker's for the rest). Fixtures and scores: football-data.org; ISL and national teams: ESPN.
       </p>
     </div>
   )

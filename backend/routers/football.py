@@ -351,6 +351,35 @@ def watch_feed(db: Session = Depends(get_db), caller: User = Depends(owner)):
     return {"teams": out}
 
 
+@router.get("/day", response_model=dict)
+def day(date: str = "", db: Session = Depends(get_db), caller: User = Depends(owner)):
+    """Every match in our competitions on one day (`date_`, ISO), any day:
+    football-data.org's, the ISL's and national teams' (ESPN), with our odds."""
+    from datetime import date as Date, timedelta
+    from models import BookOdds
+    try:
+        d = Date.fromisoformat(date) if date else Date.today()
+    except ValueError:
+        raise HTTPException(400, "Date as YYYY-MM-DD")
+    ms = []
+    for fn in (lambda: fb.clubs_day(d), lambda: fb.isl_day(d), lambda: fb.nations_day(db, d)):
+        try:
+            ms += fn()
+        except Exception:
+            pass
+    try:
+        books = fb.book_prices()
+    except Exception:
+        books = {}
+    mine = {b.match_key: b for b in db.query(BookOdds).filter(BookOdds.sport == "football", BookOdds.voter_id == caller.id)}
+    watch = {(c, t) for c, ts in _watch(db, caller.id).items() for t in ts}
+    out = [_annotate(db, m, books, mine, watch) for m in ms if m["state"] != "off"]
+    order = list(fb.COMPS) + ["ISL", "NT"]
+    out.sort(key=lambda m: (m["start"] or "", order.index(m["comp"]) if m["comp"] in order else 99))
+    return {"date": d.isoformat(), "prev": (d - timedelta(days=1)).isoformat(), "next": (d + timedelta(days=1)).isoformat(),
+            "matches": out}
+
+
 @router.get("/table/{comp}", response_model=dict)
 def table(comp: str, _: User = Depends(owner)):
     if comp not in fb.COMPS and comp != "ISL":

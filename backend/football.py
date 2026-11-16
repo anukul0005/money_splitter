@@ -819,3 +819,75 @@ def isl_table() -> dict:
             tables.append({"group": None, "rows": rows})
         return {"comp": "ISL", "name": "Indian Super League", "season": None, "tables": tables}
     return _hold("isltable", 3600, read)
+
+
+# ── One day, any day (the Matches tab's date bar) ───────────────────────────
+
+def _espn_match(e: dict, comp: str, comp_name: str, home_name: str, away_name: str, extra: dict) -> dict | None:
+    home, away, _ = _sides(e)
+    if not home or not away:
+        return None
+    st = (e.get("status") or {}).get("type") or {}
+    state = "finished" if st.get("completed") else "live" if st.get("state") == "in" else \
+        "off" if any(x in (st.get("name") or "") for x in ("POSTPONED", "CANCELED", "ABANDONED")) else "upcoming"
+    g = lambda c: int(c["score"]) if state != "upcoming" and str(c.get("score", "")).isdigit() else None
+    hg, ag = g(home), g(away)
+    team = lambda c, n: {"id": (c.get("team") or {}).get("id"), "name": n, "full": (c.get("team") or {}).get("displayName"),
+                         "crest": (c.get("team") or {}).get("logo"), "tla": None}
+    winner = None
+    if state == "finished" and hg is not None:
+        winner = "HOME_TEAM" if hg > ag else "AWAY_TEAM" if ag > hg else "DRAW"
+    return {"id": f"espn{e['id']}", "comp": comp, "comp_name": comp_name, "start": e["date"], "status": st.get("name"),
+            "state": state, "matchday": None, "stage": None, "group": None,
+            "home": {**team(home, home_name), "goals": hg}, "away": {**team(away, away_name), "goals": ag},
+            "half": [None, None], "winner": winner, "raw_home": {"name": home_name}, "raw_away": {"name": away_name}, **extra}
+
+
+def isl_day(d: date) -> list[dict]:
+    def read():
+        out = []
+        for e in _get(f"{ESPN_SOCCER}/{ISL_SLUG}/scoreboard?dates={d.strftime('%Y%m%d')}").get("events") or []:
+            home, away, _ = _sides(e)
+            if home and away:
+                m = _espn_match(e, "ISL", "Indian Super League", (home.get("team") or {}).get("displayName"),
+                                (away.get("team") or {}).get("displayName"), {"isl": True})
+                if m:
+                    out.append(m)
+        return out
+    return _hold(f"isld{d.isoformat()}", 600 if d >= date.today() - timedelta(days=1) else 12 * 3600, read)
+
+
+def nations_day(db, d: date) -> list[dict]:
+    """Senior men's national-team matches on day `d` (ESPN), played or to come."""
+    out = []
+    for e in _espn_all(d).get("events") or []:
+        home, away, _ = _sides(e)
+        if not home or not away:
+            continue
+        h = _nation(db, (home.get("team") or {}).get("displayName") or "")
+        a = _nation(db, (away.get("team") or {}).get("displayName") or "")
+        if not (h and a):
+            continue
+        lid = (e.get("uid") or "").split("~l:")[-1].split("~")[0]
+        try:
+            league = _espn_league(e["id"], lid)
+        except Exception:
+            continue
+        if not league or _YOUTH.search(league) or "women" in league.lower():
+            continue
+        m = _espn_match(e, "NT", league, h, a, {"nation": True})
+        if m:
+            out.append(m)
+    return out
+
+
+def clubs_day(d: date) -> list[dict]:
+    """football-data.org's competitions on day `d`."""
+    t = date.today()
+    ttl = 60 if d == t else 600 if d > t else 6 * 3600
+
+    def read():
+        # its dateTo is exclusive (the same date twice gives nothing): ask to the next day, keep this one
+        r = _api(f"/matches?dateFrom={d.isoformat()}&dateTo={(d + timedelta(days=1)).isoformat()}&competitions={','.join(COMPS)}")
+        return [_match(m) for m in r.get("matches") or [] if (m.get("utcDate") or "")[:10] == d.isoformat()]
+    return _hold(f"fd{d.isoformat()}", ttl, read)
