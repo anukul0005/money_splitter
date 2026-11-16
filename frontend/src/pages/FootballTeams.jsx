@@ -177,10 +177,10 @@ export function BetRecord({ stake = 100, compact = false }) {
           </tbody>
         </table>
       ) : <p className="text-[11px] text-gray-500 mt-2">No priced club matches for your ₹ teams yet.</p>}
-      {(r.teams.INTL || []).length > 0 && (
+      {[...(r.teams.INTL || []), ...(r.teams.ISL || [])].length > 0 && (
         <p className="text-[11px] text-gray-600 mt-2">
-          National teams ({r.teams.INTL.join(', ')}): {r.nations.map((n) => `${n.label} ${n.won}-${n.drawn}-${n.lost}`).join(' · ')}
-          <span className="text-gray-400"> (won-drawn-lost; no free prices, so no P/L)</span>
+          National teams & ISL ({[...(r.teams.INTL || []), ...(r.teams.ISL || [])].join(', ')}): {r.nations.map((n) => `${n.label} ${n.won}-${n.drawn}-${n.lost}`).join(' · ')}
+          <span className="text-gray-400"> (won-drawn-lost; no free prices for these, so no P/L)</span>
         </p>
       )}
       <p className="text-[10px] text-gray-500 mt-1.5">

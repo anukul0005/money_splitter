@@ -112,7 +112,9 @@ _ALIAS = {"wolverhampton": "Wolves", "nottingham": "Nott'm Forest", "brightonhov
           "mainz": "Mainz", "leipzig": "RB Leipzig", "rbleipzig": "RB Leipzig", "deportivoalaves": "Alaves",
           "alaves": "Alaves", "celta": "Celta", "leganes": "Leganes", "sheffieldutd": "Sheffield United",
           "lutontown": "Luton", "ipswichtown": "Ipswich", "leicestercity": "Leicester", "leedsunited": "Leeds",
-          "newcastle": "Newcastle", "tottenham": "Tottenham", "westham": "West Ham"}
+          "newcastle": "Newcastle", "tottenham": "Tottenham", "westham": "West Ham",
+          # ESPN's spellings
+          "cologne": "FC Koln", "atleticomadrid": "Ath Madrid", "deportivo": "La Coruna", "deportivolacoruna": "La Coruna"}
 # football-data.org's national team names -> the international results set's
 _NATIONS = {"korea republic": "South Korea", "ir iran": "Iran", "usa": "United States", "côte d'ivoire": "Ivory Coast",
             "cote d'ivoire": "Ivory Coast", "czechia": "Czech Republic", "türkiye": "Turkey", "turkiye": "Turkey",
@@ -252,6 +254,13 @@ def sync_leagues(db, full: bool = False) -> int:
                 continue
             n += _upsert(db, _league_rows(code, s, body))
             time.sleep(1.5)
+    # ESPN's same-day rows the weekly file now has (a day either side, as the two date a late kick-off differently)
+    from sqlalchemy import text
+    db.execute(text("""
+        DELETE FROM football_matches a USING football_matches b
+        WHERE a.tournament = 'espn' AND a.comp = ANY(:c) AND b.comp = a.comp AND b.tournament IS NULL
+          AND abs(a.day - b.day) <= 1 AND a.home = b.home AND a.away = b.away AND a.id <> b.id"""), {"c": list(CO_UK_OF)})
+    db.commit()
     with _teams_lock:
         _teams.clear()
     return n
@@ -546,7 +555,7 @@ def sync_national_recent(db) -> int:
 
 
 def recent_loop() -> None:
-    """National-team results into the store a few times a day."""
+    """National-team, same-day league and ISL results into the store, every two hours."""
     from database import get_session_factory
     time.sleep(90)
     while True:
@@ -560,6 +569,13 @@ def recent_loop() -> None:
                     print(f"[football] API-Football: {e}", flush=True)
                 if n:
                     print(f"[football] {n} national-team result(s) from ESPN / API-Football", flush=True)
+                for what, fn in (("league", sync_leagues_espn), ("ISL", sync_isl)):
+                    try:
+                        k = fn(db)
+                        if k:
+                            print(f"[football] {k} {what} result(s) from ESPN", flush=True)
+                    except Exception as e:
+                        print(f"[football] ESPN {what}: {e}", flush=True)
             finally:
                 db.close()
         except Exception as e:
@@ -588,7 +604,7 @@ def _espn_league(event_id: str, league_id: str) -> str:
 
 def espn_national_day(db, d: date) -> list[dict]:
     """Senior men's national-team results on day `d` (UTC), as rows to store."""
-    data = _get(f"{ESPN_SOCCER}/all/scoreboard?dates={d.strftime('%Y%m%d')}&limit=1000")   # 100 a day without it
+    data = _espn_all(d)
     rows = []
     for e in data.get("events") or []:
         comp = (e.get("competitions") or [{}])[0]
@@ -633,3 +649,173 @@ def sync_national_espn(db, max_days: int = 45) -> int:
             time.sleep(1.0)
         d += timedelta(days=1)
     return n
+
+
+# ── Leagues from ESPN: results within hours, and the ISL ────────────────────
+# football-data.co.uk's files (with the closing odds) come once a week, so
+# ESPN's scoreboard puts each top-five league result in the store the day
+# it's played (tournament "espn", no odds - kept out of the P/L until the
+# weekly file brings its prices and replaces the row). The Indian Super
+# League comes from ESPN alone - history by year, fixtures and its table.
+
+ESPN_LEAGUE_CODES = {"700": "E0", "740": "SP1", "730": "I1", "720": "D1", "710": "F1", "8316": "ISL"}
+ISL_SLUG, ISL_FROM = "ind.1", 2018
+
+
+def _espn_all(d: date) -> dict:
+    """ESPN's whole scoreboard for day `d` (every competition), held a while."""
+    ttl = 600 if d >= date.today() - timedelta(days=1) else 12 * 3600
+    return _hold(f"espn{d.isoformat()}", ttl,
+                 lambda: _get(f"{ESPN_SOCCER}/all/scoreboard?dates={d.strftime('%Y%m%d')}&limit=1000"))
+
+
+def _sides(e: dict):
+    comp = (e.get("competitions") or [{}])[0]
+    cs = comp.get("competitors") or []
+    return (next((c for c in cs if c.get("homeAway") == "home"), None),
+            next((c for c in cs if c.get("homeAway") == "away"), None), comp)
+
+
+def _club_season(day: date) -> str:
+    return _season_code(day.year if day.month >= 7 else day.year - 1)
+
+
+def _espn_club_row(db, e: dict, code: str) -> dict | None:
+    home, away, comp = _sides(e)
+    if not home or not away or not (((e.get("status") or {}).get("type") or {}).get("completed")):
+        return None
+    th, ta = home.get("team") or {}, away.get("team") or {}
+    if code == "ISL":
+        h, a = th.get("displayName"), ta.get("displayName")
+    else:
+        h = club_name(db, {"shortName": th.get("shortDisplayName"), "name": th.get("displayName")}, [code])
+        a = club_name(db, {"shortName": ta.get("shortDisplayName"), "name": ta.get("displayName")}, [code])
+    try:
+        hg, ag = int(home.get("score")), int(away.get("score"))
+    except (TypeError, ValueError):
+        return None
+    if not (h and a):
+        return None
+    day = date.fromisoformat(e["date"][:10])
+    return {"comp": code, "season": _club_season(day), "tournament": "espn", "day": day, "home": h[:80], "away": a[:80],
+            "home_goals": hg, "away_goals": ag, "neutral": bool(comp.get("neutralSite")),
+            "pin_h": None, "pin_d": None, "pin_a": None, "avg_h": None, "avg_d": None, "avg_a": None}
+
+
+def _insert_new(db, rows: list[dict]) -> int:
+    """Rows not on file yet - never over a row that has its odds."""
+    from sqlalchemy.dialects.postgresql import insert
+    from models import FootballMatch
+    if not rows:
+        return 0
+    db.execute(insert(FootballMatch).values(rows).on_conflict_do_nothing(constraint="ux_football_matches_game"))
+    db.commit()
+    return len(rows)
+
+
+def sync_leagues_espn(db, max_days: int = 21) -> int:
+    """Each top-five league's results since its weekly file's last, from ESPN."""
+    from sqlalchemy import text
+    today = date.today()
+    last = dict(db.execute(text("SELECT comp, max(day) FROM football_matches WHERE comp = ANY(:c) AND tournament IS NULL GROUP BY comp"),
+                           {"c": list(CO_UK_OF)}).all())
+    start = max(min(last.values(), default=today) + timedelta(days=1), today - timedelta(days=max_days))
+    rows, d = {}, start
+    while d <= today:
+        try:
+            for e in _espn_all(d).get("events") or []:
+                lid = (e.get("uid") or "").split("~l:")[-1].split("~")[0]
+                code = ESPN_LEAGUE_CODES.get(lid)
+                if code and code != "ISL" and (last.get(code) is None or e["date"][:10] > last[code].isoformat()):
+                    r = _espn_club_row(db, e, code)
+                    if r:
+                        rows[(r["comp"], r["day"], r["home"], r["away"])] = r
+        except Exception as ex:
+            print(f"[football] ESPN leagues {d}: {ex}", flush=True)
+        d += timedelta(days=1)
+    return _insert_new(db, list(rows.values()))
+
+
+def sync_isl(db) -> int:
+    """The ISL's results: every year since 2018 once, this year and last each time."""
+    from sqlalchemy import text
+    have = {int(y) for (y,) in db.execute(text("SELECT DISTINCT extract(year FROM day) FROM football_matches WHERE comp = 'ISL'"))}
+    n = 0
+    for y in range(ISL_FROM, date.today().year + 1):
+        if y in have and y < date.today().year - 1:
+            continue
+        try:
+            data = _get(f"{ESPN_SOCCER}/{ISL_SLUG}/scoreboard?dates={y}&limit=1000")
+        except Exception as ex:
+            print(f"[football] ISL {y}: {ex}", flush=True)
+            continue
+        rows = {}
+        for e in data.get("events") or []:
+            r = _espn_club_row(db, e, "ISL")
+            if r:
+                rows[(r["day"], r["home"], r["away"])] = r
+        if rows:
+            from sqlalchemy.dialects.postgresql import insert
+            from models import FootballMatch
+            st = insert(FootballMatch).values(list(rows.values()))
+            db.execute(st.on_conflict_do_update(constraint="ux_football_matches_game",
+                                                set_={"home_goals": st.excluded.home_goals, "away_goals": st.excluded.away_goals}))
+            db.commit()
+            n += len(rows)
+        time.sleep(1.0)
+    return n
+
+
+def isl_window(days_back: int = 2, days_ahead: int = 7) -> list[dict]:
+    """ISL fixtures, scores and results in the Matches tab's shape (comp "ISL")."""
+    def read():
+        out = []
+        t = date.today()
+        cal = ((_get(f"{ESPN_SOCCER}/{ISL_SLUG}/scoreboard").get("leagues") or [{}])[0].get("calendar") or [])
+        days = sorted({c[:10] for c in cal if isinstance(c, str)})
+        for ds in days:
+            d = date.fromisoformat(ds)
+            if not (t - timedelta(days=days_back) <= d <= t + timedelta(days=days_ahead)):
+                continue
+            for e in _get(f"{ESPN_SOCCER}/{ISL_SLUG}/scoreboard?dates={d.strftime('%Y%m%d')}").get("events") or []:
+                home, away, _ = _sides(e)
+                if not home or not away:
+                    continue
+                st = (e.get("status") or {}).get("type") or {}
+                state = "finished" if st.get("completed") else "live" if st.get("state") == "in" else \
+                    "off" if "POSTPONED" in (st.get("name") or "") or "CANCELED" in (st.get("name") or "") else "upcoming"
+                g = lambda c: int(c["score"]) if state != "upcoming" and str(c.get("score", "")).isdigit() else None
+                hg, ag = g(home), g(away)
+                team = lambda c: {"id": (c.get("team") or {}).get("id"), "name": (c.get("team") or {}).get("displayName"),
+                                  "full": (c.get("team") or {}).get("displayName"), "crest": (c.get("team") or {}).get("logo"), "tla": None}
+                winner = None
+                if state == "finished" and hg is not None:
+                    winner = "HOME_TEAM" if hg > ag else "AWAY_TEAM" if ag > hg else "DRAW"
+                out.append({"id": f"isl{e['id']}", "comp": "ISL", "comp_name": "Indian Super League", "start": e["date"],
+                            "status": st.get("name"), "state": state, "matchday": None, "stage": None, "group": None,
+                            "home": {**team(home), "goals": hg}, "away": {**team(away), "goals": ag}, "half": [None, None],
+                            "winner": winner, "isl": True, "raw_home": {"name": (home.get("team") or {}).get("displayName")},
+                            "raw_away": {"name": (away.get("team") or {}).get("displayName")}})
+            time.sleep(0.3)
+        return out
+    return _hold(f"isl{days_back}:{days_ahead}", 300, read)
+
+
+def isl_table() -> dict:
+    def read():
+        d = _get("https://site.api.espn.com/apis/v2/sports/soccer/ind.1/standings")
+        tables = []
+        for ch in d.get("children") or []:
+            rows = []
+            for n, en in enumerate((ch.get("standings") or {}).get("entries") or []):
+                stats = {s.get("name"): s.get("value") for s in en.get("stats") or []}
+                t = en.get("team") or {}
+                rows.append({"pos": int(stats.get("rank") or n + 1), "team": t.get("displayName"),
+                             "crest": ((t.get("logos") or [{}])[0]).get("href"), "played": int(stats.get("gamesPlayed") or 0),
+                             "won": int(stats.get("wins") or 0), "draw": int(stats.get("ties") or 0), "lost": int(stats.get("losses") or 0),
+                             "gf": int(stats.get("pointsFor") or 0), "ga": int(stats.get("pointsAgainst") or 0),
+                             "gd": int(stats.get("pointDifferential") or 0), "pts": int(stats.get("points") or 0), "form": None})
+            rows.sort(key=lambda r: r["pos"])
+            tables.append({"group": None, "rows": rows})
+        return {"comp": "ISL", "name": "Indian Super League", "season": None, "tables": tables}
+    return _hold("isltable", 3600, read)

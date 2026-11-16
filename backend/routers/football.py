@@ -29,6 +29,8 @@ def _names(db, m: dict) -> tuple[str, str | None, str | None, bool]:
     comp = m["comp"]
     if m.get("nation"):
         return "INTL", m["home"]["name"], m["away"]["name"], False
+    if m.get("isl"):
+        return "ISL", m["home"]["name"], m["away"]["name"], False
     if comp in fb.LEAGUES:
         code = fb.LEAGUES[comp][0]
         return code, fb.club_name(db, m["raw_home"], [code]), fb.club_name(db, m["raw_away"], [code]), False
@@ -39,11 +41,15 @@ def _names(db, m: dict) -> tuple[str, str | None, str | None, bool]:
 
 
 def _nation_window(db) -> list[dict]:
-    """National-team matches, yesterday to tomorrow (API-Football); none if it's down."""
-    try:
-        return fb.national_fixtures(db)
-    except Exception:
-        return []
+    """National-team matches, yesterday to tomorrow (API-Football), and the
+    ISL's week (ESPN); whichever answers."""
+    out = []
+    for fn in (lambda: fb.national_fixtures(db), fb.isl_window):
+        try:
+            out += fn()
+        except Exception:
+            pass
+    return out
 
 
 def _annotate(db, m: dict, books: dict, mine: dict, watch: set) -> dict:
@@ -94,7 +100,7 @@ def live(db: Session = Depends(get_db), caller: User = Depends(owner)):
     out = [_annotate(db, m, books, mine, watch) for m in ms if m["state"] != "off"]
     order = list(fb.COMPS)
     out.sort(key=lambda m: (m["start"] or "", order.index(m["comp"]) if m["comp"] in order else 99))
-    return {"matches": out, "comps": {**fb.COMPS, "NT": "National teams"}}
+    return {"matches": out, "comps": {**fb.COMPS, "NT": "National teams", "ISL": "Indian Super League"}}
 
 
 @router.get("/favourites", response_model=dict)
@@ -179,7 +185,7 @@ def _options(db) -> dict:
             r[0] += 3 if gf > ga else 1 if gf == ga else 0
             r[1] += gf - ga
     clubs = {}
-    for code, name in ((v[0], v[1]) for v in fb.LEAGUES.values()):
+    for code, name in [(v[0], v[1]) for v in fb.LEAGUES.values()] + [("ISL", "Indian Super League")]:
         teams = [t for (c, t) in pts if c == code]
         clubs[code] = {"name": name, "teams": sorted(teams, key=lambda t: (-pts[(code, t)][0], -pts[(code, t)][1], t))}
     since = date.today() - timedelta(days=4 * 366)
@@ -202,7 +208,7 @@ def get_watch(db: Session = Depends(get_db), caller: User = Depends(owner)):
 def put_watch(body: WatchIn, db: Session = Depends(get_db), caller: User = Depends(owner)):
     """Replace the teams I follow with these, each tracked or bet on."""
     from models import FootballWatch
-    allowed = set(fb.CO_UK_OF) | {"INTL"}
+    allowed = set(fb.CO_UK_OF) | {"INTL", "ISL"}
     rows = {(c, t.strip()[:80]): (m if m in MODES else "track") for c, ts in body.teams.items() if c in allowed
             for t, m in list(ts.items())[:60] if t and t.strip()}
     db.query(FootballWatch).filter(FootballWatch.user_id == caller.id).delete()
@@ -264,15 +270,17 @@ def watch_results(back: str = "mine", stake: float = 100, skip1: bool = False, c
                                for t in {b["team"] for b in kept if b["day"] >= s}), key=lambda x: -x["pl"])}
              for lbl, s, d in windows]
 
-    nat = set(mine.get("INTL", []))
+    unpriced = {(c, t) for c in ("INTL", "ISL") for t in mine.get(c, [])}
     games = []
-    if nat:
-        for day, h, a, hg, ag, tour in db.execute(text(
-                "SELECT day, home, away, home_goals, away_goals, tournament FROM football_matches WHERE comp = 'INTL' "
-                "AND day >= :d AND (home = ANY(:t) OR away = ANY(:t)) ORDER BY day"), {"d": today - timedelta(days=366), "t": list(nat)}):
+    if unpriced:
+        for comp, day, h, a, hg, ag, tour in db.execute(text(
+                "SELECT comp, day, home, away, home_goals, away_goals, tournament FROM football_matches WHERE comp IN ('INTL', 'ISL') "
+                "AND day >= :d AND (home = ANY(:t) OR away = ANY(:t)) ORDER BY day"),
+                {"d": today - timedelta(days=366), "t": [t for _, t in unpriced]}):
             for t, gf, ga, opp in ((h, hg, ag, a), (a, ag, hg, h)):
-                if t in nat:
-                    games.append({"day": day, "team": t, "opp": opp, "gf": gf, "ga": ga, "tournament": tour,
+                if (comp, t) in unpriced:
+                    games.append({"day": day, "team": t, "opp": opp, "gf": gf, "ga": ga,
+                                  "tournament": "Indian Super League" if comp == "ISL" else tour,
                                   "res": "W" if gf > ga else "D" if gf == ga else "L"})
 
     def wdl(xs):
@@ -312,7 +320,7 @@ def watch_feed(db: Session = Depends(get_db), caller: User = Depends(owner)):
                     continue
                 games.setdefault((c, t), []).append({
                     "day": day.isoformat(), "opp": opp, "home": at_home, "gf": gf, "ga": ga,
-                    "comp": names.get(comp) or ("Champions League" if comp == "CL" else tour),
+                    "comp": names.get(comp) or ("Champions League" if comp == "CL" else "Indian Super League" if comp == "ISL" else tour),
                     "res": "W" if gf > ga else "D" if gf == ga else "L"})
     nxt: dict[tuple, dict] = {}
     try:
@@ -337,7 +345,7 @@ def watch_feed(db: Session = Depends(get_db), caller: User = Depends(owner)):
     for c, ts in modes.items():
         for t, mode in ts.items():
             g = games.get((c, t), [])
-            out.append({"comp": c, "league": names.get(c, "National team"), "team": t, "mode": mode,
+            out.append({"comp": c, "league": names.get(c) or ("Indian Super League" if c == "ISL" else "National team"), "team": t, "mode": mode,
                         "form": [x["res"] for x in g[:5]], "last": g[:5], "next": nxt.get((c, t))})
     out.sort(key=lambda x: (x["mode"] != "bet", (x["next"] or {}).get("start") or "9", x["team"]))
     return {"teams": out}
@@ -345,10 +353,10 @@ def watch_feed(db: Session = Depends(get_db), caller: User = Depends(owner)):
 
 @router.get("/table/{comp}", response_model=dict)
 def table(comp: str, _: User = Depends(owner)):
-    if comp not in fb.COMPS:
+    if comp not in fb.COMPS and comp != "ISL":
         raise HTTPException(404, "Not one of our competitions")
     try:
-        return fb.standings(comp)
+        return fb.isl_table() if comp == "ISL" else fb.standings(comp)
     except Exception as e:
         raise HTTPException(502, f"football-data.org didn't answer: {type(e).__name__}")
 

@@ -13,7 +13,7 @@ import { peek, footballLive, footballModel, footballTable } from '../api'
  * dashboard.)
  */
 export const F_TABS = [['matches', 'Matches'], ['tables', 'Tables'], ['model', 'Model']]
-const COMPS = [['all', 'All'], ['mine', '★'], ['PL', 'EPL'], ['PD', 'LaLiga'], ['SA', 'Serie A'], ['BL1', 'Bund.'], ['FL1', 'Ligue 1'], ['CL', 'UCL'], ['NT', 'Nations'], ['WC', 'WC'], ['EC', 'Euro']]
+const COMPS = [['all', 'All'], ['mine', '★'], ['PL', 'EPL'], ['PD', 'LaLiga'], ['SA', 'Serie A'], ['BL1', 'Bund.'], ['FL1', 'Ligue 1'], ['CL', 'UCL'], ['ISL', 'ISL'], ['NT', 'Nations'], ['WC', 'WC'], ['EC', 'Euro']]
 const SHORT = Object.fromEntries(COMPS)
 
 const fmtTime = (iso) => (iso ? new Date(iso).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true }) : '')
@@ -166,7 +166,7 @@ function Tables({ active }) {
   }, [active, comp])
   return (
     <div className="space-y-3">
-      <Chips value={comp} onChange={setComp} options={COMPS.filter(([k]) => k !== 'all' && k !== 'mine')} />
+      <Chips value={comp} onChange={setComp} options={COMPS.filter(([k]) => !['all', 'mine', 'NT'].includes(k))} />
       {err && <p className="text-xs text-red-600">{err}</p>}
       {!d && !err && <p className="text-xs text-gray-400 py-6 text-center">Loading…</p>}
       {d?.tables?.length === 0 && <p className="text-xs text-gray-400 py-6 text-center">No table for this one now.</p>}

@@ -40,7 +40,7 @@ FOREIGN = -0.10         # a Champions League club from outside the five leagues,
 CLUB_TEST, NATION_TEST = date(2023, 7, 1), date(2022, 1, 1)
 CHECK_EVERY = 30 * 60
 VERSION = "dc-poisson-v1"
-LEAGUE_CODES = ("E0", "SP1", "I1", "D1", "F1")
+LEAGUE_CODES = ("E0", "SP1", "I1", "D1", "F1", "ISL")
 
 _lock = threading.Lock()
 _state: dict = {"built": 0.0, "mark": None, "record": None}
