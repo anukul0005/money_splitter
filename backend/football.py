@@ -588,7 +588,7 @@ def _espn_league(event_id: str, league_id: str) -> str:
 
 def espn_national_day(db, d: date) -> list[dict]:
     """Senior men's national-team results on day `d` (UTC), as rows to store."""
-    data = _get(f"{ESPN_SOCCER}/all/scoreboard?dates={d.strftime('%Y%m%d')}")
+    data = _get(f"{ESPN_SOCCER}/all/scoreboard?dates={d.strftime('%Y%m%d')}&limit=1000")   # 100 a day without it
     rows = []
     for e in data.get("events") or []:
         comp = (e.get("competitions") or [{}])[0]
