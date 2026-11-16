@@ -114,7 +114,7 @@ _ALIAS = {"wolverhampton": "Wolves", "nottingham": "Nott'm Forest", "brightonhov
 # football-data.org's national team names -> the international results set's
 _NATIONS = {"korea republic": "South Korea", "ir iran": "Iran", "usa": "United States", "côte d'ivoire": "Ivory Coast",
             "cote d'ivoire": "Ivory Coast", "czechia": "Czech Republic", "türkiye": "Turkey", "turkiye": "Turkey",
-            "china pr": "China PR", "cabo verde": "Cape Verde", "congo dr": "DR Congo", "north macedonia": "North Macedonia",
+            "china pr": "China", "cabo verde": "Cape Verde", "congo dr": "DR Congo", "north macedonia": "North Macedonia",
             "bosnia-herzegovina": "Bosnia and Herzegovina", "republic of ireland": "Republic of Ireland"}
 
 
@@ -429,7 +429,8 @@ APIF = "https://v3.football.api-sports.io"
 _YOUTH = re.compile(r"\b(U-?\d\d|Under|Youth|Women|Olympic|Elite League)\b", re.I)
 # API-Football's national team names -> the public results set's
 _APIF_NATIONS = {"USA": "United States", "Korea Republic": "South Korea", "South Korea": "South Korea",
-                 "China": "China PR", "Cape Verde Islands": "Cape Verde", "Congo DR": "DR Congo",
+                 "Rep. Of Ireland": "Republic of Ireland", "FYR Macedonia": "North Macedonia",
+                 "St. Vincent / Grenadines": "Saint Vincent and the Grenadines", "Cape Verde Islands": "Cape Verde", "Congo DR": "DR Congo",
                  "Bosnia & Herzegovina": "Bosnia and Herzegovina", "Chinese Taipei": "Taiwan", "Curacao": "Curaçao",
                  "Kyrgyz Republic": "Kyrgyzstan", "Türkiye": "Turkey", "Czechia": "Czech Republic", "Ivory Coast": "Ivory Coast",
                  "Cote D'Ivoire": "Ivory Coast", "Korea DPR": "North Korea", "Macedonia": "North Macedonia",
@@ -465,8 +466,20 @@ def _nations(db) -> set[str]:
 
 
 def _nation(db, name: str) -> str | None:
+    """API-Football's name for a senior national team as the results set
+    spells it ("St. Lucia" -> "Saint Lucia"); None for a youth / women's side
+    or a name it doesn't know."""
+    if re.search(r"(U-?\d\d|W)$", name or ""):
+        return None
+    known = _nations(db)
     n = _APIF_NATIONS.get(name, name)
-    return n if n in _nations(db) else None
+    if n in known:
+        return n
+    n = re.sub(r"^St\.? ", "Saint ", n).replace(" & ", " and ")
+    if n in known:
+        return n
+    close = difflib.get_close_matches(n, list(known), n=1, cutoff=0.88)
+    return close[0] if close else None
 
 
 def apif_day(d: date) -> list[dict]:
