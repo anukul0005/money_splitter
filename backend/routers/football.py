@@ -128,18 +128,28 @@ def favourites(stake: float = 100, db: Session = Depends(get_db), _: User = Depe
                         "pl": round(stake * (b["odds"] - 1), 2) if b["won"] else -stake} for b in recent[:120]]}
 
 
-# -- My teams: the questionnaire on the P/L dashboard -------------------------
+# -- My teams: the football "My teams" page ----------------------------------
+# Each team I follow is either tracked (its results, nothing more) or one I bet
+# on (counted in the P/L).
+
+MODES = ("track", "bet")
+
 
 class WatchIn(BaseModel):
-    teams: dict[str, list[str]]          # {"E0": ["Arsenal", ...], ..., "INTL": ["India", ...]}
+    teams: dict[str, dict[str, str]]     # {"E0": {"Arsenal": "bet", "Chelsea": "track"}, "INTL": {"India": "track"}}
 
 
-def _watch(db, user_id: int) -> dict[str, list[str]]:
+def _modes(db, user_id: int) -> dict[str, dict[str, str]]:
     from models import FootballWatch
-    out: dict[str, list[str]] = {}
+    out: dict[str, dict[str, str]] = {}
     for w in db.query(FootballWatch).filter(FootballWatch.user_id == user_id).order_by(FootballWatch.team):
-        out.setdefault(w.comp, []).append(w.team)
+        out.setdefault(w.comp, {})[w.team] = w.mode or "track"
     return out
+
+
+def _watch(db, user_id: int, mode: str | None = None) -> dict[str, list[str]]:
+    """{comp: [team]} - every team I follow, or only those in `mode`."""
+    return {c: [t for t, m in ts.items() if mode in (None, m)] for c, ts in _modes(db, user_id).items()}
 
 
 def _options(db) -> dict:
@@ -174,25 +184,26 @@ def _options(db) -> dict:
 
 @router.get("/watch", response_model=dict)
 def get_watch(db: Session = Depends(get_db), caller: User = Depends(owner)):
-    return {"teams": _watch(db, caller.id), "options": _options(db)}
+    return {"teams": _modes(db, caller.id), "options": _options(db)}
 
 
 @router.put("/watch", response_model=dict)
 def put_watch(body: WatchIn, db: Session = Depends(get_db), caller: User = Depends(owner)):
-    """Replace the teams I follow with these."""
+    """Replace the teams I follow with these, each tracked or bet on."""
     from models import FootballWatch
     allowed = set(fb.CO_UK_OF) | {"INTL"}
-    rows = {(c, t.strip()[:80]) for c, ts in body.teams.items() if c in allowed for t in ts[:60] if t and t.strip()}
+    rows = {(c, t.strip()[:80]): (m if m in MODES else "track") for c, ts in body.teams.items() if c in allowed
+            for t, m in list(ts.items())[:60] if t and t.strip()}
     db.query(FootballWatch).filter(FootballWatch.user_id == caller.id).delete()
-    for c, t in rows:
-        db.add(FootballWatch(user_id=caller.id, comp=c, team=t))
+    for (c, t), m in rows.items():
+        db.add(FootballWatch(user_id=caller.id, comp=c, team=t, mode=m))
     db.commit()
-    return {"teams": _watch(db, caller.id)}
+    return {"teams": _modes(db, caller.id)}
 
 
 @router.get("/watch/results", response_model=dict)
 def watch_results(back: str = "mine", stake: float = 100, db: Session = Depends(get_db), caller: User = Depends(owner)):
-    """The matches of the teams I follow. Clubs: Rs stake a match at the
+    """The matches of the teams I bet on. Clubs: Rs stake a match at the
     market's closing average, on my team (`back` mine; the better priced of
     two if both are mine) or the bookmakers' favourite (`back` fav) - the
     last 30 / 60 / 90 days and since 2023/24. National teams: there are no
@@ -200,7 +211,7 @@ def watch_results(back: str = "mine", stake: float = 100, db: Session = Depends(
     from datetime import timedelta
     from sqlalchemy import text
     stake = max(1.0, min(stake, 100000.0))
-    mine = _watch(db, caller.id)
+    mine = _watch(db, caller.id, "bet")
     names = {v[0]: v[1] for v in fb.LEAGUES.values()}
     today = date.today()
     long_from = fm.CLUB_TEST
@@ -252,6 +263,61 @@ def watch_results(back: str = "mine", stake: float = 100, db: Session = Depends(
     return {"back": back, "stake": stake, "teams": mine, "clubs": clubs, "nations": nations,
             "club_bets": [{**b, "day": b["day"].isoformat(), "league": names[b["comp"]]} for b in recent[:150]],
             "nation_games": [{**g, "day": g["day"].isoformat()} for g in sorted(games, key=lambda g: g["day"], reverse=True)[:60]]}
+
+
+@router.get("/watch/feed", response_model=dict)
+def watch_feed(db: Session = Depends(get_db), caller: User = Depends(owner)):
+    """Each team I follow: its form (last five, any competition on file), its
+    last results and its next match this week (with our odds and the
+    bookmakers' where there are some)."""
+    from datetime import timedelta
+    from sqlalchemy import text
+    modes = _modes(db, caller.id)
+    if not modes:
+        return {"teams": []}
+    names = {v[0]: v[1] for v in fb.LEAGUES.values()}
+    want = {t for ts in modes.values() for t in ts}
+    since = date.today() - timedelta(days=240)
+    games: dict[tuple, list] = {}
+    for comp, day, h, a, hg, ag, tour in db.execute(text(
+            "SELECT comp, day, home, away, home_goals, away_goals, tournament FROM football_matches "
+            "WHERE day >= :d AND (home = ANY(:t) OR away = ANY(:t)) ORDER BY day DESC"), {"d": since, "t": list(want)}):
+        for t, gf, ga, opp, at_home in ((h, hg, ag, a, True), (a, ag, hg, h, False)):
+            for c, ts in modes.items():
+                if t not in ts or (c == "INTL") != (comp == "INTL"):
+                    continue
+                if c != "INTL" and comp not in (c, "CL"):
+                    continue
+                games.setdefault((c, t), []).append({
+                    "day": day.isoformat(), "opp": opp, "home": at_home, "gf": gf, "ga": ga,
+                    "comp": names.get(comp) or ("Champions League" if comp == "CL" else tour),
+                    "res": "W" if gf > ga else "D" if gf == ga else "L"})
+    nxt: dict[tuple, dict] = {}
+    try:
+        ms = fb.window(2, 7)
+        books = fb.book_prices()
+    except Exception:
+        ms, books = [], {}
+    for m in ms:
+        if m["state"] not in ("upcoming", "live"):
+            continue
+        comp, h, a, neutral = _names(db, m)
+        for t, opp, at_home in ((h, a, True), (a, h, False)):
+            for c, ts in modes.items():
+                if t in ts and (c, t) not in nxt and ((c == "INTL") == (comp == "INTL")):
+                    mod = fm.predict(comp, h, a, neutral) if h and a else None
+                    bk = books.get((comp, h, a)) if comp in fb.CO_UK_OF else None
+                    nxt[(c, t)] = {"start": m["start"], "state": m["state"], "opp": opp, "home": at_home,
+                                   "comp": m.get("comp_name"), "probs": mod["probs"] if mod else None,
+                                   "book": [bk["avg"][0], bk["avg"][2], bk["avg"][1]] if bk and all(bk["avg"]) else None}
+    out = []
+    for c, ts in modes.items():
+        for t, mode in ts.items():
+            g = games.get((c, t), [])
+            out.append({"comp": c, "league": names.get(c, "National team"), "team": t, "mode": mode,
+                        "form": [x["res"] for x in g[:5]], "last": g[:5], "next": nxt.get((c, t))})
+    out.sort(key=lambda x: (x["mode"] != "bet", (x["next"] or {}).get("start") or "9", x["team"]))
+    return {"teams": out}
 
 
 @router.get("/table/{comp}", response_model=dict)

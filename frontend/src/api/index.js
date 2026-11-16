@@ -334,6 +334,7 @@ export const footballModel  = ()                 => remembered('/football/model'
 export const footballWatch  = ()                 => api.get('/football/watch')
 export const footballWatchSave = (teams)        => api.put('/football/watch', { teams })
 export const footballWatchResults = (back, stake) => api.get('/football/watch/results', { params: { back, stake } })
+export const footballWatchFeed = ()              => api.get('/football/watch/feed')
 // My picks for badminton and hockey (backend routers/picks)
 export const sportPicks       = (sport)          => api.get('/picks/mine', { params: { sport } })
 export const sportPick        = (body)           => api.post('/picks', body)

@@ -1226,6 +1226,7 @@ class FootballWatch(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     comp = Column(String(8), nullable=False)
     team = Column(String(80), nullable=False)
+    mode = Column(String(8), nullable=False, default="track")     # track (results only) / bet (in the P/L)
 
 
 class BadmintonRanking(Base):
