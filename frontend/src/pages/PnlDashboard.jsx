@@ -133,37 +133,36 @@ function Bets({ bets, suggested }) {
   const shown = kind === 'suggested' ? suggested : bets.filter((b) => kind === 'all' || b.kind === kind)
   return (
     <div className="mt-3">
-      <div className="flex gap-1.5 text-[11px]">
-        {[['all', 'All'], ['mine', 'My picks'], ['auto', 'Favourite'], ['suggested', `Suggested (${suggested.length})`]].map(([k, l]) => (
+      <div className="flex flex-wrap gap-1.5 text-[11px]">
+        {[['all', 'All'], ['mine', 'My picks'], ['auto', 'Favourite'], ['suggested', `Suggested (${suggested.length})`]]
+          .filter(([k]) => k !== 'suggested' || suggested.length).map(([k, l]) => (
           <button key={k} onClick={() => setKind(k)}
             className={`rounded-full border px-2 py-0.5 font-bold ${kind === k ? 'bg-brand-600 border-brand-600 text-white' : 'border-gray-300 text-gray-500'}`}>{l}</button>
         ))}
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs mt-1.5 min-w-[420px]">
-          <thead>
-            <tr className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
-              <th className="py-1 text-left">Day</th><th className="py-1 text-left">Backed</th><th className="py-1 text-right">Odds</th><th className="py-1 text-right">P/L</th>
-            </tr>
-          </thead>
-          <tbody>
-            {shown.slice(0, more ? 400 : 25).map((b, i) => (
-              <tr key={i} className="border-t border-gray-100">
-                <td className="py-1.5 pl-1 text-gray-500 whitespace-nowrap">{fmtDay(b.date)}</td>
-                <td className="py-1.5">
-                  <span className="font-bold text-gray-900">{b.pick}</span>
-                  {b.kind === 'mine' && <span className="ml-1 text-[9px] font-black text-brand-600">MY PICK</span>}
-                  {b.expected != null && <span className="ml-1 text-[9px] font-black text-green-700">+{Math.round(100 * b.expected)}% EXP</span>}
-                  <span className="block text-[10px] text-gray-400 truncate max-w-[240px]">v {b.other} · {b.label}</span>
-                </td>
-                <td className="py-1.5 text-right tabular-nums">{b.odds ? b.odds.toFixed(2) : '—'}</td>
-                <td className={`py-1.5 text-right tabular-nums font-bold ${tone(b.pl)}`}>{rupees(b.pl)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {/* rows that fit the screen: the match line truncates, odds and P/L stay in view */}
+      <div className="mt-1.5">
+        <div className="flex gap-2 text-[9px] font-black text-gray-500 uppercase tracking-wider py-1">
+          <span className="w-12 shrink-0">Day</span><span className="flex-1">Backed</span>
+          <span className="w-10 text-right shrink-0">Odds</span><span className="w-14 text-right shrink-0">P/L</span>
+        </div>
+        {shown.slice(0, more ? 400 : 5).map((b, i) => (
+          <div key={i} className="flex items-center gap-2 border-t border-gray-100 py-1.5 text-xs">
+            <span className="w-12 shrink-0 text-gray-500 whitespace-nowrap">{fmtDay(b.date)}</span>
+            <span className="flex-1 min-w-0">
+              <span className="block truncate">
+                <span className="font-bold text-gray-900">{b.pick}</span>
+                {b.kind === 'mine' && <span className="ml-1 text-[9px] font-black text-brand-600">MY PICK</span>}
+                {b.expected != null && <span className="ml-1 text-[9px] font-black text-green-700">+{Math.round(100 * b.expected)}% EXP</span>}
+              </span>
+              <span className="block text-[10px] text-gray-400 truncate">v {b.other} · {b.label}</span>
+            </span>
+            <span className="w-10 shrink-0 text-right tabular-nums">{b.odds ? b.odds.toFixed(2) : '—'}</span>
+            <span className={`w-14 shrink-0 text-right tabular-nums font-bold whitespace-nowrap ${tone(b.pl)}`}>{rupees(b.pl)}</span>
+          </div>
+        ))}
       </div>
-      {shown.length > 25 && (
+      {shown.length > 5 && (
         <button onClick={() => setMore((m) => !m)} className="text-[11px] font-bold text-brand-600 mt-1">
           {more ? 'Show fewer' : `Show all ${Math.min(shown.length, 400)}`}
         </button>
@@ -542,7 +541,7 @@ export default function PnlDashboard() {
   ] : [{ key: view, name: SPORT[view].name, color: SPORT[view].color, curve: d.sports[view].curve }]
   const t = d?.total
   return (
-    <div className="pb-28 md:pb-10">
+    <div className="pb-28 md:pb-10 overflow-x-hidden">
       <div className="px-5 pt-10 md:pt-6 pb-3 bg-cream sticky top-0 z-10 border-b border-amber-100/60">
         <button onClick={() => nav(-1)} className="text-xs font-bold text-gray-400 mb-2">← Back</button>
         <h1 className="text-xl font-black tracking-tight">P/L across sports</h1>
