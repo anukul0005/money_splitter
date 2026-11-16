@@ -54,22 +54,55 @@ KHAO_SNACKS, KHAO_FL = "Khao Pio (Snacks)", "Khao Pio (FL)"
 KHAO_SNACKS_MAX = 300
 
 
-def split_place(e) -> bool:
-    """Khao Pio is two places: a bill named for it (any spelling - "Khao
-    Piyo", "Khao Pio snacks") that's over KHAO_SNACKS_MAX and isn't paid to
-    the snacks counter's UPI (NEERAJ KUMAR) is the liquor shop, Khao Pio
-    (FL), Alcohol > Liquor store - never an outlier at the snacks place.
-    Run on every expense as it's categorised (expense_classifier._guard).
-    True when it changed e."""
+# What a Khao Pio bill says it was for. Drinks: a kind of drink, a brand
+# sold at the liquor shop, or a bottle size. Snacks: the counter's own word.
+_KHAO_DRINK = re.compile(
+    r"\b(beer|whisk(?:e)?y|vodka|rum|gin|wine|brandy|liquor|daru|theka|kingfisher|smirnoff|bacardi|budweiser|"
+    r"tuborg|heineken|carlsberg|bira|old\s*monk|magic\s*moments|black\s*&\s*white|blenders|royal\s*stag|"
+    r"mcdowell|8\s*pm|imperial\s*blue|signature|antiquity|teachers?|jameson|absolut|breezer|\d{2,4}\s*ml)\b", re.I)
+_KHAO_SNACK = re.compile(r"\b(snacks?|namkeen|chips|kurkure|maggi|samosa|chaat|patties|sandwich)\b", re.I)
+
+
+def _khao(e) -> bool:
     from places import place_key
-    if (e.amount or 0) <= KHAO_SNACKS_MAX or key(e.merchant) == "neerajkumar":
+    return key(e.merchant) == "neerajkumar" or any(
+        place_key(n).startswith(("khaopio", "khaopiyo")) for n in (e.venue, e.title, e.merchant) if n)
+
+
+def split_place(e) -> bool:
+    """Khao Pio is two places - the liquor shop, Khao Pio (FL), and the
+    snacks counter next to it, Khao Pio (Snacks) - and "Khao Pio" alone,
+    the name the AI usually reads, can be either. Decided on what the bill
+    says, in this order:
+      1. paid to the snacks counter's UPI (NEERAJ KUMAR)       -> Snacks
+      2. a drink named (beer, Smirnoff, 650ML ...)             -> FL
+      3. snacks named ("KHAO PIO (Snacks)")                    -> Snacks
+      4. filed as Alcohol, or over KHAO_SNACKS_MAX             -> FL
+      5. anything else - a small bill, nothing named           -> Snacks
+    So a ₹55 snacks bill can't land at the liquor shop because the AI read
+    "Khao Pio", and a ₹210 Kingfisher can't pass as food. Run on every
+    expense as it's categorised (expense_classifier._guard); a category a
+    person chose by hand is never touched (the caller filters on source).
+    True when it changed e."""
+    if not _khao(e):
         return False
-    names = [e.venue, e.title] if e.venue else [e.title]
-    if not any(place_key(n).startswith(("khaopio", "khaopiyo")) for n in names if n):
+    text = " ".join(x for x in (e.title, e.notes) if x)
+    if key(e.merchant) == "neerajkumar":
+        fl = False
+    elif _KHAO_DRINK.search(text):
+        fl = True
+    elif _KHAO_SNACK.search(text):
+        fl = False
+    else:
+        fl = e.category == "Alcohol" or (e.amount or 0) > KHAO_SNACKS_MAX
+    if fl:
+        want = (KHAO_FL, "Alcohol", "Liquor store")
+    else:                        # snacks: keeping a finer food subcategory the AI gave (a cold drink, say)
+        want = (KHAO_SNACKS, "Food & Dining",
+                e.subcategory if e.category == "Food & Dining" and e.subcategory else "Street food & snacks")
+    if (e.venue, e.category, e.subcategory) == want:
         return False
-    if place_key(e.venue) == place_key(KHAO_FL) and e.category == "Alcohol":
-        return False
-    e.venue, e.category, e.subcategory = KHAO_FL, "Alcohol", "Liquor store"
+    e.venue, e.category, e.subcategory = want
     if e.category_source in ("import", "merchant", "llm", None):
         e.category_source = "rules"
     return True
@@ -92,7 +125,7 @@ def _khao_pio(db) -> None:
             _touched(db, [e.id])
     # A big bill there that isn't the snacks counter's UPI is the liquor shop's
     # (₹1,914 for a group) - Khao Pio (Snacks) is ₹10-200 a visit
-    for e in db.query(Expense).filter(Expense.venue.isnot(None), Expense.amount > KHAO_SNACKS_MAX).all():
+    for e in db.query(Expense).filter(Expense.category_source.in_(("import", "merchant", "llm", "rules"))).all():
         if split_place(e):
             _touched(db, [e.id])
     db.flush()
