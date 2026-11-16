@@ -105,7 +105,7 @@ function CardBlock({ card: c, banks, results, busy, run, editing, setEditing, sa
                   {c.bank}{c.label ? ` ${c.label}` : ''}{c.last4 ? ` •••• ${c.last4}` : ''}
                 </p>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  {latest?.due_date ? `Due ${day(latest.due_date)}` : `Next bill ${day(c.next_bill)}`}
+                  {latest?.due_date ? `Due ${day(latest.due_date)}${latest.due_estimated ? ' (est.)' : ''}` : `Next bill ${day(c.next_bill)}`}
                   {latest?.minimum_due != null ? ` · minimum ${INR(latest.minimum_due)}` : ''}
                 </p>
               </div>
@@ -241,6 +241,9 @@ function CardsDashboard({ cards, colorOf, onPay }) {
           {dues[0] ? (
             <p className={`text-lg font-black ${daysTo(dues[0].b.due_date) <= 3 ? 'text-red-600' : 'text-gray-900'}`}>
               {daysTo(dues[0].b.due_date) < 0 ? 'Overdue' : daysTo(dues[0].b.due_date) === 0 ? 'Today' : `${daysTo(dues[0].b.due_date)}d`}
+              <span className="block text-[10px] font-semibold text-gray-500">
+                {shortName(dues[0].c, cards)} · {day(dues[0].b.due_date)}{dues[0].b.due_estimated ? ' (est.)' : ''}
+              </span>
             </p>
           ) : <p className="text-lg font-black text-gray-300">—</p>}
         </div>
@@ -278,7 +281,7 @@ function CardsDashboard({ cards, colorOf, onPay }) {
                 <span className="w-2 h-2 rounded-sm shrink-0" style={{ background: colorOf(c.id) }} />
                 <span className="flex-1 min-w-0 truncate font-semibold text-gray-700">{cardName(c)}</span>
                 <span className={`shrink-0 ${d < 0 ? 'text-red-600 font-bold' : d <= 3 ? 'text-amber-700 font-bold' : 'text-gray-400'}`}>
-                  {day(b.due_date)}{d < 0 ? ' · overdue' : d === 0 ? ' · today' : ` · ${d}d`}
+                  {day(b.due_date)}{b.due_estimated ? ' (est.)' : ''}{d < 0 ? ' · overdue' : d === 0 ? ' · today' : ` · ${d}d`}
                 </span>
                 <span className="w-20 text-right shrink-0 font-black text-red-600 tabular-nums">{INR(Math.round(b.remaining))}</span>
               </button>

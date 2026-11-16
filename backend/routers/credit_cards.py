@@ -132,13 +132,34 @@ def _spend_month(r: CreditCardStatement) -> str | None:
     return (lo + (hi - lo) / 2).strftime("%Y-%m")
 
 
-def _bill_out(r: CreditCardStatement, payments: list[CardPayment], latest: bool) -> dict:
+def _due_gap(bills: list[CreditCardStatement]) -> int | None:
+    """Days from statement to due date on this card's bills that have both -
+    the commonest gap (ICICI: 6th -> 23rd, 17 days)."""
+    from collections import Counter
+    gaps = []
+    for b in bills:
+        try:
+            g = (date.fromisoformat(b.due_date) - date.fromisoformat(b.statement_date)).days
+        except (TypeError, ValueError):
+            continue
+        if 5 <= g <= 40:
+            gaps.append(g)
+    return Counter(gaps).most_common(1)[0][0] if gaps else None
+
+
+def _bill_out(r: CreditCardStatement, payments: list[CardPayment], latest: bool, gap: int | None = None) -> dict:
     paid = round(sum(p.amount for p in payments), 2)
     cycle_from, cycle_to = _cycle(r)
+    due, estimated = r.due_date, False
+    if not due and gap and r.statement_date:   # the statement's date wasn't read: the card's usual gap
+        try:
+            due, estimated = (date.fromisoformat(r.statement_date) + timedelta(days=gap)).isoformat(), True
+        except ValueError:
+            pass
     return {"cycle_from": cycle_from, "cycle_to": cycle_to, "spend_month": _spend_month(r),"payments": [{"id": p.id, "amount": p.amount, "paid_on": p.paid_on} for p in payments],
             "paid": paid, "remaining": round(max((r.total_due or 0) - paid, 0), 2) if r.total_due is not None else None,
             "can_pay": latest, "has_details": bool(r.details_json), "id": r.id, "card_id": r.card_id, "period": r.period, "bank": r.bank, "card_last4": r.card_last4,
-            "statement_date": r.statement_date, "due_date": r.due_date, "total_due": r.total_due,
+            "statement_date": r.statement_date, "due_date": due, "due_estimated": estimated, "total_due": r.total_due,
             "minimum_due": r.minimum_due, "email_subject": r.email_subject, "source": r.source,
             "extracted_at": r.extracted_at}
 
@@ -167,13 +188,14 @@ def list_cards(db: Session = Depends(get_db), caller: User = Depends(current_use
         for p in (db.query(CardPayment).filter(CardPayment.statement_id.in_([b.id for b in bills]))
                   .order_by(CardPayment.paid_on, CardPayment.id)):
             pays.setdefault(p.statement_id, []).append(p)
+        gap = _due_gap(bills)
         last = card_bills.recent_bill_dates(c.bill_day, today, 1)[0]
         y, m = (last.year, last.month + 1) if last.month < 12 else (last.year + 1, 1)
         out.append({"id": c.id, "bank": c.bank, "label": c.label, "last4": c.last4, "bill_day": c.bill_day,
                     "has_password": bool(c.pdf_password_encrypted),
                     "name": card_bills.card_name(c), "last_bill": last.isoformat(),
                     "next_bill": card_bills.bill_date(c.bill_day, y, m).isoformat(),
-                    "bills": [_bill_out(b, pays.get(b.id, []), i == 0) for i, b in enumerate(bills)]})
+                    "bills": [_bill_out(b, pays.get(b.id, []), i == 0, gap) for i, b in enumerate(bills)]})
     return out
 
 
