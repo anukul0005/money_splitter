@@ -1668,17 +1668,17 @@ export default function BettingAnalytics() {
       <div className="px-5 pt-10 md:pt-6 pb-3 bg-cream sticky top-0 z-10 border-b border-amber-100/60">
         <button onClick={() => nav(-1)} className="text-xs font-bold text-gray-400 mb-2">← Back</button>
         <div className="flex items-center gap-2">
-          <h1 className="text-xl font-black tracking-tight flex-1">{{ badminton: 'Badminton', hockey: 'Hockey', football: 'Football' }[sport] || 'Betting analytics'}</h1>
+          <h1 className="text-xl font-black tracking-tight flex-1">{{ badminton: 'Badminton', hockey: 'Hockey', football: 'Football' }[sport] || 'Tennis'}</h1>
           <div className="flex rounded-md border border-amber-300 overflow-hidden">
             {[['tennis', '🎾'], ['badminton', '🏸'], ['hockey', '🏑'], ['football', '⚽']].map(([k, l]) => (
               <button key={k} onClick={() => setSport(k)} aria-label={k} title={k[0].toUpperCase() + k.slice(1)}
-                className={`px-2.5 py-1 text-sm ${sport === k ? 'bg-field-950' : 'bg-white'}`}>{l}</button>
+                className={`px-1.5 py-0.5 text-xs leading-5 ${sport === k ? 'bg-field-950' : 'bg-white'}`}>{l}</button>
             ))}
           </div>
-          <button onClick={() => nav('/betting/pnl')} className="px-2.5 py-1 rounded-md border border-amber-300 bg-white text-[11px] font-bold text-brand-600">
+          <button onClick={() => nav('/betting/pnl')} className="px-2 py-1 rounded-md border border-amber-300 bg-white text-[11px] font-bold text-brand-600 whitespace-nowrap">
             P/L ›
           </button>
-          <button onClick={() => nav('/my-bets')} className="px-2.5 py-1 rounded-md border border-amber-300 bg-white text-[11px] font-bold text-brand-600">
+          <button onClick={() => nav('/my-bets')} className="px-2 py-1 rounded-md border border-amber-300 bg-white text-[11px] font-bold text-brand-600 whitespace-nowrap">
             My bets ›
           </button>
         </div>
