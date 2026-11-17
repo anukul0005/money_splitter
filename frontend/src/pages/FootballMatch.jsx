@@ -379,6 +379,43 @@ function Table({ m }) {
   )
 }
 
+const TONE = { negative: 'bg-red-100 text-red-700', positive: 'bg-green-100 text-green-800', neutral: 'bg-gray-100 text-gray-600' }
+
+/** Each side's last 14 days of news, scored with the football word list (backend football_news). */
+function Sentiment({ m }) {
+  const se = m.sentiment
+  if (!se || (!se.home && !se.away)) return null
+  const side = (s) => {
+    const x = se[s]
+    return (
+      <div key={s} className="py-1.5 border-t border-gray-100 first:border-t-0">
+        <div className="flex items-center gap-2">
+          <Crest t={m[s]} size="w-4 h-4" />
+          <span className="text-[12px] font-black flex-1 min-w-0 truncate">{m[s].short}</span>
+          {x ? (
+            <>
+              <span className={`text-[9px] font-black uppercase px-1 py-0.5 rounded-none ${TONE[x.tone]}`}>{x.tone}</span>
+              <span className="text-[10px] tabular-nums text-gray-500">{x.score > 0 ? '+' : ''}{x.score.toFixed(2)} · {x.articles} articles</span>
+            </>
+          ) : <span className="text-[10px] text-gray-400">no news in 14 days</span>}
+        </div>
+        {x && Object.keys(x.flags).length > 0 && (
+          <p className="text-[10px] text-amber-800 mt-0.5">⚠ {Object.entries(x.flags).map(([f, n]) => `${f} ×${n}`).join(' · ')}</p>
+        )}
+        {x?.worst?.map((w, i) => (
+          <a key={i} href={w.link || undefined} target="_blank" rel="noreferrer" className="block text-[10px] text-gray-600 leading-snug mt-0.5 truncate">▼ {w.headline}</a>
+        ))}
+      </div>
+    )
+  }
+  return (
+    <Card title="News sentiment" sub="last 14 days, recent days count more">
+      {side('home')}
+      {side('away')}
+    </Card>
+  )
+}
+
 function News({ m }) {
   const [all, setAll] = useState(false)
   if (!m.news.length) return null
@@ -453,6 +490,7 @@ export default function FootballMatch() {
             <Form m={m} />
             <H2H m={m} />
             <Table m={m} />
+            <Sentiment m={m} />
             <News m={m} />
             <p className="text-[10px] text-gray-400 leading-snug">
               Line-ups, events, stats, form, table and news: ESPN. Our chances: our model. Prices: football-data.co.uk

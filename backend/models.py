@@ -1242,6 +1242,27 @@ class FootballLineup(Base):
     starters = Column(Text, nullable=False)                      # JSON [{"id", "name", "pos"}] x 11
 
 
+class FootballNews(Base):
+    """One ESPN news article about a club in the five leagues, with its
+    football word-list sentiment (football_news.py) - for the 14-day team
+    sentiment on the match centre and, once a season is saved, the model."""
+
+    __tablename__ = "football_news"
+    __table_args__ = (UniqueConstraint("espn_team", "article", name="ux_football_news"),)
+
+    id = Column(Integer, primary_key=True)
+    comp = Column(String(8), nullable=False)
+    team = Column(String(80), nullable=True, index=True)        # as football_matches names it
+    espn_team = Column(String(12), nullable=False)
+    article = Column(String(20), nullable=False)
+    headline = Column(String(300), nullable=False)
+    description = Column(Text, nullable=True)
+    link = Column(String(400), nullable=True)
+    published = Column(DateTime(timezone=True), nullable=False, index=True)
+    score = Column(Float, nullable=False)                         # -1..1
+    flags = Column(String(120), nullable=True)                    # injury,manager,suspension,dressing room
+
+
 class FootballWatch(Base):
     """A team someone follows for betting (the P/L dashboard's football
     questionnaire): a club in one of the five leagues, as football-data.co.uk

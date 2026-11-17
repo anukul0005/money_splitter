@@ -463,6 +463,18 @@ def match(comp: str, date: str = "", home: str = "", away: str = "", home_short:
         except Exception:
             out["ml"] = None
 
+    # each side's last 14 days of news, scored (football_news)
+    out["sentiment"] = None
+    if h and a and mcomp in fb.CO_UK_OF:
+        import football_news
+        from datetime import datetime as DT, timezone
+        asof = DT.fromisoformat(out["start"].replace("Z", "+00:00")) if out.get("start") else DT.now(timezone.utc)
+        try:
+            out["sentiment"] = {"home": football_news.team_sentiment(db, mcomp, h, asof),
+                                "away": football_news.team_sentiment(db, mcomp, a, asof)}
+        except Exception:
+            out["sentiment"] = None
+
     # my teams: tracked or bet on, at home or away
     modes = _modes(db, caller.id)
     def mode(t):
