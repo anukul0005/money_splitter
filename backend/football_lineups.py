@@ -180,6 +180,12 @@ def loop() -> None:
                     n = backfill(db)
                     if n:
                         print(f"[lineups] stored line-ups for {n} match(es); unmatched names: {status['unmatched'] or 'none'}", flush=True)
+                    if n >= 50:                      # enough new XIs to change the rotation feature: refit the model now
+                        import football_ml
+                        st = football_ml.build(db)
+                        rt = (st.get("rotation") or {}).get("test") or {}
+                        print(f"[football-ml] rebuilt after line-ups: {st['with_lineups']} rows with line-ups; "
+                              f"with rotation log-loss {rt.get('ll')} v market {rt.get('ll_market')}, ROI {rt.get('roi')}", flush=True)
                 finally:
                     db.close()
             except Exception as e:
