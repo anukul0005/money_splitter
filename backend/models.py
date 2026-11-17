@@ -1212,6 +1212,11 @@ class FootballMatch(Base):
     avg_h = Column(Float, nullable=True)
     avg_d = Column(Float, nullable=True)
     avg_a = Column(Float, nullable=True)
+    # shots and shots on target (top five leagues, football-data.co.uk) - the model's shot-share feature
+    home_shots = Column(Integer, nullable=True)
+    away_shots = Column(Integer, nullable=True)
+    home_sot = Column(Integer, nullable=True)
+    away_sot = Column(Integer, nullable=True)
 
 
 class FootballLineup(Base):

@@ -194,6 +194,10 @@ def create_tables():
 # (table, column, type/definition)
 _ADDED_COLUMNS = [
     ("football_watch", "mode", "VARCHAR(8) NOT NULL DEFAULT 'track'"),
+    ("football_matches", "home_shots", "INTEGER"),
+    ("football_matches", "away_shots", "INTEGER"),
+    ("football_matches", "home_sot", "INTEGER"),
+    ("football_matches", "away_sot", "INTEGER"),
     ("book_odds", "odds_draw", "DOUBLE PRECISION"),
     ("users", "full_access", "BOOLEAN NOT NULL DEFAULT FALSE"),
     ("users", "full_name", "VARCHAR(100)"),

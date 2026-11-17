@@ -230,9 +230,16 @@ def _league_rows(code: str, season: str, body: bytes) -> list[dict]:
                     return trio
             return [None, None, None]
         pin, avg = odds("PSC", "PS"), odds("AvgC", "Avg", "BbAv")
+
+        def whole(name):
+            try:
+                return int(float(r.get(name)))
+            except (TypeError, ValueError):
+                return None
         row = {"comp": code, "season": season, "tournament": None, "day": d, "home": r["HomeTeam"].strip()[:80],
                "away": r["AwayTeam"].strip()[:80], "home_goals": int(float(r["FTHG"])), "away_goals": int(float(r["FTAG"])),
-               "neutral": False, "pin_h": pin[0], "pin_d": pin[1], "pin_a": pin[2], "avg_h": avg[0], "avg_d": avg[1], "avg_a": avg[2]}
+               "neutral": False, "pin_h": pin[0], "pin_d": pin[1], "pin_a": pin[2], "avg_h": avg[0], "avg_d": avg[1], "avg_a": avg[2],
+               "home_shots": whole("HS"), "away_shots": whole("AS"), "home_sot": whole("HST"), "away_sot": whole("AST")}
         rows[(d, row["home"], row["away"])] = row
     return list(rows.values())
 
@@ -241,7 +248,10 @@ def sync_leagues(db, full: bool = False) -> int:
     """Each league season's CSV: past seasons once, the current one every time."""
     from sqlalchemy import text
     cur = current_season_start()
-    have = {(c, s) for c, s in db.execute(text("SELECT DISTINCT comp, season FROM football_matches WHERE season IS NOT NULL"))}
+    # a past season is read once - and once more if it was stored before shots were (so they get filled)
+    have = {(c, s) for c, s in db.execute(text(
+        "SELECT comp, season FROM football_matches WHERE season IS NOT NULL AND tournament IS NULL "
+        "GROUP BY comp, season HAVING count(home_sot) > 0"))}
     n = 0
     for y in range(FIRST_SEASON, cur + 1):
         s = _season_code(y)

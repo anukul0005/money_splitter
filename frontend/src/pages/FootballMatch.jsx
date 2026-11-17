@@ -153,6 +153,45 @@ function OurView({ m }) {
   )
 }
 
+/** The betting model (backend football_ml): each side's chance against the market's, and whether it's worth a bet. */
+function ModelCard({ m }) {
+  const ml = m.ml
+  if (!ml) return null
+  const row = (s) => {
+    const x = ml.sides[s]
+    const fav = x.odds <= ml.sides[s === 'home' ? 'away' : 'home'].odds
+    const value = x.bet && fav
+    return (
+      <div key={s} className="py-1.5 border-t border-gray-100 first:border-t-0">
+        <div className="flex items-baseline gap-2 text-[12px]">
+          <span className="font-black flex-1 min-w-0 truncate">{(m[s].short || x.team)} <span className="font-normal text-gray-400">@ {x.odds.toFixed(2)}</span></span>
+          <span className="tabular-nums text-gray-500">market {pc(x.market)}</span>
+          <span className="tabular-nums font-black">model {(100 * x.p).toFixed(1)}%</span>
+        </div>
+        <div className="flex items-center gap-2 mt-0.5">
+          <span className={`text-[9px] font-black px-1 py-0.5 rounded-none ${value ? 'bg-green-700 text-white' : x.bet ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-500'}`}>
+            {value ? 'VALUE' : x.bet ? 'UNDERDOG - NOT BACKED' : 'NO VALUE'}
+          </span>
+          <span className={`text-[10px] tabular-nums ${x.ev > 0 ? 'text-green-700' : 'text-gray-500'}`}>expected {x.ev > 0 ? '+' : ''}{(100 * x.ev).toFixed(1)}% a bet</span>
+        </div>
+        <p className="text-[10px] text-gray-500 mt-0.5 leading-snug">
+          {x.pushes.filter((d) => Math.abs(d.push) >= 0.005).map((d) => `${d.label} ${d.push > 0 ? '▲' : '▼'}`).join(' · ') || 'Close to the market on every feature.'}
+        </p>
+      </div>
+    )
+  }
+  return (
+    <Card title="Betting model" sub={ml.model}>
+      {row('home')}
+      {row('away')}
+      <p className="text-[9px] text-gray-400 mt-1 leading-snug">
+        Logistic regression starting from the market's chance ({ml.prices}); value = chance × price above 1. Only favourites are backed:
+        underdog value has lost in testing. ▲▼ the features pushing hardest. Rebuilt daily ({ml.fit_at}).
+      </p>
+    </Card>
+  )
+}
+
 function Lineup({ t, lu, rot, mode }) {
   const [subs, setSubs] = useState(false)
   return (
@@ -395,6 +434,7 @@ export default function FootballMatch() {
           <>
             <Header m={m} />
             <OurView m={m} />
+            <ModelCard m={m} />
             <Card title="Line-ups" sub={m.lineups.home || m.lineups.away ? null : 'usually out an hour before kick-off'}>
               <div className="grid grid-cols-2 gap-3">
                 <Lineup t={m.home} lu={m.lineups.home} rot={m.rotation.home} mode={m.mine.home} />

@@ -449,6 +449,20 @@ def match(comp: str, date: str = "", home: str = "", away: str = "", home_short:
                         "source": "football-data.co.uk market average"}
     out["book"] = book
 
+    # the betting model (football_ml): both sides' chances against the price, with rotation once both XIs are out
+    out["ml"] = None
+    if h and a and mcomp in fb.CO_UK_OF and out["state"] != "finished":      # it knows today's form, not a past day's
+        import football_ml
+        trio = book["avg"] if book else ([out["espn_odds"]["home"], out["espn_odds"]["draw"], out["espn_odds"]["away"]]
+                                         if out.get("espn_odds") else None)
+        xi = lambda s: [p["id"] for p in ((out["lineups"].get(s) or {}).get("starters") or [])] or None
+        try:
+            out["ml"] = football_ml.predict(mcomp, h, a, tuple(trio) if trio else None, day, xi("home"), xi("away"))
+            if out["ml"]:
+                out["ml"]["prices"] = book["source"] if book else (out["espn_odds"] or {}).get("book")
+        except Exception:
+            out["ml"] = None
+
     # my teams: tracked or bet on, at home or away
     modes = _modes(db, caller.id)
     def mode(t):
@@ -494,6 +508,7 @@ def model(db: Session = Depends(get_db), _: User = Depends(owner)):
     counts = {c: n for c, n in db.execute(text("SELECT comp, count(*) FROM football_matches GROUP BY comp"))}
     import football_lineups as fl
     sides = db.execute(text("SELECT count(*), count(team) FROM football_lineups")).first()
-    return {"record": fm.record(), "matches": counts, "sync": fb._sync,
+    import football_ml
+    return {"record": fm.record(), "matches": counts, "sync": fb._sync, "ml": football_ml.summary(),
             "lineups": {**{k: v for k, v in fl.status.items() if k != "unmatched"}, "sides": sides[0], "matched": sides[1],
                         "unmatched": sorted(fl.status["unmatched"])}}
