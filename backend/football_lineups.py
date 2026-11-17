@@ -24,7 +24,8 @@ import football as fb
 SLUGS = {"E0": "eng.1", "SP1": "esp.1", "I1": "ita.1", "D1": "ger.1", "F1": "fra.1"}
 FIRST_YEAR = 2016             # calendar years: 2016 holds the end of 2015/16 too, skipped by FIRST_SEASON
 FIRST_SEASON = "1617"
-PAUSE = 0.8                   # seconds between summary requests
+PAUSE = 0.8                   # seconds between batches of summary requests (at least)
+WORKERS = 4                   # summaries fetched at once
 status = {"stored": 0, "pending": None, "unmatched": {}, "last": None, "running": False}
 _pools: dict[tuple[str, str], dict[str, str]] = {}
 _NO_GUESS = {"paris"}         # Paris FC squashes to this, which would otherwise match Paris SG
@@ -85,14 +86,20 @@ def _year_events(code: str, year: int) -> list[dict]:
     return out
 
 
-def _store(db, code: str, ev: dict) -> int:
-    """Read one match's summary and store both XIs; returns sides stored."""
+def _summary(code: str, ev: dict) -> dict:
+    return fb._get(f"{fb.ESPN_SOCCER}/{SLUGS[code]}/summary?event={ev['id']}")
+
+
+def _store(db, code: str, ev: dict, s: dict) -> int:
+    """Store both XIs from one match's summary `s`; returns sides stored."""
     from models import FootballLineup
-    s = fb._get(f"{fb.ESPN_SOCCER}/{SLUGS[code]}/summary?event={ev['id']}")
     season = _season(ev["day"])
+    # the header's team records carry the short names ("Man City"); the rosters' don't
+    full = {str((c.get("team") or {}).get("id")): c.get("team") or {}
+            for c in (((s.get("header") or {}).get("competitions") or [{}])[0].get("competitors") or [])}
     sides = []
     for r in s.get("rosters") or []:
-        t = r.get("team") or {}
+        t = full.get(str((r.get("team") or {}).get("id"))) or r.get("team") or {}
         xi = [{"id": str((p.get("athlete") or {}).get("id")), "name": (p.get("athlete") or {}).get("displayName"),
                "pos": (p.get("position") or {}).get("abbreviation")} for p in r.get("roster") or [] if p.get("starter")]
         if len(xi) < 11:
@@ -117,6 +124,10 @@ def _store(db, code: str, ev: dict) -> int:
 def backfill(db, max_matches: int | None = None) -> int:
     """Every finished league match since 2016/17 without line-ups yet; newest years first."""
     from sqlalchemy import text
+    from concurrent.futures import ThreadPoolExecutor
+    # matches stored without one side's name are read again (the name rules may have been fixed since)
+    db.execute(text("DELETE FROM football_lineups WHERE event IN (SELECT event FROM football_lineups WHERE team IS NULL)"))
+    db.commit()
     have = {e for (e,) in db.execute(text("SELECT DISTINCT event FROM football_lineups"))}
     todo = []
     for year in range(date.today().year, FIRST_YEAR - 1, -1):
@@ -128,19 +139,31 @@ def backfill(db, max_matches: int | None = None) -> int:
             time.sleep(0.3)
     status["pending"] = len(todo)
     n = 0
-    for code, ev in todo[:max_matches] if max_matches else todo:
+    todo = todo[:max_matches] if max_matches else todo
+
+    def fetch(item):
         try:
-            if _store(db, code, ev):
-                n += 1
+            return item, _summary(*item), None
         except Exception as e:
-            db.rollback()
-            print(f"[lineups] {ev['id']}: {type(e).__name__} {e}", flush=True)
-        status["pending"] -= 1
-        status["stored"] += 1
-        status["last"] = ev["day"].isoformat()
-        if status["stored"] % 500 == 0:
-            print(f"[lineups] {status['stored']} matches read, {status['pending']} to go (at {status['last']})", flush=True)
-        time.sleep(PAUSE)
+            return item, None, e
+    with ThreadPoolExecutor(WORKERS) as ex:
+        for i in range(0, len(todo), WORKERS * 2):
+            t0 = time.time()
+            for (code, ev), summ, err in ex.map(fetch, todo[i:i + WORKERS * 2]):
+                try:
+                    if err:
+                        raise err
+                    if _store(db, code, ev, summ):
+                        n += 1
+                except Exception as e:
+                    db.rollback()
+                    print(f"[lineups] {ev['id']}: {type(e).__name__} {e}", flush=True)
+                status["pending"] -= 1
+                status["stored"] += 1
+                status["last"] = ev["day"].isoformat()
+                if status["stored"] % 500 == 0:
+                    print(f"[lineups] {status['stored']} matches read, {status['pending']} to go (at {status['last']})", flush=True)
+            time.sleep(max(0.0, PAUSE * 2 - (time.time() - t0)))
     return n
 
 
