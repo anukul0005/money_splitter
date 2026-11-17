@@ -492,4 +492,8 @@ def table(comp: str, _: User = Depends(owner)):
 def model(db: Session = Depends(get_db), _: User = Depends(owner)):
     from sqlalchemy import text
     counts = {c: n for c, n in db.execute(text("SELECT comp, count(*) FROM football_matches GROUP BY comp"))}
-    return {"record": fm.record(), "matches": counts, "sync": fb._sync}
+    import football_lineups as fl
+    sides = db.execute(text("SELECT count(*), count(team) FROM football_lineups")).first()
+    return {"record": fm.record(), "matches": counts, "sync": fb._sync,
+            "lineups": {**{k: v for k, v in fl.status.items() if k != "unmatched"}, "sides": sides[0], "matched": sides[1],
+                        "unmatched": sorted(fl.status["unmatched"])}}

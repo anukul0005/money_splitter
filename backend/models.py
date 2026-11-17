@@ -1214,6 +1214,29 @@ class FootballMatch(Base):
     avg_a = Column(Float, nullable=True)
 
 
+class FootballLineup(Base):
+    """One side's starting XI in a top-five league match, from ESPN's match
+    summary (football_lineups.py) - 2016/17 on, for the model's rotation
+    feature: how many of a side's regulars (started 3+ of its last five
+    league games) are missing. Team names as football_matches has them."""
+
+    __tablename__ = "football_lineups"
+    __table_args__ = (UniqueConstraint("event", "espn_team", name="ux_football_lineups_side"),)
+
+    id = Column(Integer, primary_key=True)
+    event = Column(String(16), nullable=False, index=True)      # ESPN event id
+    comp = Column(String(8), nullable=False)                     # E0 SP1 I1 D1 F1
+    season = Column(String(4), nullable=False)
+    day = Column(Date, nullable=False, index=True)
+    espn_team = Column(String(12), nullable=False)
+    espn_name = Column(String(80), nullable=False)
+    team = Column(String(80), nullable=True, index=True)         # ours; None if the name didn't match
+    opp = Column(String(80), nullable=True)
+    home = Column(Boolean, nullable=False)
+    formation = Column(String(16), nullable=True)
+    starters = Column(Text, nullable=False)                      # JSON [{"id", "name", "pos"}] x 11
+
+
 class FootballWatch(Base):
     """A team someone follows for betting (the P/L dashboard's football
     questionnaire): a club in one of the five leagues, as football-data.co.uk

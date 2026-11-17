@@ -114,7 +114,8 @@ _ALIAS = {"wolverhampton": "Wolves", "nottingham": "Nott'm Forest", "brightonhov
           "lutontown": "Luton", "ipswichtown": "Ipswich", "leicestercity": "Leicester", "leedsunited": "Leeds",
           "newcastle": "Newcastle", "tottenham": "Tottenham", "westham": "West Ham",
           # ESPN's spellings
-          "cologne": "FC Koln", "atleticomadrid": "Ath Madrid", "deportivo": "La Coruna", "deportivolacoruna": "La Coruna"}
+          "cologne": "FC Koln", "atleticomadrid": "Ath Madrid", "deportivo": "La Coruna", "deportivolacoruna": "La Coruna",
+          "manutd": "Man United", "manchesterunited": "Man United", "intermilan": "Inter", "internazionale": "Inter"}
 # football-data.org's national team names -> the international results set's
 _NATIONS = {"korea republic": "South Korea", "ir iran": "Iran", "usa": "United States", "côte d'ivoire": "Ivory Coast",
             "cote d'ivoire": "Ivory Coast", "czechia": "Czech Republic", "türkiye": "Turkey", "turkiye": "Turkey",
