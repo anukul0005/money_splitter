@@ -15,6 +15,7 @@ import BettingAnalytics  from './pages/BettingAnalytics'
 import MyBets            from './pages/MyBets'
 import PnlDashboard      from './pages/PnlDashboard'
 import FootballTeams from './pages/FootballTeams'
+import FootballMatch from './pages/FootballMatch'
 import TennisMatch       from './pages/TennisMatch'
 import BadmintonMatch    from './pages/BadmintonMatch'
 import TennisNews        from './pages/TennisNews'
@@ -179,6 +180,7 @@ export default function App() {
                     <Route path="/my-bets" element={<MyBets />} />
                     <Route path="/betting/pnl" element={<PnlDashboard />} />
                     <Route path="/football/teams" element={<FootballTeams />} />
+                    <Route path="/football/match" element={<FootballMatch />} />
                   </>
                 )}
                 {/* Sports news: badminton for everyone, tennis and football for the sports people (the server decides) */}

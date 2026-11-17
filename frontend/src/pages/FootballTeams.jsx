@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
+import { fMatchLink } from './FootballMatch'
 import { footballWatch, footballWatchFeed, footballWatchResults, footballWatchSave } from '../api'
 
 /**
@@ -223,27 +224,29 @@ function TeamCard({ t }) {
         </span>
       </div>
       {n ? (
-        <p className="text-[11px] text-gray-700 mt-1">
+        <Link to={fMatchLink({ comp: n.code, start: n.start, home: n.home ? t.team : n.opp, away: n.home ? n.opp : t.team, id: n.id })}
+          className="block text-[11px] text-gray-700 mt-1">
           {n.state === 'live' ? <b className="text-red-600">LIVE · </b> : <span className="text-gray-500">{fmtWhen(n.start)} · </span>}
-          {n.home ? 'v' : '@'} <b>{n.opp}</b> <span className="text-gray-400">· {n.comp}</span>
+          {n.home ? 'v' : '@'} <b>{n.opp}</b> <span className="text-gray-400">· {n.comp}</span> <span className="text-brand-600 font-bold">›</span>
           {n.probs && (
             <span className="block text-[10px] text-gray-500">
               We say {t.team} {Math.round(100 * (n.home ? n.probs[0] : n.probs[1]))}% · draw {Math.round(100 * n.probs[2])}%
               {n.book && ` · bookmakers ${(n.home ? n.book[0] : n.book[1]).toFixed(2)}`}
             </span>
           )}
-        </p>
+        </Link>
       ) : <p className="text-[11px] text-gray-400 mt-1">No match in the next week.</p>}
       {t.last.length > 0 && (
         <button onClick={() => setOpen((o) => !o)} className="text-[10px] font-bold text-brand-600 mt-0.5">{open ? 'hide results' : 'last results'}</button>
       )}
       {open && t.last.map((g, i) => (
-        <div key={i} className="flex items-center gap-2 text-[11px] py-0.5">
+        <Link key={i} to={fMatchLink({ comp: g.code, start: g.day, home: g.home ? t.team : g.opp, away: g.home ? g.opp : t.team })}
+          className="flex items-center gap-2 text-[11px] py-0.5">
           <span className="w-12 text-gray-400 shrink-0">{fmtDay(g.day)}</span>
           <span className="flex-1 min-w-0 truncate">{g.home ? 'v' : '@'} {g.opp} <span className="text-gray-400">· {g.comp}</span></span>
           <span className="tabular-nums font-bold">{g.gf}–{g.ga}</span>
           <span className={`w-4 h-4 rounded-none text-[9px] font-black text-white flex items-center justify-center ${RES[g.res]}`}>{g.res}</span>
-        </div>
+        </Link>
       ))}
     </div>
   )

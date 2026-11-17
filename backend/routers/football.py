@@ -320,6 +320,7 @@ def watch_feed(db: Session = Depends(get_db), caller: User = Depends(owner)):
                     continue
                 games.setdefault((c, t), []).append({
                     "day": day.isoformat(), "opp": opp, "home": at_home, "gf": gf, "ga": ga,
+                    "code": fb.CO_UK_OF.get(comp) or ("NT" if comp == "INTL" else comp),      # the match centre's competition
                     "comp": names.get(comp) or ("Champions League" if comp == "CL" else "Indian Super League" if comp == "ISL" else tour),
                     "res": "W" if gf > ga else "D" if gf == ga else "L"})
     nxt: dict[tuple, dict] = {}
@@ -339,6 +340,7 @@ def watch_feed(db: Session = Depends(get_db), caller: User = Depends(owner)):
                     mod = fm.predict(comp, h, a, neutral) if h and a else None
                     bk = books.get((comp, h, a)) if comp in fb.CO_UK_OF else None
                     nxt[(c, t)] = {"start": m["start"], "state": m["state"], "opp": opp, "home": at_home,
+                                   "code": m["comp"], "id": str(m["id"]),
                                    "comp": m.get("comp_name"), "probs": mod["probs"] if mod else None,
                                    "book": [bk["avg"][0], bk["avg"][2], bk["avg"][1]] if bk and all(bk["avg"]) else None}
     out = []
@@ -378,6 +380,102 @@ def day(date: str = "", db: Session = Depends(get_db), caller: User = Depends(ow
     out.sort(key=lambda m: (m["start"] or "", order.index(m["comp"]) if m["comp"] in order else 99))
     return {"date": d.isoformat(), "prev": (d - timedelta(days=1)).isoformat(), "next": (d + timedelta(days=1)).isoformat(),
             "matches": out}
+
+
+def _our_name(db, comp: str, t: dict) -> str | None:
+    """ESPN's team as our results store names it."""
+    if comp in fb.LEAGUES:
+        return fb.club_name(db, {"shortName": t.get("short"), "name": t.get("name")}, [fb.LEAGUES[comp][0]])
+    if comp == "CL":
+        return fb.club_name(db, {"shortName": t.get("short"), "name": t.get("name")}, list(fb.CO_UK_OF)) or t.get("short")
+    if comp == "ISL":
+        return t.get("name")
+    return fb._nation(db, t.get("name") or "")
+
+
+@router.get("/match", response_model=dict)
+def match(comp: str, date: str = "", home: str = "", away: str = "", home_short: str = "", away_short: str = "",
+          espn: str = "", db: Session = Depends(get_db), caller: User = Depends(owner)):
+    """The match centre for one match, played or to come: ESPN's line-ups,
+    events, stats, last five, table and news (football_match.py) with our odds,
+    the bookmakers' prices (closing average once played), head-to-head from
+    our results, each side's rotation, and whether it's one of my teams and
+    a skip by my rules (the page applies my close-match setting)."""
+    from datetime import date as Date, timedelta
+    from sqlalchemy import text
+    import football_match as fmc
+    event = espn.removeprefix("espn") if espn else ""
+    if not event:
+        try:
+            d = Date.fromisoformat(date[:10])
+        except ValueError:
+            raise HTTPException(400, "Need the match's date (YYYY-MM-DD)")
+        event = fmc.find_event(comp, d, [home, home_short], [away, away_short])
+        if not event:
+            raise HTTPException(404, "ESPN doesn't have this match")
+    try:
+        out = fmc.centre(event, comp)
+    except Exception as e:
+        raise HTTPException(502, f"ESPN didn't answer: {type(e).__name__}")
+    day = Date.fromisoformat(out["start"][:10]) if out.get("start") else Date.today()
+    mcomp = fb.LEAGUES[comp][0] if comp in fb.LEAGUES else comp if comp in ("CL", "ISL") else "INTL"
+    h, a = _our_name(db, comp, out["home"]), _our_name(db, comp, out["away"])
+    out["ours"] = {"home": h, "away": a, "model_comp": mcomp}
+    neutral = out["neutral"] or comp in ("WC", "EC")
+    mod = None
+    if h and a:
+        if out["state"] == "finished":
+            mod = fm.before(mcomp, day, h, a)
+        mod = mod or fm.predict(mcomp, h, a, neutral)
+    out["model"] = mod
+
+    # the bookmakers': the closing average once played (football-data.co.uk), else the week's average
+    book = None
+    if h and a and mcomp in fb.CO_UK_OF:
+        row = db.execute(text(
+            "SELECT avg_h, avg_d, avg_a, pin_h, pin_d, pin_a FROM football_matches WHERE comp = :c AND home = :h AND away = :a "
+            "AND day BETWEEN :d0 AND :d1 AND avg_h IS NOT NULL"), {"c": mcomp, "h": h, "a": a, "d0": day - timedelta(days=1),
+                                                                 "d1": day + timedelta(days=1)}).first()
+        if row:
+            book = {"kind": "closing", "avg": [row[0], row[1], row[2]], "pin": [row[3], row[4], row[5]] if row[3] else None,
+                    "source": "football-data.co.uk closing average"}
+        else:
+            try:
+                bk = fb.book_prices().get((mcomp, h, a))
+            except Exception:
+                bk = None
+            if bk and all(bk["avg"]):
+                book = {"kind": "average", "avg": bk["avg"], "max": bk["max"] if all(bk["max"]) else None,
+                        "source": "football-data.co.uk market average"}
+    out["book"] = book
+
+    # my teams: tracked or bet on, at home or away
+    modes = _modes(db, caller.id)
+    def mode(t):
+        if not t:
+            return None
+        if comp in ("NT", "WC", "EC"):
+            return modes.get("INTL", {}).get(t)
+        if comp == "ISL":
+            return modes.get("ISL", {}).get(t)
+        if comp == "CL":
+            return next((modes[c][t] for c in fb.CO_UK_OF if t in modes.get(c, {})), None)
+        return modes.get(mcomp, {}).get(t)
+    out["mine"] = {"home": mode(h), "away": mode(a)}
+
+    # head-to-head: every meeting in our results before this day
+    h2h = []
+    if h and a:
+        group = "comp = 'INTL'" if mcomp == "INTL" else "comp = 'ISL'" if mcomp == "ISL" else "comp NOT IN ('INTL', 'ISL')"
+        for c, dd, hh, aa, hg, ag, tour, ph, pdr, pa in db.execute(text(
+                f"SELECT comp, day, home, away, home_goals, away_goals, tournament, avg_h, avg_d, avg_a FROM football_matches "
+                f"WHERE {group} AND day < :d AND ((home = :h AND away = :a) OR (home = :a AND away = :h)) ORDER BY day DESC LIMIT 12"),
+                {"d": day, "h": h, "a": a}):
+            h2h.append({"day": dd.isoformat(), "home": hh, "away": aa, "hg": hg, "ag": ag,
+                        "comp": {v[0]: v[1] for v in fb.LEAGUES.values()}.get(c) or ("Champions League" if c == "CL" else tour if c == "INTL" else c),
+                        "odds": [ph, pdr, pa] if ph else None})
+    out["h2h"] = h2h
+    return out
 
 
 @router.get("/table/{comp}", response_model=dict)

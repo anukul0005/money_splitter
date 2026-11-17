@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { CardHead, Tile } from './Badminton'
 import { BookOdds, useBookOdds } from '../components/SportPick'
 import DatePicker from '../components/DatePicker'
+import { fMatchLink } from './FootballMatch'
 import { peek, footballDay, footballLive, footballModel, footballTable } from '../api'
 
 /**
@@ -96,8 +98,14 @@ function Row({ m, books, setBook }) {
           <button onClick={() => setOpen((o) => !o)} className="ml-auto font-bold text-brand-600">{open ? 'hide' : 'bookmaker odds'}</button>
         )}
       </div>
-      <Side t={m.home} won={w == null ? null : w === 1} live={live} />
-      <Side t={m.away} won={w == null ? null : w === 2} live={live} />
+      <Link to={fMatchLink({ comp: m.comp, start: m.start, home: m.home.full || m.home.name, away: m.away.full || m.away.name,
+        homeShort: m.home.name, awayShort: m.away.name, id: m.id })} className="flex items-center gap-2 group">
+        <div className="flex-1 min-w-0">
+          <Side t={m.home} won={w == null ? null : w === 1} live={live} />
+          <Side t={m.away} won={w == null ? null : w === 2} live={live} />
+        </div>
+        <span className="text-gray-300 group-hover:text-brand-600 text-lg leading-none" aria-label="match centre">›</span>
+      </Link>
       <Odds m={m} />
       {open && books && (
         <BookOdds sport="football" mkey={String(m.id)} entry={books[String(m.id)]} onSaved={setBook} open names={[m.home.name, m.away.name]} />
@@ -175,6 +183,7 @@ function Matches({ active }) {
         </p>
       )}
       <p className="text-[10px] text-gray-400 leading-snug">
+        Tap a match for its match centre - line-ups, stats, form, head-to-head, news.
         1 / X / 2: our chance and fair price for a home win, draw and away win; "b" the bookmakers' average
         (football-data.co.uk, top five leagues only - type a bookmaker's for the rest). Fixtures and scores: football-data.org; ISL and national teams: ESPN.
       </p>

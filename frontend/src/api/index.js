@@ -332,6 +332,7 @@ export const footballLive   = ()                 => remembered('/football/live',
 export const footballDay    = (date)             => remembered('/football/day', { date }, 60_000)
 export const footballTable  = (comp)             => remembered(`/football/table/${comp}`, null, 30 * MIN)
 export const footballModel  = ()                 => remembered('/football/model', null, 10 * MIN)
+export const footballMatch  = (params)           => remembered('/football/match', params, 30_000)
 export const footballWatch  = ()                 => api.get('/football/watch')
 export const footballWatchSave = (teams)        => api.put('/football/watch', { teams })
 export const footballWatchResults = (back, stake, skip = {}) => api.get('/football/watch/results', { params: { back, stake, ...skip } })
