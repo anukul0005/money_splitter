@@ -1666,15 +1666,18 @@ export default function BettingAnalytics() {
   return (
     <div className="pb-28 md:pb-10">
       <div className="px-5 pt-10 md:pt-6 pb-3 bg-cream sticky top-0 z-10 border-b border-amber-100/60">
-        <button onClick={() => nav(-1)} className="text-xs font-bold text-gray-400 mb-2">← Back</button>
         <div className="flex items-center gap-2">
-          <h1 className="text-xl font-black tracking-tight flex-1">{{ badminton: 'Badminton', hockey: 'Hockey', football: 'Football' }[sport] || 'Tennis'}</h1>
+          <h1 className="text-xl font-black tracking-tight flex-1 min-w-0 truncate">{{ badminton: 'Badminton', hockey: 'Hockey', football: 'Football' }[sport] || 'Tennis'}</h1>
           <div className="flex rounded-md border border-amber-300 overflow-hidden">
             {[['tennis', '🎾'], ['badminton', '🏸'], ['hockey', '🏑'], ['football', '⚽']].map(([k, l]) => (
               <button key={k} onClick={() => setSport(k)} aria-label={k} title={k[0].toUpperCase() + k.slice(1)}
                 className={`px-1.5 py-0.5 text-xs leading-5 ${sport === k ? 'bg-field-950' : 'bg-white'}`}>{l}</button>
             ))}
           </div>
+          <button onClick={() => nav(`/tennis/news?sport=${sport}`)} aria-label="News" title="News"
+            className="px-1.5 py-1 rounded-md border border-amber-300 bg-white text-brand-600">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z" /></svg>
+          </button>
           <button onClick={() => nav('/betting/pnl')} className="px-2 py-1 rounded-md border border-amber-300 bg-white text-[11px] font-bold text-brand-600 whitespace-nowrap">
             P/L ›
           </button>

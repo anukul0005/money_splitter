@@ -1,19 +1,25 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import { isAdmin, isAnalyticsUser } from '../UserContext'
 
 function HomeIcon()    { return <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0h6" /></svg> }
 // Matches the bottom nav: sparkles rather than a cocktail glass, because the
 // key opens food as well as drinks.
 function SparkIcon()   { return <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M13 3l2.1 6.3L21 11.4l-5.9 2.1L13 19.8l-2.1-6.3L5 11.4l5.9-2.1L13 3zM5.5 3v3M4 4.5h3M6 17.5v3M4.5 19h3" /></svg> }
-function HistoryIcon() { return <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> }
+function SportsIcon()  { return <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M8 21h8m-4-4v4m-5-17h10v5a5 5 0 01-10 0V4zM7 6H4v1a3 3 0 003 3m10-4h3v1a3 3 0 01-3 3" /></svg> }
+function HistoryIcon() { return <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> }
 
-const items = [
+// Sports is the main feature (the sports section, or the news for those
+// without it); History is the small link at the foot.
+const SPORTS_PATHS = ['/betting', '/football', '/my-bets', '/tennis']
+const itemsFor = (user) => [
   { to: '/',        label: 'Home',        icon: HomeIcon,    exact: true },
   { to: '/recommend', label: 'Recommend', icon: SparkIcon,  exact: false },
-  { to: '/history', label: 'History',     icon: HistoryIcon, exact: false },
+  { to: isAnalyticsUser(user) ? '/betting' : '/tennis/news', label: 'Sports', icon: SportsIcon, exact: false, sports: true },
 ]
 
 export default function Sidebar({ user, onLogout }) {
+  const { pathname } = useLocation()
+  const inSports = SPORTS_PATHS.some((x) => pathname.startsWith(x))
   return (
     <aside className="hidden md:flex flex-col fixed left-0 top-0 h-screen w-56 bg-field-950 border-r border-field-800 z-40">
       {/* Logo */}
@@ -29,14 +35,14 @@ export default function Sidebar({ user, onLogout }) {
 
       {/* Nav links */}
       <nav className="flex-1 px-3 py-4 space-y-1">
-        {items.map(({ to, label, icon: Icon, exact }) => (
+        {itemsFor(user).map(({ to, label, icon: Icon, exact, sports }) => (
           <NavLink
-            key={to}
+            key={label}
             to={to}
             end={exact}
-            className={({ isActive }) =>
+            className={({ isActive: hit }) =>
               `flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-semibold transition-all ${
-                isActive
+                (sports ? inSports : hit)
                   ? 'bg-field-800 text-brand-400'
                   : 'text-slate-300/60 hover:bg-field-800 hover:text-white'
               }`
@@ -61,19 +67,11 @@ export default function Sidebar({ user, onLogout }) {
             </div>
           </div>
         )}
-        {isAnalyticsUser(user) && (
-          <NavLink
-            to="/betting"
-            className="block w-full text-left text-xs text-slate-300/50 hover:text-brand-400 font-semibold transition-colors tracking-widest py-1"
-          >
-            Betting analytics
-          </NavLink>
-        )}
         <NavLink
-          to="/tennis/news"
-          className="block w-full text-left text-xs text-slate-300/50 hover:text-brand-400 font-semibold transition-colors tracking-widest py-1"
+          to="/history"
+          className="flex items-center gap-1.5 w-full text-left text-xs text-slate-300/50 hover:text-brand-400 font-semibold transition-colors tracking-widest py-1"
         >
-          Sports news
+          <HistoryIcon /> History
         </NavLink>
         {isAdmin(user) && (
           <NavLink
