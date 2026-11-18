@@ -1,8 +1,7 @@
 """Betting analytics: ATP and WTA tour-level results, 2000 to today, from
 the tennis knowledge base (tennis_kb tables, kept current by tennis_sync).
 
-Only for the people in ANALYTICS_USERS - anyone else is told it doesn't
-exist (404), not that it's forbidden.
+Open to everyone signed in; what's personal in it is kept per person.
 """
 from __future__ import annotations
 
@@ -36,8 +35,7 @@ COLS = ("match_id, tour, tourney_name, surface, tourney_level, tourney_date, mat
 
 
 def owner(caller: User = Depends(current_user)) -> User:
-    if (caller.name or "").lower() not in ANALYTICS_USERS:
-        raise HTTPException(404, "Not found")
+    """The sports section is open to everyone signed in (each person's bets, lists and picks are their own)."""
     return caller
 
 

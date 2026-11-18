@@ -18,6 +18,5 @@ export const isAdmin = (user) =>
  *  never sees it, or any mention of it. */
 export const hasFullAccess = (user) => !!user?.has_full_access || isAdmin(user)
 
-/** The sports section's people (keep in step with backend routers/tennis.ANALYTICS_USERS). */
-const ANALYTICS_USERS = ['anukul', 'utkarsh']
-export const isAnalyticsUser = (user) => ANALYTICS_USERS.includes(user?.name?.toLowerCase())
+/** The sports section is open to everyone signed in (backend routers/tennis.owner). */
+export const isAnalyticsUser = (user) => !!user
