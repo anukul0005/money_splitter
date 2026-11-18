@@ -504,6 +504,13 @@ def match(comp: str, date: str = "", home: str = "", away: str = "", home_short:
     return out
 
 
+@router.get("/ml/picks", response_model=dict)
+def ml_picks(stake: float = 100, db: Session = Depends(get_db), _: User = Depends(owner)):
+    """The betting model's live record: its value picks on favourites, frozen at kick-off and settled."""
+    import football_ml_picks
+    return football_ml_picks.report(db, max(1.0, min(stake, 100000.0)))
+
+
 @router.get("/table/{comp}", response_model=dict)
 def table(comp: str, _: User = Depends(owner)):
     if comp not in fb.COMPS and comp != "ISL":

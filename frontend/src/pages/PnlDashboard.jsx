@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { pnlBacktest } from '../api'
+import { footballMlPicks, pnlBacktest } from '../api'
 import { BetRecord } from './FootballTeams'
 import { EDGES, useEdge } from '../components/Suggest'
 
@@ -300,6 +300,76 @@ function MyTeams({ stake }) {
   )
 }
 
+const LG = { E0: 'EPL', SP1: 'LaLiga', I1: 'Serie A', D1: 'Bund.', F1: 'Ligue 1' }
+const when = (iso) => new Date(iso).toLocaleString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true })
+
+/** The betting model's picks, recorded live from the day it went in (backend football_ml_picks). */
+function ModelPicks({ stake }) {
+  const [d, setD] = useState(null)
+  const [err, setErr] = useState(false)
+  const [all, setAll] = useState(false)
+  useEffect(() => {
+    let alive = true
+    footballMlPicks(stake).then((r) => { if (alive) setD(r.data) }).catch(() => { if (alive) setErr(true) })
+    return () => { alive = false }
+  }, [stake])
+  if (err) return null
+  const done = d?.settled || []
+  const shown = all ? done : done.slice(0, 5)
+  return (
+    <div className="card">
+      <p className="text-sm font-black text-gray-900">🤖 Model picks · live</p>
+      <p className="text-[10px] text-gray-400 mt-0.5 leading-snug">
+        Favourites where the model's chance × price beats 1, frozen at kick-off, settled at the closing average.
+        {d?.since ? ` Recording since ${new Date(`${d.since}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}.` : ''}
+      </p>
+      {!d && <p className="text-xs text-gray-400 py-3">Loading…</p>}
+      {d && (
+        <>
+          {d.all.bets > 0 ? (
+            <div className="flex gap-2 mt-2 flex-wrap">
+              <Tile label="P/L" value={rupees(d.all.pl)} cls={tone(d.all.pl)} />
+              <Tile label="Return" value={pct(d.all.roi)} cls={tone(d.all.pl)} />
+              <Tile label="Won" value={`${d.all.won}/${d.all.bets}`} sub={d.all.avg_odds ? `avg odds ${d.all.avg_odds}` : null} />
+            </div>
+          ) : <p className="text-xs text-gray-500 mt-2">No settled picks yet - the first results come after this weekend's matches.</p>}
+          {d.pending.length > 0 && (
+            <div className="mt-3">
+              <p className="text-[11px] font-bold text-gray-700">Coming up · {d.pending.length}</p>
+              {d.pending.map((x) => (
+                <div key={`${x.comp}${x.day}${x.home}${x.side}`} className="flex items-baseline gap-2 text-[11px] py-1 border-t border-gray-100 first:border-t-0">
+                  <span className="flex-1 min-w-0">
+                    <span className="block truncate"><b>{x.team}</b> {x.side === 'home' ? 'v' : '@'} {x.opp} <span className="text-gray-400">· {LG[x.comp]}</span></span>
+                    <span className="block text-[10px] text-gray-400">{when(x.kickoff)} · {x.decided ? 'frozen' : x.model} · {x.price_src}</span>
+                  </span>
+                  <span className="shrink-0 text-right tabular-nums">
+                    <span className="block font-bold">@ {x.odds.toFixed(2)}</span>
+                    <span className="block text-[10px] text-gray-500">{Math.round(100 * x.p_model)}% v {Math.round(100 * x.p_market)}%</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          {done.length > 0 && (
+            <div className="mt-3">
+              <p className="text-[11px] font-bold text-gray-700">Settled</p>
+              {shown.map((x) => (
+                <div key={`${x.comp}${x.day}${x.home}${x.side}`} className="flex items-center gap-2 text-[11px] py-1 border-t border-gray-100 first:border-t-0">
+                  <span className={`w-4 h-4 shrink-0 text-[9px] font-black text-white flex items-center justify-center ${x.result === 'W' ? 'bg-green-600' : x.result === 'D' ? 'bg-gray-400' : 'bg-red-500'}`}>{x.result}</span>
+                  <span className="flex-1 min-w-0 truncate"><b>{x.team}</b> {x.side === 'home' ? 'v' : '@'} {x.opp} <span className="text-gray-400">{x.score}</span></span>
+                  <span className="shrink-0 tabular-nums text-gray-500">@ {(x.close_odds || x.odds).toFixed(2)}</span>
+                  <span className={`shrink-0 w-14 text-right tabular-nums font-bold ${tone(x.pl)}`}>{rupees(x.pl)}</span>
+                </div>
+              ))}
+              {done.length > 5 && <button onClick={() => setAll((v) => !v)} className="text-[11px] font-bold text-brand-600 mt-1">{all ? 'Show fewer' : `Show all ${done.length}`}</button>}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 function SportCard({ k, s, stake, edge }) {
   const meta = SPORT[k]
   return (
@@ -422,6 +492,7 @@ export default function PnlDashboard() {
             )}
 
             {view !== 'all' && <SportCard k={view} s={d.sports[view]} stake={stake} edge={d.edge} />}
+            {view === 'football' && <ModelPicks stake={stake} />}
             {view === 'football' && <MyTeams stake={stake} />}
 
             <p className="text-[10px] text-gray-400 text-center">

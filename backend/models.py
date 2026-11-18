@@ -1263,6 +1263,36 @@ class FootballNews(Base):
     flags = Column(String(120), nullable=True)                    # injury,manager,suspension,dressing room
 
 
+class FootballModelPick(Base):
+    """A bet the football model flags, recorded live (football_ml_picks.py):
+    a favourite whose model chance x price beats 1, kept up to date until
+    kick-off, then frozen and settled at Rs 100 - the model's real test."""
+
+    __tablename__ = "football_model_picks"
+    __table_args__ = (UniqueConstraint("comp", "day", "home", "away", "side", name="ux_football_model_picks"),)
+
+    id = Column(Integer, primary_key=True)
+    comp = Column(String(8), nullable=False)                     # E0 SP1 I1 D1 F1
+    day = Column(Date, nullable=False, index=True)
+    kickoff = Column(DateTime(timezone=True), nullable=False)
+    home = Column(String(80), nullable=False)
+    away = Column(String(80), nullable=False)
+    side = Column(String(4), nullable=False)                     # home / away
+    team = Column(String(80), nullable=False)
+    odds = Column(Float, nullable=False)                         # the price it was picked at
+    price_src = Column(String(40), nullable=True)
+    p_model = Column(Float, nullable=False)
+    p_market = Column(Float, nullable=False)
+    ev = Column(Float, nullable=False)
+    model = Column(String(24), nullable=True)                    # before line-ups / with line-ups
+    flagged_at = Column(DateTime(timezone=True), nullable=False)
+    decided = Column(Boolean, nullable=False, default=False)     # frozen at kick-off
+    result = Column(String(1), nullable=True)                    # W D L
+    score = Column(String(8), nullable=True)
+    close_odds = Column(Float, nullable=True)                    # the closing average, when the weekly file has it
+    pl = Column(Float, nullable=True)                            # at Rs 100
+
+
 class FootballWatch(Base):
     """A team someone follows for betting (the P/L dashboard's football
     questionnaire): a club in one of the five leagues, as football-data.co.uk
