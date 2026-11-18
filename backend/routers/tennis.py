@@ -25,7 +25,7 @@ from models import TennisFanVote, User
 
 router = APIRouter(prefix="/tennis", tags=["tennis"])
 
-ANALYTICS_USERS = {"anukul"}
+ANALYTICS_USERS = {"anukul", "utkarsh"}
 ROUND_ORDER = ["F", "SF", "QF", "R16", "R32", "R64", "R128", "RR", "BR", "ER"]
 LEVEL_ORDER = {"G": 0, "F": 1, "M": 2, "PM": 2, "A": 3, "P": 3, "I": 4, "D": 5}
 LEVEL_NAME = {"G": "Grand Slam", "F": "Tour Finals", "M": "Masters 1000", "PM": "WTA 1000", "P": "WTA 500",

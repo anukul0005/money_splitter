@@ -10,7 +10,7 @@ import DatePicker from '../components/DatePicker'
 
 /**
  * /betting - ATP and WTA tour-level results, 2000 to today, laid out like a
- * scores app (backend routers/tennis.py; Anukul's alone). Results: a day at
+ * scores app (backend routers/tennis.py; for the sports-section people). Results: a day at
  * a time, tournaments biggest first, rounds final first, each match two
  * lines with set columns. Players: record, surfaces, years, recent matches,
  * head-to-head.
