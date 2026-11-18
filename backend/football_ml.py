@@ -208,8 +208,11 @@ def build(db) -> dict:
         total = _score([rs[i] for i in all_i], np.array(all_p), y[all_i], off[all_i]) if all_i else None
         mu, sd = X.mean(0), X.std(0); sd[sd == 0] = 1
         w = _fit((X - mu) / sd, off, y)
+        # each tested row's chance from a model that never saw its season - for the team grades
+        oos = [{"comp": rs[i]["comp"], "team": rs[i]["team"], "day": rs[i]["day"], "season": rs[i]["season"], "p": float(q),
+                "m": rs[i]["m"], "odds": rs[i]["odds"], "y": rs[i]["y"], "fav": rs[i]["fav"]} for i, q in zip(all_i, all_p)]
         return {"feats": feats, "n": len(rs), "w": [float(v) for v in w], "mu": [float(v) for v in mu], "sd": [float(v) for v in sd],
-                "test": total, "per_season": per}
+                "test": total, "per_season": per, "oos": oos}
 
     plain = run(BASE, lambda r: True)
     covered = [r for r in rows if r["rot"] is not None and r["opp_rot"] is not None]
@@ -286,6 +289,62 @@ def predict(comp: str, home: str, away: str, odds: tuple, day: date | None = Non
         out["sides"][side] = {"team": team, "p": round(p, 4), "market": round(probs[i], 4), "odds": odds[i],
                               "ev": round(p * odds[i] - 1, 4), "bet": p * odds[i] > 1, "pushes": pushes[:4],
                               "form": f["form"], "rotation": rt}
+    return out
+
+
+def grades() -> list[dict]:
+    """A 0-100 grade for every club in this season's five leagues, from the
+    model's walk-forward chances (never fitted on the matches it grades):
+
+      edge (50%)    mean(model - market chance) over its last 20 league matches,
+                    less what the model gives any side at that market chance (its
+                    favourite-longshot lift, which 'backable' already counts) -
+                    so only this team's own form, shots, table and runs:
+                    50 + 50 tanh(edge / 0.015)
+      record (20%)  return on its value bets as favourite over the last two
+                    seasons, shrunk by n / (n + 40): 50 + 50 tanh(roi / 0.05)
+      backable (30%) share of its last 20 matches as the favourite x 100 -
+                    the model only backs favourites
+    """
+    if not state.get("built"):
+        return []
+    oos = state["plain"]["oos"]
+    season = fb._season_code(fb.current_season_start())
+    seasons = sorted({r["season"] for r in oos}, key=_season_order)
+    last2 = set(seasons[-2:])
+    by = defaultdict(list)
+    for r in oos:
+        by[(r["comp"], r["team"])].append(r)
+    # the model's usual lift at each market chance (5-point bins), taken off each row's edge
+    bins = defaultdict(list)
+    for r in oos:
+        bins[min(19, int(r["m"] * 20))].append(r["p"] - r["m"])
+    lift = {b: sum(v) / len(v) for b, v in bins.items()}
+    own = lambda r: r["p"] - r["m"] - lift[min(19, int(r["m"] * 20))]
+    hist: _History = state["hist"]
+    current = {(c, t) for (c, s), tbl in hist.table.items() if s == season for t in tbl}
+    out = []
+    for key in current:
+        rs = sorted(by.get(key, []), key=lambda r: r["day"])
+        if len(rs) < 10:
+            continue
+        last = rs[-20:]
+        edge = sum(own(r) for r in last) / len(last)
+        vb = [r for r in rs if r["season"] in last2 and r["fav"] and r["p"] * r["odds"] > 1]
+        pl = sum((r["odds"] - 1) * 100 if r["y"] else -100 for r in vb)
+        roi = pl / (100 * len(vb)) if vb else 0.0
+        shrunk = roi * len(vb) / (len(vb) + 40)
+        fav = sum(r["fav"] for r in last) / len(last)
+        s_edge = 50 + 50 * math.tanh(edge / 0.015)
+        s_rec = 50 + 50 * math.tanh(shrunk / 0.05)
+        s_fav = 100 * fav
+        f = hist.feats(key[0], season, key[1]) or {}
+        out.append({"comp": key[0], "team": key[1], "grade": round(0.5 * s_edge + 0.2 * s_rec + 0.3 * s_fav),
+                    "edge": round(edge, 4), "edge_score": round(s_edge), "value_bets": len(vb), "value_pl": round(pl),
+                    "value_roi": round(roi, 4) if vb else None, "record_score": round(s_rec), "fav_share": round(fav, 3),
+                    "fav_score": round(s_fav), "matches": len(last), "form": f.get("form"), "rank": f.get("rank"),
+                    "elite": f.get("elite")})
+    out.sort(key=lambda g: -g["grade"])
     return out
 
 

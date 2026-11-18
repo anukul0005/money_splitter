@@ -16,6 +16,7 @@ import MyBets            from './pages/MyBets'
 import PnlDashboard      from './pages/PnlDashboard'
 import FootballTeams from './pages/FootballTeams'
 import FootballMatch from './pages/FootballMatch'
+import FootballGrades from './pages/FootballGrades'
 import TennisMatch       from './pages/TennisMatch'
 import BadmintonMatch    from './pages/BadmintonMatch'
 import TennisNews        from './pages/TennisNews'
@@ -181,6 +182,7 @@ export default function App() {
                     <Route path="/betting/pnl" element={<PnlDashboard />} />
                     <Route path="/football/teams" element={<FootballTeams />} />
                     <Route path="/football/match" element={<FootballMatch />} />
+                    <Route path="/football/grades" element={<FootballGrades />} />
                   </>
                 )}
                 {/* Sports news: badminton for everyone, tennis and football for the sports people (the server decides) */}

@@ -1692,8 +1692,12 @@ export default function BettingAnalytics() {
               <br />
               fixtures from football-data.org · odds from football-data.co.uk
             </p>
-            <button onClick={() => nav('/football/teams')}
-              className="mt-2 w-full py-1.5 rounded-none border border-amber-300 bg-white text-[11px] font-bold text-brand-600">My teams · track & ₹ bet ›</button>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <button onClick={() => nav('/football/teams')}
+                className="py-1.5 rounded-none border border-amber-300 bg-white text-[11px] font-bold text-brand-600">My teams · track & ₹ bet ›</button>
+              <button onClick={() => nav('/football/grades')}
+                className="py-1.5 rounded-none border border-amber-300 bg-white text-[11px] font-bold text-brand-600">Team grades ›</button>
+            </div>
             <div className="grid grid-cols-3 mt-2.5 rounded-md border border-amber-300 overflow-hidden">
               {F_TABS.map(([k, l]) => (
                 <button key={k} onClick={() => setFtab(k)}

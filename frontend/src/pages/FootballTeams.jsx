@@ -274,6 +274,7 @@ export default function FootballTeams() {
         <button onClick={() => nav(-1)} className="text-xs font-bold text-gray-400 mb-2">← Back</button>
         <div className="flex items-center gap-2">
           <h1 className="text-xl font-black tracking-tight flex-1">My teams</h1>
+          <button onClick={() => nav('/football/grades')} className="px-2 py-1 rounded-none border border-amber-300 bg-white text-[11px] font-bold text-brand-600">Grades ›</button>
           {w && !editing && <button onClick={() => setEditing(true)} className="px-2 py-1 rounded-none border border-amber-300 bg-white text-[11px] font-bold text-brand-600">Edit teams</button>}
         </div>
         <p className="mt-1 text-[11px] text-gray-400">Tracked for results · ₹ bet on, counted in the P/L</p>

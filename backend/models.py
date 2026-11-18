@@ -1293,6 +1293,19 @@ class FootballModelPick(Base):
     pl = Column(Float, nullable=True)                            # at Rs 100
 
 
+class FootballGrade(Base):
+    """My own grade for a club, 0-5 stars, beside the model's (Team grades page)."""
+
+    __tablename__ = "football_grades"
+    __table_args__ = (UniqueConstraint("user_id", "comp", "team", name="ux_football_grades"),)
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    comp = Column(String(8), nullable=False)
+    team = Column(String(80), nullable=False)
+    stars = Column(Integer, nullable=False)
+
+
 class FootballWatch(Base):
     """A team someone follows for betting (the P/L dashboard's football
     questionnaire): a club in one of the five leagues, as football-data.co.uk

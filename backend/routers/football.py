@@ -504,6 +504,47 @@ def match(comp: str, date: str = "", home: str = "", away: str = "", home_short:
     return out
 
 
+class StarsIn(BaseModel):
+    stars: int
+
+
+@router.get("/grades", response_model=dict)
+def team_grades(db: Session = Depends(get_db), caller: User = Depends(owner)):
+    """Every club in this season's five leagues: the model's 0-100 grade (football_ml.grades),
+    my stars (0-5) and the blend - 60% model, 40% mine where I've graded it - with my track / bet mode."""
+    import football_ml
+    from models import FootballGrade
+    mine = {(g.comp, g.team): g.stars for g in db.query(FootballGrade).filter(FootballGrade.user_id == caller.id)}
+    modes = _modes(db, caller.id)
+    names = {v[0]: v[1] for v in fb.LEAGUES.values()}
+    out = []
+    for g in football_ml.grades():
+        st = mine.get((g["comp"], g["team"]))
+        out.append({**g, "league": names.get(g["comp"]), "stars": st, "mode": modes.get(g["comp"], {}).get(g["team"]),
+                    "blend": round(0.6 * g["grade"] + 0.4 * 20 * st) if st is not None else g["grade"]})
+    out.sort(key=lambda x: -x["blend"])
+    return {"teams": out, "built_at": football_ml.state.get("at")}
+
+
+@router.put("/grades/{comp}/{team}", response_model=dict)
+def set_grade(comp: str, team: str, body: StarsIn, db: Session = Depends(get_db), caller: User = Depends(owner)):
+    """My stars for a club (0-5); -1 clears them."""
+    from models import FootballGrade
+    if comp not in fb.CO_UK_OF:
+        raise HTTPException(404, "Not one of the five leagues")
+    q = db.query(FootballGrade).filter(FootballGrade.user_id == caller.id, FootballGrade.comp == comp, FootballGrade.team == team)
+    row = q.first()
+    if body.stars < 0:
+        if row:
+            db.delete(row)
+    elif row:
+        row.stars = min(5, body.stars)
+    else:
+        db.add(FootballGrade(user_id=caller.id, comp=comp, team=team[:80], stars=min(5, body.stars)))
+    db.commit()
+    return {"comp": comp, "team": team, "stars": body.stars if body.stars >= 0 else None}
+
+
 @router.get("/ml/picks", response_model=dict)
 def ml_picks(stake: float = 100, db: Session = Depends(get_db), _: User = Depends(owner)):
     """The betting model's live record: its value picks on favourites, frozen at kick-off and settled."""
