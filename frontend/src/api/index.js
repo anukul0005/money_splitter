@@ -474,4 +474,4 @@ export const reactInDiscussion = (id, target, targetId, kind) => api.post(`/disc
 
 // Lessons (routers/lessons.py): the list, and a signed address for one lesson's page (a frame can't send the login header)
 export const lessonsList = () => api.get('/lessons')
-export const lessonSrc = (slug, font) => api.get(`/lessons/${encodeURIComponent(slug)}/link`, { params: { font } }).then((r) => `${BASE}${r.data.path}`)
+export const lessonSrc = (slug, font, size) => api.get(`/lessons/${encodeURIComponent(slug)}/link`, { params: { font, size } }).then((r) => `${BASE}${r.data.path}`)

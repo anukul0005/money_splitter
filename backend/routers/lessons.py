@@ -39,6 +39,8 @@ LESSONS = [
 FONTS = {"plex": ('"IBM Plex Sans"', None), "inter": ('"Inter"', "Inter:wght@400;500;600;700"),
          "dmsans": ('"DM Sans"', "DM+Sans:wght@400;500;600;700"), "poppins": ('"Poppins"', "Poppins:wght@400;500;600;700"),
          "nunito": ('"Nunito"', "Nunito:wght@400;500;600;700"), "lora": ('"Lora"', "Lora:wght@400;500;600;700")}
+# reading sizes (the A A A buttons in the app): text scale
+SIZES = {"s": 0.9, "m": 1.0, "l": 1.15}
 
 
 def reader(caller: User = Depends(current_user)) -> User:
@@ -58,7 +60,7 @@ def _sign(slug: str, uid: int, exp: int) -> str:
     return hmac.new(_secret(), f"lesson|{slug}|{uid}|{exp}".encode(), sha256).hexdigest()[:40]
 
 
-def _dress(html: str, font: str) -> str:
+def _dress(html: str, font: str, size: str = "m") -> str:
     css_family, google = FONTS.get(font, FONTS["plex"])
     fams = ["IBM+Plex+Sans:wght@400;500;600;700", "IBM+Plex+Mono:wght@400;600"] + ([google] if google else [])
     body = f'{css_family}, "IBM Plex Sans", system-ui, sans-serif'
@@ -69,6 +71,7 @@ def _dress(html: str, font: str) -> str:
             f"--slate:#475569;--code:#f1f5f9;--f-display:{body};--f-body:{body};--f-math:{body};"
             "--f-mono:\"IBM Plex Mono\",ui-monospace,monospace}"
             "[hidden]{display:none!important}"
+            f":root{{--ls:{SIZES.get(size, 1.0)}}}html{{font-size:calc(16px * var(--ls))}}body{{font-size:calc(15.5px * var(--ls))!important}}"
             "body{letter-spacing:-.01em;-webkit-font-smoothing:antialiased}"
             "h1,h2,h3{font-weight:700;letter-spacing:-.02em}h1{font-size:1.75rem}h2{font-size:1.3rem}h3{font-size:1.05rem}"
             ".panel,.card,.callout,.formula,.stat,details.qa,.calc,.btn,.chip,.tnode,input[type=text],#tocSheet .sheet,table{border-radius:.375rem}"
@@ -78,7 +81,10 @@ def _dress(html: str, font: str) -> str:
             ".stat b,.out{font-weight:700}.part{border-radius:.375rem;background:#0f172a;color:#f8fafc}"
             ".part .eyebrow,.part p{color:#f8fafc}.eyebrow{color:#ea580c}"
             ".chip[aria-pressed=\"true\"]{background:#0f172a;color:#fff;border-color:#0f172a}header.top{background:#f8fafc}"
-            "</style>")
+            "</style>"
+            # the app changes the reading size in place (postMessage), so the lesson keeps your place
+            "<script>addEventListener('message',function(e){var v=e.data&&e.data.lessonScale;"
+            "if(typeof v==='number'&&v>0.5&&v<2)document.documentElement.style.setProperty('--ls',v)})</script>")
     low = html.lower()
     at = low.find("</head>")
     html = html[:at] + head + html[at:] if at >= 0 else head + html
@@ -94,18 +100,20 @@ def list_lessons(_: User = Depends(reader)):
 
 
 @router.get("/{slug}/link", response_model=dict)
-def lesson_link(slug: str, font: str = "plex", caller: User = Depends(reader)):
+def lesson_link(slug: str, font: str = "plex", size: str = "m", caller: User = Depends(reader)):
     """A signed address for the lesson page, good for LINK_HOURS - a frame can't send the login header."""
     _lesson(slug)
     exp = int(time.time()) + LINK_HOURS * 3600
     f = font if font in FONTS else "plex"
-    return {"path": f"/lessons/view/{slug}?u={caller.id}&exp={exp}&f={f}&s={_sign(slug, caller.id, exp)}"}
+    z = size if size in SIZES else "m"
+    return {"path": f"/lessons/view/{slug}?u={caller.id}&exp={exp}&f={f}&z={z}&s={_sign(slug, caller.id, exp)}",
+            "scales": SIZES}
 
 
 @router.get("/view/{slug}", response_class=HTMLResponse)
-def lesson_view(slug: str, u: int, exp: int, s: str, f: str = "plex"):
+def lesson_view(slug: str, u: int, exp: int, s: str, f: str = "plex", z: str = "m"):
     x = _lesson(slug)
     if exp < time.time() or not hmac.compare_digest(s, _sign(slug, u, exp)):
         return HTMLResponse("<p style='font-family:system-ui;padding:1rem'>This lesson link has expired - go back and open it again.</p>", status_code=403)
-    html = _dress((DIR / x["file"]).read_text(encoding="utf-8"), f)
+    html = _dress((DIR / x["file"]).read_text(encoding="utf-8"), f, z)
     return HTMLResponse(html, headers={"Cache-Control": "private, max-age=300", "X-Robots-Tag": "noindex"})
