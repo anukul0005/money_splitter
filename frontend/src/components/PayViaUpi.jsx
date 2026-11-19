@@ -20,6 +20,13 @@ import { useState } from 'react'
  * scheme (phonepe://, tez://, paytmmp://) is unambiguous instead, so the
  * primary button targets PhonePe directly and the row below offers the
  * others + a generic fallback for anything else.
+ *
+ * But UPI apps now treat a pre-filled link from another app to a personal
+ * UPI ID like a QR picked from the gallery: PhonePe caps it at ₹2,000 and
+ * often declines it outright (only registered merchants' signed links get
+ * through). So the main way is the one that always works: copy the UPI ID,
+ * open the app, pay "to UPI ID" and type the amount. The pre-filled links
+ * stay underneath as a quick try.
  */
 // gpay:// and paytmmp://upi/pay are each app's current iOS scheme - tez://
 // was Google Pay's old (pre-rebrand, Android-only) scheme and paytmmp://pay
@@ -30,6 +37,12 @@ const APP_SCHEMES = [
   { key: 'gpay', label: 'Google Pay', scheme: 'gpay://upi/pay' },
   { key: 'paytm', label: 'Paytm', scheme: 'paytmmp://upi/pay' },
   { key: 'other', label: 'Other UPI app', scheme: 'upi://pay' },
+]
+// each app's own scheme with nothing after it just opens the app
+const APP_HOMES = [
+  { key: 'phonepe', label: 'PhonePe', href: 'phonepe://' },
+  { key: 'gpay', label: 'Google Pay', href: 'gpay://' },
+  { key: 'paytm', label: 'Paytm', href: 'paytmmp://' },
 ]
 
 export default function PayViaUpi({ upiId, payeeName, amount, note = '', className = '', showAppButtons = true, onClaim }) {
@@ -77,6 +90,14 @@ export default function PayViaUpi({ upiId, payeeName, amount, note = '', classNa
       setTimeout(() => setCopied(false), 1500)
     } catch { /* clipboard denied - nothing to do about it */ }
   }
+  // copy the UPI ID (inside the tap, so iPhone allows it), then open the app
+  const copyAndOpen = (href) => (e) => {
+    e.preventDefault()
+    try { navigator.clipboard.writeText(upiId).catch(() => {}) } catch { /* clipboard blocked */ }
+    setCopied(true)
+    setTimeout(() => { window.location.href = href }, 150)
+  }
+  const amtText = effectiveAmount ? `₹${Number(effectiveAmount).toLocaleString('en-IN')}` : ''
 
   return (
     <div className={`card space-y-3 text-center ${className}`}>
@@ -135,19 +156,33 @@ export default function PayViaUpi({ upiId, payeeName, amount, note = '', classNa
 
       {showAppButtons && (
         <>
-          <a href={linkFor(APP_SCHEMES[0].scheme)} className="btn-primary block py-2.5 text-sm">
-            Pay{effectiveAmount ? ` ₹${Number(effectiveAmount).toLocaleString('en-IN')}` : ''} via {APP_SCHEMES[0].label}
+          <a href={APP_HOMES[0].href} onClick={copyAndOpen(APP_HOMES[0].href)} className="btn-primary block py-2.5 text-sm">
+            Copy UPI ID &amp; open {APP_HOMES[0].label}
           </a>
-
           <div className="flex flex-wrap justify-center gap-1.5">
-            {APP_SCHEMES.slice(1).map((app) => (
-              <a
-                key={app.key} href={linkFor(app.scheme)}
-                className="text-[11px] px-2.5 py-1.5 rounded-full border border-amber-300 text-gray-600 hover:border-brand-300 hover:text-brand-600"
-              >
+            {APP_HOMES.slice(1).map((app) => (
+              <a key={app.key} href={app.href} onClick={copyAndOpen(app.href)}
+                className="text-[11px] px-2.5 py-1.5 rounded-full border border-amber-300 text-gray-600 hover:border-brand-300 hover:text-brand-600">
                 {app.label}
               </a>
             ))}
+          </div>
+          <p className="text-[11px] text-gray-500 leading-snug">
+            In the app: <b>Pay → To UPI ID</b>, paste <b>{upiId}</b>{amtText ? <>, enter <b>{amtText}</b></> : ''}. This works for any amount.
+          </p>
+
+          <div className="border-t border-amber-200 pt-2.5 space-y-1.5">
+            <p className="text-[10px] text-gray-400 leading-snug">
+              Or try a link with the amount filled in. UPI apps limit these links to personal UPI IDs (PhonePe: up to ₹2,000) and sometimes decline them.
+            </p>
+            <div className="flex flex-wrap justify-center gap-1.5">
+              {APP_SCHEMES.map((app) => (
+                <a key={app.key} href={linkFor(app.scheme)}
+                  className="text-[11px] px-2.5 py-1.5 rounded-full border border-amber-200 text-gray-500 hover:border-brand-300 hover:text-brand-600">
+                  {app.label}{app.key === 'phonepe' && amtText ? ` ${amtText}` : ''}
+                </a>
+              ))}
+            </div>
           </div>
 
           {onClaim && (
