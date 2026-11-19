@@ -7,6 +7,7 @@ import Badminton, { B_TABS } from './Badminton'
 import Hockey, { H_TABS } from './Hockey'
 import Football, { F_TABS } from './Football'
 import DatePicker from '../components/DatePicker'
+import { hasBetAccess, useUser } from '../UserContext'
 
 /**
  * /betting - ATP and WTA tour-level results, 2000 to today, laid out like a
@@ -1596,6 +1597,7 @@ const Pane = memo(function Pane({ hidden, children }) {
 }, (a, b) => a.hidden === b.hidden && a.deps === b.deps)
 
 export default function BettingAnalytics() {
+  const me = useUser()
   const nav = useNavigate()
   // the tab and the open player live in the address, so Back from a match page returns to them
   const [params, setParams] = useSearchParams()
@@ -1681,9 +1683,11 @@ export default function BettingAnalytics() {
           <button onClick={() => nav('/betting/pnl')} className="px-2 py-1 rounded-md border border-amber-300 bg-white text-[11px] font-bold text-brand-600 whitespace-nowrap">
             P/L ›
           </button>
-          <button onClick={() => nav('/my-bets')} className="px-2 py-1 rounded-md border border-amber-300 bg-white text-[11px] font-bold text-brand-600 whitespace-nowrap">
-            My bets ›
-          </button>
+          {hasBetAccess(me) && (
+            <button onClick={() => nav('/my-bets')} className="px-2 py-1 rounded-md border border-amber-300 bg-white text-[11px] font-bold text-brand-600 whitespace-nowrap">
+              My bets ›
+            </button>
+          )}
         </div>
         {sport === 'football' ? (
           <>

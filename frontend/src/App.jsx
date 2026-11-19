@@ -48,7 +48,7 @@ import Balances      from './pages/Balances'
 import MasterGroupDetail from './pages/MasterGroupDetail'
 import FriendDetail      from './pages/FriendDetail'
 import Recommend         from './pages/Recommend'
-import { UserContext, RefreshUserContext, isAdmin, isAnalyticsUser } from './UserContext'
+import { UserContext, RefreshUserContext, isAdmin, isAnalyticsUser, hasBetAccess } from './UserContext'
 import { getMe, listUsersBasic } from './api'
 import { setDirectory } from './utils/displayName'
 
@@ -180,7 +180,7 @@ export default function App() {
                     <Route path="/betting" element={<BettingAnalytics />} />
                     <Route path="/betting/match" element={<TennisMatch />} />
                     <Route path="/betting/badminton-match" element={<BadmintonMatch />} />
-                    <Route path="/my-bets" element={<MyBets />} />
+                    {hasBetAccess(user) && <Route path="/my-bets" element={<MyBets />} />}
                     <Route path="/betting/pnl" element={<PnlDashboard />} />
                     <Route path="/football/teams" element={<FootballTeams />} />
                     <Route path="/football/match" element={<FootballMatch />} />

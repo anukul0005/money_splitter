@@ -108,9 +108,9 @@ class User(Base):
     # shown on their own home page. Optional; `name` stays the login and the
     # name every group, expense and balance is keyed on.
     full_name = Column(String(100), nullable=True)
-    # The betting side of Sports (the sports section: analytics, teams, bets,
-    # P&L) - off for everyone until an admin switches it on (users.py
-    # /admin/bet-access). Admins always have it; see has_bet_access.
+    # My bets (real bookmaker bets, routers/bets.py) - off for everyone until
+    # an admin switches it on (users.py /admin/bet-access); the rest of Sports,
+    # mock picks and their P&L included, is everyone's. Admins always have it.
     bet_access = Column(Boolean, nullable=False, default=False, server_default="false")
     access_code_hash = Column(String(128), nullable=True)
     access_code_salt = Column(String(64), nullable=True)

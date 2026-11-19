@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getGroups, getOverview, getUserSummary, getUserGroupBalances, getFriends, getLoans, betsPromos } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
-import { useUser, isAdmin, isAnalyticsUser } from '../UserContext'
+import { useUser, isAdmin, hasBetAccess } from '../UserContext'
 import { buildMasterGroups } from '../utils/masterGroups'
 import { owes, owed } from '../utils/money'
 import { combinedBalances } from '../utils/balances'
@@ -63,7 +63,7 @@ export default function Home() {
   // 1xbet's Friday no-risk bet: nudge until that Friday's result is in (My bets asks for it)
   const [fridayAsk, setFridayAsk] = useState(false)
   useEffect(() => {
-    if (!isAnalyticsUser(user)) return
+    if (!hasBetAccess(user)) return
     betsPromos().then((r) => setFridayAsk(r.data.pending.length > 0)).catch(() => {})
   }, [user?.name])
 

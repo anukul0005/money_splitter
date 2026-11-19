@@ -35,9 +35,14 @@ COLS = ("match_id, tour, tourney_name, surface, tourney_level, tourney_date, mat
 
 
 def owner(caller: User = Depends(current_user)) -> User:
-    """The sports section (the betting side: analytics, teams, bets, P&L) -
-    only for people an admin has switched on (models.User.bet_access), and
-    admins. A 404 for everyone else, as if it weren't there. News is apart."""
+    """The sports section is open to everyone signed in - analytics, teams,
+    mock picks and their P&L (each person's own). Real bets are bettor()."""
+    return caller
+
+
+def bettor(caller: User = Depends(current_user)) -> User:
+    """My bets (real bookmaker bets read from email): only for people an admin
+    has switched on (models.User.bet_access), and admins - a 404 for others."""
     if not caller.has_bet_access:
         raise HTTPException(404, "Not found")
     return caller

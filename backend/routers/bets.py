@@ -20,7 +20,7 @@ from database import get_db
 from sqlalchemy import func
 
 from models import Bet, BetImport, BettingGmailConnection, FridayPromo, User
-from routers.tennis import owner
+from routers.tennis import bettor as owner   # real bets: admin-granted only
 
 router = APIRouter(prefix="/bets", tags=["bets"])
 

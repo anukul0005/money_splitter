@@ -637,9 +637,9 @@ export default function Account() {
 
         {/* ── Admin: who sees the Drinks section of Recommend ── */}
         {isAdmin(user) && <DrinksAccess />}
-        {isAdmin(user) && <AccessList list={listBetAccess} save={setBetAccess} title="Who sees Betting"
-          about="Turn on the people who should see the betting side of Sports - analytics, teams, their bets and P&L. Everyone else gets Sports news only. Admins always see it."
-          onText="sees Betting" offText="news only" what="Betting" />}
+        {isAdmin(user) && <AccessList list={listBetAccess} save={setBetAccess} title="Who sees My bets"
+          about="Turn on the people who should see My bets - real bookmaker bets read from their email. Everyone has the rest of Sports, mock picks and their P&L included. Admins always see it."
+          onText="sees My bets" offText="mock picks only" what="My bets" />}
 
         {/* ── Sports news notifications ── */}
         {(
