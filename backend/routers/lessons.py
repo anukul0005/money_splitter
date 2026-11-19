@@ -4,7 +4,7 @@ backend/lessons/ as self-contained HTML.
 
 The app shows a lesson in a frame that loads it as an ordinary page (iPhone
 Safari left a frame filled from a string blank): /lessons/{slug}/link (logged
-in) hands out a signed address good for a few hours, and /lessons/view/{slug}
+in) hands out a signed address (a fresh one each time a lesson opens), and /lessons/view/{slug}
 serves the page for it - re-dressed in the app's look (light canvas, white
 cards with the 0.375rem radius, orange accents, numbers in Plex Mono) and in
 the font picked in Account.
@@ -28,7 +28,7 @@ router = APIRouter(prefix="/lessons", tags=["lessons"])
 
 DIR = Path(__file__).resolve().parent.parent / "lessons"
 LESSON_USERS = {"anukul"}
-LINK_HOURS = 6
+LINK_HOURS = 24          # the app asks for a fresh one every time a lesson opens
 LESSONS = [
     {"slug": "betting-models", "file": "betting-models.html", "title": "Betting models from scratch",
      "about": "The arithmetic, six models from first principles, then the live model worked by hand on a real pick - with interview questions."},
@@ -39,6 +39,36 @@ LESSONS = [
 FONTS = {"plex": ('"IBM Plex Sans"', None), "inter": ('"Inter"', "Inter:wght@400;500;600;700"),
          "dmsans": ('"DM Sans"', "DM+Sans:wght@400;500;600;700"), "poppins": ('"Poppins"', "Poppins:wght@400;500;600;700"),
          "nunito": ('"Nunito"', "Nunito:wght@400;500;600;700"), "lora": ('"Lora"', "Lora:wght@400;500;600;700")}
+# Read vertically on a phone: no sideways scrolling anywhere. Under 700px each
+# table row becomes a card - the first cell its title, every other cell a line
+# "COLUMN  value" (labels copied from the header row, kept up to date as the
+# lesson redraws its tables) - and long sums and formulas wrap.
+VERTICAL = (
+    "<style id=\"vertical\">"
+    ".calc,.formula{white-space:normal!important;overflow-x:visible!important;overflow-wrap:anywhere}"
+    ".scroll{overflow-x:visible!important}"
+    "@media (max-width:700px){"
+    ".scroll table,.scroll tbody,.scroll tr,.scroll td,.scroll th,table.v,table.v tbody,table.v tr,table.v td,table.v th{display:block;width:100%!important}"
+    "table tr.vh{display:none!important}"
+    "table tr{border:1px solid var(--line);border-radius:.375rem;margin:.5rem 0;padding:.45rem .65rem;background:var(--surface)}"
+    "table td,table th{border:0!important;padding:.16rem 0!important;white-space:normal!important;text-align:right!important;"
+    "display:flex!important;justify-content:space-between;align-items:baseline;gap:.75rem}"
+    "table td::before,table th::before{content:attr(data-l);flex:0 1 auto;text-align:left;font:600 .68rem var(--f-body);"
+    "letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}"
+    "table td:first-child{display:block!important;text-align:left!important;font-weight:600;padding-bottom:.3rem!important}"
+    "table td:first-child::before{content:none}"
+    "table td[colspan]{display:block!important;text-align:left!important}table td[colspan]::before{content:none}"
+    "}</style>"
+    "<script>(function(){function label(){document.querySelectorAll('table').forEach(function(t){"
+    "var rows=t.rows;if(!rows.length)return;var h=rows[0],cells=h.cells,all=cells.length>0;"
+    "for(var i=0;i<cells.length;i++)if(cells[i].tagName!=='TH')all=false;"
+    "var names=[];if(all){h.classList.add('vh');"
+    "for(var i=0;i<cells.length;i++){var n=cells[i].colSpan||1;for(var k=0;k<n;k++)names.push(cells[i].textContent.trim())}}"
+    "t.classList.add('v');for(var r=all?1:0;r<rows.length;r++){var c=rows[r].cells,col=0;"
+    "for(var j=0;j<c.length;j++){var nm=names[col]||'';if(c[j].getAttribute('data-l')!==nm)c[j].setAttribute('data-l',nm);col+=c[j].colSpan||1}}})}"
+    "var q=0;function soon(){if(!q){q=1;requestAnimationFrame(function(){q=0;label()})}}"
+    "document.addEventListener('DOMContentLoaded',function(){label();new MutationObserver(soon).observe(document.body,{childList:true,subtree:true})})})()</script>"
+)
 # reading sizes (the A A A buttons in the app): text scale
 SIZES = {"s": 0.9, "m": 1.0, "l": 1.15}
 
@@ -84,7 +114,8 @@ def _dress(html: str, font: str, size: str = "m") -> str:
             "</style>"
             # the app changes the reading size in place (postMessage), so the lesson keeps your place
             "<script>addEventListener('message',function(e){var v=e.data&&e.data.lessonScale;"
-            "if(typeof v==='number'&&v>0.5&&v<2)document.documentElement.style.setProperty('--ls',v)})</script>")
+            "if(typeof v==='number'&&v>0.5&&v<2)document.documentElement.style.setProperty('--ls',v)})</script>"
+            + VERTICAL)
     low = html.lower()
     at = low.find("</head>")
     html = html[:at] + head + html[at:] if at >= 0 else head + html
