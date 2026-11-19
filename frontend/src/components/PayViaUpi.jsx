@@ -1,48 +1,23 @@
 import { useState } from 'react'
 
 /**
- * A QR code + "Pay via UPI App" button for one UPI ID, pre-filled with an
- * amount and a note where given. Two ways to actually pay: scan the QR
- * with any UPI app, or (on the same phone the app is open on) tap the
- * button to jump straight into whichever UPI app is installed.
+ * How to pay one UPI ID, with the amount (and a note) where given.
  *
- * The QR is rendered by a public QR-image API rather than a bundled JS QR
- * library - the string it encodes (a UPI ID + an amount) is exactly what
- * you'd hand someone to pay you anyway, same as reading it off a QR taped
- * to a shop counter, so there's nothing sensitive going out in that
- * request.
- *
- * The generic `upi://pay?...` scheme reliably pops Android's "open with"
- * chooser across every installed UPI app - but on iOS there's no chooser:
- * whichever app registered that same scheme first just gets it, and apps
- * with their own UPI payment feature (WhatsApp included) often do too, so
- * a bare upi:// link can silently open the wrong one. Each app's own
- * scheme (phonepe://, tez://, paytmmp://) is unambiguous instead, so the
- * primary button targets PhonePe directly and the row below offers the
- * others + a generic fallback for anything else.
- *
- * But UPI apps now treat a pre-filled link from another app to a personal
- * UPI ID like a QR picked from the gallery: PhonePe caps it at ₹2,000 and
- * often declines it outright (only registered merchants' signed links get
- * through). So the main way is the one that always works: copy the UPI ID,
- * open the app, pay "to UPI ID" and type the amount. The pre-filled links
- * stay underneath as a quick try.
+ * UPI apps treat a pre-filled pay link from another app to a personal UPI
+ * ID like a QR picked from the gallery: PhonePe caps it at ₹2,000 and often
+ * declines it (only registered merchants' signed links get through). So
+ * every app gets the way that always works: tap it, the UPI ID is copied
+ * and the app opens - then Pay -> To UPI ID, paste, type the amount. Each
+ * app is opened by its own scheme (on iPhone a bare upi:// link opens
+ * whichever app claimed it first). Any other app: copy and open it by hand.
  */
-// gpay:// and paytmmp://upi/pay are each app's current iOS scheme - tez://
-// was Google Pay's old (pre-rebrand, Android-only) scheme and paytmmp://pay
-// was missing the /upi/ segment Paytm's own iOS docs use, so both were
-// silently doing nothing on iPhone even when the app was installed.
-const APP_SCHEMES = [
-  { key: 'phonepe', label: 'PhonePe', scheme: 'phonepe://pay' },
-  { key: 'gpay', label: 'Google Pay', scheme: 'gpay://upi/pay' },
-  { key: 'paytm', label: 'Paytm', scheme: 'paytmmp://upi/pay' },
-  { key: 'other', label: 'Other UPI app', scheme: 'upi://pay' },
-]
 // each app's own scheme with nothing after it just opens the app
-const APP_HOMES = [
+const APPS = [
   { key: 'phonepe', label: 'PhonePe', href: 'phonepe://' },
   { key: 'gpay', label: 'Google Pay', href: 'gpay://' },
   { key: 'paytm', label: 'Paytm', href: 'paytmmp://' },
+  { key: 'bhim', label: 'BHIM', href: 'bhim://' },
+  { key: 'other', label: 'Any other app', href: null },
 ]
 
 export default function PayViaUpi({ upiId, payeeName, amount, note = '', className = '', showAppButtons = true, onClaim }) {
@@ -71,18 +46,6 @@ export default function PayViaUpi({ upiId, payeeName, amount, note = '', classNa
 
   const effectiveAmount = editingAmount ? customAmount : amount
 
-  const params = new URLSearchParams({
-    pa: upiId,
-    pn: payeeName || '',
-    cu: 'INR',
-    ...(effectiveAmount ? { am: String(effectiveAmount) } : {}),
-    ...(note ? { tn: note } : {}),
-  })
-  const qs = params.toString()
-  const linkFor = (scheme) => `${scheme}?${qs}`
-  const upiLink = linkFor('upi://pay')   // what the QR encodes - scanning app decides itself, no ambiguity there
-  const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=10&data=${encodeURIComponent(upiLink)}`
-
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(upiId)
@@ -95,25 +58,15 @@ export default function PayViaUpi({ upiId, payeeName, amount, note = '', classNa
     e.preventDefault()
     try { navigator.clipboard.writeText(upiId).catch(() => {}) } catch { /* clipboard blocked */ }
     setCopied(true)
-    setTimeout(() => { window.location.href = href }, 150)
+    setTimeout(() => setCopied(false), 2500)
+    if (href) setTimeout(() => { window.location.href = href }, 150)
   }
   const amtText = effectiveAmount ? `₹${Number(effectiveAmount).toLocaleString('en-IN')}` : ''
 
   return (
     <div className={`card space-y-3 text-center ${className}`}>
       <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">
-        {effectiveAmount ? `Scan & Pay ₹${Number(effectiveAmount).toLocaleString('en-IN')}` : 'Scan to pay'}
-      </p>
-
-      <div className="flex justify-center">
-        <img
-          src={qrSrc} alt={`UPI QR code for ${upiId}`} width={200} height={200}
-          className="rounded-md border border-amber-200 bg-white p-2"
-        />
-      </div>
-
-      <p className="text-[11px] text-gray-400">
-        Scan with any UPI app: GPay · PhonePe · Paytm · BHIM
+        {amtText ? `Pay ${amtText}` : 'Pay'}{payeeName ? ` to ${payeeName}` : ''}
       </p>
 
       <div className="flex items-center justify-center gap-2 text-xs">
@@ -156,34 +109,18 @@ export default function PayViaUpi({ upiId, payeeName, amount, note = '', classNa
 
       {showAppButtons && (
         <>
-          <a href={APP_HOMES[0].href} onClick={copyAndOpen(APP_HOMES[0].href)} className="btn-primary block py-2.5 text-sm">
-            Copy UPI ID &amp; open {APP_HOMES[0].label}
-          </a>
-          <div className="flex flex-wrap justify-center gap-1.5">
-            {APP_HOMES.slice(1).map((app) => (
-              <a key={app.key} href={app.href} onClick={copyAndOpen(app.href)}
-                className="text-[11px] px-2.5 py-1.5 rounded-full border border-amber-300 text-gray-600 hover:border-brand-300 hover:text-brand-600">
-                {app.label}
+          <p className="text-[11px] text-gray-500">Tap your app - the UPI ID is copied and the app opens</p>
+          <div className="grid grid-cols-2 gap-2">
+            {APPS.map((app) => (
+              <a key={app.key} href={app.href || '#'} onClick={copyAndOpen(app.href)}
+                className={`py-2.5 text-sm font-bold rounded-md border border-amber-300 text-gray-700 bg-white hover:border-brand-300 hover:text-brand-600 active:scale-[0.98] ${app.key === 'other' ? 'col-span-2' : ''}`}>
+                {app.href ? app.label : (copied ? 'UPI ID copied - open your app' : 'Any other app: copy UPI ID')}
               </a>
             ))}
           </div>
           <p className="text-[11px] text-gray-500 leading-snug">
-            In the app: <b>Pay → To UPI ID</b>, paste <b>{upiId}</b>{amtText ? <>, enter <b>{amtText}</b></> : ''}. This works for any amount.
+            Then in the app: <b>Pay → To UPI ID</b>, paste <b>{upiId}</b>{amtText ? <>, enter <b>{amtText}</b></> : ''}. Works for any amount.
           </p>
-
-          <div className="border-t border-amber-200 pt-2.5 space-y-1.5">
-            <p className="text-[10px] text-gray-400 leading-snug">
-              Or try a link with the amount filled in. UPI apps limit these links to personal UPI IDs (PhonePe: up to ₹2,000) and sometimes decline them.
-            </p>
-            <div className="flex flex-wrap justify-center gap-1.5">
-              {APP_SCHEMES.map((app) => (
-                <a key={app.key} href={linkFor(app.scheme)}
-                  className="text-[11px] px-2.5 py-1.5 rounded-full border border-amber-200 text-gray-500 hover:border-brand-300 hover:text-brand-600">
-                  {app.label}{app.key === 'phonepe' && amtText ? ` ${amtText}` : ''}
-                </a>
-              ))}
-            </div>
-          </div>
 
           {onClaim && (
             <div className="border-t border-amber-200 pt-3 space-y-1.5">

@@ -497,9 +497,9 @@ export default function Account() {
         <div className="card">
           <h2 className="text-sm font-bold text-gray-800">UPI IDs</h2>
           <p className="text-xs text-gray-500 leading-relaxed mt-1 mb-3">
-            Where someone settling up with you actually sends the money - shown as
-            a QR code and a "Pay via UPI" button wherever someone owes you. Not a
-            secret; it's the same thing you'd hand out on a QR code anyway, so add
+            Where someone settling up with you actually sends the money - shown with
+            "copy and open your UPI app" buttons wherever someone owes you. Not a
+            secret; it's the same thing you'd hand out to get paid anyway, so add
             as many as you use (PhonePe, your bank's own app...).
           </p>
 
