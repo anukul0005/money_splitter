@@ -160,16 +160,13 @@ export default function Home() {
                 </svg>
               </button>
             )}
-            {isAnalyticsUser(user) && (
-              <button onClick={() => nav('/betting')} title="Betting analytics" aria-label="Betting analytics"
-                className="p-2 text-white/70 hover:text-white active:scale-95 transition-all">
-                {/* tennis ball */}
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                  <circle cx="12" cy="12" r="9" />
-                  <path d="M5.6 5.6a9 9 0 0 1 0 12.8M18.4 5.6a9 9 0 0 0 0 12.8" />
-                </svg>
-              </button>
-            )}
+            {/* history: every expense, newest first (the sports section is in the main bar) */}
+            <button onClick={() => nav('/history')} title="History" aria-label="History"
+              className="p-2 text-white/70 hover:text-white active:scale-95 transition-all">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </button>
             <NotificationBell user={user} />
           </div>
         </div>
