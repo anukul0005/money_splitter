@@ -721,14 +721,14 @@ const DEF = {
   opp_rank: 'The opponent\'s table position', elite: '1 if top 3 in at least 3 of the last 4 seasons', losses5: 'Losses in the last 5',
   elite_x_losses5: 'elite × losses5: a top club on a bad run', mine: '1 if one of your ₹ teams',
 };
-$('#featTable').innerHTML = `<tr><th>Feature</th><th>Definition</th><th class="r">μ</th><th class="r">s</th></tr>` +
+$('#featTable').innerHTML = `<tr><th>Feature</th><th>Definition</th><th class="r">Mean</th><th class="r">Spread</th></tr>` +
   D.feats.map((f) => `<tr><td><b>${esc(L[f])}</b><br><span class="mono">${f}</span></td><td>${esc(DEF[f])}</td><td class="r num">${fx(D.mu[f], 2)}</td><td class="r num">${fx(D.sd[f], 2)}</td></tr>`).join('');
-$('#headTable').innerHTML = `<tr><th>Match (8 Nov)</th><th class="r">Odds</th><th class="r">m</th><th>Last 12, newest first</th><th>Result</th></tr>` +
+$('#headTable').innerHTML = `<tr><th>Match (8 Nov)</th><th class="r">Odds</th><th class="r">Market</th><th>Last 12, newest first</th><th>Result</th></tr>` +
   H.map((h) => `<tr><td><b>${esc(name(h))}</b><br><span class="note">${esc(h.score)}</span></td><td class="r num">${fx(h.odds)}</td><td class="r num">${pct(h.m)}</td><td><span class="form">${h.form}</span><br><span class="note">${h.w12}W ${h.d12}D ${h.l12}L</span></td><td><span class="res ${h.res}">${h.res}</span></td></tr>`).join('');
 
 /* ── 4 judging ── */
 let llSum = 0;
-$('#llTable').innerHTML = `<tr><th>Match</th><th class="r">m</th><th class="r">y</th><th>Term</th><th class="r">Loss</th></tr>` +
+$('#llTable').innerHTML = `<tr><th>Match</th><th class="r">Market</th><th class="r">Won</th><th>Term</th><th class="r">Loss</th></tr>` +
   H.map((h) => {
     const l = h.y ? -Math.log(h.m) : -Math.log(1 - h.m); llSum += l;
     return `<tr><td>${esc(short(h))}</td><td class="r num">${fx(h.m, 3)}</td><td class="r num">${h.y}</td><td class="m">${h.y ? `−ln ${fx(h.m, 3)}` : `−ln(1 − ${fx(h.m, 3)})`}</td><td class="r num">${fx(l, 3)}</td></tr>`;
@@ -775,7 +775,7 @@ function lgRender() {
     return `<tr><td>${esc(L[f])}</td><td class="r num">${fmtFeat(f, x)}</td><td class="r num">${fx(zt, 2)}</td><td class="r num">${fx(W[f], 3)}</td><td class="r num ${c > 0 ? 'pos' : c < 0 ? 'neg' : ''}">${c >= 0 ? '+' : ''}${fx(c, 4)}</td></tr>`;
   }).join('');
   const p = sig(zsum);
-  $('#lgTable').innerHTML = `<tr><th>Feature</th><th class="r">x</th><th class="r">x̃</th><th class="r">w</th><th class="r">w·x̃</th></tr>` +
+  $('#lgTable').innerHTML = `<tr><th>Feature</th><th class="r">Value</th><th class="r">Z-score</th><th class="r">Weight</th><th class="r">Push</th></tr>` +
     `<tr><td>Market log-odds, logit(m)</td><td class="r num">${pct(h.m)}</td><td></td><td></td><td class="r num">${fx(h.logit_m, 4)}</td></tr>` +
     `<tr><td>Intercept b</td><td></td><td></td><td></td><td class="r num">+${fx(W.intercept, 4)}</td></tr>` + rows +
     `<tr class="hl"><td colspan="4">z (sum) → p = σ(z)</td><td class="r num">${fx(zsum, 4)}</td></tr>`;
@@ -931,7 +931,7 @@ function bayesT() {
   const tau = +$('#tauSl').value; $('#tauV').textContent = fx(tau, 3);
   const k = B.sigma2 / (tau * tau);
   const mine = teams.filter((t) => t.mine).sort((a, b) => b.raw - a.raw);
-  $('#bayesTable').innerHTML = `<tr><th>Your team</th><th class="r">n</th><th class="r">Raw r</th><th class="r">Shrink n/(n+σ²/τ²)</th><th class="r">Graded θ̂</th></tr>` +
+  $('#bayesTable').innerHTML = `<tr><th>Your team</th><th class="r">Matches</th><th class="r">Raw r</th><th class="r">Shrink n/(n+σ²/τ²)</th><th class="r">Graded θ̂</th></tr>` +
     mine.map((t) => { const s = t.n / (t.n + k); return `<tr><td>${esc(t.team)}</td><td class="r num">${t.n}</td><td class="r num">${sgn(t.raw)}</td><td class="r num">${fx(s, 2)}</td><td class="r num ${t.raw * s > 0 ? 'pos' : 'neg'}">${sgn(t.raw * s, 2)}</td></tr>`; }).join('');
 }
 $('#tauSl').addEventListener('input', bayesT); bayesT();
@@ -1120,7 +1120,7 @@ function featCalc(side, opp) {
     const g = gTerms.reduce((a, b) => a + b, 0) - lam * w, Hh = hTerms.reduce((a, b) => a + b, 0) + lam;
     const nw = w + g / Hh;
     const ll = -M.reduce((a, m, n) => a + (Y[n] ? Math.log(p[n]) : Math.log(1 - p[n])), 0) / M.length;
-    html += `<h3>Round ${it + 1}: w = ${sn(w, 4)}</h3><div class="scroll"><table><tr><th>Match</th><th class="r">p</th><th class="r">y − p</th><th class="r">x(y − p)</th><th class="r">p(1−p)x²</th></tr>` +
+    html += `<h3>Round ${it + 1}: w = ${sn(w, 4)}</h3><div class="scroll"><table><tr><th>Match</th><th class="r">Chance p</th><th class="r">y − p</th><th class="r">x(y − p)</th><th class="r">p(1−p)x²</th></tr>` +
       p.map((q, n) => `<tr><td>${n + 1}</td><td class="r num">${fx(q, 4)}</td><td class="r num">${sn(Y[n] - q, 4)}</td><td class="r num">${sn(gTerms[n], 4)}</td><td class="r num">${fx(hTerms[n], 4)}</td></tr>`).join('') +
       `</table></div><div class="calc">g = ${sn(gTerms.reduce((a, b) => a + b, 0), 4)} − ${lam} × ${par(w, 4)} = ${sn(g, 4)} · H = ${fx(hTerms.reduce((a, b) => a + b, 0), 4)} + ${lam} = ${fx(Hh, 4)}<br>new w = ${sn(w, 4)} + ${par(g, 4)} ÷ ${fx(Hh, 4)} = <span class="ans">${sn(nw, 4)}</span> &nbsp;·&nbsp; log-loss at this w = ${fx(ll, 4)}</div>`;
     w = nw;
