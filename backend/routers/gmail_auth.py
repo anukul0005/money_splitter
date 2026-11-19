@@ -56,6 +56,8 @@ def connect(purpose: str = "cards", caller: User = Depends(current_user)):
     `window.location = data.url` - there is nothing to POST here, Google's
     own consent screen is the next step. purpose=betting connects the inbox
     for My bets (BettingGmailConnection) instead of Credit Cards'."""
+    if purpose == "betting" and not caller.has_bet_access:
+        raise HTTPException(404, "Not found")   # My bets is admin-granted (models.User.bet_access)
     flow = _flow()
     # purpose=expenses: the same inbox connection as Credit Cards, made from
     # New expense / the monthly page's mail sync - Google sends them back there.

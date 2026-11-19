@@ -266,6 +266,9 @@ def daily_jobs(db: Session) -> dict:
     import bet_history
     from models import BettingGmailConnection
     for (uid,) in db.query(BettingGmailConnection.user_id).all():
+        u = db.get(User, uid)
+        if not (u and u.has_bet_access):
+            continue                              # My bets switched off for them (admin's call)
         try:
             bet_history.start_sync(uid)
         except RuntimeError:
