@@ -33,6 +33,7 @@ export default function DatePicker({ value, onChange, placeholder = 'Select date
   // than inside the field's box: in a modal or any scrolling card it was cut
   // off, and from a right-hand column it ran off the screen. Placed under
   // the field - above it when there's no room below - and kept on screen.
+  // Layered above every modal (the expense editor sits at z-200), or it opens out of sight.
   useLayoutEffect(() => {
     if (!open) return
     const place = () => {
@@ -102,7 +103,7 @@ export default function DatePicker({ value, onChange, placeholder = 'Select date
       </button>
       {open && pos && createPortal(
         <div ref={panelRef} style={{ position: 'fixed', left: pos.left, top: pos.top, width: PANEL_W }}
-          className="z-[100] bg-white border border-amber-200 rounded-md shadow-lg p-3">
+          className="z-[2000] bg-white border border-amber-200 rounded-md shadow-lg p-3">
           <div className="flex items-center justify-between mb-2">
             <button
               type="button" onClick={() => setViewMonth(new Date(y, m - 1, 1))}
