@@ -1,0 +1,1268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Betting Models from Scratch</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=STIX+Two+Text:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+/* Layout: one reading column like a match programme crossed with a textbook - chapters in order, formulas in ruled boxes, every example on the same five real bets. */
+:root {
+  --bg: #f4f6f2; --surface: #ffffff; --ink: #14211b; --muted: #5b6a62; --line: #d9e1db;
+  --pitch: #1d7a4b; --pitch-soft: #e3f1e8; --market: #b67a0c; --market-soft: #fbf0d9; --loss: #b8402b; --loss-soft: #f8e4df;
+  --slate: #49627a; --code: #eef2ee;
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-math: "STIX Two Text", "Times New Roman", Georgia, serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0d1411; --surface: #141e19; --ink: #e5ede8; --muted: #93a49b; --line: #263530;
+  --pitch: #4cc187; --pitch-soft: #183528; --market: #e3a83c; --market-soft: #3a2c12; --loss: #ec7a63; --loss-soft: #3c1d17;
+  --slate: #8fb0cf; --code: #1a2621; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0d1411; --surface: #141e19; --ink: #e5ede8; --muted: #93a49b; --line: #263530;
+  --pitch: #4cc187; --pitch-soft: #183528; --market: #e3a83c; --market-soft: #3a2c12; --loss: #ec7a63; --loss-soft: #3c1d17;
+  --slate: #8fb0cf; --code: #1a2621; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15.5px; line-height: 1.6; -webkit-text-size-adjust: 100%; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.wrap { max-width: 44rem; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 0 4rem; }
+header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line); }
+header.top .bar { max-width: 44rem; margin: 0 auto; display: flex; align-items: center; gap: .75rem; padding-block: .6rem; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+header.top .now { flex: 1; min-width: 0; font: 600 .8rem var(--f-body); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.progress { height: 3px; background: var(--pitch); width: 0; transition: width .1s linear; }
+button, select, input { font: inherit; color: inherit; }
+.btn { border: 1px solid var(--line); background: var(--surface); padding: .35rem .7rem; font-weight: 600; font-size: .8rem; cursor: pointer; }
+.btn:focus-visible, .chip:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid var(--pitch); outline-offset: 2px; }
+h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; line-height: 1.15; letter-spacing: -.01em; }
+h1 { font-size: clamp(2rem, 8vw, 2.9rem); font-weight: 800; margin: 2rem 0 .75rem; }
+h2 { font-size: 1.6rem; font-weight: 800; margin: 0 0 .5rem; }
+h3 { font-size: 1.1rem; font-weight: 700; margin: 1.6rem 0 .4rem; }
+p { margin: .6rem 0; }
+.lede { font-size: 1.05rem; color: var(--muted); }
+.eyebrow { font: 700 .72rem var(--f-body); letter-spacing: .12em; text-transform: uppercase; color: var(--pitch); }
+section.ch { padding-top: 2.6rem; scroll-margin-top: 3.5rem; }
+section.ch + section.ch { border-top: 1px solid var(--line); margin-top: 2.4rem; }
+.num { font-family: var(--f-mono); font-variant-numeric: tabular-nums; font-size: .88em; }
+.m { font-family: var(--f-math); font-size: 1.08em; }
+.m i, i.v { font-family: var(--f-math); font-style: italic; }
+.formula { font-family: var(--f-math); font-size: 1.12rem; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--pitch); padding: .8rem 1rem; margin: .9rem 0; overflow-x: auto; line-height: 1.9; }
+.formula .where { display: block; font-family: var(--f-body); font-size: .82rem; color: var(--muted); line-height: 1.5; margin-top: .3rem; }
+.frac { display: inline-flex; flex-direction: column; vertical-align: middle; text-align: center; margin: 0 .15em; line-height: 1.15; }
+.frac > span:first-child { border-bottom: 1px solid currentColor; padding: 0 .2em; }
+.frac > span:last-child { padding: 0 .2em; }
+.panel { background: var(--surface); border: 1px solid var(--line); padding: 1rem; margin: 1rem 0; }
+.panel h4 { margin: 0 0 .5rem; font: 700 .78rem var(--f-body); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.note { font-size: .85rem; color: var(--muted); }
+.callout { border: 1px solid var(--line); background: var(--pitch-soft); padding: .8rem 1rem; margin: 1rem 0; font-size: .93rem; }
+.callout.warn { background: var(--market-soft); }
+.callout b { font-weight: 700; }
+.chips { display: flex; flex-wrap: wrap; gap: .35rem; margin: .4rem 0 .8rem; }
+.chip { border: 1px solid var(--line); background: var(--surface); padding: .3rem .6rem; font-size: .78rem; font-weight: 600; cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.scroll { overflow-x: auto; margin: .6rem 0; }
+table { border-collapse: collapse; width: 100%; font-size: .84rem; }
+th, td { text-align: left; padding: .38rem .45rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 700; }
+td.r, th.r { text-align: right; }
+tr.hl td { background: var(--pitch-soft); font-weight: 700; }
+.pos { color: var(--pitch); } .neg { color: var(--loss); } .mk { color: var(--market); }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .6rem; margin: 1rem 0; }
+.stat { background: var(--surface); border: 1px solid var(--line); padding: .7rem .8rem; }
+.stat b { display: block; font: 800 1.45rem var(--f-display); }
+.stat span { font-size: .78rem; color: var(--muted); }
+label.row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .2rem .8rem; align-items: center; font-size: .85rem; margin: .5rem 0; }
+label.row input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--pitch); }
+.out { font: 800 2rem var(--f-display); }
+.big-p { display: flex; gap: 1.2rem; flex-wrap: wrap; align-items: baseline; margin: .4rem 0; }
+.big-p div { min-width: 0; }
+.big-p small { display: block; font-size: .72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
+.verdict { display: inline-block; font: 700 .72rem var(--f-body); letter-spacing: .06em; text-transform: uppercase; padding: .15rem .45rem; border: 1px solid; }
+.verdict.bet { color: var(--pitch); border-color: var(--pitch); } .verdict.skip { color: var(--muted); border-color: var(--line); }
+.res { display: inline-flex; width: 1.25rem; height: 1.25rem; align-items: center; justify-content: center; font: 700 .7rem var(--f-body); color: #fff; }
+.res.W { background: #1d7a4b; } .res.D { background: #7c8a83; } .res.L { background: #b8402b; }
+.form { font-family: var(--f-mono); letter-spacing: .12em; font-size: .8rem; }
+svg { display: block; max-width: 100%; height: auto; }
+svg text { fill: var(--muted); font-family: var(--f-body); font-size: 11px; }
+svg .ink { fill: var(--ink); } svg .axis { stroke: var(--line); }
+details.qa { border: 1px solid var(--line); background: var(--surface); padding: .6rem .8rem; margin: .45rem 0; }
+details.qa summary { cursor: pointer; font-weight: 600; font-size: .92rem; }
+details.qa p { font-size: .9rem; }
+.interview { margin-top: 1.4rem; }
+.interview > .eyebrow { color: var(--slate); }
+nav.toc ol { padding-left: 1.3rem; margin: .4rem 0; }
+nav.toc li { margin: .2rem 0; }
+nav.toc a { color: var(--ink); text-decoration: none; border-bottom: 1px solid var(--line); }
+#tocSheet { position: fixed; inset: 0; z-index: 20; background: color-mix(in srgb, var(--ink) 35%, transparent); display: flex; align-items: flex-end; justify-content: center; }
+#tocSheet .sheet { background: var(--surface); width: 100%; max-width: 44rem; max-height: 80vh; overflow-y: auto; padding: 1rem max(16px, env(safe-area-inset-right, 0px)) calc(1rem + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); border-top: 3px solid var(--pitch); }
+.tree { font-size: .85rem; }
+.tnode { border: 1px solid var(--line); background: var(--surface); padding: .45rem .6rem; margin: .3rem 0; }
+.tnode.hit { border-color: var(--pitch); background: var(--pitch-soft); }
+.tkids { margin-left: 1rem; padding-left: .7rem; border-left: 1px dashed var(--line); }
+.mono { font-family: var(--f-mono); font-size: .82rem; }
+.nnrow { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr); gap: .2rem .6rem; font-size: .84rem; align-items: baseline; }
+@media (prefers-reduced-motion: reduce) { .progress { transition: none; } html { scroll-behavior: auto; } }
+html { scroll-behavior: smooth; }
+
+.steps { counter-reset: st; padding: 0; margin: .6rem 0; list-style: none; }
+.steps > li { counter-increment: st; position: relative; padding: .2rem 0 .6rem 2.2rem; border-left: 2px solid var(--line); margin-left: .7rem; }
+.steps > li::before { content: counter(st); position: absolute; left: -.8rem; top: .15rem; width: 1.5rem; height: 1.5rem; background: var(--pitch); color: #fff; font: 700 .75rem var(--f-body); display: flex; align-items: center; justify-content: center; }
+.steps > li > b:first-child { display: block; font-family: var(--f-display); font-size: 1rem; }
+.calc { font-family: var(--f-mono); font-size: .86rem; background: var(--code); padding: .55rem .7rem; margin: .4rem 0; overflow-x: auto; white-space: nowrap; line-height: 1.75; }
+.calc .ans { color: var(--pitch); font-weight: 700; }
+.part { margin-top: 3rem; padding: 1.2rem 1rem; background: var(--ink); color: var(--bg); }
+.part .eyebrow { color: var(--bg); opacity: .75; }
+.part h2 { margin: .2rem 0 .3rem; }
+.part p { margin: 0; opacity: .85; font-size: .95rem; }
+td.tick { text-align: center; font-weight: 700; color: var(--pitch); }
+td.miss { background: var(--loss-soft); }
+tr.dim td { color: var(--muted); }
+input[type=text].hl-in { width: 100%; border: 1px solid var(--line); background: var(--surface); padding: .5rem .6rem; font-size: .9rem; }
+</style>
+
+<header class="top">
+  <div class="bar">
+    <span class="now" id="now">Betting models from scratch</span>
+    <button class="btn" id="tocBtn" aria-haspopup="dialog">Contents</button>
+  </div>
+  <div class="progress" id="progress"></div>
+</header>
+<div id="tocSheet" hidden role="dialog" aria-label="Contents"><div class="sheet"><nav class="toc" id="tocList"></nav><button class="btn" id="tocClose" style="margin-top:.8rem">Close</button></div></div>
+
+<main class="wrap">
+  <h1>Betting models, built from scratch</h1>
+  <p class="lede">Start with the arithmetic, then six machine-learning models from first principles, then the exact model that runs in your app, worked by hand on a real match. Every number on this page comes from real data: the five big leagues, 2016/17 to now.</p>
+  <div class="grid2" id="headStats"></div>
+  <div class="callout"><b>How to read this.</b> <b>Chapter 0</b> is the arithmetic toolkit; start there if formulas feel rusty. Chapters 1–4 are the foundations every model needs, 5–10 are the models, 11–12 put them side by side. <b>Part 2 (Chapters 13–21)</b> is the live model in the app: the bias fix, every feature by hand, one real pick step by step, learning the weights, line-ups, news, team grades and live picks. Most chapters end with interview questions; tap one to see a model answer.</div>
+  <nav class="toc panel" aria-label="Chapters"><h4>Chapters</h4><ol id="tocInline" start="0"></ol></nav>
+
+
+  <!-- 0 -->
+  <section class="ch" id="start" data-title="Start here: the arithmetic">
+    <div class="eyebrow">Chapter 0 · Start here</div>
+    <h2>The arithmetic behind everything</h2>
+    <p>Every chapter uses the same eight tools. Each is shown here with a real number from the app, so you can check it on a phone calculator. If a later formula looks scary, come back to this page: it is always one of these eight.</p>
+
+    <h3>1 · Decimals and percentages</h3>
+    <p>A chance is a number between 0 and 1. Multiply by 100 to read it as a percentage.</p>
+    <div class="calc">0.6726 × 100 = <span class="ans">67.26%</span> &nbsp;&nbsp;(the market's chance that Monaco beat Auxerre on 21 Nov)</div>
+
+    <h3>2 · The mean (average)</h3>
+    <div class="formula">mean = <span class="frac"><span><i>x</i><sub>1</sub> + <i>x</i><sub>2</sub> + … + <i>x<sub>n</sub></i></span><span><i>n</i></span></span><span class="where">Add them up, divide by how many there are. Written short: (1/<i>n</i>) Σ <i>x</i>. The Σ sign just means "add up all of".</span></div>
+    <div class="calc" id="c0mean"></div>
+
+    <h3>3 · The weighted average</h3>
+    <p>Same idea, but some numbers count more. The weights add up to 1.</p>
+    <div class="formula">weighted mean = <i>w</i><sub>1</sub><i>x</i><sub>1</sub> + <i>w</i><sub>2</sub><i>x</i><sub>2</sub> + <i>w</i><sub>3</sub><i>x</i><sub>3</sub> &nbsp;&nbsp; with <i>w</i><sub>1</sub> + <i>w</i><sub>2</sub> + <i>w</i><sub>3</sub> = 1</div>
+    <div class="calc" id="c0wmean"></div>
+
+    <h3>4 · Profit, return and break-even</h3>
+    <div class="formula">win: profit = stake × (<i>o</i> − 1) &nbsp;&nbsp; lose: profit = −stake &nbsp;&nbsp; ROI = <span class="frac"><span>total profit</span><span>total staked</span></span> &nbsp;&nbsp; break-even win rate = <span class="frac"><span>1</span><span><i>o</i></span></span></div>
+    <div class="calc">₹100 on Monaco @ 1.42 → win: 100 × 0.42 = <span class="ans">+₹42</span> · lose: <span class="ans">−₹100</span><br>
+      4 such bets, 3 won: 3 × 42 − 100 = +₹26 on ₹400 staked → ROI = 26 ÷ 400 = <span class="ans">+6.5%</span><br>
+      to break even at 1.42 you must win 1 ÷ 1.42 = <span class="ans">70.4%</span> of the time</div>
+
+    <h3>5 · e, powers and the natural log (ln)</h3>
+    <p><i class="v">e</i> = 2.71828… is just a fixed number, like π. <span class="m"><i>e</i><sup><i>x</i></sup></span> means e multiplied by itself <i class="v">x</i> times (it works for fractions too). <b>ln</b> is the undo button: <span class="m">ln(<i>e</i><sup><i>x</i></sup>) = <i>x</i></span>.</p>
+    <div class="scroll"><table><tr><th>x</th><th class="r">e<sup>x</sup></th><th>and back</th></tr>
+      <tr><td class="num">0</td><td class="r num">1</td><td class="num">ln 1 = 0</td></tr>
+      <tr><td class="num">0.693</td><td class="r num">2</td><td class="num">ln 2 = 0.693</td></tr>
+      <tr><td class="num">1</td><td class="r num">2.718</td><td class="num">ln 2.718 = 1</td></tr>
+      <tr><td class="num">−0.693</td><td class="r num">0.5</td><td class="num">ln 0.5 = −0.693</td></tr></table></div>
+    <p>Two rules you will use: <span class="m">ln(<i>a</i>/<i>b</i>) = ln <i>a</i> − ln <i>b</i></span>, and <span class="m"><i>e</i><sup>−<i>x</i></sup> = 1/<i>e</i><sup><i>x</i></sup></span>.</p>
+    <div class="calc">ln(0.6726 ÷ 0.3274) = ln(2.0544) = <span class="ans">0.720</span> &nbsp;(Monaco's market chance on the log-odds scale, Chapter 2)</div>
+
+    <h3>6 · Spread: the standard deviation</h3>
+    <div class="formula"><i>s</i> = √<span class="frac"><span>Σ (<i>x</i> − mean)²</span><span><i>n</i></span></span> &nbsp;&nbsp;&nbsp; z-score = <span class="frac"><span><i>x</i> − mean</span><span><i>s</i></span></span><span class="where">How far numbers typically sit from their mean. The z-score says "how many typical steps from normal" a value is: the model uses it to put every feature on the same scale.</span></div>
+    <div class="calc" id="c0sd"></div>
+
+    <h3>7 · tanh: a squash into −1 … +1</h3>
+    <div class="formula">tanh(<i>x</i>) = <span class="frac"><span><i>e</i><sup><i>x</i></sup> − <i>e</i><sup>−<i>x</i></sup></span><span><i>e</i><sup><i>x</i></sup> + <i>e</i><sup>−<i>x</i></sup></span></span><span class="where">Near 0 it is almost <i>x</i> itself; big numbers get flattened towards ±1. tanh(0.5) = 0.462, tanh(1) = 0.762, tanh(2) = 0.964. Used for the team grades and the news tone, so one extreme value can't run off the scale.</span></div>
+    <div class="calc">PSG's own edge 0.0117 ÷ 0.015 = 0.78 → tanh(0.78) = 0.653 → 50 + 50 × 0.653 = <span class="ans">82.6 ≈ 83</span> out of 100 (Chapter 20)</div>
+
+    <h3>8 · Halving: the half-life</h3>
+    <div class="formula">weight = 0.5<sup>age ÷ <i>h</i></sup><span class="where">After <i>h</i> days a thing counts half, after 2<i>h</i> a quarter. News uses <i>h</i> = 4 days.</span></div>
+    <div class="calc">age 0 → 1 · age 4 → 0.5 · age 8 → 0.25 · age 13.6 days → 0.5<sup>3.4</sup> = <span class="ans">0.095</span></div>
+
+    <div class="panel">
+      <h4>Pocket calculator: type any number</h4>
+      <label class="row" for="c0x">x <input type="text" class="hl-in" id="c0x" value="0.72" inputmode="decimal" style="grid-column:1/-1"></label>
+      <div class="scroll"><table id="c0calc"></table></div>
+    </div>
+  </section>
+
+  <!-- 1 -->
+  <section class="ch" id="odds" data-title="Odds and chance">
+    <div class="eyebrow">Chapter 1 · Foundations</div>
+    <h2>Odds are chances in disguise</h2>
+    <p>Decimal odds say how much you get back per ₹1 staked if the bet wins. Odds of 1.80 return ₹180 on ₹100. Turn them around and they become the bookmaker's view of the chance.</p>
+    <div class="formula">
+      <i>q</i><sub><i>i</i></sub> = <span class="frac"><span>1</span><span><i>o</i><sub><i>i</i></sub></span></span>
+      <span class="where"><i>o<sub>i</sub></i> is the decimal price of outcome <i>i</i> (home, draw, away); <i>q<sub>i</sub></i> is its implied chance.</span>
+    </div>
+    <p>The three implied chances add up to more than 100%. The extra is the <b>overround</b>, the bookmaker's margin. To get fair chances we divide it out:</p>
+    <div class="formula">
+      overround = <i>q</i><sub>H</sub> + <i>q</i><sub>D</sub> + <i>q</i><sub>A</sub> − 1 &nbsp;&nbsp;&nbsp; <i>m</i><sub><i>i</i></sub> = <span class="frac"><span><i>q</i><sub><i>i</i></sub></span><span><i>q</i><sub>H</sub> + <i>q</i><sub>D</sub> + <i>q</i><sub>A</sub></span></span>
+      <span class="where"><i>m<sub>i</sub></i> is the margin-free ("no-vig") chance. Every model on this page starts from <i>m</i> for the side you back.</span>
+    </div>
+    <div class="panel">
+      <h4>Try it: Brighton v Brentford, 8 Nov, closing average</h4>
+      <div class="grid2" style="margin:.2rem 0">
+        <label class="row" for="oH">Home <span class="num" id="oHv"></span><input type="range" id="oH" min="1.05" max="8" step="0.01" value="1.80"></label>
+        <label class="row" for="oD">Draw <span class="num" id="oDv"></span><input type="range" id="oD" min="2.5" max="8" step="0.01" value="3.85"></label>
+        <label class="row" for="oA">Away <span class="num" id="oAv"></span><input type="range" id="oA" min="1.05" max="15" step="0.01" value="4.09"></label>
+      </div>
+      <div class="scroll"><table id="oddsTable"></table></div>
+      <p class="note" id="oddsNote"></p>
+    </div>
+    <h3>Why the closing price is hard to beat</h3>
+    <p>The closing price is the last one before kick-off. By then it carries the line-ups, the news and the money of the sharpest bettors. Across 9,288 test bets, backing the side at its closing price lost <b class="neg" id="backAllRoi"></b>, roughly the margin. A model is useful only if it finds where this price is wrong.</p>
+  </section>
+
+  <!-- 2 -->
+  <section class="ch" id="logodds" data-title="Log-odds and the sigmoid">
+    <div class="eyebrow">Chapter 2 · Foundations</div>
+    <h2>Log-odds: the scale models think on</h2>
+    <p>A chance lives between 0 and 1, which makes adding effects awkward: +5 points on a 97% favourite would break 100%. So models work on <b>log-odds</b> (also called the logit), which runs from −∞ to +∞, and turn the answer back into a chance at the end with the <b>sigmoid</b>.</p>
+    <div class="formula">
+      logit(<i>p</i>) = ln <span class="frac"><span><i>p</i></span><span>1 − <i>p</i></span></span>
+      &nbsp;&nbsp;&nbsp;&nbsp; σ(<i>z</i>) = <span class="frac"><span>1</span><span>1 + <i>e</i><sup>−<i>z</i></sup></span></span>
+      <span class="where">σ is the inverse of logit: σ(logit(<i>p</i>)) = <i>p</i>. A 50% chance is log-odds 0; 73% is +1; 88% is +2.</span>
+    </div>
+    <div class="panel">
+      <h4>Try it</h4>
+      <label class="row" for="pSl">Chance <span class="num" id="pSlv"></span><input type="range" id="pSl" min="0.02" max="0.98" step="0.01" value="0.55"></label>
+      <div class="big-p"><div><small>log-odds</small><span class="out num" id="zOut"></span></div><div><small>+0.10 on log-odds gives</small><span class="out num" id="zPlus"></span></div></div>
+      <p class="note">The same +0.10 log-odds moves a 50% chance by about 2.5 points but a 95% chance by only 0.5. That is the slope of the sigmoid: <span class="m">dp/dz = p(1 − p)</span>.</p>
+    </div>
+    <div class="callout">Remember <span class="m">Δ<i>p</i> ≈ Δ<i>z</i> · <i>p</i>(1 − <i>p</i>)</span>. At a typical 55% chance, <span class="m"><i>p</i>(1 − <i>p</i>) ≈ 0.25</span>, so a weight of 0.04 on the log-odds scale is about 1 percentage point.</div>
+  </section>
+
+  <!-- 3 -->
+  <section class="ch" id="data" data-title="The data and the features">
+    <div class="eyebrow">Chapter 3 · Foundations</div>
+    <h2>The data: one bet a match</h2>
+    <p>Every league match in England, Spain, Italy, Germany and France from 2016/17 to now with a closing price: <b id="nRows"></b> matches. For each one we back a side: <b>your team</b> if one of your ₹ teams plays (<span id="nMine"></span> matches), otherwise the favourite. The target is simple:</p>
+    <div class="formula"><i>y</i> = 1 if the backed side wins, 0 for a draw or a loss</div>
+    <p>Each match gets twelve <b>features</b>, all computed only from what was known before kick-off. Matches in cups are not in the files, so form counts league games only.</p>
+    <div class="scroll"><table id="featTable"></table></div>
+    <h3>Two features need the price</h3>
+    <p>Raw form misleads: winning 8 of 12 at average odds of 1.30 is expected, at 2.20 it is remarkable. So two features measure results <b>beyond what the prices expected</b>:</p>
+    <div class="formula">
+      xPts = 3 · <i>m</i><sub>win</sub> + 1 · <i>m</i><sub>draw</sub> &nbsp;&nbsp;&nbsp; pvp12 = <span class="frac"><span>1</span><span>12</span></span> Σ (points − xPts)
+      <span class="where">Expected points from the no-vig chances of that match, summed over the last 12.</span>
+    </div>
+    <div class="formula">
+      xGD = <span id="xgdK"></span> · (<i>m</i><sub>home</sub> − <i>m</i><sub>away</sub>) <span id="xgdC"></span> &nbsp;&nbsp;&nbsp; gdvp6 = <span class="frac"><span>1</span><span>6</span></span> Σ (goal difference − xGD)
+      <span class="where">The line was fitted on all 29,393 matches: a side the market makes 30 points likelier to win than its opponent is expected to win by about 0.75 goals.</span>
+    </div>
+    <h3>Standardising</h3>
+    <p>League position runs 1–20 while share of shots runs 0–1. To make weights comparable, each feature is rescaled to mean 0 and spread 1 using the training data:</p>
+    <div class="formula"><i>x̃</i> = <span class="frac"><span><i>x</i> − <i>μ</i></span><span><i>s</i></span></span><span class="where"><i>μ</i> and <i>s</i> are the training mean and standard deviation (in the table). So a weight is "the effect of one typical step".</span></div>
+    <h3>Your five matches, used in every chapter</h3>
+    <div class="scroll"><table id="headTable"></table></div>
+  </section>
+
+  <!-- 4 -->
+  <section class="ch" id="judge" data-title="Judging a model">
+    <div class="eyebrow">Chapter 4 · Foundations</div>
+    <h2>What makes a model good</h2>
+    <h3>Log-loss: the score we minimise</h3>
+    <p>A model gives a chance <i class="v">p</i>; the match gives <i class="v">y</i>. Log-loss punishes confident mistakes hard.</p>
+    <div class="formula">
+      LogLoss = −<span class="frac"><span>1</span><span><i>N</i></span></span> Σ [ <i>y</i> ln <i>p</i> + (1 − <i>y</i>) ln(1 − <i>p</i>) ]
+      <span class="where">Lower is better. Saying 50% on everything scores ln 2 = 0.693. The market scores <span id="llMarket"></span> on the test seasons.</span>
+    </div>
+    <div class="panel"><h4>Worked on your five, with the market's chance</h4><div class="scroll"><table id="llTable"></table></div></div>
+    <p><b>Brier score</b> is the other common one: <span class="m">(1/<i>N</i>) Σ (<i>p</i> − <i>y</i>)²</span>, the mean squared error of the chance.</p>
+    <h3>Calibration</h3>
+    <p>Group the bets by predicted chance. A calibrated model's 70% bets win 70% of the time. Chapter 8 shows a model that fails this.</p>
+    <h3>Overfitting and walk-forward testing</h3>
+    <p>A flexible model can memorise the past, noise included. The only fair test is on seasons it has never seen. We train on every season before, test on the next, then move forward one season:</p>
+    <div class="scroll"><table id="foldTable"></table></div>
+    <h3>From chance to a bet</h3>
+    <p>A bet has positive expected value when our chance times the price is above 1:</p>
+    <div class="formula">EV = <i>p</i> · <i>o</i> − 1 &gt; 0 &nbsp;⇔&nbsp; <i>p</i> &gt; <span class="frac"><span>1</span><span><i>o</i></span></span><span class="where">Every model's ROI on this page is: bet ₹100 when <i>p · o</i> &gt; 1, skip otherwise.</span></div>
+    <div class="interview"><div class="eyebrow">Interview questions</div><div id="qa-judge"></div></div>
+  </section>
+
+  <!-- 5 -->
+  <section class="ch" id="logistic" data-title="Logistic regression">
+    <div class="eyebrow">Chapter 5 · Model</div>
+    <h2>Logistic regression, starting from the market</h2>
+    <p><b>The idea.</b> Take the market's log-odds as the starting point and let each feature push it up or down by a fixed amount per unit. Add up, then squash back into a chance.</p>
+    <div class="formula">
+      <i>z</i> = logit(<i>m</i>) + <i>b</i> + Σ<sub><i>j</i></sub> <i>w</i><sub><i>j</i></sub> <i>x̃</i><sub><i>j</i></sub> &nbsp;&nbsp;&nbsp; <i>p</i> = σ(<i>z</i>)
+      <span class="where">logit(<i>m</i>) is the <b>offset</b>: fixed, not learned. <i>b</i> is the intercept, <i>w<sub>j</sub></i> the weight of feature <i>j</i>. With every weight 0 the model is the market.</span>
+    </div>
+    <h3>How it learns</h3>
+    <p>It picks the weights that make the observed results most likely: <b>maximum likelihood</b>, which is the same as minimising log-loss. Add a penalty on large weights (<b>L2 regularisation</b>) so noise can't buy big weights:</p>
+    <div class="formula">
+      <i>L</i>(<i>w</i>) = −Σ<sub><i>n</i></sub> [ <i>y<sub>n</sub></i> ln <i>p<sub>n</sub></i> + (1 − <i>y<sub>n</sub></i>) ln(1 − <i>p<sub>n</sub></i>) ] + <span class="frac"><span>λ</span><span>2</span></span> ‖<i>w</i>‖²
+    </div>
+    <p>The gradient has a beautifully simple form, the features times the errors:</p>
+    <div class="formula">
+      ∇<i>L</i> = −<i>X</i><sup>T</sup>(<i>y</i> − <i>p</i>) + λ<i>w</i> &nbsp;&nbsp;&nbsp; <i>H</i> = <i>X</i><sup>T</sup> diag(<i>p</i>(1 − <i>p</i>)) <i>X</i> + λ<i>I</i>
+      <span class="where">We used <b>Newton's method</b>: <i>w</i> ← <i>w</i> − <i>H</i><sup>−1</sup>∇<i>L</i>. It converges in a handful of steps because log-loss is convex: one valley, no traps. λ = 2 here.</span>
+    </div>
+    <h3>The weights it learned</h3>
+    <p class="note">Trained on <span id="lastTrain"></span> matches (2016/17 to 2025/26). Bars are on the log-odds scale per one standard step of the feature; the right column converts to percentage points at a 55% chance.</p>
+    <div id="wChart"></div>
+    <div class="callout" id="wRead"></div>
+    <h3>Run it on your five</h3>
+    <div class="chips" id="lgPick" role="group" aria-label="Choose a match"></div>
+    <div class="panel">
+      <div class="scroll"><table id="lgTable"></table></div>
+      <div class="big-p"><div><small>market</small><span class="out num mk" id="lgM"></span></div><div><small>model</small><span class="out num" id="lgP"></span></div><div><small>p × odds</small><span class="out num" id="lgEV"></span></div></div>
+      <p id="lgVerdict"></p>
+      <h4 style="margin-top:1rem">Change a feature and watch</h4>
+      <div id="lgSliders"></div>
+      <button class="btn" id="lgReset">Reset to the real values</button>
+    </div>
+    <div class="interview"><div class="eyebrow">Interview questions</div><div id="qa-logistic"></div></div>
+  </section>
+
+  <!-- 6 -->
+  <section class="ch" id="gam" data-title="GAM">
+    <div class="eyebrow">Chapter 6 · Model</div>
+    <h2>GAM: logistic regression that can bend</h2>
+    <p><b>The idea.</b> Logistic regression says every extra loss counts the same. Real effects bend: one loss in five may mean nothing while three means a crisis. A <b>generalised additive model</b> replaces each straight line with a flexible curve <i class="v">f<sub>j</sub></i>, but still adds them up, so each curve stays readable.</p>
+    <div class="formula">
+      <i>z</i> = logit(<i>m</i>) + <i>b</i> + Σ<sub><i>j</i></sub> <i>f<sub>j</sub></i>(<i>x̃<sub>j</sub></i>)
+      &nbsp;&nbsp;&nbsp; <i>f<sub>j</sub></i>(<i>x</i>) = <i>w</i><sub><i>j</i>0</sub> <i>x</i> + Σ<sub><i>k</i></sub> <i>w<sub>jk</sub></i> · max(0, <i>x</i> − <i>κ<sub>k</sub></i>)
+      <span class="where">Each max(0, <i>x</i> − κ) is a <b>hinge</b> that switches on past a knot κ, letting the slope change there. Knots at each feature's 25th, 50th and 75th percentile. Fitted exactly like Chapter 5, with a stronger penalty (λ = 6) because there are 4× as many weights.</span>
+    </div>
+    <h3>The curves it learned</h3>
+    <div class="chips" id="gamPick" role="group" aria-label="Choose a feature"></div>
+    <div class="panel"><div id="gamChart"></div><p class="note" id="gamNote"></p></div>
+    <p>On your five, the GAM gives: <span id="gamHead"></span></p>
+    <div class="interview"><div class="eyebrow">Interview questions</div><div id="qa-gam"></div></div>
+  </section>
+
+  <!-- 7 -->
+  <section class="ch" id="boost" data-title="Trees and boosting">
+    <div class="eyebrow">Chapter 7 · Model</div>
+    <h2>Decision trees, then gradient boosting</h2>
+    <h3>One tree</h3>
+    <p>A tree asks yes/no questions ("losses in last 5 ≤ 2?") and puts each match in a <b>leaf</b>. At each step it tries every feature and every cut, and keeps the one that best separates the outcomes. For a regression tree, "best" means the biggest fall in squared error:</p>
+    <div class="formula">
+      gain = Σ<sub>parent</sub>(<i>g</i> − <i>ḡ</i>)² − [ Σ<sub>left</sub>(<i>g</i> − <i>ḡ</i><sub>L</sub>)² + Σ<sub>right</sub>(<i>g</i> − <i>ḡ</i><sub>R</sub>)² ]
+      <span class="where">For classification trees you will also hear Gini impurity, 1 − Σ <i>p<sub>c</sub></i>². Boosting uses regression trees on the errors, as below.</span>
+    </div>
+    <h3>Boosting: many small trees fixing each other</h3>
+    <p>Start from the market's log-odds. Fit a small tree to what the current model gets wrong, add a little of it, repeat:</p>
+    <div class="formula">
+      <i>F</i><sub>0</sub> = logit(<i>m</i>) &nbsp;&nbsp; <i>g<sub>n</sub></i> = <i>y<sub>n</sub></i> − <i>p<sub>n</sub></i> &nbsp;&nbsp; <i>h<sub>n</sub></i> = <i>p<sub>n</sub></i>(1 − <i>p<sub>n</sub></i>)
+      <br>leaf value <i>v</i> = <span class="frac"><span>Σ<sub>leaf</sub> <i>g<sub>n</sub></i></span><span>Σ<sub>leaf</sub> <i>h<sub>n</sub></i> + λ</span></span> &nbsp;&nbsp; <i>F<sub>t</sub></i> = <i>F</i><sub><i>t</i>−1</sub> + η · <i>v</i><sub>leaf(<i>x</i>)</sub>
+      <span class="where"><i>g</i> is the gradient (the error), <i>h</i> the Hessian (how sure we were). The leaf value is a Newton step, the same maths as Chapter 5 done one leaf at a time. η = 0.05 is the learning rate; trees are 2 levels deep with at least 300 matches per leaf and λ = 10. This is what LightGBM and XGBoost do, with faster split-finding.</span>
+    </div>
+    <p>How many trees? Too few underfit, too many memorise. We held out the last training season and stopped where its log-loss was lowest: <b id="nTrees"></b> trees for the latest model. In 2022/23 the best number was 1, meaning the trees found nothing that held up.</p>
+    <h3>The first real tree</h3>
+    <div class="chips" id="trPick" role="group" aria-label="Choose a match"></div>
+    <div class="panel tree" id="treeBox"></div>
+    <p id="trWalk"></p>
+    <div class="interview"><div class="eyebrow">Interview questions</div><div id="qa-boost"></div></div>
+  </section>
+
+  <!-- 8 -->
+  <section class="ch" id="forest" data-title="Random forest">
+    <div class="eyebrow">Chapter 8 · Model</div>
+    <h2>Random forest: many deep trees voting</h2>
+    <p><b>The idea.</b> Grow hundreds of deep trees, each on a random resample of the matches (<b>bagging</b>) and each split choosing from a random subset of features. Their mistakes differ, so the average is steadier than any one tree.</p>
+    <div class="formula">
+      <i>p</i>(<i>x</i>) = <span class="frac"><span>1</span><span><i>T</i></span></span> Σ<sub><i>t</i>=1</sub><sup><i>T</i></sup> <i>p<sub>t</sub></i>(<i>x</i>)
+      <span class="where"><i>T</i> = 300 trees, at least 40 matches per leaf, √12 ≈ 3 features tried per split. Averaging cuts the variance of one tree by up to a factor of <i>T</i> when the trees are uncorrelated.</span>
+    </div>
+    <p>A forest cannot start from the market's log-odds: it has no offset. So the market's chance goes in as just another feature, and the forest has to relearn the bookmaker from scratch. It leans on it heavily:</p>
+    <div id="impChart"></div>
+    <h3>The calibration problem</h3>
+    <p>Averaging pulls chances towards the middle. Below, each dot is a group of test bets: predicted chance across, actual win rate up. On the diagonal is perfect.</p>
+    <div class="panel"><div id="calChart"></div></div>
+    <p>On your five, the forest says: <span id="rfHead"></span>. It is the most eager to bet, and its ROI swings from season to season.</p>
+    <div class="interview"><div class="eyebrow">Interview questions</div><div id="qa-forest"></div></div>
+  </section>
+
+  <!-- 9 -->
+  <section class="ch" id="nn" data-title="Neural network">
+    <div class="eyebrow">Chapter 9 · Model</div>
+    <h2>Neural network: layers of tiny regressions</h2>
+    <p><b>The idea.</b> A neuron is a logistic regression with a different squash. Stack a layer of them, feed their outputs into one more, and the network can learn shapes no single formula was told about.</p>
+    <div class="formula">
+      <i>h</i> = ReLU(<i>W</i><sub>1</sub><sup>T</sup> <i>x</i> + <i>b</i><sub>1</sub>) &nbsp;&nbsp; <i>p</i> = σ(<i>W</i><sub>2</sub><sup>T</sup> <i>h</i> + <i>b</i><sub>2</sub>) &nbsp;&nbsp; ReLU(<i>u</i>) = max(0, <i>u</i>)
+      <span class="where">Trained by <b>backpropagation</b>: the chain rule carries the error back through each layer, e.g. ∂<i>L</i>/∂<i>W</i><sub>2</sub> = <i>h</i>(<i>p</i> − <i>y</i>), and the optimiser (Adam) steps every weight downhill.</span>
+    </div>
+    <h3>A real 3-neuron network, by hand</h3>
+    <p class="note">Trained on four inputs only (points per game over 12, points beyond the price, losses in 5, and the market's log-odds) so every step fits on screen. All weights are the real fitted ones.</p>
+    <div class="chips" id="nnPick" role="group" aria-label="Choose a match"></div>
+    <div class="panel" id="nnBox"></div>
+    <h3>Why a big one fails here</h3>
+    <p>A network with two layers of 128 neurons and almost no penalty, trained on 2016–2026 and tested on this season:</p>
+    <div id="ofChart"></div>
+    <p>It learned the training matches nearly by heart and is far worse than the market on new ones. Our real network (8 neurons, penalised, early stopping) still trails the market on log-loss: <span id="nnLL"></span>. 18,000 rows is small data for a neural network.</p>
+    <div class="interview"><div class="eyebrow">Interview questions</div><div id="qa-nn"></div></div>
+  </section>
+
+  <!-- 10 -->
+  <section class="ch" id="bayes" data-title="Bayesian team grade">
+    <div class="eyebrow">Chapter 10 · Model</div>
+    <h2>Bayesian shrinkage: grading teams honestly</h2>
+    <p><b>The idea.</b> To grade a team, measure how often it beat its price: <span class="m"><i>r</i> = mean(<i>y</i> − <i>m</i>)</span> over its matches. But a team on +5% over 340 matches may just be lucky. Shrinkage pulls each team towards zero by how much of its number is likely noise.</p>
+    <div class="formula">
+      <i>r</i><sub>team</sub> ~ Normal(<i>θ</i><sub>team</sub>, σ²/<i>n</i>) &nbsp;&nbsp; <i>θ</i><sub>team</sub> ~ Normal(0, τ²)
+      <br><i>θ̂</i> = <i>r</i> · <span class="frac"><span><i>n</i></span><span><i>n</i> + σ²/τ²</span></span>
+      <span class="where">σ² ≈ average <i>m</i>(1 − <i>m</i>), the noise of one match. τ² is how much teams <b>truly</b> differ, estimated from the data: τ² = Var(team <i>r</i>) − mean(σ²/<i>n</i>), the spread we see minus the spread luck alone would make. This is <b>empirical Bayes</b>.</span>
+    </div>
+    <div class="panel" id="bayesBox"></div>
+    <div class="callout warn" id="bayesRead"></div>
+    <h3>What if teams did differ?</h3>
+    <label class="row" for="tauSl">Suppose true team spread τ <span class="num" id="tauV"></span><input type="range" id="tauSl" min="0.005" max="0.05" step="0.001" value="0.02"></label>
+    <div class="scroll"><table id="bayesTable"></table></div>
+    <div class="interview"><div class="eyebrow">Interview questions</div><div id="qa-bayes"></div></div>
+  </section>
+
+  <!-- 11 -->
+  <section class="ch" id="results" data-title="Results">
+    <div class="eyebrow">Chapter 11 · Verdict</div>
+    <h2>Six models, tested on six unseen seasons</h2>
+    <p>2021/22 to 2026/27 so far, <span id="nTest"></span> bets, every model trained only on the seasons before.</p>
+    <div class="scroll"><table id="resTable"></table></div>
+    <h3>Season by season: logistic regression</h3>
+    <div id="seasonChart"></div>
+    <h3>Is +3.4% real?</h3>
+    <p>Each ₹100 bet at odds <i class="v">o</i> has a standard deviation of about ₹100·√(<i>o</i> − 1). At odds near 2 that is ₹100 a bet, so over <i class="v">N</i> bets:</p>
+    <div class="formula">SE(ROI) ≈ <span class="frac"><span>√(<i>o</i> − 1)</span><span>√<i>N</i></span></span> ≈ <span class="frac"><span>1</span><span>√1915</span></span> ≈ 2.3%<span class="where">So +3.4% is about 1.5 standard errors from zero: encouraging, positive in 5 of 6 seasons, not yet proof.</span></div>
+    <div class="callout" id="verdict"></div>
+  </section>
+
+  <!-- 12 -->
+  <section class="ch" id="five" data-title="Your five, every model">
+    <div class="eyebrow">Chapter 12 · Side by side</div>
+    <h2>Your five bets through every model</h2>
+    <p>Chance for your team, then whether the model bets (chance × odds above 1), and the ₹ result at ₹100 a bet.</p>
+    <div class="scroll"><table id="fiveTable"></table></div>
+    <p class="note">Five matches prove nothing on their own; they are here to show how differently the models think about the same match.</p>
+    <h3>What came next</h3>
+    <p>Rotation (regulars missing from the line-up) and 14-day news sentiment were added after this comparison, together with a fix for the favourite–longshot bias. <a href="#part2">Part 2</a> walks through all of it.</p>
+  </section>
+
+
+  <div class="part" id="part2">
+    <div class="eyebrow">Part 2</div>
+    <h2>The model that runs in the app</h2>
+    <p>Chapters 13–21 follow one real match, Monaco v Auxerre on 21 Nov, from the prices to a recorded pick, with every sum written out.</p>
+  </div>
+
+  <!-- 13 -->
+  <section class="ch" id="built" data-title="From lesson to live model">
+    <div class="eyebrow">Chapter 13 · Part 2</div>
+    <h2>From the lesson to the live model</h2>
+    <p>Part 1 compared six models; logistic regression starting from the market won. That is what now runs in the app, rebuilt every day. Five things changed on the way:</p>
+    <div class="scroll"><table>
+      <tr><th></th><th>Part 1 (lesson)</th><th>Live model</th></tr>
+      <tr><td><b>Rows</b></td><td>one side a match (your team or the favourite)</td><td>both sides of every match: <span class="num" id="b2rows"></span> rows</td></tr>
+      <tr><td><b>The market</b></td><td>only the starting point (offset)</td><td>starting point <i>and</i> a feature, to correct the favourite–longshot bias (Ch 14)</td></tr>
+      <tr><td><b>Line-ups</b></td><td>not used</td><td>regulars missing from the XI, for <span class="num" id="b2lu"></span> rows (Ch 18)</td></tr>
+      <tr><td><b>News</b></td><td>not used</td><td>14-day tone per club, shown beside the model (Ch 19)</td></tr>
+      <tr><td><b>Bets</b></td><td>backtest only</td><td>picks recorded live every 20 minutes, settled at the closing price (Ch 21)</td></tr>
+    </table></div>
+    <div class="grid2" id="b2stats"></div>
+    <div class="callout"><b>Why "both sides"?</b> Each match gives two rows: Monaco's view (home, 67% by the market) and Auxerre's (away, 14%). Twice the rows, and the model learns about favourites <i>and</i> underdogs. The draw is the third outcome; we never back it.</div>
+  </section>
+
+  <!-- 14 -->
+  <section class="ch" id="bias" data-title="Favourite–longshot bias">
+    <div class="eyebrow">Chapter 14 · Part 2</div>
+    <h2>The favourite–longshot bias</h2>
+    <p>The market is not equally wrong everywhere. Group all <span id="biasN"></span> tested sides by the market's chance and compare with how often they really won:</p>
+    <div class="scroll"><table id="biasTable"></table></div>
+    <p><b>Read it:</b> longshots (under 30%) win <i>less</i> often than their price says, and ₹100 on every one of them loses 11–20%. Favourites win a touch <i>more</i> often. Bookmakers put most of their margin on longshots, because people love backing them.</p>
+    <h3>The fix: let the model stretch the market</h3>
+    <p>In Part 1 the market's log-odds were only the starting point. Now they are also a feature, with their own learned weight:</p>
+    <div class="formula"><i>z</i> = logit(<i>m</i>) + <i>b</i> + <i>w</i><sub>m</sub> · <span class="frac"><span>logit(<i>m</i>) − <i>μ</i></span><span><i>s</i></span></span> + (other features)<span class="where" id="biasWhere"></span></div>
+    <div class="calc" id="biasCalc"></div>
+    <div class="callout warn"><b>Why the app only backs favourites.</b> With both sides as rows, the first fit found "value" on underdogs that lost about 9% when tested. Even after this fix, underdog value didn't hold up, so a pick must be the favourite <i>and</i> have chance × price above 1.</div>
+    <div class="interview"><div class="eyebrow">Interview questions</div><div id="qa-bias"></div></div>
+  </section>
+
+  <!-- 15 -->
+  <section class="ch" id="feats2" data-title="Every feature by hand">
+    <div class="eyebrow">Chapter 15 · Part 2</div>
+    <h2>Every feature, worked by hand</h2>
+    <p>Before kick-off the app looks back at each club's last 12 league games. Here are Monaco's and Auxerre's, oldest first (game 12 is the most recent). Pick a side:</p>
+    <div class="chips" id="f2Pick" role="group" aria-label="Choose a side"></div>
+    <div class="scroll"><table id="f2Games"></table></div>
+    <p class="note">xPts and xGD are what the prices of <i>that</i> match expected: xPts = 3 × (chance to win) + 1 × (chance to draw); xGD = <span id="f2k"></span> × (home chance − away chance) <span id="f2c"></span>, a straight line fitted through every match since 2016 ("least squares": the line with the smallest total squared miss).</p>
+    <div id="f2Calc"></div>
+  </section>
+
+  <!-- 16 -->
+  <section class="ch" id="worked" data-title="One match, every step">
+    <div class="eyebrow">Chapter 16 · Part 2</div>
+    <h2>One match, every step</h2>
+    <p id="wkIntro"></p>
+    <ol class="steps" id="wkSteps"></ol>
+    <h3>All twelve pushes</h3>
+    <div class="chips" id="wkPick" role="group" aria-label="Choose a side"></div>
+    <div class="scroll"><table id="wkTable"></table></div>
+    <div class="callout" id="wkRead"></div>
+    <div class="interview"><div class="eyebrow">Interview questions</div><div id="qa-worked"></div></div>
+  </section>
+
+  <!-- 17 -->
+  <section class="ch" id="newton" data-title="Learning the weights by hand">
+    <div class="eyebrow">Chapter 17 · Part 2</div>
+    <h2>Learning the weights, by hand</h2>
+    <p>Where do numbers like 0.147 come from? The computer tries a weight, sees how wrong the chances are, and corrects, a few times. Here is the same method on six made-up matches and <b>one</b> feature, so every number fits on screen.</p>
+    <div class="scroll"><table id="ntData"></table></div>
+    <div class="formula">
+      <i>p<sub>n</sub></i> = σ(logit(<i>m<sub>n</sub></i>) + <i>w</i> · <i>x<sub>n</sub></i>)<br>
+      slope: <i>g</i> = Σ <i>x<sub>n</sub></i>(<i>y<sub>n</sub></i> − <i>p<sub>n</sub></i>) − λ<i>w</i> &nbsp;&nbsp; curvature: <i>H</i> = Σ <i>p<sub>n</sub></i>(1 − <i>p<sub>n</sub></i>)<i>x<sub>n</sub></i>² + λ &nbsp;&nbsp; new <i>w</i> = <i>w</i> + <span class="frac"><span><i>g</i></span><span><i>H</i></span></span>
+      <span class="where"><b>y − p</b> is the miss on each match. If the matches with a high <i>x</i> won more than predicted, <i>g</i> is positive and <i>w</i> goes up. <i>H</i> says how fast the slope changes, so the step is the right size (Newton's method). λ is the penalty that keeps <i>w</i> small unless the data insist. Here λ = <span id="ntLam"></span>.</span>
+    </div>
+    <div id="ntIters"></div>
+    <div class="callout" id="ntRead"></div>
+    <p class="note">In the app it is the same thing with 13 weights at once (an intercept plus 12 features), 36,312 rows and λ = 2: <i>g</i> becomes a list (the gradient), <i>H</i> a 13 × 13 table (the Hessian), and "divide by <i>H</i>" becomes solving a set of equations. It stops when no weight moves by more than 0.000000001, usually within 6 rounds.</p>
+    <div class="interview"><div class="eyebrow">Interview questions</div><div id="qa-newton"></div></div>
+  </section>
+
+  <!-- 18 -->
+  <section class="ch" id="rotation" data-title="Line-ups and rotation">
+    <div class="eyebrow">Chapter 18 · Part 2</div>
+    <h2>Line-ups: counting the regulars who are missing</h2>
+    <p>A <b>regular</b> is a player who started at least 3 of the club's last 5 league games. When the starting XI comes out (about an hour before kick-off), the app counts how many regulars are not in it.</p>
+    <div class="formula">regular ⇔ starts in last 5 ≥ 3 &nbsp;&nbsp;&nbsp; rot = number of regulars not in today's XI</div>
+    <div id="rotIntro"></div>
+    <div class="scroll"><table id="rotTable"></table></div>
+    <div class="calc" id="rotCalc"></div>
+    <h3>Does rotation matter? The raw numbers</h3>
+    <div class="scroll"><table id="rotEff"></table></div>
+    <p class="note">On its own the effect is small: the closing price is set after the team news, so the market has already seen the XI. What the model gains is the <i>combination</i>: a favourite whose regulars all play, against an opponent that rested several.</p>
+    <h3>With and without line-ups, tested</h3>
+    <div class="scroll"><table id="rotRes"></table></div>
+    <div class="callout" id="rotRead"></div>
+    <div class="interview"><div class="eyebrow">Interview questions</div><div id="qa-rotation"></div></div>
+  </section>
+
+  <!-- 19 -->
+  <section class="ch" id="sentiment" data-title="News sentiment">
+    <div class="eyebrow">Chapter 19 · Part 2</div>
+    <h2>News sentiment: from headlines to a tone</h2>
+    <p>Every 6 hours the app reads each club's latest ESPN articles. No AI is needed: a <b>word list</b> gives each phrase a weight, negative for trouble and positive for good news.</p>
+    <div class="scroll"><table id="lexTable"></table></div>
+    <h3>Step 1: score one article</h3>
+    <div class="formula">article score = tanh <span class="frac"><span>sum of the weights of the phrases found</span><span>3</span></span><span class="where">tanh keeps it between −1 and +1, so ten negative words don't count ten times as much as one (Chapter 0, tool 7).</span></div>
+    <div class="panel">
+      <h4>Try it: type a headline</h4>
+      <input type="text" class="hl-in" id="snIn" value="Manager under pressure after another defeat as captain ruled out with hamstring injury" aria-label="Headline">
+      <div class="calc" id="snOut"></div>
+    </div>
+    <h3>Step 2: the club's tone, newest counts most</h3>
+    <div class="formula">tone = <span class="frac"><span>Σ weight<sub>i</sub> × score<sub>i</sub></span><span>Σ weight<sub>i</sub></span></span> &nbsp;&nbsp; weight<sub>i</sub> = 0.5<sup>age<sub>i</sub> ÷ 4 days</sup><span class="where">Only the last 14 days. Below −0.15 is "negative", above +0.15 "positive", in between "neutral".</span></div>
+    <div id="snTeam"></div>
+    <div class="scroll"><table id="snTable"></table></div>
+    <div class="calc" id="snCalc"></div>
+    <div class="callout warn"><b>Shown, not yet in the model.</b> The match centre shows each side's tone and the worst headlines, but the model doesn't use it yet: to know if tone adds anything beyond the price, we need about a season of stored news to test on. Word lists also miss context. Here the only "negative" article is about Ronaldo's old rows with coaches, not about Juventus today.</div>
+    <div class="interview"><div class="eyebrow">Interview questions</div><div id="qa-sentiment"></div></div>
+  </section>
+
+  <!-- 20 -->
+  <section class="ch" id="grades" data-title="Team grades">
+    <div class="eyebrow">Chapter 20 · Part 2</div>
+    <h2>The team grade, 0 to 100</h2>
+    <p>Every club in the five leagues gets a grade for "how good is it to back with this model". It is a weighted average (Chapter 0, tool 3) of three parts, each turned into 0–100 first:</p>
+    <div class="formula">grade = 0.5 × edge score + 0.2 × record score + 0.3 × backable score</div>
+    <div class="chips" id="grPick" role="group" aria-label="Choose a club"></div>
+    <h3>Part A · Own edge (50%)</h3>
+    <p>For each of the club's last 20 matches: the model's chance minus the market's, <b>less the usual lift</b> the model gives any side at that price. That lift is the bias fix from Chapter 14; without removing it, every favourite would look gifted.</p>
+    <div class="scroll"><table id="grLift"></table></div>
+    <div class="scroll"><table id="grEdge"></table></div>
+    <div class="calc" id="grEdgeCalc"></div>
+    <h3>Part B · Value record (20%)</h3>
+    <p>Its value bets as favourite over the last two seasons: P/L at ₹100 each, then <b>shrunk</b> for small samples. With <i>n</i> bets the return is multiplied by <i>n</i> ÷ (<i>n</i> + 40), so 7 bets keep only 15% of their return and 40 bets keep half.</p>
+    <div class="scroll"><table id="grVb"></table></div>
+    <div class="calc" id="grVbCalc"></div>
+    <h3>Part C · Backable (30%)</h3>
+    <div class="calc" id="grFavCalc"></div>
+    <h3>Put together, then your stars</h3>
+    <div class="calc" id="grAll"></div>
+    <div class="formula">shown score = 0.6 × model grade + 0.4 × (20 × your stars)<span class="where">Each star is worth 20 points, so 5★ = 100. No stars: the model grade alone.</span></div>
+    <label class="row" for="grStars">Your stars <span class="num" id="grStarsV"></span><input type="range" id="grStars" min="0" max="5" step="1" value="3"></label>
+    <div class="calc" id="grBlend"></div>
+    <div class="interview"><div class="eyebrow">Interview questions</div><div id="qa-grades"></div></div>
+  </section>
+
+  <!-- 21 -->
+  <section class="ch" id="live" data-title="Live picks and patience">
+    <div class="eyebrow">Chapter 21 · Part 2</div>
+    <h2>Live picks, and how long until we know</h2>
+    <p>The backtest can flatter. The real test is bets recorded <i>before</i> the matches, which can't be changed afterwards. Every 20 minutes the app:</p>
+    <ol class="steps">
+      <li><b>Prices the next 3 days</b>The week's market average, or ESPN's sportsbook line until that is out; ESPN's line and the starting XIs from 3 hours before kick-off.</li>
+      <li><b>Runs the model</b>With line-ups once both XIs are out (Ch 18), otherwise without.</li>
+      <li><b>Keeps the value favourites</b>Favourite, and chance × price &gt; 1. A pick that stops being value before kick-off is dropped.</li>
+      <li><b>Freezes at kick-off</b>Nothing can change after the whistle.</li>
+      <li><b>Settles at ₹100</b>At the closing average once the weekly file has it (as the backtest did), else at the price picked.</li>
+    </ol>
+    <h3>Recorded so far</h3>
+    <div class="scroll"><table id="lvTable"></table></div>
+    <h3>How many bets before we can trust the number?</h3>
+    <p>Each ₹100 bet at odds <i class="v">o</i> swings by about ₹100 × √(<i>o</i> − 1). Averaging <i class="v">N</i> bets shrinks the swing by √<i>N</i>. To be fairly sure (2 standard errors) an edge is real:</p>
+    <div class="formula">SE = <span class="frac"><span>√(<i>o</i> − 1)</span><span>√<i>N</i></span></span> &nbsp;&nbsp;&nbsp; need ROI &gt; 2 × SE &nbsp;⇔&nbsp; <i>N</i> &gt; <span class="frac"><span>4(<i>o</i> − 1)</span><span>ROI²</span></span></div>
+    <label class="row" for="lvRoi">If the true return is <span class="num" id="lvRoiV"></span><input type="range" id="lvRoi" min="0.01" max="0.10" step="0.005" value="0.024"></label>
+    <label class="row" for="lvOdds">at typical odds <span class="num" id="lvOddsV"></span><input type="range" id="lvOdds" min="1.2" max="2.2" step="0.05" value="1.45"></label>
+    <div class="calc" id="lvCalc"></div>
+    <div class="callout" id="lvRead"></div>
+    <div class="interview"><div class="eyebrow">Interview questions</div><div id="qa-live"></div></div>
+  </section>
+
+  <!-- 22 -->
+  <section class="ch" id="glossary" data-title="Glossary">
+    <div class="eyebrow">Chapter 22 · Reference</div>
+    <h2>Glossary</h2>
+    <div class="scroll"><table id="glossTable"></table></div>
+    <p class="note">Data: football-data.co.uk league results and closing prices, 2010/11–2026/27 (the six seasons before 2016/17 only feed history such as the elite flag). Models fitted with NumPy and scikit-learn; boosting and logistic regression written by hand.</p>
+  </section>
+</main>
+
+<script>
+const D = {"rows":18198,"mine_rows":3745,"first_season":"1617","tests":["2122","2223","2324","2425","2526","2627"],"folds":[{"test":"2122","train_rows":8910,"test_rows":1796,"boost_rounds":137},{"test":"2223","train_rows":10706,"test_rows":1808,"boost_rounds":1},{"test":"2324","train_rows":12514,"test_rows":1734,"boost_rounds":77},{"test":"2425","train_rows":14248,"test_rows":1734,"boost_rounds":39},{"test":"2526","train_rows":15982,"test_rows":1734,"boost_rounds":20},{"test":"2627","train_rows":17716,"test_rows":482,"boost_rounds":39}],"feats":["home","ppg5","ppg12","pvp12","gdvp6","sot6","rank","opp_rank","elite","losses5","elite_x_losses5","mine"],"labels":{"home":"Playing at home","ppg5":"Points per game, last 5","ppg12":"Points per game, last 12","pvp12":"Points beyond the price, last 12","gdvp6":"Goal difference beyond the price, last 6","sot6":"Share of shots on target, last 6","rank":"League position","opp_rank":"Opponent's league position","elite":"Elite club (top 3 in 3 of last 4 seasons)","losses5":"Losses in last 5","elite_x_losses5":"Elite club × losses in last 5","mine":"One of my ₹ teams"},"xgd":[2.501,-0.023],"mu":{"home":0.6498,"ppg5":1.5919,"ppg12":1.5937,"pvp12":0.0324,"gdvp6":0.0359,"sot6":0.5396,"rank":8.1173,"opp_rank":12.8978,"elite":0.2226,"losses5":1.5447,"elite_x_losses5":0.1929,"mine":0.2059},"sd":{"home":0.477,"ppg5":0.6887,"ppg12":0.5427,"pvp12":0.3316,"gdvp6":0.6504,"sot6":0.1113,"rank":5.3123,"opp_rank":4.7985,"elite":0.416,"losses5":1.1487,"elite_x_losses5":0.5467,"mine":0.4043},"logit_w":{"intercept":0.0628,"home":-0.0198,"ppg5":-0.0652,"ppg12":0.0196,"pvp12":-0.0366,"gdvp6":-0.0166,"sot6":0.0313,"rank":0.0045,"opp_rank":-0.0134,"elite":-0.0009,"losses5":-0.0552,"elite_x_losses5":0.0233,"mine":-0.0182},"gam_curves":{"ppg5":[{"x":0.2,"eff":-0.0359},{"x":0.317,"eff":-0.0491},{"x":0.433,"eff":-0.0622},{"x":0.55,"eff":-0.0754},{"x":0.667,"eff":-0.0885},{"x":0.783,"eff":-0.1017},{"x":0.9,"eff":-0.1148},{"x":1.017,"eff":-0.1266},{"x":1.133,"eff":-0.1303},{"x":1.25,"eff":-0.134},{"x":1.367,"eff":-0.1377},{"x":1.483,"eff":-0.1415},{"x":1.6,"eff":-0.1452},{"x":1.717,"eff":-0.1666},{"x":1.833,"eff":-0.188},{"x":1.95,"eff":-0.2094},{"x":2.067,"eff":-0.2241},{"x":2.183,"eff":-0.2338},{"x":2.3,"eff":-0.2435},{"x":2.417,"eff":-0.2532},{"x":2.533,"eff":-0.2629},{"x":2.65,"eff":-0.2726},{"x":2.767,"eff":-0.2823},{"x":2.883,"eff":-0.292},{"x":3.0,"eff":-0.3017}],"ppg12":[{"x":0.583,"eff":-0.1341},{"x":0.67,"eff":-0.1287},{"x":0.757,"eff":-0.1234},{"x":0.844,"eff":-0.118},{"x":0.931,"eff":-0.1127},{"x":1.017,"eff":-0.1073},{"x":1.104,"eff":-0.1019},{"x":1.191,"eff":-0.1007},{"x":1.278,"eff":-0.1102},{"x":1.365,"eff":-0.1196},{"x":1.451,"eff":-0.1291},{"x":1.538,"eff":-0.1385},{"x":1.625,"eff":-0.1494},{"x":1.712,"eff":-0.1618},{"x":1.799,"eff":-0.1741},{"x":1.885,"eff":-0.1865},{"x":1.972,"eff":-0.1989},{"x":2.059,"eff":-0.1869},{"x":2.146,"eff":-0.1635},{"x":2.233,"eff":-0.1401},{"x":2.319,"eff":-0.1167},{"x":2.406,"eff":-0.0932},{"x":2.493,"eff":-0.0698},{"x":2.58,"eff":-0.0464},{"x":2.667,"eff":-0.023}],"pvp12":[{"x":-0.65,"eff":-0.0795},{"x":-0.594,"eff":-0.094},{"x":-0.537,"eff":-0.1085},{"x":-0.481,"eff":-0.123},{"x":-0.425,"eff":-0.1375},{"x":-0.369,"eff":-0.1519},{"x":-0.312,"eff":-0.1664},{"x":-0.256,"eff":-0.1809},{"x":-0.2,"eff":-0.1954},{"x":-0.144,"eff":-0.1856},{"x":-0.087,"eff":-0.1726},{"x":-0.031,"eff":-0.1596},{"x":0.025,"eff":-0.1466},{"x":0.081,"eff":-0.1456},{"x":0.137,"eff":-0.1473},{"x":0.194,"eff":-0.1491},{"x":0.25,"eff":-0.1508},{"x":0.306,"eff":-0.1644},{"x":0.362,"eff":-0.1808},{"x":0.419,"eff":-0.1973},{"x":0.475,"eff":-0.2137},{"x":0.531,"eff":-0.2302},{"x":0.587,"eff":-0.2467},{"x":0.644,"eff":-0.2631},{"x":0.7,"eff":-0.2796}],"gdvp6":[{"x":-1.288,"eff":-0.0923},{"x":-1.175,"eff":-0.0899},{"x":-1.063,"eff":-0.0876},{"x":-0.95,"eff":-0.0853},{"x":-0.838,"eff":-0.083},{"x":-0.725,"eff":-0.0807},{"x":-0.613,"eff":-0.0784},{"x":-0.5,"eff":-0.076},{"x":-0.388,"eff":-0.0747},{"x":-0.275,"eff":-0.0934},{"x":-0.163,"eff":-0.1121},{"x":-0.05,"eff":-0.1309},{"x":0.062,"eff":-0.1472},{"x":0.175,"eff":-0.1569},{"x":0.287,"eff":-0.1667},{"x":0.4,"eff":-0.1764},{"x":0.512,"eff":-0.176},{"x":0.625,"eff":-0.1659},{"x":0.737,"eff":-0.1557},{"x":0.85,"eff":-0.1456},{"x":0.962,"eff":-0.1354},{"x":1.075,"eff":-0.1253},{"x":1.187,"eff":-0.1152},{"x":1.3,"eff":-0.105},{"x":1.412,"eff":-0.0949}],"sot6":[{"x":0.318,"eff":-0.2249},{"x":0.337,"eff":-0.2148},{"x":0.356,"eff":-0.2047},{"x":0.374,"eff":-0.1946},{"x":0.393,"eff":-0.1845},{"x":0.412,"eff":-0.1744},{"x":0.43,"eff":-0.1643},{"x":0.449,"eff":-0.1542},{"x":0.468,"eff":-0.1472},{"x":0.486,"eff":-0.1468},{"x":0.505,"eff":-0.1463},{"x":0.524,"eff":-0.1459},{"x":0.542,"eff":-0.1441},{"x":0.561,"eff":-0.1387},{"x":0.58,"eff":-0.1333},{"x":0.598,"eff":-0.1279},{"x":0.617,"eff":-0.1225},{"x":0.636,"eff":-0.1174},{"x":0.655,"eff":-0.1122},{"x":0.673,"eff":-0.1071},{"x":0.692,"eff":-0.1019},{"x":0.711,"eff":-0.0968},{"x":0.729,"eff":-0.0916},{"x":0.748,"eff":-0.0865},{"x":0.767,"eff":-0.0814}],"rank":[{"x":1.0,"eff":-0.0877},{"x":1.75,"eff":-0.0825},{"x":2.5,"eff":-0.0774},{"x":3.25,"eff":-0.0723},{"x":4.0,"eff":-0.0671},{"x":4.75,"eff":-0.084},{"x":5.5,"eff":-0.1008},{"x":6.25,"eff":-0.1177},{"x":7.0,"eff":-0.1345},{"x":7.75,"eff":-0.1415},{"x":8.5,"eff":-0.1485},{"x":9.25,"eff":-0.1555},{"x":10.0,"eff":-0.1625},{"x":10.75,"eff":-0.1695},{"x":11.5,"eff":-0.1765},{"x":12.25,"eff":-0.1776},{"x":13.0,"eff":-0.1668},{"x":13.75,"eff":-0.156},{"x":14.5,"eff":-0.1452},{"x":15.25,"eff":-0.1344},{"x":16.0,"eff":-0.1236},{"x":16.75,"eff":-0.1128},{"x":17.5,"eff":-0.102},{"x":18.25,"eff":-0.0912},{"x":19.0,"eff":-0.0804}],"opp_rank":[{"x":3.0,"eff":-0.0326},{"x":3.708,"eff":-0.0405},{"x":4.417,"eff":-0.0485},{"x":5.125,"eff":-0.0564},{"x":5.833,"eff":-0.0644},{"x":6.542,"eff":-0.0723},{"x":7.25,"eff":-0.0803},{"x":7.958,"eff":-0.0883},{"x":8.667,"eff":-0.0962},{"x":9.375,"eff":-0.1043},{"x":10.083,"eff":-0.1124},{"x":10.792,"eff":-0.1206},{"x":11.5,"eff":-0.1288},{"x":12.208,"eff":-0.137},{"x":12.917,"eff":-0.1451},{"x":13.625,"eff":-0.1475},{"x":14.333,"eff":-0.1492},{"x":15.042,"eff":-0.1508},{"x":15.75,"eff":-0.1524},{"x":16.458,"eff":-0.154},{"x":17.167,"eff":-0.1483},{"x":17.875,"eff":-0.1185},{"x":18.583,"eff":-0.0886},{"x":19.292,"eff":-0.0588},{"x":20.0,"eff":-0.029}],"losses5":[{"x":0.0,"eff":-0.1333},{"x":0.167,"eff":-0.1343},{"x":0.333,"eff":-0.1352},{"x":0.5,"eff":-0.1361},{"x":0.667,"eff":-0.137},{"x":0.833,"eff":-0.138},{"x":1.0,"eff":-0.1389},{"x":1.167,"eff":-0.1407},{"x":1.333,"eff":-0.1426},{"x":1.5,"eff":-0.1444},{"x":1.667,"eff":-0.1463},{"x":1.833,"eff":-0.1481},{"x":2.0,"eff":-0.15},{"x":2.167,"eff":-0.1683},{"x":2.333,"eff":-0.1867},{"x":2.5,"eff":-0.205},{"x":2.667,"eff":-0.2234},{"x":2.833,"eff":-0.2418},{"x":3.0,"eff":-0.2601},{"x":3.167,"eff":-0.2785},{"x":3.333,"eff":-0.2968},{"x":3.5,"eff":-0.3152},{"x":3.667,"eff":-0.3335},{"x":3.833,"eff":-0.3519},{"x":4.0,"eff":-0.3703}]},"boost_rounds":39,"first_tree":{"feature":"pvp12","label":"Points beyond the price, last 12","thr_z":1.039,"thr":0.377,"n":17716,"left":{"feature":"sot6","label":"Share of shots on target, last 6","thr_z":-1.396,"thr":0.384,"n":15048,"left":{"leaf":2,"value":-0.0589,"n":1310},"right":{"leaf":3,"value":0.096,"n":13738}},"right":{"feature":"sot6","label":"Share of shots on target, last 6","thr_z":0.852,"thr":0.634,"n":2668,"left":{"leaf":5,"value":-0.1378,"n":1879},"right":{"leaf":6,"value":0.1754,"n":789}}},"forest_importance":{"home":0.0181,"ppg5":0.0315,"ppg12":0.0556,"pvp12":0.0837,"gdvp6":0.0822,"sot6":0.0941,"rank":0.0683,"opp_rank":0.0568,"elite":0.0396,"losses5":0.0156,"elite_x_losses5":0.0097,"mine":0.0107,"market":0.434},"tiny":{"inputs":["ppg12","pvp12","losses5","market log-odds"],"W1":[[0.1654,0.1003,-0.1802],[-0.205,0.3085,0.9264],[0.0037,-0.3545,-0.5767],[1.2214,-0.7484,0.4354]],"b1":[0.7018,-0.1554,0.3029],"W2":[[0.6615],[-0.4391],[0.1625]],"b2":[-0.4316]},"overfit":{"train_ll":0.3517,"test_ll":1.0314,"market_test_ll":0.6427},"evals":{"market":{"ll":0.65636,"brier":0.23247,"bets":1,"pl":56,"roi":0.56,"mine":{"bets":1,"pl":56,"roi":0.56},"per_season":{"2122":{"ll":0.65538,"bets":0,"pl":0,"roi":null},"2223":{"ll":0.66466,"bets":0,"pl":0,"roi":null},"2324":{"ll":0.65327,"bets":0,"pl":0,"roi":null},"2425":{"ll":0.65221,"bets":0,"pl":0,"roi":null},"2526":{"ll":0.65973,"bets":1,"pl":56,"roi":0.56},"2627":{"ll":0.6427,"bets":0,"pl":0,"roi":null}},"calib":[{"pred":0.2567,"actual":0.3056,"n":36},{"pred":0.3743,"actual":0.4026,"n":1642},{"pred":0.4476,"actual":0.4568,"n":2995},{"pred":0.548,"actual":0.5651,"n":2159},{"pred":0.6473,"actual":0.6802,"n":1407},{"pred":0.743,"actual":0.7668,"n":789},{"pred":0.8365,"actual":0.8486,"n":251}]},"logit":{"ll":0.65546,"brier":0.23205,"bets":1915,"pl":6573,"roi":0.0343,"mine":{"bets":243,"pl":-224,"roi":-0.0092},"per_season":{"2122":{"ll":0.65572,"bets":389,"pl":2226,"roi":0.0572},"2223":{"ll":0.66434,"bets":340,"pl":1041,"roi":0.0306},"2324":{"ll":0.65132,"bets":392,"pl":2574,"roi":0.0657},"2425":{"ll":0.6512,"bets":430,"pl":1438,"roi":0.0334},"2526":{"ll":0.65833,"bets":281,"pl":-993,"roi":-0.0353},"2627":{"ll":0.64115,"bets":83,"pl":287,"roi":0.0346}},"calib":[{"pred":0.2612,"actual":0.2727,"n":33},{"pred":0.3751,"actual":0.3845,"n":1251},{"pred":0.4476,"actual":0.4601,"n":3058},{"pred":0.5488,"actual":0.5426,"n":2219},{"pred":0.6469,"actual":0.662,"n":1512},{"pred":0.7419,"actual":0.7514,"n":897},{"pred":0.836,"actual":0.8439,"n":301}]},"gam":{"ll":0.65578,"brier":0.23222,"bets":2568,"pl":7793,"roi":0.0303,"mine":{"bets":351,"pl":-480,"roi":-0.0137},"per_season":{"2122":{"ll":0.65697,"bets":497,"pl":-1680,"roi":-0.0338},"2223":{"ll":0.66468,"bets":500,"pl":60,"roi":0.0012},"2324":{"ll":0.65193,"bets":534,"pl":3271,"roi":0.0613},"2425":{"ll":0.65121,"bets":522,"pl":3570,"roi":0.0684},"2526":{"ll":0.65808,"bets":388,"pl":1448,"roi":0.0373},"2627":{"ll":0.63996,"bets":127,"pl":1124,"roi":0.0885}},"calib":[{"pred":0.2611,"actual":0.2821,"n":39},{"pred":0.3723,"actual":0.386,"n":1285},{"pred":0.4481,"actual":0.458,"n":3026},{"pred":0.5489,"actual":0.5443,"n":2221},{"pred":0.6462,"actual":0.6581,"n":1509},{"pred":0.7418,"actual":0.7589,"n":871},{"pred":0.8362,"actual":0.8517,"n":317}]},"boost":{"ll":0.65633,"brier":0.23249,"bets":1147,"pl":-1934,"roi":-0.0169,"mine":{"bets":232,"pl":-354,"roi":-0.0153},"per_season":{"2122":{"ll":0.65735,"bets":438,"pl":-1586,"roi":-0.0362},"2223":{"ll":0.66456,"bets":0,"pl":0,"roi":null},"2324":{"ll":0.65297,"bets":438,"pl":58,"roi":0.0013},"2425":{"ll":0.6518,"bets":223,"pl":-1204,"roi":-0.054},"2526":{"ll":0.65905,"bets":8,"pl":369,"roi":0.4612},"2627":{"ll":0.64035,"bets":40,"pl":429,"roi":0.1073}},"calib":[{"pred":0.2556,"actual":0.2353,"n":34},{"pred":0.374,"actual":0.3923,"n":1384},{"pred":0.4478,"actual":0.4599,"n":3007},{"pred":0.5483,"actual":0.5493,"n":2212},{"pred":0.6465,"actual":0.6597,"n":1478},{"pred":0.7434,"actual":0.7583,"n":869},{"pred":0.8369,"actual":0.8483,"n":290}]},"forest":{"ll":0.65733,"brier":0.2329,"bets":3472,"pl":887,"roi":0.0026,"mine":{"bets":757,"pl":2198,"roi":0.029},"per_season":{"2122":{"ll":0.65759,"bets":678,"pl":-1179,"roi":-0.0174},"2223":{"ll":0.66383,"bets":723,"pl":2466,"roi":0.0341},"2324":{"ll":0.65333,"bets":691,"pl":1167,"roi":0.0169},"2425":{"ll":0.65494,"bets":634,"pl":854,"roi":0.0135},"2526":{"ll":0.66086,"bets":594,"pl":-2496,"roi":-0.042},"2627":{"ll":0.64225,"bets":152,"pl":75,"roi":0.0049}},"calib":[{"pred":0.3702,"actual":0.4009,"n":1337},{"pred":0.4497,"actual":0.4531,"n":2796},{"pred":0.5471,"actual":0.5346,"n":2469},{"pred":0.6488,"actual":0.6553,"n":1352},{"pred":0.743,"actual":0.7604,"n":1135},{"pred":0.8247,"actual":0.8571,"n":196}]},"nn":{"ll":0.66133,"brier":0.23484,"bets":3334,"pl":-4266,"roi":-0.0128,"mine":{"bets":746,"pl":-314,"roi":-0.0042},"per_season":{"2122":{"ll":0.66384,"bets":664,"pl":-1317,"roi":-0.0198},"2223":{"ll":0.66959,"bets":687,"pl":1130,"roi":0.0164},"2324":{"ll":0.65616,"bets":660,"pl":3967,"roi":0.0601},"2425":{"ll":0.66021,"bets":685,"pl":-4523,"roi":-0.066},"2526":{"ll":0.66171,"bets":520,"pl":-2447,"roi":-0.0471},"2627":{"ll":0.6423,"bets":118,"pl":-1076,"roi":-0.0912}},"calib":[{"pred":0.2714,"actual":0.4302,"n":86},{"pred":0.3664,"actual":0.4102,"n":1331},{"pred":0.4482,"actual":0.4678,"n":2905},{"pred":0.5473,"actual":0.5285,"n":2191},{"pred":0.6465,"actual":0.636,"n":1511},{"pred":0.7426,"actual":0.7446,"n":885},{"pred":0.8386,"actual":0.8426,"n":343},{"pred":0.917,"actual":0.9355,"n":31}]}},"baselines":{"back_all":{"bets":9288,"pl":-5812,"roi":-0.0063},"mine_all":{"bets":1979,"pl":3088,"roi":0.0156},"mine_skip_close":{"bets":1848,"pl":2686,"roi":0.0145}},"head":[{"day":"2026-11-08","lg":"SP1","team":"Barcelona","opp":"Ath Madrid","home":0,"odds":1.86,"m":0.5071794871794872,"y":1,"res":"W","score":"Ath Madrid 1-2 Barcelona","close":0,"form":"WLWWWWWWWWWL","w12":10,"d12":0,"l12":2,"x":{"home":0.0,"ppg5":2.4,"ppg12":2.5,"pvp12":0.1105,"gdvp6":1.1889,"sot6":0.7015,"rank":1.0,"opp_rank":3.0,"elite":1.0,"losses5":1.0,"elite_x_losses5":1.0,"mine":1.0},"z":{"home":-1.362,"ppg5":1.1733,"ppg12":1.67,"pvp12":0.2354,"gdvp6":1.7727,"sot6":1.4543,"rank":-1.3398,"opp_rank":-2.0627,"elite":1.869,"losses5":-0.4742,"elite_x_losses5":1.4763,"mine":1.9641},"logit_m":0.0287,"contrib":{"home":0.0269,"ppg5":-0.0765,"ppg12":0.0328,"pvp12":-0.0086,"gdvp6":-0.0294,"sot6":0.0455,"rank":-0.006,"opp_rank":0.0275,"elite":-0.0017,"losses5":0.0262,"elite_x_losses5":0.0343,"mine":-0.0358},"p":{"market":0.5072,"logit":0.5317,"gam":0.5715,"boost":0.5315,"forest":0.5571,"nn":0.5129,"tiny":0.5464},"tree_leaf":3,"tiny_x":[1.67,0.2354,-0.4742,0.0287]},{"day":"2026-11-08","lg":"I1","team":"Inter","opp":"Como","home":1,"odds":2.08,"m":0.4520328095960876,"y":1,"res":"W","score":"Inter 2-0 Como","close":0,"form":"LWWWWDWWWWDD","w12":8,"d12":3,"l12":1,"x":{"home":1.0,"ppg5":2.4,"ppg12":2.25,"pvp12":0.1413,"gdvp6":-0.045,"sot6":0.6667,"rank":3.0,"opp_rank":5.0,"elite":1.0,"losses5":1.0,"elite_x_losses5":1.0,"mine":1.0},"z":{"home":0.7342,"ppg5":1.1733,"ppg12":1.2093,"pvp12":0.3285,"gdvp6":-0.1244,"sot6":1.1415,"rank":-0.9633,"opp_rank":-1.6459,"elite":1.869,"losses5":-0.4742,"elite_x_losses5":1.4763,"mine":1.9641},"logit_m":-0.1925,"contrib":{"home":-0.0145,"ppg5":-0.0765,"ppg12":0.0237,"pvp12":-0.012,"gdvp6":0.0021,"sot6":0.0357,"rank":-0.0043,"opp_rank":0.022,"elite":-0.0017,"losses5":0.0262,"elite_x_losses5":0.0343,"mine":-0.0358},"p":{"market":0.452,"logit":0.4674,"gam":0.4801,"boost":0.4757,"forest":0.5244,"nn":0.5269,"tiny":0.4729},"tree_leaf":3,"tiny_x":[1.2093,0.3285,-0.4742,-0.1925]},{"day":"2026-11-08","lg":"E0","team":"Aston Villa","opp":"Man United","home":0,"odds":3.31,"m":0.2842380564494625,"y":0,"res":"D","score":"Man United 4-4 Aston Villa","close":0,"form":"DWWDWLDLLWWD","w12":5,"d12":4,"l12":3,"x":{"home":0.0,"ppg5":2.2,"ppg12":1.5833,"pvp12":0.3167,"gdvp6":0.5032,"sot6":0.4561,"rank":11.0,"opp_rank":19.0,"elite":0.0,"losses5":0.0,"elite_x_losses5":0.0,"mine":1.0},"z":{"home":-1.362,"ppg5":0.883,"ppg12":-0.019,"pvp12":0.8574,"gdvp6":0.7184,"sot6":-0.7492,"rank":0.5426,"opp_rank":1.2717,"elite":-0.5351,"losses5":-1.3447,"elite_x_losses5":-0.3529,"mine":1.9641},"logit_m":-0.9235,"contrib":{"home":0.0269,"ppg5":-0.0576,"ppg12":-0.0004,"pvp12":-0.0314,"gdvp6":-0.0119,"sot6":-0.0235,"rank":0.0024,"opp_rank":-0.017,"elite":0.0005,"losses5":0.0743,"elite_x_losses5":-0.0082,"mine":-0.0358},"p":{"market":0.2842,"logit":0.2804,"gam":0.2696,"boost":0.2988,"forest":0.3807,"nn":0.3492,"tiny":0.3204},"tree_leaf":3,"tiny_x":[-0.019,0.8574,-1.3447,-0.9235]},{"day":"2026-11-08","lg":"E0","team":"Chelsea","opp":"Sunderland","home":0,"odds":2.27,"m":0.41348383234014174,"y":0,"res":"L","score":"Sunderland 1-0 Chelsea","close":0,"form":"WLWWLDLWWLWD","w12":6,"d12":2,"l12":4,"x":{"home":0.0,"ppg5":1.8,"ppg12":1.6667,"pvp12":0.0806,"gdvp6":-0.0912,"sot6":0.5538,"rank":5.0,"opp_rank":20.0,"elite":0.0,"losses5":2.0,"elite_x_losses5":0.0,"mine":1.0},"z":{"home":-1.362,"ppg5":0.3022,"ppg12":0.1345,"pvp12":0.1453,"gdvp6":-0.1954,"sot6":0.1283,"rank":-0.5868,"opp_rank":1.4801,"elite":-0.5351,"losses5":0.3963,"elite_x_losses5":-0.3529,"mine":1.9641},"logit_m":-0.3496,"contrib":{"home":0.0269,"ppg5":-0.0197,"ppg12":0.0026,"pvp12":-0.0053,"gdvp6":0.0032,"sot6":0.004,"rank":-0.0026,"opp_rank":-0.0198,"elite":0.0005,"losses5":-0.0219,"elite_x_losses5":-0.0082,"mine":-0.0358},"p":{"market":0.4135,"logit":0.4103,"gam":0.4528,"boost":0.4382,"forest":0.4543,"nn":0.4093,"tiny":0.4356},"tree_leaf":3,"tiny_x":[0.1345,0.1453,0.3963,-0.3496]},{"day":"2026-11-08","lg":"E0","team":"Liverpool","opp":"Crystal Palace","home":0,"odds":1.52,"m":0.6187316600953927,"y":1,"res":"W","score":"Crystal Palace 1-3 Liverpool","close":0,"form":"LWWLWDWDDDLD","w12":4,"d12":5,"l12":3,"x":{"home":0.0,"ppg5":1.8,"ppg12":1.4167,"pvp12":-0.2412,"gdvp6":-0.2425,"sot6":0.5676,"rank":6.0,"opp_rank":19.0,"elite":0.0,"losses5":2.0,"elite_x_losses5":0.0,"mine":1.0},"z":{"home":-1.362,"ppg5":0.3022,"ppg12":-0.3261,"pvp12":-0.8251,"gdvp6":-0.4282,"sot6":0.2515,"rank":-0.3986,"opp_rank":1.2717,"elite":-0.5351,"losses5":0.3963,"elite_x_losses5":-0.3529,"mine":1.9641},"logit_m":0.4842,"contrib":{"home":0.0269,"ppg5":-0.0197,"ppg12":-0.0064,"pvp12":0.0302,"gdvp6":0.0071,"sot6":0.0079,"rank":-0.0018,"opp_rank":-0.017,"elite":0.0005,"losses5":-0.0219,"elite_x_losses5":-0.0082,"mine":-0.0358},"p":{"market":0.6187,"logit":0.6245,"gam":0.6456,"boost":0.6368,"forest":0.6741,"nn":0.6023,"tiny":0.6227},"tree_leaf":3,"tiny_x":[-0.3261,-0.8251,0.3963,0.4842]}],"bayes":{"sigma2":0.2312,"tau2":1e-06,"k":231193.9,"teams":[{"lg":"F1","team":"Marseille","n":290,"raw":0.0504,"shrink":0.001,"post":0.0001,"mine":0},{"lg":"E0","team":"Arsenal","n":344,"raw":0.0525,"shrink":0.001,"post":0.0001,"mine":1},{"lg":"F1","team":"Rennes","n":238,"raw":0.055,"shrink":0.001,"post":0.0001,"mine":0},{"lg":"I1","team":"Roma","n":294,"raw":0.0894,"shrink":0.001,"post":0.0001,"mine":0},{"lg":"SP1","team":"Barcelona","n":379,"raw":0.0325,"shrink":0.002,"post":0.0001,"mine":1},{"lg":"E0","team":"West Ham","n":134,"raw":0.0923,"shrink":0.001,"post":0.0001,"mine":0},{"lg":"I1","team":"Lazio","n":272,"raw":0.0752,"shrink":0.001,"post":0.0001,"mine":0},{"lg":"I1","team":"Inter","n":389,"raw":0.0425,"shrink":0.002,"post":0.0001,"mine":1},{"lg":"I1","team":"Milan","n":302,"raw":0.0543,"shrink":0.001,"post":0.0001,"mine":0},{"lg":"I1","team":"Napoli","n":332,"raw":0.0384,"shrink":0.001,"post":0.0001,"mine":0},{"lg":"SP1","team":"Real Madrid","n":377,"raw":0.0317,"shrink":0.002,"post":0.0001,"mine":1},{"lg":"SP1","team":"Betis","n":188,"raw":0.0864,"shrink":0.001,"post":0.0001,"mine":0},{"lg":"SP1","team":"Ath Madrid","n":335,"raw":0.0702,"shrink":0.001,"post":0.0001,"mine":0},{"lg":"D1","team":"Freiburg","n":133,"raw":0.1147,"shrink":0.001,"post":0.0001,"mine":0},{"lg":"F1","team":"Paris SG","n":363,"raw":0.0026,"shrink":0.002,"post":0.0,"mine":1},{"lg":"F1","team":"Monaco","n":295,"raw":0.0248,"shrink":0.001,"post":0.0,"mine":0},{"lg":"E0","team":"Burnley","n":45,"raw":0.1456,"shrink":0.0,"post":0.0,"mine":0},{"lg":"E0","team":"Crystal Palace","n":124,"raw":0.028,"shrink":0.001,"post":0.0,"mine":0},{"lg":"E0","team":"Tottenham","n":232,"raw":0.0345,"shrink":0.001,"post":0.0,"mine":0},{"lg":"E0","team":"Leicester","n":122,"raw":0.0254,"shrink":0.001,"post":0.0,"mine":0},{"lg":"E0","team":"Man City","n":378,"raw":0.0193,"shrink":0.002,"post":0.0,"mine":1},{"lg":"E0","team":"Southampton","n":104,"raw":-0.0809,"shrink":0.0,"post":-0.0,"mine":0},{"lg":"F1","team":"Bordeaux","n":97,"raw":-0.0496,"shrink":0.0,"post":-0.0,"mine":0},{"lg":"F1","team":"Caen","n":28,"raw":0.0008,"shrink":0.0,"post":0.0,"mine":0},{"lg":"F1","team":"Dijon","n":38,"raw":0.0983,"shrink":0.0,"post":0.0,"mine":0},{"lg":"F1","team":"Lille","n":253,"raw":0.0389,"shrink":0.001,"post":0.0,"mine":0},{"lg":"F1","team":"Montpellier","n":140,"raw":-0.0208,"shrink":0.001,"post":-0.0,"mine":0},{"lg":"E0","team":"Liverpool","n":358,"raw":0.0219,"shrink":0.002,"post":0.0,"mine":1},{"lg":"E0","team":"Man United","n":253,"raw":-0.0223,"shrink":0.001,"post":-0.0,"mine":0},{"lg":"F1","team":"Lyon","n":289,"raw":-0.009,"shrink":0.001,"post":-0.0,"mine":0},{"lg":"F1","team":"Nice","n":197,"raw":0.023,"shrink":0.001,"post":0.0,"mine":0},{"lg":"E0","team":"Chelsea","n":340,"raw":-0.0152,"shrink":0.001,"post":-0.0,"mine":1},{"lg":"SP1","team":"La Coruna","n":26,"raw":-0.0393,"shrink":0.0,"post":-0.0,"mine":0},{"lg":"SP1","team":"Malaga","n":30,"raw":-0.0946,"shrink":0.0,"post":-0.0,"mine":0},{"lg":"E0","team":"Swansea","n":21,"raw":0.1545,"shrink":0.0,"post":0.0,"mine":0},{"lg":"E0","team":"Everton","n":151,"raw":0.0246,"shrink":0.001,"post":0.0,"mine":0},{"lg":"F1","team":"Angers","n":102,"raw":0.0496,"shrink":0.0,"post":0.0,"mine":0},{"lg":"F1","team":"Lorient","n":66,"raw":-0.042,"shrink":0.0,"post":-0.0,"mine":0},{"lg":"F1","team":"Nantes","n":134,"raw":-0.0355,"shrink":0.001,"post":-0.0,"mine":0},{"lg":"F1","team":"Toulouse","n":127,"raw":-0.0481,"shrink":0.001,"post":-0.0,"mine":0},{"lg":"I1","team":"Juventus","n":342,"raw":0.0326,"shrink":0.001,"post":0.0,"mine":0},{"lg":"SP1","team":"Granada","n":49,"raw":0.059,"shrink":0.0,"post":0.0,"mine":0},{"lg":"SP1","team":"Sevilla","n":246,"raw":0.0188,"shrink":0.001,"post":0.0,"mine":0},{"lg":"F1","team":"St Etienne","n":98,"raw":0.0001,"shrink":0.0,"post":0.0,"mine":0},{"lg":"I1","team":"Empoli","n":55,"raw":-0.0254,"shrink":0.0,"post":-0.0,"mine":0},{"lg":"I1","team":"Genoa","n":116,"raw":-0.0488,"shrink":0.001,"post":-0.0,"mine":0},{"lg":"I1","team":"Sassuolo","n":141,"raw":-0.0346,"shrink":0.001,"post":-0.0,"mine":0},{"lg":"SP1","team":"Ath Bilbao","n":262,"raw":-0.004,"shrink":0.001,"post":-0.0,"mine":0},{"lg":"SP1","team":"Valencia","n":192,"raw":-0.0124,"shrink":0.001,"post":-0.0,"mine":0},{"lg":"D1","team":"Bayern Munich","n":345,"raw":-0.0175,"shrink":0.001,"post":-0.0,"mine":1},{"lg":"SP1","team":"Espanol","n":111,"raw":-0.0089,"shrink":0.0,"post":-0.0,"mine":0},{"lg":"D1","team":"Wolfsburg","n":162,"raw":-0.0527,"shrink":0.001,"post":-0.0,"mine":0},{"lg":"D1","team":"Dortmund","n":299,"raw":0.037,"shrink":0.001,"post":0.0,"mine":0},{"lg":"D1","team":"Schalke 04","n":87,"raw":-0.0233,"shrink":0.0,"post":-0.0,"mine":0},{"lg":"D1","team":"FC Koln","n":103,"raw":-0.0322,"shrink":0.0,"post":-0.0,"mine":0},{"lg":"D1","team":"Hamburg","n":34,"raw":0.0194,"shrink":0.0,"post":0.0,"mine":0},{"lg":"D1","team":"M'gladbach","n":193,"raw":-0.0147,"shrink":0.001,"post":-0.0,"mine":0},{"lg":"F1","team":"Metz","n":41,"raw":-0.0037,"shrink":0.0,"post":-0.0,"mine":0},{"lg":"SP1","team":"Sociedad","n":258,"raw":0.0234,"shrink":0.001,"post":0.0,"mine":0},{"lg":"D1","team":"Hertha","n":74,"raw":0.0181,"shrink":0.0,"post":0.0,"mine":0},{"lg":"I1","team":"Fiorentina","n":241,"raw":-0.0466,"shrink":0.001,"post":-0.0,"mine":0},{"lg":"I1","team":"Sampdoria","n":77,"raw":0.0005,"shrink":0.0,"post":0.0,"mine":0},{"lg":"I1","team":"Torino","n":189,"raw":0.0018,"shrink":0.001,"post":0.0,"mine":0},{"lg":"I1","team":"Udinese","n":148,"raw":-0.0299,"shrink":0.001,"post":-0.0,"mine":0},{"lg":"SP1","team":"Las Palmas","n":43,"raw":-0.0381,"shrink":0.0,"post":-0.0,"mine":0},{"lg":"SP1","team":"Villarreal","n":260,"raw":0.0343,"shrink":0.001,"post":0.0,"mine":0},{"lg":"D1","team":"Ein Frankfurt","n":188,"raw":-0.0083,"shrink":0.001,"post":-0.0,"mine":0},{"lg":"D1","team":"Leverkusen","n":279,"raw":-0.0088,"shrink":0.001,"post":-0.0,"mine":0},{"lg":"E0","team":"Bournemouth","n":112,"raw":-0.0091,"shrink":0.0,"post":-0.0,"mine":0},{"lg":"F1","team":"Guingamp","n":37,"raw":-0.016,"shrink":0.0,"post":-0.0,"mine":0},{"lg":"D1","team":"Mainz","n":144,"raw":-0.052,"shrink":0.001,"post":-0.0,"mine":0},{"lg":"D1","team":"Werder Bremen","n":109,"raw":-0.0038,"shrink":0.0,"post":-0.0,"mine":0},{"lg":"I1","team":"Atalanta","n":293,"raw":0.0242,"shrink":0.001,"post":0.0,"mine":0},{"lg":"I1","team":"Bologna","n":174,"raw":0.0471,"shrink":0.001,"post":0.0,"mine":0},{"lg":"D1","team":"Augsburg","n":94,"raw":0.0011,"shrink":0.0,"post":0.0,"mine":0},{"lg":"I1","team":"Cagliari","n":89,"raw":0.0953,"shrink":0.0,"post":0.0,"mine":0},{"lg":"SP1","team":"Celta","n":190,"raw":-0.0417,"shrink":0.001,"post":-0.0,"mine":0},{"lg":"D1","team":"Hoffenheim","n":196,"raw":-0.0301,"shrink":0.001,"post":-0.0,"mine":0},{"lg":"I1","team":"Chievo","n":24,"raw":0.0962,"shrink":0.0,"post":0.0,"mine":0},{"lg":"E0","team":"Stoke","n":24,"raw":0.0509,"shrink":0.0,"post":0.0,"mine":0},{"lg":"SP1","team":"Eibar","n":76,"raw":-0.0029,"shrink":0.0,"post":-0.0,"mine":0},{"lg":"E0","team":"Watford","n":49,"raw":-0.0353,"shrink":0.0,"post":-0.0,"mine":0},{"lg":"SP1","team":"Osasuna","n":104,"raw":0.0616,"shrink":0.0,"post":0.0,"mine":0},{"lg":"D1","team":"RB Leipzig","n":284,"raw":0.0086,"shrink":0.001,"post":0.0,"mine":0},{"lg":"SP1","team":"Leganes","n":52,"raw":0.04,"shrink":0.0,"post":0.0,"mine":0},{"lg":"SP1","team":"Alaves","n":101,"raw":0.0677,"shrink":0.0,"post":0.0,"mine":0},{"lg":"E0","team":"West Brom","n":23,"raw":-0.0318,"shrink":0.0,"post":-0.0,"mine":0},{"lg":"F1","team":"Troyes","n":21,"raw":-0.0166,"shrink":0.0,"post":-0.0,"mine":0},{"lg":"D1","team":"Stuttgart","n":154,"raw":0.0008,"shrink":0.001,"post":0.0,"mine":0},{"lg":"E0","team":"Newcastle","n":138,"raw":0.0522,"shrink":0.001,"post":0.0,"mine":0},{"lg":"SP1","team":"Levante","n":60,"raw":-0.03,"shrink":0.0,"post":-0.0,"mine":0},{"lg":"I1","team":"Verona","n":78,"raw":0.008,"shrink":0.0,"post":0.0,"mine":0},{"lg":"F1","team":"Strasbourg","n":152,"raw":0.0163,"shrink":0.001,"post":0.0,"mine":0},{"lg":"SP1","team":"Getafe","n":142,"raw":0.0403,"shrink":0.001,"post":0.0,"mine":0},{"lg":"I1","team":"Spal","n":24,"raw":-0.0949,"shrink":0.0,"post":-0.0,"mine":0},{"lg":"SP1","team":"Girona","n":105,"raw":0.0084,"shrink":0.0,"post":0.0,"mine":0},{"lg":"F1","team":"Amiens","n":22,"raw":0.0788,"shrink":0.0,"post":0.0,"mine":0},{"lg":"E0","team":"Fulham","n":77,"raw":0.0336,"shrink":0.0,"post":0.0,"mine":0},{"lg":"E0","team":"Wolves","n":95,"raw":0.0209,"shrink":0.0,"post":0.0,"mine":0},{"lg":"F1","team":"Reims","n":108,"raw":-0.0771,"shrink":0.0,"post":-0.0,"mine":0},{"lg":"SP1","team":"Valladolid","n":41,"raw":-0.0568,"shrink":0.0,"post":-0.0,"mine":0},{"lg":"I1","team":"Parma","n":41,"raw":-0.1507,"shrink":0.0,"post":-0.0,"mine":0},{"lg":"SP1","team":"Vallecano","n":89,"raw":-0.0371,"shrink":0.0,"post":-0.0,"mine":0},{"lg":"F1","team":"Nimes","n":28,"raw":0.0422,"shrink":0.0,"post":0.0,"mine":0},{"lg":"E0","team":"Aston Villa","n":210,"raw":0.0461,"shrink":0.001,"post":0.0,"mine":1},{"lg":"F1","team":"Brest","n":92,"raw":0.0346,"shrink":0.0,"post":0.0,"mine":0},{"lg":"I1","team":"Lecce","n":38,"raw":0.0181,"shrink":0.0,"post":0.0,"mine":0},{"lg":"SP1","team":"Mallorca","n":71,"raw":0.0199,"shrink":0.0,"post":0.0,"mine":0},{"lg":"D1","team":"Union Berlin","n":103,"raw":0.0124,"shrink":0.0,"post":0.0,"mine":0},{"lg":"F1","team":"Lens","n":164,"raw":0.0464,"shrink":0.001,"post":0.0,"mine":0},{"lg":"E0","team":"Leeds","n":52,"raw":0.0691,"shrink":0.0,"post":0.0,"mine":0},{"lg":"SP1","team":"Elche","n":26,"raw":0.0264,"shrink":0.0,"post":0.0,"mine":0},{"lg":"SP1","team":"Cadiz","n":21,"raw":0.0515,"shrink":0.0,"post":0.0,"mine":0},{"lg":"E0","team":"Brentford","n":75,"raw":0.0457,"shrink":0.0,"post":0.0,"mine":0},{"lg":"F1","team":"Clermont","n":21,"raw":-0.1002,"shrink":0.0,"post":-0.0,"mine":0},{"lg":"D1","team":"Bochum","n":22,"raw":-0.0156,"shrink":0.0,"post":-0.0,"mine":0},{"lg":"F1","team":"Auxerre","n":23,"raw":0.0469,"shrink":0.0,"post":0.0,"mine":0},{"lg":"I1","team":"Monza","n":33,"raw":0.0012,"shrink":0.0,"post":0.0,"mine":0},{"lg":"E0","team":"Nott'm Forest","n":45,"raw":0.0288,"shrink":0.0,"post":0.0,"mine":0},{"lg":"I1","team":"Como","n":53,"raw":0.0481,"shrink":0.0,"post":0.0,"mine":0},{"lg":"E0","team":"Brighton","n":262,"raw":-0.049,"shrink":0.001,"post":-0.0001,"mine":1}]},"train_size_last":17716};
+const $ = (s) => document.querySelector(s);
+const fx = (x, n = 2) => Number(x).toFixed(n);
+const pct = (x, n = 1) => `${(100 * x).toFixed(n)}%`;
+const sgn = (x, n = 1) => `${x > 0 ? '+' : x < 0 ? '−' : ''}${Math.abs(100 * x).toFixed(n)}%`;
+const rup = (x) => `${x > 0 ? '+' : x < 0 ? '−' : ''}₹${Math.abs(Math.round(x)).toLocaleString('en-IN')}`;
+const sig = (z) => 1 / (1 + Math.exp(-z));
+const logit = (p) => Math.log(p / (1 - p));
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const H = D.head;
+const L = D.labels;
+const SEASON = (s) => `20${s.slice(0, 2)}/${s.slice(2)}`;
+const MODELS = [['market', 'Market only'], ['logit', 'Logistic'], ['gam', 'GAM'], ['boost', 'Boosting'], ['forest', 'Random forest'], ['nn', 'Neural net']];
+const name = (h) => `${h.team} ${h.home ? 'v' : '@'} ${h.opp}`;
+const short = (h) => h.team;
+
+/* ── contents & progress ── */
+const secs = [...document.querySelectorAll('section.ch')];
+const tocHtml = secs.map((s) => `<li><a href="#${s.id}">${esc(s.dataset.title)}</a></li>`).join('');
+$('#tocInline').innerHTML = tocHtml;
+$('#tocList').innerHTML = `<h4 style="margin:0 0 .4rem;font:700 .78rem var(--f-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)">Contents</h4><ol start="0">${tocHtml}</ol>`;
+$('#tocBtn').onclick = () => { $('#tocSheet').hidden = false; };
+$('#tocClose').onclick = () => { $('#tocSheet').hidden = true; };
+$('#tocSheet').onclick = (e) => { if (e.target.id === 'tocSheet' || e.target.tagName === 'A') $('#tocSheet').hidden = true; };
+const onScroll = () => {
+  const h = document.documentElement;
+  $('#progress').style.width = `${Math.min(100, (100 * h.scrollTop) / Math.max(1, h.scrollHeight - h.clientHeight))}%`;
+  let cur = null;
+  for (const s of secs) if (s.getBoundingClientRect().top < 120) cur = s;
+  $('#now').textContent = cur ? `${secs.indexOf(cur)}. ${cur.dataset.title}` : 'Betting models from scratch';
+};
+addEventListener('scroll', onScroll, { passive: true }); onScroll();
+
+/* ── shared bits ── */
+const E = D.evals;
+$('#headStats').innerHTML = [
+  [D.rows.toLocaleString('en-IN'), 'matches, 2016/17 to now'], [D.mine_rows.toLocaleString('en-IN'), 'of them your ₹ teams'],
+  ['5', 'leagues, closing prices'], ['6', 'unseen test seasons'],
+].map(([b, s]) => `<div class="stat"><b>${b}</b><span>${s}</span></div>`).join('');
+$('#backAllRoi').textContent = sgn(D.baselines.back_all.roi);
+$('#nRows').textContent = D.rows.toLocaleString('en-IN');
+$('#nMine').textContent = D.mine_rows.toLocaleString('en-IN');
+$('#xgdK').textContent = fx(D.xgd[0], 3);
+$('#xgdC').textContent = `${D.xgd[1] < 0 ? '−' : '+'} ${fx(Math.abs(D.xgd[1]), 3)}`;
+$('#llMarket').textContent = fx(E.market.ll, 4);
+$('#lastTrain').textContent = D.train_size_last.toLocaleString('en-IN');
+$('#nTrees').textContent = D.boost_rounds;
+$('#nTest').textContent = D.baselines.back_all.bets.toLocaleString('en-IN');
+
+function pickers(el, labelOf, onPick, n, start = 0) {
+  const box = $(el);
+  box.innerHTML = Array.from({ length: n }, (_, i) => `<button class="chip" aria-pressed="${i === start}" data-i="${i}">${esc(labelOf(i))}</button>`).join('');
+  box.onclick = (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    box.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', x === b));
+    onPick(+b.dataset.i);
+  };
+  onPick(start);
+}
+function qa(id, items) {
+  $(id).innerHTML = items.map(([q, a]) => `<details class="qa"><summary>${q}</summary><p>${a}</p></details>`).join('');
+}
+const fmtFeat = (f, v) => (['home', 'elite', 'mine'].includes(f) ? (v ? 'yes' : 'no') : ['rank', 'opp_rank', 'losses5', 'elite_x_losses5'].includes(f) ? fx(v, 0) : fx(v, 2));
+
+/* ── 1 odds ── */
+function odds() {
+  const o = ['oH', 'oD', 'oA'].map((k) => +$(`#${k}`).value);
+  ['oH', 'oD', 'oA'].forEach((k, i) => { $(`#${k}v`).textContent = fx(o[i]); });
+  const q = o.map((x) => 1 / x); const s = q.reduce((a, b) => a + b);
+  $('#oddsTable').innerHTML = `<tr><th></th><th class="r">Price</th><th class="r">Implied q</th><th class="r">No-vig m</th><th class="r">Log-odds of m</th></tr>` +
+    ['Home', 'Draw', 'Away'].map((n, i) => `<tr><td>${n}</td><td class="r num">${fx(o[i])}</td><td class="r num">${pct(q[i])}</td><td class="r num">${pct(q[i] / s)}</td><td class="r num">${fx(logit(q[i] / s), 3)}</td></tr>`).join('') +
+    `<tr class="hl"><td>Sum</td><td></td><td class="r num">${pct(s)}</td><td class="r num">100.0%</td><td></td></tr>`;
+  $('#oddsNote').textContent = `Overround ${pct(s - 1)}: the bookmaker keeps about ${pct((s - 1) / s)} of what is staked across the three outcomes.`;
+}
+['oH', 'oD', 'oA'].forEach((k) => $(`#${k}`).addEventListener('input', odds)); odds();
+
+/* ── 2 log-odds ── */
+function lo() {
+  const p = +$('#pSl').value;
+  $('#pSlv').textContent = pct(p, 0);
+  $('#zOut').textContent = fx(logit(p), 3);
+  $('#zPlus').textContent = `${pct(sig(logit(p) + 0.1))}`;
+}
+$('#pSl').addEventListener('input', lo); lo();
+
+/* ── 3 features ── */
+const DEF = {
+  home: '1 if your side plays at home', ppg5: 'Mean points (3/1/0) over the last 5 league games', ppg12: 'Mean points over the last 12',
+  pvp12: 'Mean of (points − xPts) over the last 12', gdvp6: 'Mean of (goal difference − xGD) over the last 6',
+  sot6: 'Own shots on target ÷ all shots on target, last 6', rank: 'Table position now (last season\'s before 5 games)',
+  opp_rank: 'The opponent\'s table position', elite: '1 if top 3 in at least 3 of the last 4 seasons', losses5: 'Losses in the last 5',
+  elite_x_losses5: 'elite × losses5: a top club on a bad run', mine: '1 if one of your ₹ teams',
+};
+$('#featTable').innerHTML = `<tr><th>Feature</th><th>Definition</th><th class="r">μ</th><th class="r">s</th></tr>` +
+  D.feats.map((f) => `<tr><td><b>${esc(L[f])}</b><br><span class="mono">${f}</span></td><td>${esc(DEF[f])}</td><td class="r num">${fx(D.mu[f], 2)}</td><td class="r num">${fx(D.sd[f], 2)}</td></tr>`).join('');
+$('#headTable').innerHTML = `<tr><th>Match (8 Nov)</th><th class="r">Odds</th><th class="r">m</th><th>Last 12, newest first</th><th>Result</th></tr>` +
+  H.map((h) => `<tr><td><b>${esc(name(h))}</b><br><span class="note">${esc(h.score)}</span></td><td class="r num">${fx(h.odds)}</td><td class="r num">${pct(h.m)}</td><td><span class="form">${h.form}</span><br><span class="note">${h.w12}W ${h.d12}D ${h.l12}L</span></td><td><span class="res ${h.res}">${h.res}</span></td></tr>`).join('');
+
+/* ── 4 judging ── */
+let llSum = 0;
+$('#llTable').innerHTML = `<tr><th>Match</th><th class="r">m</th><th class="r">y</th><th>Term</th><th class="r">Loss</th></tr>` +
+  H.map((h) => {
+    const l = h.y ? -Math.log(h.m) : -Math.log(1 - h.m); llSum += l;
+    return `<tr><td>${esc(short(h))}</td><td class="r num">${fx(h.m, 3)}</td><td class="r num">${h.y}</td><td class="m">${h.y ? `−ln ${fx(h.m, 3)}` : `−ln(1 − ${fx(h.m, 3)})`}</td><td class="r num">${fx(l, 3)}</td></tr>`;
+  }).join('') + `<tr class="hl"><td colspan="4">Mean over the five</td><td class="r num">${fx(llSum / 5, 3)}</td></tr>`;
+$('#foldTable').innerHTML = `<tr><th>Test season</th><th>Trained on</th><th class="r">Train rows</th><th class="r">Test rows</th></tr>` +
+  D.folds.map((f) => `<tr><td>${SEASON(f.test)}</td><td>2016/17 – ${SEASON(String(+f.test.slice(0, 2) - 1).padStart(2, '0') + f.test.slice(0, 2))}</td><td class="r num">${f.train_rows.toLocaleString('en-IN')}</td><td class="r num">${f.test_rows.toLocaleString('en-IN')}</td></tr>`).join('');
+qa('#qa-judge', [
+  ['Why log-loss and not accuracy?', 'Accuracy only checks which side is likelier; betting needs the chance itself to be right. Log-loss is a proper scoring rule: it is minimised only by reporting your true belief, and it punishes a confident wrong call (say 90% on a loss) far more than a hesitant one.'],
+  ['What is the difference between log-loss and Brier score?', 'Both are proper scoring rules. Brier is the squared error of the probability and is bounded between 0 and 1; log-loss is unbounded and penalises confident mistakes much more. Log-loss is the likelihood the models actually optimise.'],
+  ['Why not a random train/test split?', 'Matches are ordered in time and features use the past. A random split leaks the future into training (a 2024 match helps predict a 2022 one) and overstates performance. Walk-forward validation mimics real use.'],
+  ['What is overfitting and how do you detect it?', 'The model learns noise specific to the training data. You see training loss falling while validation loss rises. Remedies: regularisation, simpler models, more data, early stopping.'],
+]);
+
+/* ── 5 logistic ── */
+const W = D.logit_w;
+function bars(el, items, opt = {}) {
+  const w = 640, rowH = 26, left = 210, right = 70, max = Math.max(...items.map((d) => Math.abs(d.v))) || 1;
+  const mid = opt.zeroLeft ? left : left + (w - left - right) / 2;
+  const scale = (opt.zeroLeft ? (w - left - right) : (w - left - right) / 2) / max;
+  const h = items.length * rowH + 24;
+  let s = `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="${esc(opt.label || 'bar chart')}"><line class="axis" x1="${mid}" x2="${mid}" y1="0" y2="${h - 18}" stroke-width="1"/>`;
+  items.forEach((d, i) => {
+    const y = i * rowH + 4, len = Math.abs(d.v) * scale;
+    const x = d.v >= 0 ? mid : mid - len;
+    const col = opt.color ? opt.color(d) : d.v >= 0 ? 'var(--pitch)' : 'var(--loss)';
+    s += `<text x="${left - 8}" y="${y + 15}" text-anchor="end" class="ink">${esc(d.label)}</text>`;
+    s += `<rect x="${x}" y="${y + 3}" width="${Math.max(len, 1)}" height="${rowH - 10}" rx="2" fill="${col}"/>`;
+    s += `<text x="${w - 4}" y="${y + 15}" text-anchor="end" class="ink" style="font-family:var(--f-mono);font-size:10.5px">${esc(d.txt)}</text>`;
+  });
+  s += `</svg>`;
+  $(el).innerHTML = s;
+}
+const wItems = D.feats.map((f) => ({ label: L[f], v: W[f], txt: `${W[f] >= 0 ? '+' : ''}${fx(W[f], 3)} · ${sgn(W[f] * 0.2475)}` })).sort((a, b) => b.v - a.v);
+bars('#wChart', wItems, { label: 'logistic regression weights' });
+$('#wRead').innerHTML = `<b>Reading it.</b> The intercept is <span class="num">+${fx(W.intercept, 3)}</span>: backed sides win a little more often than the no-vig price says (the favourite–longshot bias). The strongest feature weights are small and negative on <b>short-term form</b> (${fx(W.ppg5, 3)}) and <b>losses in the last 5</b> (${fx(W.losses5, 3)}): the market already reacts to hot streaks, slightly too much. Elite clubs on a losing run are punished less (${fx(W.elite_x_losses5, 3)}). Nothing moves a chance by more than about 1.6 points: the market is very good.`;
+let lgI = 0; let lgX = null;
+const SL = [['losses5', 0, 5, 1], ['ppg5', 0, 3, 0.2], ['pvp12', -1, 1, 0.05], ['sot6', 0.2, 0.85, 0.01], ['rank', 1, 20, 1], ['opp_rank', 1, 20, 1]];
+function lgRender() {
+  const h = H[lgI];
+  let zsum = h.logit_m + W.intercept;
+  const rows = D.feats.map((f) => {
+    const x = f === 'elite_x_losses5' ? lgX.elite * lgX.losses5 : lgX[f];
+    const zt = (x - D.mu[f]) / D.sd[f], c = W[f] * zt; zsum += c;
+    return `<tr><td>${esc(L[f])}</td><td class="r num">${fmtFeat(f, x)}</td><td class="r num">${fx(zt, 2)}</td><td class="r num">${fx(W[f], 3)}</td><td class="r num ${c > 0 ? 'pos' : c < 0 ? 'neg' : ''}">${c >= 0 ? '+' : ''}${fx(c, 4)}</td></tr>`;
+  }).join('');
+  const p = sig(zsum);
+  $('#lgTable').innerHTML = `<tr><th>Feature</th><th class="r">x</th><th class="r">x̃</th><th class="r">w</th><th class="r">w·x̃</th></tr>` +
+    `<tr><td>Market log-odds, logit(m)</td><td class="r num">${pct(h.m)}</td><td></td><td></td><td class="r num">${fx(h.logit_m, 4)}</td></tr>` +
+    `<tr><td>Intercept b</td><td></td><td></td><td></td><td class="r num">+${fx(W.intercept, 4)}</td></tr>` + rows +
+    `<tr class="hl"><td colspan="4">z (sum) → p = σ(z)</td><td class="r num">${fx(zsum, 4)}</td></tr>`;
+  $('#lgM').textContent = pct(h.m); $('#lgP').textContent = pct(p); $('#lgEV').textContent = fx(p * h.odds, 3);
+  const bet = p * h.odds > 1;
+  $('#lgVerdict').innerHTML = `<span class="verdict ${bet ? 'bet' : 'skip'}">${bet ? 'Bet' : 'No bet'}</span> ${esc(h.team)} at ${fx(h.odds)} needs a chance above ${pct(1 / h.odds)}. Real result: <span class="res ${h.res}">${h.res}</span> ${esc(h.score)}.`;
+}
+function lgSliders() {
+  $('#lgSliders').innerHTML = SL.map(([f, a, b, st]) => `<label class="row" for="s_${f}">${esc(L[f])} <span class="num" id="v_${f}">${fmtFeat(f, lgX[f])}</span><input type="range" id="s_${f}" min="${a}" max="${b}" step="${st}" value="${lgX[f]}"></label>`).join('');
+  SL.forEach(([f]) => $(`#s_${f}`).addEventListener('input', (e) => { lgX[f] = +e.target.value; $(`#v_${f}`).textContent = fmtFeat(f, lgX[f]); lgRender(); }));
+}
+function lgPick(i) { lgI = i; lgX = { ...H[i].x }; lgSliders(); lgRender(); }
+pickers('#lgPick', (i) => short(H[i]), lgPick, 5);
+$('#lgReset').onclick = () => lgPick(lgI);
+qa('#qa-logistic', [
+  ['Why use the market log-odds as an offset instead of a feature?', 'An offset fixes its coefficient at 1, so the model starts as the market and only learns corrections. As a free feature the model would spend data re-estimating something we already trust, and its other weights would mix "how good the market is" with "where the market is wrong".'],
+  ['Why is logistic regression\'s loss convex, and why does that matter?', 'The negative log-likelihood\'s Hessian, Xᵀ diag(p(1−p)) X, is positive semi-definite, so there is one global minimum. Gradient descent or Newton\'s method cannot get stuck, and two runs give the same answer.'],
+  ['L1 vs L2 regularisation?', 'L2 (ridge) adds λ‖w‖²/2 and shrinks all weights smoothly; L1 (lasso) adds λ‖w‖₁ and drives some to exactly zero, doing feature selection. Elastic net mixes both. Both are equivalent to putting a prior on the weights: Gaussian for L2, Laplace for L1.'],
+  ['How do you interpret a coefficient?', 'A one-unit change in the feature (here one standard deviation) multiplies the odds by e^w. For small w at chance p, the probability moves by about w·p(1−p).'],
+  ['Why Newton\'s method rather than gradient descent here?', 'With 13 parameters the Hessian is tiny to invert and Newton converges quadratically, in under 10 steps. For millions of parameters you would use gradient descent variants because the Hessian is too big.'],
+]);
+
+/* ── 6 GAM ── */
+const GF = Object.keys(D.gam_curves);
+function lineChart(el, series, opt) {
+  const w = 640, h = 280, l = 52, r = 16, t = 14, b = 40;
+  const xs = series.flatMap((s) => s.pts.map((p) => p[0])), ys = series.flatMap((s) => s.pts.map((p) => p[1]));
+  const x0 = opt.x0 ?? Math.min(...xs), x1 = opt.x1 ?? Math.max(...xs);
+  let y0 = opt.y0 ?? Math.min(...ys), y1 = opt.y1 ?? Math.max(...ys);
+  if (y0 === y1) { y0 -= 1; y1 += 1; }
+  const X = (v) => l + ((v - x0) / (x1 - x0)) * (w - l - r), Y = (v) => t + (1 - (v - y0) / (y1 - y0)) * (h - t - b);
+  let s = `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="${esc(opt.label)}">`;
+  const ticks = (a, z, n) => Array.from({ length: n + 1 }, (_, i) => a + ((z - a) * i) / n);
+  ticks(y0, y1, 4).forEach((v) => { s += `<line class="axis" x1="${l}" x2="${w - r}" y1="${Y(v)}" y2="${Y(v)}" stroke-width="1"/><text x="${l - 6}" y="${Y(v) + 4}" text-anchor="end">${opt.yfmt(v)}</text>`; });
+  ticks(x0, x1, 4).forEach((v) => { s += `<text x="${X(v)}" y="${h - b + 16}" text-anchor="middle">${opt.xfmt(v)}</text>`; });
+  s += `<text x="${(l + w - r) / 2}" y="${h - 6}" text-anchor="middle">${esc(opt.xlabel)}</text>`;
+  if (opt.diag) s += `<line x1="${X(Math.max(x0, y0))}" y1="${Y(Math.max(x0, y0))}" x2="${X(Math.min(x1, y1))}" y2="${Y(Math.min(x1, y1))}" stroke="var(--muted)" stroke-dasharray="4 4" stroke-width="1"/>`;
+  if (opt.zero) s += `<line x1="${l}" x2="${w - r}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--muted)" stroke-dasharray="4 4" stroke-width="1"/>`;
+  series.forEach((se) => {
+    if (se.line !== false) s += `<polyline fill="none" stroke="${se.color}" stroke-width="2" points="${se.pts.map((p) => `${X(p[0])},${Y(p[1])}`).join(' ')}"/>`;
+    se.pts.forEach((p) => { s += `<circle cx="${X(p[0])}" cy="${Y(p[1])}" r="${se.dot || 3}" fill="${se.color}" stroke="var(--surface)" stroke-width="2"/>`; });
+    if (se.label) { const lp = se.pts[se.pts.length - 1]; s += `<text x="${Math.min(X(lp[0]) - 4, w - r - 4)}" y="${Y(lp[1]) - 9}" text-anchor="end" style="fill:${se.color};font-weight:700">${esc(se.label)}</text>`; }
+  });
+  (opt.marks || []).forEach((m) => { s += `<line x1="${X(m.x)}" x2="${X(m.x)}" y1="${t}" y2="${h - b}" stroke="${m.color}" stroke-width="1.5" stroke-dasharray="2 3"/><text x="${X(m.x) + 4}" y="${t + 10 + (m.dy || 0)}" style="fill:${m.color};font-weight:700">${esc(m.label)}</text>`; });
+  s += `</svg>`;
+  $(el).innerHTML = s;
+}
+function gamPick(i) {
+  const f = GF[i], pts = D.gam_curves[f];
+  const at = (x) => { for (let k = 1; k < pts.length; k++) if (pts[k].x >= x) { const a = pts[k - 1], b = pts[k]; return a.eff + ((x - a.x) / (b.x - a.x || 1)) * (b.eff - a.eff); } return pts[pts.length - 1].eff; };
+  const c0 = at(D.mu[f]);
+  const ser = [{ pts: pts.map((p) => [p.x, (p.eff - c0) * 0.2475]), color: 'var(--pitch)', dot: 2 }];
+  const lin = [{ pts: pts.map((p) => [p.x, W[f] * ((p.x - D.mu[f]) / D.sd[f]) * 0.2475]), color: 'var(--market)', dot: 0, label: 'logistic (straight)' }];
+  ser[0].label = 'GAM curve';
+  lineChart('#gamChart', [...lin, ...ser], { label: `GAM effect of ${L[f]}`, xlabel: L[f], yfmt: (v) => sgn(v, 1), xfmt: (v) => fx(v, ['rank', 'opp_rank', 'losses5'].includes(f) ? 0 : 2), zero: true,
+    marks: H.slice(0, 5).map((h, k) => ({ x: h.x[f], color: 'var(--slate)', label: k === 0 ? 'your five' : '', dy: 0 })) });
+  $('#gamNote').textContent = `Effect on the win chance in percentage points (at a 55% chance), relative to an average team. Dotted lines mark your five matches.`;
+}
+pickers('#gamPick', (i) => L[GF[i]].replace(', last', ' ·'), gamPick, GF.length, GF.indexOf('losses5'));
+$('#gamHead').innerHTML = H.map((h) => `${esc(short(h))} <b>${pct(h.p.gam)}</b> <span class="note">(market ${pct(h.m)})</span>`).join(' · ');
+qa('#qa-gam', [
+  ['What is a GAM?', 'A generalised additive model: the link (here log-odds) is a sum of smooth functions of each feature, g(E[y]) = b + Σ f_j(x_j). It captures non-linear effects while keeping each feature\'s effect separately plottable.'],
+  ['How are the smooth functions fitted?', 'Expand each feature into basis functions (here linear hinges at knots; commonly cubic or thin-plate splines) and fit their weights with a penalty on roughness. The penalty trades wiggle against fit and is usually chosen by cross-validation.'],
+  ['GAM vs boosting?', 'A GAM has no interactions unless you add them explicitly, so it is interpretable and stable on small data. Boosting finds interactions automatically but needs more data and is harder to explain.'],
+]);
+
+/* ── 7 boosting ── */
+const T = D.first_tree;
+function treeHtml(n, hitLeaf, path = []) {
+  if (n.leaf !== undefined) {
+    const hit = n.leaf === hitLeaf;
+    return `<div class="tnode ${hit ? 'hit' : ''}"><b>Leaf</b> · v = <span class="num">${n.value >= 0 ? '+' : ''}${fx(n.value, 4)}</span> · adds η·v = <span class="num">${fx(0.05 * n.value, 4)}</span> · ${n.n.toLocaleString('en-IN')} matches</div>`;
+  }
+  const inLeft = (x) => x.leaf !== undefined ? x.leaf === hitLeaf : inLeft(x.left) || inLeft(x.right);
+  const on = inLeft(n);
+  return `<div class="tnode ${on ? 'hit' : ''}"><b>${esc(n.label)}</b> ≤ <span class="num">${fx(n.thr, 3)}</span>? · ${n.n.toLocaleString('en-IN')} matches</div>` +
+    `<div class="tkids"><div class="note">yes</div>${treeHtml(n.left, hitLeaf)}<div class="note">no</div>${treeHtml(n.right, hitLeaf)}</div>`;
+}
+function trPick(i) {
+  const h = H[i];
+  $('#treeBox').innerHTML = treeHtml(T, h.tree_leaf);
+  const leaf = (function find(n) { if (n.leaf !== undefined) return n.leaf === h.tree_leaf ? n : null; return find(n.left) || find(n.right); })(T);
+  const f0 = h.logit_m, f1 = f0 + 0.05 * leaf.value;
+  $('#trWalk').innerHTML = `${esc(h.team)}: points beyond the price ${fx(h.x.pvp12, 3)}, shots-on-target share ${fx(h.x.sot6, 3)}. It starts at F₀ = logit(${pct(h.m)}) = <span class="num">${fx(f0, 4)}</span>. Tree 1 adds <span class="num">${fx(0.05 * leaf.value, 4)}</span> → F₁ = <span class="num">${fx(f1, 4)}</span> (${pct(sig(f1))}). After all ${D.boost_rounds} trees: <b>${pct(h.p.boost)}</b> against the market's ${pct(h.m)}.`;
+}
+pickers('#trPick', (i) => short(H[i]), trPick, 5);
+qa('#qa-boost', [
+  ['Bagging vs boosting?', 'Bagging trains models independently on resamples and averages them, cutting variance (random forest). Boosting trains models in sequence, each fitting the previous ones\' errors, cutting bias. Boosting needs a small learning rate and early stopping to avoid overfitting.'],
+  ['What do the gradient and Hessian mean in gradient boosting?', 'For log-loss, the gradient with respect to the log-odds is (p − y) and the Hessian is p(1 − p). XGBoost and LightGBM build trees on the gradient and set leaf values to −ΣG/(ΣH + λ), a second-order Newton step.'],
+  ['What does the learning rate do?', 'It scales each tree\'s contribution. Smaller values need more trees but generalise better because no single tree, which partly fits noise, can move the model much.'],
+  ['How do XGBoost and LightGBM differ?', 'Both are second-order gradient boosting. LightGBM grows trees leaf-wise and bins features into histograms, so it is faster on large data; XGBoost grows level-wise by default. In practice the tuning matters more than the library.'],
+  ['How can boosting use the market price as a starting point?', 'Pass the market\'s log-odds as the initial score (init_score or base_margin). The trees then only model the correction, exactly like the logistic offset.'],
+]);
+
+/* ── 8 forest ── */
+const imp = Object.entries(D.forest_importance).map(([f, v]) => ({ label: f === 'market' ? "Market's chance" : L[f], v, txt: pct(v) })).sort((a, b) => b.v - a.v);
+bars('#impChart', imp, { label: 'random forest feature importance', zeroLeft: true, color: (d) => d.label === "Market's chance" ? 'var(--market)' : 'var(--slate)' });
+lineChart('#calChart', [
+  { pts: E.logit.calib.map((c) => [c.pred, c.actual]), color: 'var(--pitch)', label: 'logistic' },
+  { pts: E.forest.calib.map((c) => [c.pred, c.actual]), color: 'var(--slate)', label: 'forest' },
+], { label: 'calibration', x0: 0.2, x1: 0.9, y0: 0.2, y1: 0.9, diag: true, xlabel: 'predicted chance', yfmt: (v) => pct(v, 0), xfmt: (v) => pct(v, 0) });
+$('#rfHead').innerHTML = H.map((h) => `${esc(short(h))} <b>${pct(h.p.forest)}</b>`).join(' · ');
+qa('#qa-forest', [
+  ['Why does a random forest decorrelate its trees?', 'Each tree sees a bootstrap sample and, at each split, only a random subset of features. Without that, every tree would pick the same strong splits and averaging would not reduce variance.'],
+  ['What is out-of-bag error?', 'Each bootstrap sample leaves out about 37% of rows (since (1 − 1/n)ⁿ → 1/e). Predicting each row with only the trees that did not see it gives a free validation estimate.'],
+  ['Why are forest probabilities often poorly calibrated?', 'Leaf frequencies averaged across trees are pulled toward the middle and are noisy at the extremes. Fix with Platt scaling (a logistic regression on the forest\'s output) or isotonic regression on held-out data.'],
+  ['Are impurity-based importances reliable?', 'They are biased toward continuous, high-cardinality features. Permutation importance on held-out data or SHAP values are more trustworthy.'],
+]);
+
+/* ── 9 neural net ── */
+const TN = D.tiny;
+function nnPick(i) {
+  const h = H[i], x = h.tiny_x;
+  const pre = [0, 1, 2].map((j) => x.reduce((a, xi, k) => a + xi * TN.W1[k][j], 0) + TN.b1[j]);
+  const hid = pre.map((u) => Math.max(0, u));
+  const out = hid.reduce((a, hj, j) => a + hj * TN.W2[j][0], 0) + TN.b2[0];
+  const inName = ['ppg12 x̃', 'pvp12 x̃', 'losses5 x̃', 'logit(m)'];
+  let s = `<h4>Inputs</h4>` + x.map((v, k) => `<div class="nnrow"><span class="mono">${inName[k]}</span><span class="num">${fx(v, 3)}</span></div>`).join('');
+  s += `<h4 style="margin-top:.8rem">Hidden layer: u = Σ xₖ·Wₖⱼ + bⱼ, then ReLU</h4>`;
+  s += pre.map((u, j) => `<div class="nnrow"><span class="mono">neuron ${j + 1}</span><span class="num">${x.map((v, k) => `${fx(v, 2)}×${fx(TN.W1[k][j], 2)}`).join(' + ')} + ${fx(TN.b1[j], 2)} = ${fx(u, 3)} → <b>${fx(hid[j], 3)}</b>${u < 0 ? ' (switched off)' : ''}</span></div>`).join('');
+  s += `<h4 style="margin-top:.8rem">Output: z = Σ hⱼ·W₂ⱼ + b₂, p = σ(z)</h4>`;
+  s += `<div class="nnrow"><span class="mono">z</span><span class="num">${hid.map((v, j) => `${fx(v, 3)}×${fx(TN.W2[j][0], 3)}`).join(' + ')} ${TN.b2[0] < 0 ? '−' : '+'} ${fx(Math.abs(TN.b2[0]), 3)} = ${fx(out, 3)}</span></div>`;
+  s += `<div class="big-p"><div><small>market</small><span class="out num mk">${pct(h.m)}</span></div><div><small>tiny network</small><span class="out num">${pct(sig(out))}</span></div></div>`;
+  $('#nnBox').innerHTML = s;
+}
+pickers('#nnPick', (i) => short(H[i]), nnPick, 5);
+bars('#ofChart', [
+  { label: 'Big net, training data', v: D.overfit.train_ll, txt: fx(D.overfit.train_ll, 3) },
+  { label: 'Market, this season', v: D.overfit.market_test_ll, txt: fx(D.overfit.market_test_ll, 3) },
+  { label: 'Big net, this season', v: D.overfit.test_ll, txt: fx(D.overfit.test_ll, 3) },
+], { label: 'overfitting log-loss', zeroLeft: true, color: (d) => d.label.startsWith('Market') ? 'var(--market)' : d.label.includes('training') ? 'var(--slate)' : 'var(--loss)' });
+$('#nnLL').textContent = `${fx(E.nn.ll, 4)} against ${fx(E.market.ll, 4)}`;
+qa('#qa-nn', [
+  ['Why do neural networks need non-linear activations?', 'Without them, stacked linear layers collapse into one linear map, so depth adds nothing. ReLU, sigmoid or tanh let the network represent curved decision boundaries.'],
+  ['Explain backpropagation in one breath.', 'Run the network forward to get the loss, then apply the chain rule layer by layer from the output back, reusing each layer\'s intermediate values, to get the gradient of the loss for every weight; then take an optimiser step.'],
+  ['What is the vanishing gradient problem?', 'Sigmoid and tanh saturate, so their derivatives are near zero; multiplied across many layers the gradient shrinks to nothing. ReLU, good initialisation, batch normalisation and residual connections help.'],
+  ['When would you not use a neural network?', 'Small or tabular data with few strong features, where gradient-boosted trees or regularised linear models usually win, are cheaper and easier to explain. Our 18k-row table is that case.'],
+  ['Name ways to regularise a network.', 'L2 weight decay (alpha here), dropout, early stopping on a validation set, smaller architecture, data augmentation.'],
+]);
+
+/* ── 10 Bayes ── */
+const B = D.bayes;
+const teams = B.teams;
+const vr = (() => { const r = teams.map((t) => t.raw); const mu = r.reduce((a, b) => a + b) / r.length; return r.reduce((a, b) => a + (b - mu) ** 2, 0) / r.length; })();
+const noise = teams.reduce((a, t) => a + B.sigma2 / t.n, 0) / teams.length;
+$('#bayesBox').innerHTML = `<h4>The real estimate, ${teams.length} teams with 20+ matches</h4>
+  <div class="nnrow"><span class="mono">σ²</span><span class="num">${fx(B.sigma2, 4)} (one match's noise)</span></div>
+  <div class="nnrow"><span class="mono">Var(r)</span><span class="num">${fx(vr, 6)} (spread of team records we see)</span></div>
+  <div class="nnrow"><span class="mono">mean σ²/n</span><span class="num">${fx(noise, 6)} (spread luck alone would give)</span></div>
+  <div class="nnrow"><span class="mono">τ²</span><span class="num">${fx(vr, 6)} − ${fx(noise, 6)} = ${fx(vr - noise, 6)} → floored at 0</span></div>`;
+$('#bayesRead').innerHTML = `<b>The finding.</b> The spread of teams' records against the price is <b>smaller</b> than luck alone would produce. So τ² ≈ 0, every team is shrunk to zero, and no team in ten years has shown a lasting edge against the closing price. Arsenal's +${fx(100 * teams.find((t) => t.team === 'Arsenal').raw, 1)} points over ${teams.find((t) => t.team === 'Arsenal').n} matches is about 2 standard errors, which some of ${teams.length} teams would reach by chance. This is why swapping clubs on your list moved your returns around without a pattern.`;
+function bayesT() {
+  const tau = +$('#tauSl').value; $('#tauV').textContent = fx(tau, 3);
+  const k = B.sigma2 / (tau * tau);
+  const mine = teams.filter((t) => t.mine).sort((a, b) => b.raw - a.raw);
+  $('#bayesTable').innerHTML = `<tr><th>Your team</th><th class="r">n</th><th class="r">Raw r</th><th class="r">Shrink n/(n+σ²/τ²)</th><th class="r">Graded θ̂</th></tr>` +
+    mine.map((t) => { const s = t.n / (t.n + k); return `<tr><td>${esc(t.team)}</td><td class="r num">${t.n}</td><td class="r num">${sgn(t.raw)}</td><td class="r num">${fx(s, 2)}</td><td class="r num ${t.raw * s > 0 ? 'pos' : 'neg'}">${sgn(t.raw * s, 2)}</td></tr>`; }).join('');
+}
+$('#tauSl').addEventListener('input', bayesT); bayesT();
+qa('#qa-bayes', [
+  ['What is shrinkage and why does it help?', 'Pulling noisy group estimates toward a common mean. Groups with little data move most. It trades a little bias for a large cut in variance and beats raw averages on average (the James–Stein result).'],
+  ['Empirical Bayes vs full Bayes?', 'Empirical Bayes estimates the prior\'s parameters (here τ²) from the data and plugs them in. Full Bayes puts a prior on τ² too and integrates over it (e.g. with MCMC), which carries the uncertainty about τ² through to the answer.'],
+  ['What is partial pooling?', 'The middle ground between treating every team separately (no pooling) and treating all as one (complete pooling). A hierarchical model lets the data decide how much to pool, through τ².'],
+  ['How does this relate to ridge regression?', 'Ridge is the same idea applied to coefficients: a Gaussian prior centred at zero. The λ in ridge plays the role of σ²/τ².'],
+]);
+
+/* ── 11 results ── */
+$('#resTable').innerHTML = `<tr><th>Model</th><th class="r">Log-loss</th><th class="r">vs market</th><th class="r">Bets</th><th class="r">ROI</th><th class="r">Your teams</th></tr>` +
+  MODELS.map(([k, n]) => {
+    const e = E[k], d = e.ll - E.market.ll;
+    const best = k === 'logit';
+    return `<tr class="${best ? 'hl' : ''}"><td>${n}</td><td class="r num">${fx(e.ll, 4)}</td><td class="r num ${d < 0 ? 'pos' : d > 0 ? 'neg' : ''}">${k === 'market' ? '—' : `${d > 0 ? '+' : '−'}${fx(Math.abs(d), 4)}`}</td><td class="r num">${e.bets.toLocaleString('en-IN')}</td><td class="r num ${e.roi > 0 ? 'pos' : 'neg'}">${k === 'market' ? 'never bets' : sgn(e.roi)}</td><td class="r num ${(e.mine.roi || 0) > 0 ? 'pos' : 'neg'}">${e.mine.bets ? `${sgn(e.mine.roi)} · ${e.mine.bets}` : '—'}</td></tr>`;
+  }).join('') +
+  `<tr><td colspan="3">Back every bet</td><td class="r num">${D.baselines.back_all.bets.toLocaleString('en-IN')}</td><td class="r num neg">${sgn(D.baselines.back_all.roi)}</td><td></td></tr>` +
+  `<tr><td colspan="3">Your rule: your teams, skip close matches</td><td class="r num">${D.baselines.mine_skip_close.bets.toLocaleString('en-IN')}</td><td class="r num pos">${sgn(D.baselines.mine_skip_close.roi)}</td><td></td></tr>`;
+const ps = E.logit.per_season;
+bars('#seasonChart', Object.keys(ps).map((s) => ({ label: `${SEASON(s)} · ${ps[s].bets} bets`, v: ps[s].roi || 0, txt: sgn(ps[s].roi || 0) })), { label: 'logistic ROI by season' });
+$('#verdict').innerHTML = `<b>Verdict.</b> Logistic regression from the market is the only model that beats the closing price on log-loss (${fx(E.logit.ll, 4)} vs ${fx(E.market.ll, 4)}) and the best bettor: ${sgn(E.logit.roi)} over ${E.logit.bets.toLocaleString('en-IN')} bets, positive in 5 of 6 seasons. The flexible models (forest, network) are worse than the market itself: there is not enough signal for them to find shapes, so they find noise. On your teams alone the logistic model is about break-even, while your current rule made ${sgn(D.baselines.mine_skip_close.roi)}. The next step is to add rotation, then re-test.`;
+
+/* ── 12 five ── */
+$('#fiveTable').innerHTML = `<tr><th>Model</th>${H.map((h) => `<th class="r">${esc(short(h))}<br><span class="note">@${fx(h.odds)} · ${h.res}</span></th>`).join('')}<th class="r">₹ on five</th></tr>` +
+  MODELS.map(([k, n]) => {
+    let pl = 0;
+    const cells = H.map((h) => { const p = h.p[k]; const bet = k !== 'market' && p * h.odds > 1; if (bet) pl += h.y ? 100 * (h.odds - 1) : -100;
+      return `<td class="r"><span class="num">${pct(p)}</span><br>${bet ? `<span class="verdict bet">bet</span>` : `<span class="note">–</span>`}</td>`; }).join('');
+    return `<tr><td>${n}</td>${cells}<td class="r num ${pl > 0 ? 'pos' : pl < 0 ? 'neg' : ''}">${k === 'market' ? '—' : rup(pl)}</td></tr>`;
+  }).join('');
+
+/* ── 13 glossary ── */
+$('#glossTable').innerHTML = [
+  ['Closing price', 'The last price before kick-off; the sharpest public estimate of the chance.'],
+  ['Overround', 'The bookmaker margin: implied chances summing above 100%.'],
+  ['Log-odds (logit)', 'ln(p/(1−p)); the scale where effects add.'],
+  ['Sigmoid σ', '1/(1+e⁻ᶻ); turns log-odds back into a chance.'],
+  ['Offset', 'A term with its coefficient fixed at 1; here the market\'s log-odds.'],
+  ['Log-loss', 'Mean negative log-likelihood of the outcomes; lower is better.'],
+  ['Calibration', 'Whether predicted chances match observed frequencies.'],
+  ['Regularisation', 'A penalty on model complexity (L1, L2, early stopping, dropout).'],
+  ['Walk-forward validation', 'Train on the past, test on the next period, roll forward.'],
+  ['Gradient / Hessian', 'First / second derivative of the loss; for log-loss (p−y) and p(1−p).'],
+  ['Learning rate η', 'The step size of each boosting tree or optimiser update.'],
+  ['Bagging', 'Bootstrap aggregating: average models trained on resamples.'],
+  ['ReLU', 'max(0, u); the standard hidden-layer activation.'],
+  ['Shrinkage', 'Pulling noisy estimates toward a common mean in proportion to their noise.'],
+  ['Expected value', 'p·o − 1 per unit staked; bet only when positive.'],
+  ['ROI', 'Profit ÷ total staked.'],
+  ['Favourite–longshot bias', 'Longshots win less often than priced, favourites slightly more (Ch 14).'],
+  ['No-vig chance', 'An implied chance with the bookmaker margin divided out.'],
+  ['Standardise / z-score', '(x − mean) ÷ standard deviation; puts features on one scale.'],
+  ['Newton\'s method', 'Update w ← w + g ÷ H using slope and curvature; converges in a few steps (Ch 17).'],
+  ['Regular / rotation', 'Started 3+ of the last 5; rotation = regulars missing from the XI (Ch 18).'],
+  ['Lexicon sentiment', 'Scoring text by a weighted word list; tanh(sum ÷ 3) per article (Ch 19).'],
+  ['Half-life', 'Time after which a weight halves: 0.5^(age ÷ h).'],
+  ['tanh', '(eˣ − e⁻ˣ) ÷ (eˣ + e⁻ˣ); squashes any number into −1…+1.'],
+  ['Out-of-sample', 'Predictions from a model that never saw those rows.'],
+  ['Closing line value', 'Getting a better price than the closing one; an early sign of edge.'],
+].map(([a, b]) => `<tr><td><b>${a}</b></td><td>${b}</td></tr>`).join('');
+
+/* ════════ Part 2 + Chapter 0 ════════ */
+const D2 = {"rows":36312,"with_lineups":35610,"xgd":[2.556006642823292,-0.028189679521067344],"built_at":"2026-11-19 06:43","plain":{"feats":["mlogit","home","ppg5","ppg12","pvp12","gdvp6","sot6","rank","opp_rank","elite","losses5","elite_x_losses5"],"n":36312,"w":[-0.017496417194467824,0.14734781851517956,-0.02969974959807188,-0.06378341807898641,0.016505654869072836,-0.006103843732055725,-0.020684221926163746,0.023832518133373216,0.02860904953160438,-0.0422264839139638,-0.012753073845057979,-0.033849208775172196,0.008371920318266772],"mu":[-0.603705412452421,0.5,1.378442388191259,1.3797821766034701,0.001353016775737407,0.0005200607076709433,0.4990081496223154,10.524454725710509,10.524454725710509,0.12119960343688037,1.86940956157744,0.10877946684291694],"sd":[0.9324906040865603,0.5,0.6858177750976331,0.540919650000623,0.33048117167777874,0.643493833698852,0.1128597819681236,5.600024500415545,5.600024500415545,0.32635909603316493,1.2090248244491892,0.42543606395469374],"test":{"rows":18540,"ll":0.57137,"ll_market":0.57225,"bets":1438,"pl":-1829,"roi":-0.0127,"fav_bets":1301,"fav_roi":0.0133},"per_season":{"2122":{"rows":3592,"ll":0.57693,"ll_market":0.57702,"bets":354,"pl":905,"roi":0.0256,"fav_bets":331,"fav_roi":0.027},"2223":{"rows":3604,"ll":0.58325,"ll_market":0.58311,"bets":360,"pl":-3046,"roi":-0.0846,"fav_bets":296,"fav_roi":-0.0306},"2324":{"rows":3468,"ll":0.55275,"ll_market":0.55429,"bets":318,"pl":-354,"roi":-0.0111,"fav_bets":288,"fav_roi":0.0235},"2425":{"rows":3456,"ll":0.5672,"ll_market":0.56835,"bets":270,"pl":1407,"roi":0.0521,"fav_bets":261,"fav_roi":0.0629},"2526":{"rows":3468,"ll":0.57787,"ll_market":0.5792,"bets":87,"pl":-1356,"roi":-0.1559,"fav_bets":79,"fav_roi":-0.1478},"2627":{"rows":952,"ll":0.56458,"ll_market":0.5675,"bets":49,"pl":615,"roi":0.1255,"fav_bets":46,"fav_roi":0.1296}}},"rotation":{"feats":["mlogit","home","ppg5","ppg12","pvp12","gdvp6","sot6","rank","opp_rank","elite","losses5","elite_x_losses5","rot","opp_rot"],"n":35610,"w":[-0.01842322710343978,0.14338611222376502,-0.030748737477397443,-0.05805447279522657,0.03008282263320357,-0.013713702355715963,-0.021270824231807182,0.02235667037012749,0.03498865811654194,-0.04128531269756198,-0.013418720140307644,-0.027547314183671144,0.007837450411677067,-0.02169040364647131,0.01751912722389991],"mu":[-0.6033366530043065,0.5,1.3796742488065434,1.381090996821827,0.001615779784848793,0.0010782430901431933,0.4992188359547753,10.509098567818029,10.509098567818029,0.12145464757090704,1.8652344846953104,0.10951979780960404,3.0300758213984835,3.0300758213984835],"sd":[0.932143439086571,0.5,0.6858224107909414,0.5407998686166298,0.3303581961866352,0.6434765353551062,0.11281878013453711,5.596543724356774,5.596543724356774,0.3266548884592077,1.2083703705065243,0.42726748764305694,1.6117093717532074,1.6117093717532074],"test":{"rows":18496,"ll":0.57166,"ll_market":0.57249,"bets":1675,"pl":4044,"roi":0.0241,"fav_bets":1452,"fav_roi":0.0235},"per_season":{"2122":{"rows":3582,"ll":0.57749,"ll_market":0.57749,"bets":457,"pl":2835,"roi":0.062,"fav_bets":401,"fav_roi":0.0118},"2223":{"rows":3574,"ll":0.58423,"ll_market":0.58377,"bets":408,"pl":-1603,"roi":-0.0393,"fav_bets":325,"fav_roi":-0.0106},"2324":{"rows":3468,"ll":0.55256,"ll_market":0.55429,"bets":335,"pl":-60,"roi":-0.0018,"fav_bets":293,"fav_roi":0.05},"2425":{"rows":3454,"ll":0.56708,"ll_market":0.56847,"bets":282,"pl":2317,"roi":0.0822,"fav_bets":266,"fav_roi":0.0781},"2526":{"rows":3466,"ll":0.57838,"ll_market":0.57927,"bets":146,"pl":-811,"roi":-0.0555,"fav_bets":124,"fav_roi":-0.1156},"2627":{"rows":952,"ll":0.56417,"ll_market":0.5675,"bets":47,"pl":1366,"roi":0.2906,"fav_bets":43,"fav_roi":0.2726}}},"calib":[{"bin":"0-10%","n":741,"m":0.0753,"won":0.0621,"p":0.0638,"roi":-0.2026},{"bin":"10-20%","n":2769,"m":0.1549,"won":0.134,"p":0.1418,"roi":-0.1861},{"bin":"20-30%","n":3712,"m":0.2519,"won":0.2341,"p":0.2424,"roi":-0.1105},{"bin":"30-40%","n":3669,"m":0.3488,"won":0.3426,"p":0.346,"roi":-0.0669},{"bin":"40-50%","n":3029,"m":0.4474,"won":0.4569,"p":0.4525,"roi":-0.0233},{"bin":"50-60%","n":2169,"m":0.548,"won":0.5657,"p":0.562,"roi":-0.0136},{"bin":"60-70%","n":1410,"m":0.6473,"won":0.6794,"p":0.6683,"roi":0.0015},{"bin":"70-80%","n":788,"m":0.743,"won":0.7665,"p":0.7663,"roi":-0.0152},{"bin":"80-90%","n":250,"m":0.8363,"won":0.848,"p":0.8597,"roi":-0.0309},{"bin":"90-100%","n":3,"m":0.9176,"won":1.0,"p":0.9373,"roi":0.0433}],"lift":{"0-5%":-0.0084,"5-10%":-0.0118,"10-15%":-0.0135,"15-20%":-0.0129,"20-25%":-0.0111,"25-30%":-0.008,"30-35%":-0.0048,"35-40%":-0.0007,"40-45%":0.0029,"45-50%":0.0077,"50-55%":0.0125,"55-60%":0.0157,"60-65%":0.0196,"65-70%":0.0227,"70-75%":0.0226,"75-80%":0.0243,"80-85%":0.0239,"85-90%":0.0224,"90-95%":0.0197},"worked_pick":{"comp":"F1","day":"2026-11-21","home":"Monaco","away":"Auxerre","odds":[1.42,5.0,7.0],"inv":[0.7042253521126761,0.2,0.14285714285714285],"probs":[0.6725595695618755,0.19100691775557263,0.13643351268255186],"sides":{"home":{"team":"Monaco","games":[{"pts":0,"gd":-1,"xpts":1.3697219361483006,"xgd":-0.028189679521067344,"sf":3,"sa":2},{"pts":0,"gd":-1,"xpts":1.6731484160675112,"xgd":0.5153628249309358,"sf":8,"sa":7},{"pts":3,"gd":1,"xpts":1.7376689517260235,"xgd":0.6620478500684963,"sf":7,"sa":4},{"pts":3,"gd":2,"xpts":1.5563603617712696,"xgd":0.29755330714311246,"sf":5,"sa":2},{"pts":3,"gd":1,"xpts":0.5197237239706457,"xgd":-1.502251282761434,"sf":2,"sa":10},{"pts":1,"gd":0,"xpts":1.54383056731088,"xgd":0.3229352238979639,"sf":3,"sa":2},{"pts":3,"gd":1,"xpts":1.8030219955800288,"xgd":0.6930604432665431,"sf":6,"sa":4},{"pts":1,"gd":0,"xpts":1.9726237295061035,"xgd":0.9698526507503492,"sf":4,"sa":4},{"pts":0,"gd":-1,"xpts":1.6769939785380297,"xgd":0.5621420208919642,"sf":4,"sa":3},{"pts":1,"gd":0,"xpts":1.7571346485347636,"xgd":0.6361468487898325,"sf":6,"sa":2},{"pts":0,"gd":-2,"xpts":1.2990011853086454,"xgd":-0.0830390504868623,"sf":2,"sa":10},{"pts":1,"gd":0,"xpts":1.9884679441990052,"xgd":1.0631881986350373,"sf":3,"sa":5}],"x":{"ppg5":0.6,"ppg12":1.3333333333333333,"pvp12":-0.24147478655510057,"gdvp6":-0.973558518641144,"sot6":0.4716981132075472,"rank":7,"elite":0,"losses5":2,"elite_x_losses5":0,"home":1,"mlogit":0.719784540088244,"opp_rank":14},"steps":[{"f":"mlogit","x":0.719784540088244,"mu":-0.603705412452421,"sd":0.9324906040865603,"zt":1.4193064753045055,"w":0.14734781851517956,"push":0.20913171294058744},{"f":"home","x":1,"mu":0.5,"sd":0.5,"zt":1.0,"w":-0.02969974959807188,"push":-0.02969974959807188},{"f":"ppg5","x":0.6,"mu":1.378442388191259,"sd":0.6858177750976331,"zt":-1.1350571776598237,"w":-0.06378341807898641,"push":0.07239782650623089},{"f":"ppg12","x":1.3333333333333333,"mu":1.3797821766034701,"sd":0.540919650000623,"zt":-0.08587013481592576,"w":0.016505654869072836,"push":-0.0014173428088324258},{"f":"pvp12","x":-0.24147478655510057,"mu":0.001353016775737407,"sd":0.33048117167777874,"zt":-0.7347704624080571,"w":-0.006103843732055725,"push":0.004484924081469106},{"f":"gdvp6","x":-0.973558518641144,"mu":0.0005200607076709433,"sd":0.643493833698852,"zt":-1.5137341312965447,"w":-0.020684221926163746,"push":0.03131041270894642},{"f":"sot6","x":0.4716981132075472,"mu":0.4990081496223154,"sd":0.1128597819681236,"zt":-0.24198200579974288,"w":0.023832518133373216,"push":-0.005767040541172395},{"f":"rank","x":7,"mu":10.524454725710509,"sd":5.600024500415545,"zt":-0.6293641617905386,"w":0.02860904953160438,"push":-0.01800551047808219},{"f":"opp_rank","x":14,"mu":10.524454725710509,"sd":5.600024500415545,"zt":0.6206303693906323,"w":-0.0422264839139638,"push":-0.02620703830959095},{"f":"elite","x":0,"mu":0.12119960343688037,"sd":0.32635909603316493,"zt":-0.3713688538485348,"w":-0.012753073845057979,"push":0.004736094416884908},{"f":"losses5","x":2,"mu":1.86940956157744,"sd":1.2090248244491892,"zt":0.10801303313358744,"w":-0.033849208775172196,"push":-0.0036561557089783933},{"f":"elite_x_losses5","x":0,"mu":0.10877946684291694,"sd":0.42543606395469374,"zt":-0.25568934102986923,"w":0.008371920318266772,"push":-0.002140610789332204}],"offset":0.719784540088244,"b":-0.017496417194467824,"z":0.9374556453138344,"p":0.7185854232348742,"m":0.6725595695618755,"odds":1.42,"ev":0.020391300993521266},"away":{"team":"Auxerre","games":[{"pts":3,"gd":1,"xpts":1.4945321992709601,"xgd":0.2016335180110393,"sf":4,"sa":6},{"pts":3,"gd":2,"xpts":0.6066527616904736,"xgd":-1.3204557862093484,"sf":4,"sa":3},{"pts":0,"gd":-3,"xpts":0.6178324827379166,"xgd":-1.2985396766607014,"sf":4,"sa":9},{"pts":0,"gd":-2,"xpts":1.5936442271530653,"xgd":0.3757824121098046,"sf":7,"sa":6},{"pts":0,"gd":-2,"xpts":0.5951534041102562,"xgd":-1.3540305992119663,"sf":3,"sa":7},{"pts":3,"gd":1,"xpts":1.2731078550181776,"xgd":-0.17405411060870257,"sf":7,"sa":4},{"pts":3,"gd":1,"xpts":1.2416223420221644,"xgd":-0.24003683280320248,"sf":4,"sa":2},{"pts":0,"gd":-3,"xpts":0.619191964706316,"xgd":-1.3079282598126536,"sf":5,"sa":10},{"pts":3,"gd":2,"xpts":1.2192367941857043,"xgd":-0.22007582149346455,"sf":6,"sa":6},{"pts":1,"gd":0,"xpts":1.6140509307976352,"xgd":0.3896462773467609,"sf":5,"sa":1},{"pts":0,"gd":-4,"xpts":0.9812975801358788,"xgd":-0.6478885249856243,"sf":2,"sa":6},{"pts":0,"gd":-1,"xpts":0.7684447451635621,"xgd":-1.0790963337332504,"sf":2,"sa":3}],"x":{"ppg5":0.8,"ppg12":1.3333333333333333,"pvp12":0.2812693927506575,"gdvp6":-0.3157700840864276,"sot6":0.46153846153846156,"rank":14,"elite":0,"losses5":3,"elite_x_losses5":0,"home":0,"mlogit":-1.8452334827099135,"opp_rank":7},"steps":[{"f":"mlogit","x":-1.8452334827099135,"mu":-0.603705412452421,"sd":0.9324906040865603,"zt":-1.3314108097353496,"w":0.14734781851517956,"push":-0.19618047836203256},{"f":"home","x":0,"mu":0.5,"sd":0.5,"zt":-1.0,"w":-0.02969974959807188,"push":0.02969974959807188},{"f":"ppg5","x":0.8,"mu":1.378442388191259,"sd":0.6858177750976331,"zt":-0.8434345232724713,"w":-0.06378341807898641,"push":0.053797136820138626},{"f":"ppg12","x":1.3333333333333333,"mu":1.3797821766034701,"sd":0.540919650000623,"zt":-0.08587013481592576,"w":0.016505654869072836,"push":-0.0014173428088324258},{"f":"pvp12","x":0.2812693927506575,"mu":0.001353016775737407,"sd":0.33048117167777874,"zt":0.8469964402324267,"w":-0.006103843732055725,"push":-0.005169933912786209},{"f":"gdvp6","x":-0.3157700840864276,"mu":0.0005200607076709433,"sd":0.643493833698852,"zt":-0.4915200864879132,"w":-0.020684221926163746,"push":0.010166710550083195},{"f":"sot6","x":0.46153846153846156,"mu":0.4990081496223154,"sd":0.1128597819681236,"zt":-0.3320021307008802,"w":0.023832518133373216,"push":-0.007912446800247271},{"f":"rank","x":14,"mu":10.524454725710509,"sd":5.600024500415545,"zt":0.6206303693906323,"w":0.02860904953160438,"push":0.017755644978714524},{"f":"opp_rank","x":7,"mu":10.524454725710509,"sd":5.600024500415545,"zt":-0.6293641617905386,"w":-0.0422264839139638,"push":0.02657583565387349},{"f":"elite","x":0,"mu":0.12119960343688037,"sd":0.32635909603316493,"zt":-0.3713688538485348,"w":-0.012753073845057979,"push":0.004736094416884908},{"f":"losses5","x":3,"mu":1.86940956157744,"sd":1.2090248244491892,"zt":0.9351259093771193,"w":-0.033849208775172196,"push":-0.03165327213757887},{"f":"elite_x_losses5","x":0,"mu":0.10877946684291694,"sd":0.42543606395469374,"zt":-0.25568934102986923,"w":0.008371920318266772,"push":-0.002140610789332204}],"offset":-1.8452334827099135,"b":-0.017496417194467824,"z":-1.964472812697424,"p":0.12298380131445698,"m":0.13643351268255186,"odds":7.0,"ev":-0.13911339079880114}},"table":[["Paris SG",23,12,10],["Lille",21,7,10],["Paris FC",20,7,10],["Marseille",18,8,10],["Lyon",17,6,10],["Nice",17,3,10],["Monaco",16,2,10],["Rennes",16,0,10],["Brest",15,6,10],["Lorient",15,1,10],["Lens",13,2,10],["Toulouse",13,1,10],["Strasbourg",10,-4,10],["Auxerre",10,-11,10],["Le Mans",8,-7,10],["Troyes",8,-10,10],["Angers",8,-10,10],["Le Havre",2,-13,10]]},"rotation_example":{"comp":"SP1","day":"2026-11-08","team":"Celta","opp":"Levante","past":[["2026-09-19",[{"id":"144720","name":"Andrei Radu","pos":"G"},{"id":"384643","name":"Yoel Lago","pos":"CD"},{"id":"285756","name":"Sebastián Cáceres","pos":"CD-L"},{"id":"367430","name":"Álvaro Núñez","pos":"CD-R"},{"id":"353736","name":"Miguel Román","pos":"CM-L"},{"id":"297829","name":"Ilaix Moriba","pos":"CM-R"},{"id":"188391","name":"Hugo Álvarez","pos":"LM"},{"id":"331586","name":"Javi Rueda","pos":"RM"},{"id":"279904","name":"Ferran Jutglà","pos":"F"},{"id":"322652","name":"Williot Swedberg","pos":"CF-L"},{"id":"324811","name":"Hugo González","pos":"CF-R"}]],["2026-10-11",[{"id":"144720","name":"Andrei Radu","pos":"G"},{"id":"384643","name":"Yoel Lago","pos":"CD"},{"id":"146127","name":"Marcos Alonso","pos":"CD-L"},{"id":"367430","name":"Álvaro Núñez","pos":"CD-R"},{"id":"240235","name":"Aleix Febas","pos":"CM-L"},{"id":"297829","name":"Ilaix Moriba","pos":"CM-R"},{"id":"231838","name":"Javi Galán","pos":"LM"},{"id":"331586","name":"Javi Rueda","pos":"RM"},{"id":"138448","name":"Pablo Durán","pos":"F"},{"id":"188391","name":"Hugo Álvarez","pos":"CF-L"},{"id":"279904","name":"Ferran Jutglà","pos":"CF-R"}]],["2026-10-18",[{"id":"144720","name":"Andrei Radu","pos":"G"},{"id":"384643","name":"Yoel Lago","pos":"CD"},{"id":"285756","name":"Sebastián Cáceres","pos":"CD-L"},{"id":"376147","name":"Javi Rodríguez","pos":"CD-R"},{"id":"297829","name":"Ilaix Moriba","pos":"CM-L"},{"id":"414293","name":"Hugo Burcio","pos":"CM-R"},{"id":"188391","name":"Hugo Álvarez","pos":"LM"},{"id":"298343","name":"Sergio Carreira","pos":"RM"},{"id":"279904","name":"Ferran Jutglà","pos":"F"},{"id":"322652","name":"Williot Swedberg","pos":"CF-L"},{"id":"304592","name":"Couhaib Driouech","pos":"CF-R"}]],["2026-10-25",[{"id":"144720","name":"Andrei Radu","pos":"G"},{"id":"384643","name":"Yoel Lago","pos":"CD"},{"id":"146127","name":"Marcos Alonso","pos":"CD-L"},{"id":"376147","name":"Javi Rodríguez","pos":"CD-R"},{"id":"240235","name":"Aleix Febas","pos":"CM-L"},{"id":"297829","name":"Ilaix Moriba","pos":"CM-R"},{"id":"231838","name":"Javi Galán","pos":"LM"},{"id":"331586","name":"Javi Rueda","pos":"RM"},{"id":"138448","name":"Pablo Durán","pos":"F"},{"id":"188391","name":"Hugo Álvarez","pos":"CF-L"},{"id":"324811","name":"Hugo González","pos":"CF-R"}]],["2026-10-31",[{"id":"144720","name":"Andrei Radu","pos":"G"},{"id":"384643","name":"Yoel Lago","pos":"CD"},{"id":"285756","name":"Sebastián Cáceres","pos":"CD-L"},{"id":"376147","name":"Javi Rodríguez","pos":"CD-R"},{"id":"240235","name":"Aleix Febas","pos":"CM-L"},{"id":"297829","name":"Ilaix Moriba","pos":"CM-R"},{"id":"231838","name":"Javi Galán","pos":"LM"},{"id":"331586","name":"Javi Rueda","pos":"RM"},{"id":"279904","name":"Ferran Jutglà","pos":"F"},{"id":"324811","name":"Hugo González","pos":"CF-L"},{"id":"188391","name":"Hugo Álvarez","pos":"CF-R"}]]],"xi":[{"id":"144720","name":"Andrei Radu","pos":"G"},{"id":"285756","name":"Sebastián Cáceres","pos":"CD"},{"id":"146127","name":"Marcos Alonso","pos":"CD-L"},{"id":"376147","name":"Javi Rodríguez","pos":"CD-R"},{"id":"297829","name":"Ilaix Moriba","pos":"CM-L"},{"id":"414292","name":"Andrés Antañón","pos":"CM-R"},{"id":"298343","name":"Sergio Carreira","pos":"LM"},{"id":"331586","name":"Javi Rueda","pos":"RM"},{"id":"138448","name":"Pablo Durán","pos":"F"},{"id":"304592","name":"Couhaib Driouech","pos":"CF-L"},{"id":"92800","name":"Iago Aspas","pos":"CF-R"}],"regulars":{"144720":5,"384643":5,"285756":3,"297829":5,"188391":5,"331586":4,"279904":4,"324811":3,"240235":3,"231838":3,"376147":3},"missing":["384643","188391","279904","324811","240235","231838"],"result":["Celta","Levante",0,0]},"rotation_effect":[{"missing":0,"n":618,"m":0.4041,"won":0.411},{"missing":1,"n":2334,"m":0.3864,"won":0.3993},{"missing":2,"n":4349,"m":0.3677,"won":0.3658},{"missing":3,"n":4568,"m":0.3729,"won":0.3654},{"missing":"4+","n":6642,"m":0.3749,"won":0.3731}],"sentiment":{"comp":"I1","team":"Juventus","asof":"2026-11-19T06:43:28.340396+00:00","items":[{"headline":"How fallen giants and their fans bounce back from scandal, relegation","description":"Some of Europe's greatest teams have suffered relegation as punishment. What might lie ahead for Man City? Past scandals provide a few potential answers.","age":0.6876081064351852,"hits":[],"raw":0,"score":0.0,"weight":0.8876716169843294,"flags":""},{"headline":"Transfer rumors, news: AC Milan, Juventus eye USMNT's Folarin Balogun","description":"AS Monaco and USMNT striker Folarin Balogun is reportedly linked to two of Italy's biggest clubs. Transfer Talk has the latest.","age":1.418696069398148,"hits":[],"raw":0,"score":0.0,"weight":0.7820463296275703,"flags":""},{"headline":"Transfer rumors, news: Man United eye USMNT's McKennie amid Pochettino arrival","description":"Incoming Manchester United boss Mauricio Pochettino is eyeing a quick reunion with USMNT midfielder Weston McKennie. Transfer Talk has the latest.","age":2.3990780138425927,"hits":[],"raw":0,"score":0.0,"weight":0.6598593713946256,"flags":""},{"headline":"Portugal, Man United, Real Madrid: Cristiano Ronaldo's long history of rows with coaches","description":"Cristiano Ronaldo has retired from international soccer with Portugal after being benched by coach Jorge Jesus. It is far from the first high-profile row of his career.","age":13.59875393976852,"hits":[["\\b(rift|row|bust-up|fallout|unrest|turmoil|crisis|chaos|mutiny|feud)\\b",-1.3]],"raw":-1.3,"score":-0.4081,"weight":0.09475274275845796,"flags":"dressing room"}],"result":{"score":-0.016,"tone":"neutral","articles":4,"flags":{"dressing room":1},"worst":[{"headline":"Portugal, Man United, Real Madrid: Cristiano Ronaldo's long history of rows with coaches","link":"https://www.espn.com/soccer/story/_/id/50075485/cristiano-ronaldo-long-history-rows-portugal-manchester-united-real-madrid-juventus-coaches","published":"2026-11-05T16:21:16+00:00","score":-0.4081}]}},"lexicon":[["\\binjur(y|ies|ed)\\b",-1.0,"injury"],["\\bruled out\\b",-1.5,"injury"],["\\bsidelined\\b",-1.2,"injury"],["\\b(hamstring|acl|ligament|fracture|surgery|knock)\\b",-0.8,"injury"],["\\bdoubt(ful)?\\b",-0.6,"injury"],["\\bout for\\b",-1.0,"injury"],["\\bsetback\\b",-0.8,"injury"],["\\bsack(ed|ing)?\\b",-2.0,"manager"],["\\b(fired|axed|dismissed)\\b",-1.8,"manager"],["\\bunder (pressure|fire)\\b",-1.5,"manager"],["\\b(future in doubt|on the brink|ultimatum)\\b",-1.5,"manager"],["\\b(interim|caretaker)\\b",-0.8,"manager"],["\\b(suspend(ed)?|suspension|banned|ban)\\b",-1.0,"suspension"],["\\bred card\\b",-0.6,"suspension"],["\\b(rift|row|bust-up|fallout|unrest|turmoil|crisis|chaos|mutiny|feud)\\b",-1.3,"dressing room"],["\\b(defeat|beaten|loses|lost|slump|winless|struggl\\w*|humiliat\\w*|collapse|thrashed|crushed|stunned)\\b",-0.7,null],["\\b(poor|woeful|dismal|worst)\\b",-0.6,null],["\\b(returns?|back in training|fit again|recovered|available|boost)\\b",0.9,null],["\\b(win|wins|won|victory|beat|beats|thrash(es)?|rout)\\b",0.6,null],["\\b(unbeaten|streak|run of|straight win|top of|title (race|charge|challengers?)|dominant|perfect)\\b",0.9,null],["\\b(new (deal|contract)|extension|signs|agrees)\\b",0.5,null]],"grades_top":[{"comp":"F1","team":"Paris SG","grade":86,"edge_score":83,"record_score":73,"fav_score":100},{"comp":"I1","team":"Juventus","grade":82,"edge_score":93,"record_score":36,"fav_score":95},{"comp":"D1","team":"Hoffenheim","grade":80,"edge_score":81,"record_score":69,"fav_score":85},{"comp":"E0","team":"Liverpool","grade":80,"edge_score":75,"record_score":82,"fav_score":85},{"comp":"I1","team":"Milan","grade":79,"edge_score":73,"record_score":81,"fav_score":85},{"comp":"SP1","team":"Ath Bilbao","grade":77,"edge_score":80,"record_score":73,"fav_score":75},{"comp":"D1","team":"Bayern Munich","grade":74,"edge_score":63,"record_score":60,"fav_score":100},{"comp":"SP1","team":"Real Madrid","grade":74,"edge_score":62,"record_score":79,"fav_score":90},{"comp":"I1","team":"Como","grade":74,"edge_score":70,"record_score":66,"fav_score":85},{"comp":"F1","team":"Lens","grade":73,"edge_score":74,"record_score":68,"fav_score":75}],"grades_n":90,"grade_detail":{"Paris SG":{"grade":{"comp":"F1","team":"Paris SG","grade":86,"edge":0.0117,"edge_score":83,"value_bets":7,"value_pl":115,"value_roi":0.1643,"record_score":73,"fav_share":1.0,"fav_score":100,"matches":20,"form":"WWWWWWWLDDLW","rank":1,"elite":1},"last20":[{"day":"2026-02-28","p":0.7623481869639425,"m":0.7328022949769527,"lift":0.022581584147054114,"fav":1,"y":1,"odds":1.28},{"day":"2026-03-06","p":0.7181231802830523,"m":0.6954641302884831,"lift":0.02274550452784832,"fav":1,"y":0,"odds":1.35},{"day":"2026-03-21","p":0.6842579650312051,"m":0.6539842841704971,"lift":0.02274550452784832,"fav":1,"y":1,"odds":1.44},{"day":"2026-04-03","p":0.7701729255549812,"m":0.7405393882660742,"lift":0.022581584147054114,"fav":1,"y":1,"odds":1.27},{"day":"2026-04-19","p":0.7450440801379716,"m":0.7173786240140364,"lift":0.022581584147054114,"fav":1,"y":0,"odds":1.31},{"day":"2026-04-22","p":0.8456792543228181,"m":0.818127170579748,"lift":0.02389160458975557,"fav":1,"y":1,"odds":1.15},{"day":"2026-04-25","p":0.8002722504099673,"m":0.7618342110281497,"lift":0.024318734859737415,"fav":1,"y":1,"odds":1.23},{"day":"2026-05-02","p":0.7275191386337202,"m":0.7060543772931018,"lift":0.022581584147054114,"fav":1,"y":0,"odds":1.33},{"day":"2026-05-10","p":0.8201354627931083,"m":0.7892745658656212,"lift":0.024318734859737415,"fav":1,"y":1,"odds":1.19},{"day":"2026-05-13","p":0.49125645998643014,"m":0.4647418226007899,"lift":0.007650026595216885,"fav":1,"y":1,"odds":2.01},{"day":"2026-05-17","p":0.6645922545433706,"m":0.6396639848556555,"lift":0.019611433117794716,"fav":1,"y":0,"odds":1.46},{"day":"2026-08-23","p":0.6878614286170767,"m":0.6477965597580926,"lift":0.019611433117794716,"fav":1,"y":0,"odds":1.45},{"day":"2026-08-28","p":0.5898889144061128,"m":0.5442938064430237,"lift":0.012476790848376208,"fav":1,"y":0,"odds":1.73},{"day":"2026-09-04","p":0.7572756126556724,"m":0.7172487512076798,"lift":0.022581584147054114,"fav":1,"y":0,"odds":1.31},{"day":"2026-09-13","p":0.8276238367029873,"m":0.7740769331359174,"lift":0.024318734859737415,"fav":1,"y":1,"odds":1.22},{"day":"2026-09-20","p":0.7352502225596111,"m":0.6712950989266778,"lift":0.02274550452784832,"fav":1,"y":1,"odds":1.4},{"day":"2026-10-17","p":0.6951256148124907,"m":0.6521963467983889,"lift":0.02274550452784832,"fav":1,"y":1,"odds":1.44},{"day":"2026-10-26","p":0.7486453161766322,"m":0.7141383066134179,"lift":0.022581584147054114,"fav":1,"y":1,"odds":1.32},{"day":"2026-10-30","p":0.7562084138885908,"m":0.738588520079888,"lift":0.022581584147054114,"fav":1,"y":1,"odds":1.28},{"day":"2026-11-07","p":0.8616002229846632,"m":0.8455752541137593,"lift":0.02389160458975557,"fav":1,"y":1,"odds":1.12}],"value_bets":[{"day":"2025-08-17","odds":1.21,"y":1,"p":0.8285464741680886},{"day":"2025-10-25","odds":1.32,"y":1,"p":0.7577638460502537},{"day":"2025-11-09","odds":1.56,"y":1,"p":0.6543045309678284},{"day":"2026-08-28","odds":1.73,"y":0,"p":0.5898889144061128},{"day":"2026-09-13","odds":1.22,"y":1,"p":0.8276238367029873},{"day":"2026-09-20","odds":1.4,"y":1,"p":0.7352502225596111},{"day":"2026-10-17","odds":1.44,"y":1,"p":0.6951256148124907}]},"Brighton":{"grade":{"comp":"E0","team":"Brighton","grade":44,"edge":-0.0058,"edge_score":31,"value_bets":2,"value_pl":-55,"value_roi":-0.275,"record_score":37,"fav_share":0.7,"fav_score":70,"matches":20,"form":"WWLWWWWDLWLL","rank":2,"elite":0},"last20":[{"day":"2026-03-01","p":0.4599730321199151,"m":0.45104089006136383,"lift":0.007650026595216885,"fav":1,"y":1,"odds":2.09},{"day":"2026-03-04","p":0.17191675167581433,"m":0.187903809470788,"lift":-0.012865283490192714,"fav":0,"y":0,"odds":5.03},{"day":"2026-03-14","p":0.49224671695402916,"m":0.46879629560698893,"lift":0.007650026595216885,"fav":1,"y":1,"odds":2.01},{"day":"2026-03-21","p":0.29294607318868787,"m":0.30909650932030586,"lift":-0.004784333902201105,"fav":0,"y":1,"odds":3.05},{"day":"2026-04-11","p":0.6037079585285672,"m":0.5932763981480225,"lift":0.01571320465465891,"fav":1,"y":1,"odds":1.59},{"day":"2026-04-18","p":0.41249296127882484,"m":0.4269796176220947,"lift":0.002942192252415081,"fav":1,"y":0,"odds":2.21},{"day":"2026-04-21","p":0.4056037330427586,"m":0.4128481455563331,"lift":0.002942192252415081,"fav":1,"y":1,"odds":2.28},{"day":"2026-05-02","p":0.36690801609079093,"m":0.38341421227117667,"lift":-0.0006728988419933536,"fav":1,"y":0,"odds":2.46},{"day":"2026-05-09","p":0.7645568298187203,"m":0.7455227750782008,"lift":0.022581584147054114,"fav":1,"y":1,"odds":1.27},{"day":"2026-05-17","p":0.4614284340187694,"m":0.45851387480409334,"lift":0.007650026595216885,"fav":1,"y":0,"odds":2.04},{"day":"2026-05-24","p":0.5228647728673682,"m":0.5014668023708316,"lift":0.012476790848376208,"fav":1,"y":0,"odds":1.87},{"day":"2026-08-23","p":0.4723099221449209,"m":0.4555588026551998,"lift":0.007650026595216885,"fav":1,"y":1,"odds":2.07},{"day":"2026-08-30","p":0.2316811783991673,"m":0.24146722110637592,"lift":-0.011094394184897922,"fav":0,"y":0,"odds":3.89},{"day":"2026-09-05","p":0.4912395464080602,"m":0.48672636358080834,"lift":0.007650026595216885,"fav":1,"y":0,"odds":1.94},{"day":"2026-09-19","p":0.17615289858798447,"m":0.19194515852613536,"lift":-0.012865283490192714,"fav":0,"y":1,"odds":4.92},{"day":"2026-10-10","p":0.38953153541189295,"m":0.4024522295586475,"lift":0.002942192252415081,"fav":1,"y":1,"odds":2.33},{"day":"2026-10-18","p":0.6748976556580607,"m":0.6629113315199363,"lift":0.02274550452784832,"fav":1,"y":1,"odds":1.42},{"day":"2026-10-25","p":0.25137372426246496,"m":0.27297452986342524,"lift":-0.008028063463852816,"fav":0,"y":0,"odds":3.45},{"day":"2026-10-31","p":0.19201781753367017,"m":0.21465433422253244,"lift":-0.011094394184897922,"fav":0,"y":1,"odds":4.36},{"day":"2026-11-08","p":0.5125974881853288,"m":0.5242105964012851,"lift":0.012476790848376208,"fav":1,"y":1,"odds":1.8}],"value_bets":[{"day":"2025-12-30","odds":2.1,"y":0,"p":0.47725389415818653},{"day":"2026-01-03","odds":1.45,"y":1,"p":0.6915215719786585}]}},"picks":{"since":"2026-11-20","all":{"bets":0,"won":0,"pl":0,"roi":null,"avg_odds":null},"d30":{"bets":0,"won":0,"pl":0,"roi":null,"avg_odds":null},"settled":[],"pending":[{"comp":"F1","day":"2026-11-21","kickoff":"2026-11-21T19:45:00+00:00","home":"Monaco","away":"Auxerre","side":"home","team":"Monaco","odds":1.42,"price_src":"ESPN sportsbook","p_model":0.7186,"p_market":0.6726,"ev":0.0204,"model":"before line-ups","decided":false,"result":null,"close_odds":null,"pl":null,"score":null,"opp":"Auxerre"},{"comp":"SP1","day":"2026-11-21","kickoff":"2026-11-21T13:00:00+00:00","home":"Alaves","away":"La Coruna","side":"home","team":"Alaves","odds":2.25,"price_src":"ESPN sportsbook","p_model":0.4455,"p_market":0.4268,"ev":0.0025,"model":"before line-ups","decided":false,"result":null,"close_odds":null,"pl":null,"score":null,"opp":"La Coruna"},{"comp":"E0","day":"2026-11-21","kickoff":"2026-11-21T12:30:00+00:00","home":"Man City","away":"Fulham","side":"home","team":"Man City","odds":1.4,"price_src":"ESPN sportsbook","p_model":0.7144,"p_market":0.6818,"ev":0.0002,"model":"before line-ups","decided":false,"result":null,"close_odds":null,"pl":null,"score":null,"opp":"Fulham"},{"comp":"SP1","day":"2026-11-20","kickoff":"2026-11-20T20:00:00+00:00","home":"Ath Bilbao","away":"Espanol","side":"home","team":"Ath Bilbao","odds":1.48,"price_src":"ESPN sportsbook","p_model":0.6778,"p_market":0.6492,"ev":0.0032,"model":"before line-ups","decided":false,"result":null,"close_odds":null,"pl":null,"score":null,"opp":"Espanol"}],"status":{"last":null,"priced":0,"picks":0,"settled":0}}};
+const sn = (x, n = 2) => `${x < 0 ? '−' : ''}${Math.abs(x).toFixed(n)}`;
+const par = (x, n = 3) => (x < 0 ? `(${sn(x, n)})` : sn(x, n));
+const tanh = (x) => Math.tanh(x);
+const WK = D2.worked_pick;
+const MON = WK.sides.home, AUX = WK.sides.away;
+const LBL2 = { mlogit: 'Market log-odds (bias stretch)', home: 'At home', ppg5: 'Points a game, last 5', ppg12: 'Points a game, last 12', pvp12: 'Points beyond the price, last 12', gdvp6: 'Goal diff. beyond the price, last 6', sot6: 'Shots-on-target share, last 6', rank: 'League position', opp_rank: "Opponent's position", elite: 'Elite club', losses5: 'Losses in last 5', elite_x_losses5: 'Elite × losses' };
+
+/* ── 0 start ── */
+{
+  const l5 = MON.games.slice(-5).map((g) => g.pts);
+  const mean = l5.reduce((a, b) => a + b, 0) / 5;
+  $('#c0mean').innerHTML = `Monaco's last 5 league games gave ${l5.join(', ')} points<br>(${l5.join(' + ')}) ÷ 5 = ${l5.reduce((a, b) => a + b, 0)} ÷ 5 = <span class="ans">${fx(mean, 2)} points a game</span> &nbsp;(the feature "ppg5")`;
+  const g = D2.grade_detail['Paris SG'].grade;
+  $('#c0wmean').innerHTML = `PSG's grade: 0.5 × ${g.edge_score} + 0.2 × ${g.record_score} + 0.3 × ${g.fav_score}<br>= ${fx(0.5 * g.edge_score, 1)} + ${fx(0.2 * g.record_score, 1)} + ${fx(0.3 * g.fav_score, 1)} = <span class="ans">${fx(0.5 * g.edge_score + 0.2 * g.record_score + 0.3 * g.fav_score, 1)} ≈ ${g.grade}</span>`;
+  const dev = l5.map((x) => x - mean), sq = dev.map((x) => x * x), ss = sq.reduce((a, b) => a + b, 0);
+  $('#c0sd').innerHTML = `points ${l5.join(', ')} · mean ${fx(mean, 1)}<br>gaps from the mean: ${dev.map((x) => sn(x, 1)).join(', ')}<br>squared: ${sq.map((x) => fx(x, 2)).join(' + ')} = ${fx(ss, 2)}<br>÷ 5 = ${fx(ss / 5, 3)} → √${fx(ss / 5, 3)} = <span class="ans">s = ${fx(Math.sqrt(ss / 5), 3)}</span>`;
+  const draw = () => {
+    const x = parseFloat(String($('#c0x').value).replace('−', '-'));
+    if (!isFinite(x)) { $('#c0calc').innerHTML = '<tr><td>Type a number</td></tr>'; return; }
+    const rows = [['e<sup>x</sup>', Math.exp(x)], ['ln x', x > 0 ? Math.log(x) : null], ['σ(x) = 1 ÷ (1 + e<sup>−x</sup>)', sig(x)], ['tanh x', tanh(x)],
+      ['logit x = ln(x ÷ (1 − x))', x > 0 && x < 1 ? logit(x) : null], ['0.5<sup>x ÷ 4</sup> (news weight at x days)', Math.pow(0.5, x / 4)]];
+    $('#c0calc').innerHTML = rows.map(([a, v]) => `<tr><td>${a}</td><td class="r num">${v == null ? '<span class="note">needs x between 0 and 1 / above 0</span>' : sn(v, 4)}</td></tr>`).join('');
+  };
+  $('#c0x').addEventListener('input', draw); draw();
+}
+
+/* ── 13 built ── */
+{
+  const P = D2.plain.test, R = D2.rotation.test;
+  $('#b2rows').textContent = D2.rows.toLocaleString('en-IN');
+  $('#b2lu').textContent = D2.with_lineups.toLocaleString('en-IN');
+  $('#b2stats').innerHTML = [
+    [fx(P.ll, 5), `test log-loss (market ${fx(P.ll_market, 5)}): lower is better`],
+    [sgn(P.fav_roi), `on ${P.fav_bets.toLocaleString('en-IN')} value favourites, before line-ups`],
+    [sgn(R.fav_roi), `on ${R.fav_bets.toLocaleString('en-IN')} value favourites, with line-ups`],
+    ['6', 'unseen test seasons, 2021/22 on'],
+  ].map(([b, s]) => `<div class="stat"><b>${b}</b><span>${s}</span></div>`).join('');
+}
+
+/* ── 14 bias ── */
+{
+  const C = D2.calib;
+  $('#biasN').textContent = C.reduce((a, c) => a + c.n, 0).toLocaleString('en-IN');
+  $('#biasTable').innerHTML = `<tr><th>Market's chance</th><th class="r">Sides</th><th class="r">Market said</th><th class="r">Really won</th><th class="r">Gap</th><th class="r">₹100 on each</th></tr>` +
+    C.map((c) => { const gap = c.won - c.m; return `<tr><td>${c.bin}</td><td class="r num">${c.n.toLocaleString('en-IN')}</td><td class="r num">${pct(c.m)}</td><td class="r num">${pct(c.won)}</td><td class="r num ${gap > 0 ? 'pos' : 'neg'}">${gap > 0 ? '+' : '−'}${fx(Math.abs(100 * gap), 1)} pts</td><td class="r num ${c.roi > 0 ? 'pos' : 'neg'}">${sgn(c.roi)}</td></tr>`; }).join('');
+  const f = D2.plain, j = f.feats.indexOf('mlogit'), w = f.w[j + 1], mu = f.mu[j], s = f.sd[j];
+  $('#biasWhere').innerHTML = `Learned: <i>w</i><sub>m</sub> = ${fx(w, 3)}, <i>μ</i> = ${sn(mu, 3)} (the average side is a slight underdog), <i>s</i> = ${fx(s, 3)}. Since logit(<i>m</i>) appears twice, it is the same as multiplying it by 1 + ${fx(w, 3)} ÷ ${fx(s, 3)} = <b>${fx(1 + w / s, 3)}</b>: favourites pushed up, longshots pushed down.`;
+  const one = (side) => { const zt = (side.offset - mu) / s; return `${side.team}: logit(${fx(side.m, 4)}) = ${sn(side.offset, 3)} → ${fx(w, 3)} × (${sn(side.offset, 3)} − ${par(mu, 3)}) ÷ ${fx(s, 3)} = ${fx(w, 3)} × ${sn(zt, 3)} = <span class="ans">${zt * w > 0 ? '+' : ''}${sn(zt * w, 3)}</span>`; };
+  $('#biasCalc').innerHTML = `${one(MON)}<br>${one(AUX)}`;
+}
+
+/* ── 15 features by hand ── */
+function featCalc(side, opp) {
+  const g = side.games, l5 = g.slice(-5), l6 = g.slice(-6), x = side.x;
+  const list = (a, f, n = 2) => a.map((v) => par(f(v), n)).join(' + ');
+  const sum = (a, f) => a.reduce((t, v) => t + f(v), 0);
+  const sf = sum(l6, (v) => v.sf || 0), sa = sum(l6, (v) => v.sa || 0);
+  const L = [];
+  L.push(`<b>ppg5</b> = (${l5.map((v) => v.pts).join(' + ')}) ÷ 5 = ${sum(l5, (v) => v.pts)} ÷ 5 = <span class="ans">${fx(x.ppg5, 2)}</span>`);
+  L.push(`<b>ppg12</b> = (${g.map((v) => v.pts).join(' + ')}) ÷ ${g.length} = ${sum(g, (v) => v.pts)} ÷ ${g.length} = <span class="ans">${fx(x.ppg12, 3)}</span>`);
+  L.push(`<b>pvp12</b> = [${list(g, (v) => v.pts - v.xpts)}] ÷ ${g.length}<br>&nbsp;&nbsp;= ${sn(sum(g, (v) => v.pts - v.xpts), 3)} ÷ ${g.length} = <span class="ans">${sn(x.pvp12, 3)}</span> points a game ${x.pvp12 < 0 ? 'below' : 'above'} what the prices expected`);
+  L.push(`<b>gdvp6</b> = [${list(l6, (v) => v.gd - v.xgd)}] ÷ 6<br>&nbsp;&nbsp;= ${sn(sum(l6, (v) => v.gd - v.xgd), 3)} ÷ 6 = <span class="ans">${sn(x.gdvp6, 3)}</span> goals a game`);
+  L.push(`<b>sot6</b> = shots on target for ÷ (for + against), last 6 = ${sf} ÷ (${sf} + ${sa}) = <span class="ans">${fx(x.sot6, 3)}</span>`);
+  L.push(`<b>losses5</b> = games with 0 points in the last 5 = <span class="ans">${x.losses5}</span>`);
+  L.push(`<b>rank</b> = ${x.rank} in the table now · <b>opp_rank</b> = ${opp.team} ${x.opp_rank}`);
+  L.push(`<b>elite</b> = top 3 in at least 3 of the last 4 seasons? <span class="ans">${x.elite ? 'yes (1)' : 'no (0)'}</span> · <b>elite × losses5</b> = ${x.elite} × ${x.losses5} = <span class="ans">${x.elite * x.losses5}</span>`);
+  L.push(`<b>home</b> = <span class="ans">${x.home}</span> · <b>mlogit</b> = logit(${fx(side.m, 4)}) = <span class="ans">${sn(x.mlogit, 3)}</span>`);
+  return L.map((l) => `<div class="calc">${l}</div>`).join('');
+}
+{
+  $('#f2k').textContent = fx(D2.xgd[0], 3);
+  $('#f2c').textContent = `${D2.xgd[1] < 0 ? '−' : '+'} ${fx(Math.abs(D2.xgd[1]), 3)}`;
+  const sides = [MON, AUX];
+  pickers('#f2Pick', (i) => sides[i].team, (i) => {
+    const s = sides[i], o = sides[1 - i], g = s.games, n = g.length;
+    $('#f2Games').innerHTML = `<tr><th>#</th><th class="r">Pts</th><th class="r">xPts</th><th class="r">Pts − xPts</th><th class="r">GD</th><th class="r">xGD</th><th class="r">GD − xGD</th><th class="r">SoT for</th><th class="r">SoT ag.</th></tr>` +
+      g.map((v, k) => `<tr class="${k < n - 6 ? 'dim' : ''}"><td class="num">${k + 1}${k >= n - 5 ? ' ·5' : k === n - 6 ? ' ·6' : ''}</td><td class="r num">${v.pts}</td><td class="r num">${fx(v.xpts, 2)}</td><td class="r num">${sn(v.pts - v.xpts, 2)}</td><td class="r num">${v.gd > 0 ? '+' : ''}${v.gd}</td><td class="r num">${sn(v.xgd, 2)}</td><td class="r num">${sn(v.gd - v.xgd, 2)}</td><td class="r num">${v.sf ?? '–'}</td><td class="r num">${v.sa ?? '–'}</td></tr>`).join('') +
+      `<tr><td colspan="9" class="note">·5 = in the last 5 · ·6 = in the last 6 (grey rows count only for the 12-game features)</td></tr>`;
+    $('#f2Calc').innerHTML = featCalc(s, o);
+  }, 2);
+}
+
+/* ── 16 worked ── */
+{
+  const [oh, od, oa] = WK.odds, inv = WK.inv, S = inv[0] + inv[1] + inv[2], pr = WK.probs;
+  const day = new Date(`${WK.day}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  $('#wkIntro').innerHTML = `<b>${MON.team} v ${AUX.team}</b>, Ligue 1, ${day}. ESPN's sportsbook prices: home <b>${fx(oh)}</b>, draw <b>${fx(od)}</b>, away <b>${fx(oa)}</b>. The app recorded ${MON.team} as a pick. Here is exactly why.`;
+  const sumPush = MON.steps.reduce((a, s) => a + s.push, 0);
+  const ez = Math.exp(-MON.z);
+  $('#wkSteps').innerHTML = [
+    `<b>Prices → implied chances</b><div class="calc">1 ÷ ${fx(oh)} = ${fx(inv[0], 4)} · 1 ÷ ${fx(od)} = ${fx(inv[1], 4)} · 1 ÷ ${fx(oa)} = ${fx(inv[2], 4)}<br>total = ${fx(S, 4)} → the bookmaker's margin is ${fx(100 * (S - 1), 2)}%</div>`,
+    `<b>Take the margin out (no-vig chances)</b><div class="calc">${MON.team}: ${fx(inv[0], 4)} ÷ ${fx(S, 4)} = <span class="ans">${fx(pr[0], 4)}</span> · draw ${fx(pr[1], 4)} · ${AUX.team} ${fx(pr[2], 4)} &nbsp;(they now add to 1)</div>`,
+    `<b>Move to log-odds (the starting point)</b><div class="calc">logit(${fx(pr[0], 4)}) = ln(${fx(pr[0], 4)} ÷ ${fx(1 - pr[0], 4)}) = ln(${fx(pr[0] / (1 - pr[0]), 4)}) = <span class="ans">${fx(MON.offset, 4)}</span></div>`,
+    `<b>Standardise each feature and multiply by its weight</b><div class="calc">push = weight × (value − mean) ÷ spread<br>e.g. ppg5: ${fx(MON.steps[2].w, 4)} × (${fx(MON.steps[2].x, 2)} − ${fx(MON.steps[2].mu, 3)}) ÷ ${fx(MON.steps[2].sd, 3)} = ${fx(MON.steps[2].w, 4)} × ${sn(MON.steps[2].zt, 3)} = <span class="ans">${MON.steps[2].push > 0 ? '+' : ''}${sn(MON.steps[2].push, 4)}</span><br>all twelve are in the table below; they add up to <span class="ans">${sumPush > 0 ? '+' : ''}${sn(sumPush, 4)}</span></div>`,
+    `<b>Add everything up</b><div class="calc">z = start + intercept + pushes = ${fx(MON.offset, 4)} + ${par(MON.b, 4)} + ${par(sumPush, 4)} = <span class="ans">${fx(MON.z, 4)}</span></div>`,
+    `<b>Back to a chance with the sigmoid</b><div class="calc">p = 1 ÷ (1 + e<sup>−${fx(MON.z, 4)}</sup>) = 1 ÷ (1 + ${fx(ez, 4)}) = 1 ÷ ${fx(1 + ez, 4)} = <span class="ans">${fx(MON.p, 4)}</span> → ${pct(MON.p)} against the market's ${pct(MON.m)}</div>`,
+    `<b>Is it value?</b><div class="calc">p × odds = ${fx(MON.p, 4)} × ${fx(oh)} = ${fx(MON.p * oh, 4)} &gt; 1 ✓ · expected profit = ${fx(MON.ev, 4)} × ₹100 = <span class="ans">+₹${fx(100 * MON.ev, 2)}</span> a bet<br>favourite? ${fx(oh)} &lt; ${fx(oa)} ✓ → <span class="ans">PICK ${MON.team.toUpperCase()}</span></div>`,
+    `<b>And the other side</b><div class="calc">${AUX.team}: p = ${fx(AUX.p, 4)} v market ${fx(AUX.m, 4)} → p × odds = ${fx(AUX.p, 4)} × ${fx(oa)} = ${fx(AUX.p * oa, 4)} &lt; 1 ✗ (and it is the underdog) → no bet</div>`,
+  ].map((h) => `<li>${h}</li>`).join('');
+  const sides = [MON, AUX];
+  pickers('#wkPick', (i) => sides[i].team, (i) => {
+    const s = sides[i];
+    $('#wkTable').innerHTML = `<tr><th>Feature</th><th class="r">Value</th><th class="r">Mean</th><th class="r">Spread</th><th class="r">z-score</th><th class="r">Weight</th><th class="r">Push</th></tr>` +
+      s.steps.map((t) => `<tr><td>${esc(LBL2[t.f] || t.f)}</td><td class="r num">${sn(t.x, ['home', 'elite', 'rank', 'opp_rank', 'losses5', 'elite_x_losses5'].includes(t.f) ? 0 : 3)}</td><td class="r num">${sn(t.mu, 3)}</td><td class="r num">${fx(t.sd, 3)}</td><td class="r num">${sn(t.zt, 3)}</td><td class="r num">${sn(t.w, 4)}</td><td class="r num ${t.push > 0 ? 'pos' : 'neg'}">${t.push > 0 ? '+' : ''}${sn(t.push, 4)}</td></tr>`).join('') +
+      `<tr class="hl"><td colspan="6">start ${fx(s.offset, 4)} + intercept ${sn(s.b, 4)} + pushes = z</td><td class="r num">${sn(s.z, 4)}</td></tr>`;
+  }, 0);
+  const top = [...MON.steps].sort((a, b) => Math.abs(b.push) - Math.abs(a.push)).slice(0, 3);
+  $('#wkRead').innerHTML = `<b>Reading the pushes.</b> The biggest are ${top.map((t) => `<b>${t.f}</b> (${t.push > 0 ? '+' : ''}${sn(t.push, 3)})`).join(', ')}. Monaco's poor last five (${fx(MON.x.ppg5, 1)} points a game) <i>raises</i> its chance: the ppg5 weight is negative because the market over-reacts to short runs, so a good side in a bad week is a little cheap. The bias stretch (mlogit) adds the most, because Monaco is a strong favourite.`;
+}
+
+/* ── 17 Newton by hand ── */
+{
+  const lam = 1;
+  const M = [0.60, 0.50, 0.70, 0.40, 0.55, 0.65], X = [1.0, -1.0, 0.5, -0.5, 1.5, -1.5], Y = [1, 0, 1, 1, 1, 0];
+  $('#ntLam').textContent = lam;
+  $('#ntData').innerHTML = `<tr><th>Match</th><th class="r">Market m</th><th class="r">logit(m)</th><th class="r">feature x</th><th class="r">won y</th></tr>` +
+    M.map((m, n) => `<tr><td>${n + 1}</td><td class="r num">${fx(m, 2)}</td><td class="r num">${sn(logit(m), 3)}</td><td class="r num">${sn(X[n], 1)}</td><td class="r num">${Y[n]}</td></tr>`).join('');
+  let w = 0, html = '';
+  for (let it = 0; it < 4; it++) {
+    const p = M.map((m, n) => sig(logit(m) + w * X[n]));
+    const gTerms = p.map((q, n) => X[n] * (Y[n] - q)), hTerms = p.map((q, n) => q * (1 - q) * X[n] * X[n]);
+    const g = gTerms.reduce((a, b) => a + b, 0) - lam * w, Hh = hTerms.reduce((a, b) => a + b, 0) + lam;
+    const nw = w + g / Hh;
+    const ll = -M.reduce((a, m, n) => a + (Y[n] ? Math.log(p[n]) : Math.log(1 - p[n])), 0) / M.length;
+    html += `<h3>Round ${it + 1}: w = ${sn(w, 4)}</h3><div class="scroll"><table><tr><th>Match</th><th class="r">p</th><th class="r">y − p</th><th class="r">x(y − p)</th><th class="r">p(1−p)x²</th></tr>` +
+      p.map((q, n) => `<tr><td>${n + 1}</td><td class="r num">${fx(q, 4)}</td><td class="r num">${sn(Y[n] - q, 4)}</td><td class="r num">${sn(gTerms[n], 4)}</td><td class="r num">${fx(hTerms[n], 4)}</td></tr>`).join('') +
+      `</table></div><div class="calc">g = ${sn(gTerms.reduce((a, b) => a + b, 0), 4)} − ${lam} × ${par(w, 4)} = ${sn(g, 4)} · H = ${fx(hTerms.reduce((a, b) => a + b, 0), 4)} + ${lam} = ${fx(Hh, 4)}<br>new w = ${sn(w, 4)} + ${par(g, 4)} ÷ ${fx(Hh, 4)} = <span class="ans">${sn(nw, 4)}</span> &nbsp;·&nbsp; log-loss at this w = ${fx(ll, 4)}</div>`;
+    w = nw;
+  }
+  $('#ntIters').innerHTML = html;
+  $('#ntRead').innerHTML = `<b>It settles at w ≈ ${sn(w, 3)}.</b> The matches with a positive feature won more than the market said, so the weight is positive. The first round does almost all the work, the next ones only polish it. That is Newton's method on a "one-valley" (convex) loss. Try it on paper: the only tools are Chapter 0's.`;
+}
+
+/* ── 18 rotation ── */
+{
+  const R = D2.rotation_example, past = R.past, regs = R.regulars;
+  const names = {}; const starts = {};
+  past.forEach(([, xi]) => xi.forEach((p) => { names[p.id] = p.name; starts[p.id] = (starts[p.id] || 0) + 1; }));
+  R.xi.forEach((p) => { names[p.id] = p.name; });
+  const today = new Set(R.xi.map((p) => p.id));
+  const ids = Object.keys(starts).sort((a, b) => starts[b] - starts[a] || names[a].localeCompare(names[b]));
+  const dd = (s) => new Date(`${s}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+  const res = R.result ? `${R.result[0]} ${R.result[2]}–${R.result[3]} ${R.result[1]}` : '';
+  $('#rotIntro').innerHTML = `<p><b>${esc(R.team)} v ${esc(R.opp)}</b>, ${dd(R.day)} (${esc(res)}). A tick means the player started that game. Regulars are shaded where they were left out:</p>`;
+  $('#rotTable').innerHTML = `<tr><th>Player</th>${past.map(([d]) => `<th class="r">${dd(d)}</th>`).join('')}<th class="r">Starts</th><th>Regular?</th><th>${dd(R.day)}</th></tr>` +
+    ids.map((id) => { const reg = starts[id] >= 3, inn = today.has(id);
+      return `<tr class="${reg ? '' : 'dim'}"><td>${esc(names[id])}</td>${past.map(([, xi]) => `<td class="tick">${xi.some((p) => p.id === id) ? '✓' : ''}</td>`).join('')}<td class="r num">${starts[id]}</td><td>${reg ? '<b>yes</b>' : 'no'}</td><td class="${reg && !inn ? 'miss' : 'tick'}">${inn ? '✓ started' : reg ? '<b>left out</b>' : ''}</td></tr>`; }).join('');
+  const f = D2.rotation, j = f.feats.indexOf('rot'), w = f.w[j + 1], mu = f.mu[j], s = f.sd[j];
+  const k = R.missing.length, zt = (k - mu) / s;
+  $('#rotCalc').innerHTML = `regulars = ${Object.keys(regs).length} · in today's XI = ${Object.keys(regs).length - k} · <b>rot = ${k}</b><br>push = ${sn(w, 4)} × (${k} − ${fx(mu, 2)}) ÷ ${fx(s, 2)} = ${sn(w, 4)} × ${sn(zt, 3)} = <span class="ans">${sn(w * zt, 4)}</span> on ${esc(R.team)}'s log-odds<br>at a 40% chance that is about ${sn(w * zt, 4)} × 0.4 × 0.6 = ${sn(w * zt * 0.24 * 100, 2)} percentage points (Chapter 2: Δp ≈ Δz · p(1 − p))`;
+  $('#rotEff').innerHTML = `<tr><th>Regulars missing</th><th class="r">Sides</th><th class="r">Market said</th><th class="r">Really won</th><th class="r">Gap</th></tr>` +
+    D2.rotation_effect.map((r) => { const g = r.won - r.m; return `<tr><td>${r.missing}</td><td class="r num">${r.n.toLocaleString('en-IN')}</td><td class="r num">${pct(r.m)}</td><td class="r num">${pct(r.won)}</td><td class="r num ${g > 0 ? 'pos' : 'neg'}">${g > 0 ? '+' : '−'}${fx(Math.abs(100 * g), 1)} pts</td></tr>`; }).join('');
+  const P = D2.plain, Q = D2.rotation;
+  $('#rotRes').innerHTML = `<tr><th>Season</th><th class="r">Before line-ups</th><th class="r">With line-ups</th></tr>` +
+    Object.keys(Q.per_season).map((ss) => { const a = P.per_season[ss], b = Q.per_season[ss];
+      return `<tr><td>${SEASON(ss)}</td><td class="r num ${(a.fav_roi || 0) > 0 ? 'pos' : 'neg'}">${a.fav_roi == null ? '—' : sgn(a.fav_roi)} · ${a.fav_bets}</td><td class="r num ${(b.fav_roi || 0) > 0 ? 'pos' : 'neg'}">${b.fav_roi == null ? '—' : sgn(b.fav_roi)} · ${b.fav_bets}</td></tr>`; }).join('') +
+    `<tr class="hl"><td>All six</td><td class="r num">${sgn(P.test.fav_roi)} · ${P.test.fav_bets}</td><td class="r num">${sgn(Q.test.fav_roi)} · ${Q.test.fav_bets}</td></tr>`;
+  const jo = f.feats.indexOf('opp_rot');
+  $('#rotRead').innerHTML = `Value favourites only, ROI · bets. Learned weights: own regulars missing <b>${sn(w, 3)}</b>, opponent's regulars missing <b>+${fx(f.w[jo + 1], 3)}</b>. Both are per typical step of ${fx(s, 2)} players. With line-ups the value favourites returned <b>${sgn(Q.test.fav_roi)}</b> against <b>${sgn(P.test.fav_roi)}</b> without, and across all value bets <b>${rup(Q.test.pl)}</b> on ${Q.test.bets.toLocaleString('en-IN')}. It is better, but not certain yet: see Chapter 21 for why.`;
+}
+
+/* ── 19 sentiment ── */
+{
+  const LEX = D2.lexicon.map(([p, w, f]) => [new RegExp(p), w, f, p]);
+  const pretty = (p) => p.replace(/\\b/g, '').replace(/\\w\*/g, '…').replace(/\(\?:/g, '(').replace(/\|/g, ' / ').replace(/[()]/g, '').replace(/\?/g, '');
+  $('#lexTable').innerHTML = `<tr><th>Phrase</th><th class="r">Weight</th><th>Flag</th></tr>` +
+    D2.lexicon.map(([p, w, f]) => `<tr><td>${esc(pretty(p))}</td><td class="r num ${w > 0 ? 'pos' : 'neg'}">${w > 0 ? '+' : ''}${sn(w, 1)}</td><td>${f || ''}</td></tr>`).join('');
+  const run = () => {
+    const t = $('#snIn').value.toLowerCase();
+    const hits = LEX.filter(([rx]) => rx.test(t));
+    const tot = hits.reduce((a, h) => a + h[1], 0), sc = tanh(tot / 3);
+    $('#snOut').innerHTML = hits.length
+      ? `found: ${hits.map(([, w, , p]) => `"${esc(pretty(p).split(' / ')[0])}…" ${w > 0 ? '+' : ''}${sn(w, 1)}`).join(', ')}<br>sum = ${hits.map((h) => par(h[1], 1)).join(' + ')} = ${sn(tot, 1)}<br>score = tanh(${sn(tot, 1)} ÷ 3) = tanh(${sn(tot / 3, 3)}) = <span class="ans">${sn(sc, 3)}</span>`
+      : 'no listed phrase found → score = tanh(0) = <span class="ans">0</span>';
+  };
+  $('#snIn').addEventListener('input', run); run();
+  const S = D2.sentiment;
+  $('#snTeam').innerHTML = `<p><b>${esc(S.team)}</b>, the last 14 days of articles (ages in days, when this page was made):</p>`;
+  let num = 0, den = 0;
+  $('#snTable').innerHTML = `<tr><th>Headline</th><th class="r">Age</th><th class="r">Weight</th><th class="r">Score</th><th class="r">W × S</th></tr>` +
+    S.items.map((it) => { num += it.weight * it.score; den += it.weight;
+      return `<tr><td>${esc(it.headline)}${it.hits.length ? `<br><span class="note">found "${esc(pretty(it.hits[0][0]).split(' / ')[0])}…" ${sn(it.hits[0][1], 1)} → tanh(${sn(it.raw, 1)} ÷ 3)</span>` : ''}</td><td class="r num">${fx(it.age, 1)}</td><td class="r num">${fx(it.weight, 3)}</td><td class="r num">${sn(it.score, 3)}</td><td class="r num">${sn(it.weight * it.score, 4)}</td></tr>`; }).join('');
+  const tone = num / den;
+  $('#snCalc').innerHTML = `tone = ${sn(num, 4)} ÷ ${fx(den, 3)} = <span class="ans">${sn(tone, 3)}</span> → between −0.15 and +0.15 → <b>${tone < -0.15 ? 'negative' : tone > 0.15 ? 'positive' : 'neutral'}</b><br>the 13.6-day-old article counts only ${fx(S.items[S.items.length - 1].weight, 3)}: 0.5<sup>13.6 ÷ 4</sup> = 0.5<sup>3.4</sup>`;
+}
+
+/* ── 20 grades ── */
+{
+  const teams = Object.keys(D2.grade_detail);
+  $('#grLift').innerHTML = `<tr><th>Market's chance</th>${Object.keys(D2.lift).filter((_, i) => i % 2 === 0).map((b) => `<th class="r">${b}</th>`).join('')}</tr><tr><td>usual lift</td>${Object.entries(D2.lift).filter((_, i) => i % 2 === 0).map(([, v]) => `<td class="r num ${v > 0 ? 'pos' : 'neg'}">${v > 0 ? '+' : ''}${sn(100 * v, 1)}</td>`).join('')}</tr>`;
+  const draw = (i) => {
+    const T = D2.grade_detail[teams[i]], G = T.grade, rs = T.last20;
+    let tot = 0;
+    $('#grEdge').innerHTML = `<tr><th>Date</th><th class="r">Market m</th><th class="r">Model p</th><th class="r">p − m</th><th class="r">Usual lift</th><th class="r">Own</th></tr>` +
+      rs.map((r) => { const own = r.p - r.m - r.lift; tot += own;
+        return `<tr><td class="num">${r.day.slice(5)}</td><td class="r num">${fx(r.m, 3)}</td><td class="r num">${fx(r.p, 3)}</td><td class="r num">${sn(r.p - r.m, 4)}</td><td class="r num">${sn(r.lift, 4)}</td><td class="r num ${own > 0 ? 'pos' : 'neg'}">${sn(own, 4)}</td></tr>`; }).join('');
+    const edge = tot / rs.length, se = 50 + 50 * tanh(edge / 0.015);
+    $('#grEdgeCalc').innerHTML = `edge = sum of "own" ÷ ${rs.length} = ${sn(tot, 4)} ÷ ${rs.length} = <span class="ans">${sn(edge, 4)}</span> (${sn(100 * edge, 2)} points a match)<br>edge score = 50 + 50 × tanh(${sn(edge, 4)} ÷ 0.015) = 50 + 50 × tanh(${sn(edge / 0.015, 3)}) = 50 + 50 × ${sn(tanh(edge / 0.015), 3)} = <span class="ans">${fx(se, 1)}</span>`;
+    const vb = T.value_bets; let pl = 0;
+    $('#grVb').innerHTML = vb.length ? `<tr><th>Date</th><th class="r">Odds</th><th class="r">Model p × odds</th><th class="r">Result</th><th class="r">₹ P/L</th></tr>` +
+      vb.map((b) => { const x = b.y ? 100 * (b.odds - 1) : -100; pl += x; return `<tr><td class="num">${b.day}</td><td class="r num">${fx(b.odds)}</td><td class="r num">${fx(b.p * b.odds, 3)}</td><td class="r">${b.y ? 'won' : 'not won'}</td><td class="r num ${x > 0 ? 'pos' : 'neg'}">${rup(x)}</td></tr>`; }).join('')
+      : '<tr><td>No value bets as favourite in the last two seasons.</td></tr>';
+    const n = vb.length, roi = n ? pl / (100 * n) : 0, sh = roi * n / (n + 40), sr = 50 + 50 * tanh(sh / 0.05);
+    $('#grVbCalc').innerHTML = `P/L = ${rup(pl)} on ${n} × ₹100 → ROI = ${Math.round(pl)} ÷ ${100 * n || 1} = ${sgn(roi)}<br>shrunk = ${sn(roi, 4)} × ${n} ÷ (${n} + 40) = ${sn(roi, 4)} × ${fx(n / (n + 40), 3)} = <span class="ans">${sn(sh, 4)}</span><br>record score = 50 + 50 × tanh(${sn(sh, 4)} ÷ 0.05) = 50 + 50 × ${sn(tanh(sh / 0.05), 3)} = <span class="ans">${fx(sr, 1)}</span>`;
+    const fav = rs.filter((r) => r.fav).length, sf = 100 * fav / rs.length;
+    $('#grFavCalc').innerHTML = `favourite in ${fav} of its last ${rs.length} → ${fav} ÷ ${rs.length} × 100 = <span class="ans">${fx(sf, 0)}</span>`;
+    const gr = 0.5 * se + 0.2 * sr + 0.3 * sf;
+    $('#grAll').innerHTML = `grade = 0.5 × ${fx(se, 1)} + 0.2 × ${fx(sr, 1)} + 0.3 × ${fx(sf, 0)} = ${fx(0.5 * se, 2)} + ${fx(0.2 * sr, 2)} + ${fx(0.3 * sf, 2)} = <span class="ans">${fx(gr, 1)} ≈ ${Math.round(gr)}</span> &nbsp;(the app shows ${G.grade})`;
+    const blend = () => { const st = +$('#grStars').value; $('#grStarsV').textContent = '★'.repeat(st) || '0'; $('#grBlend').innerHTML = `0.6 × ${G.grade} + 0.4 × (20 × ${st}) = ${fx(0.6 * G.grade, 1)} + ${fx(8 * st, 1)} = <span class="ans">${Math.round(0.6 * G.grade + 8 * st)}</span> shown for ${esc(teams[i])}`; };
+    $('#grStars').oninput = blend; blend();
+  };
+  pickers('#grPick', (i) => teams[i], draw, teams.length);
+}
+
+/* ── 21 live ── */
+{
+  const P = D2.picks, rows = [...P.settled, ...P.pending];
+  const LGN = { E0: 'EPL', SP1: 'LaLiga', I1: 'Serie A', D1: 'Bund.', F1: 'Ligue 1' };
+  $('#lvTable').innerHTML = `<tr><th>Pick</th><th class="r">Odds</th><th class="r">Model v market</th><th class="r">p × o</th><th>Status</th></tr>` +
+    rows.map((r) => `<tr><td><b>${esc(r.team)}</b> ${r.side === 'home' ? 'v' : '@'} ${esc(r.opp)}<br><span class="note">${LGN[r.comp]} · ${new Date(r.kickoff).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} · ${esc(r.price_src || '')}</span></td><td class="r num">${fx(r.odds)}</td><td class="r num">${pct(r.p_model)} v ${pct(r.p_market)}</td><td class="r num">${fx(1 + r.ev, 3)}</td><td>${r.result ? `${r.result} ${rup(r.pl)}` : 'to come'}</td></tr>`).join('');
+  const draw = () => {
+    const roi = +$('#lvRoi').value, o = +$('#lvOdds').value;
+    $('#lvRoiV').textContent = sgn(roi); $('#lvOddsV').textContent = fx(o);
+    const N = 4 * (o - 1) / (roi * roi);
+    const full = Object.entries(D2.rotation.per_season).filter(([s]) => s !== '2627').map(([, v]) => v.fav_bets);
+    const pace = full.reduce((x, y) => x + y, 0) / full.length;
+    $('#lvCalc').innerHTML = `N &gt; 4 × (${fx(o)} − 1) ÷ ${fx(roi, 3)}² = ${fx(4 * (o - 1), 2)} ÷ ${fx(roi * roi, 6)} = <span class="ans">${Math.round(N).toLocaleString('en-IN')} bets</span><br>the backtest found about ${Math.round(pace)} value favourites a season, so that is ${Math.round(N).toLocaleString('en-IN')} ÷ ${Math.round(pace)} ≈ <span class="ans">${fx(N / pace, 1)} seasons</span>`;
+  };
+  $('#lvRoi').oninput = draw; $('#lvOdds').oninput = draw; draw();
+  $('#lvRead').innerHTML = `<b>Honest reading.</b> The backtest says about +2.4% with line-ups. Proving that from live bets alone takes thousands of bets, so for the first months the live record mostly tells us the system works as designed (prices, freezing, settling), not whether the edge is real. Watch two things instead: is the model's chance usually <i>above</i> the closing price (you beat the close), and is the ROI not far below the backtest.`;
+}
+
+qa('#qa-bias', [
+  ['What is the favourite–longshot bias?', 'Longshots win less often than their prices imply and favourites slightly more, so returns on longshots are much worse than the margin alone explains. In our data ₹100 on every side under 10% lost about 20%.'],
+  ['Why add the market log-odds as a feature when it is already the offset?', 'The offset fixes its coefficient at 1. Adding it as a feature lets the model learn a coefficient of 1 + w/s ≈ 1.16, i.e. stretch the market: a calibration fix that is still one parameter, so it can\'t overfit.'],
+  ['How would you check calibration?', 'Bin predictions (e.g. by 10 points), compare mean predicted with observed frequency per bin; plot a reliability diagram; summarise with Brier score or expected calibration error.'],
+]);
+qa('#qa-worked', [
+  ['Why remove the overround before taking logit?', 'Implied chances sum above 1. Normalising gives a proper probability distribution; otherwise every side is biased up by the margin, and logit amplifies that near 0 and 1.'],
+  ['Why standardise features?', 'So weights are comparable and the L2 penalty treats each feature fairly. A raw weight on league position (1–20) and on shot share (0–1) would be on different scales; the penalty would punish one more than the other for no reason.'],
+  ['Explain a negative weight on recent points (ppg5).', 'The market already prices recent form, and over-reacts to it. Conditional on the price, a team with poor recent form wins slightly more often than priced: mean reversion.'],
+]);
+qa('#qa-newton', [
+  ['Newton\'s method v gradient descent?', 'Gradient descent steps along the slope with a hand-picked learning rate. Newton divides by the curvature (Hessian), so it takes the right-sized step and converges in a handful of iterations on smooth convex losses; each step costs a matrix solve, fine for 13 parameters, not for millions.'],
+  ['What is the gradient of log-loss for logistic regression?', 'Xᵀ(p − y) (plus λw with L2). The Hessian is Xᵀ diag(p(1−p)) X + λI.'],
+  ['Why is the intercept not penalised?', 'Penalising it would pull the average prediction towards 50% for no reason; only the effects of features should be shrunk.'],
+]);
+qa('#qa-rotation', [
+  ['How do you avoid look-ahead leakage with line-ups?', 'Regulars are counted only from the five XIs before the match, and the XI used is the one published before kick-off. The rotation model is used live only once both XIs are out.'],
+  ['The model improved ROI but barely changed log-loss. Contradiction?', 'No. Log-loss averages over every row; betting profit depends on a small tail of rows where the model disagrees with the price. A feature can matter there and be nearly invisible on average. That is also why we need many bets to confirm it.'],
+  ['What other line-up features could you build?', 'Minutes-weighted regulars, missing players weighted by their importance (e.g. share of goals or xG), goalkeeper changes, average age, or a player-rating sum for the XI.'],
+]);
+qa('#qa-sentiment', [
+  ['Why a lexicon instead of a language model?', 'Free, fast, transparent and reproducible: every score can be traced to words. The cost is missing context and sarcasm; a model could be compared later on the same stored articles.'],
+  ['How would you test if sentiment adds value?', 'Add the tone at kick-off as a feature, refit walk-forward, and compare log-loss and value-bet ROI against the model without it on the same test seasons. Only keep it if it helps out-of-sample.'],
+  ['Why a half-life weighting?', 'News decays: an injury story from yesterday matters more than one from two weeks ago. Exponential decay is smooth, has one parameter and needs no hard cut-off.'],
+]);
+qa('#qa-grades', [
+  ['Why use out-of-sample chances for the grade?', 'A model graded on matches it was fitted on looks better than it is (it memorised them). Walk-forward chances come from models that never saw those seasons.'],
+  ['What does n/(n + 40) do?', 'It is a shrinkage factor: with few bets the ROI is mostly noise, so it is pulled towards 0. 40 is the number of bets at which we trust the observed ROI half and the prior (0) half.'],
+  ['Why tanh before averaging?', 'It maps each part onto 0–100 with diminishing returns, so one extreme part can\'t dominate the weighted average.'],
+]);
+qa('#qa-live', [
+  ['Why record picks live if you have a backtest?', 'Backtests suffer from hidden leakage and from choices tuned on the same data. Picks frozen before kick-off are a clean, untouchable test.'],
+  ['What is closing line value?', 'Whether you got a better price than the closing one. Beating the close consistently is the fastest early sign of a real edge, because prices are far less noisy than results.'],
+  ['How many bets to detect a 2% edge at odds 1.5?', 'N > 4(o − 1)/ROI² = 4 × 0.5 / 0.0004 = 5,000 bets.'],
+]);
+</script>
+
+</html>

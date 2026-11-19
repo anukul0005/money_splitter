@@ -42,6 +42,7 @@ import AdminRecovery from './pages/AdminRecovery'
 import AdminCodes    from './pages/AdminCodes'
 import Loans from './pages/Loans'
 import Account       from './pages/Account'
+import Lesson        from './pages/Lesson'
 import Notifications from './pages/Notifications'
 import Balances      from './pages/Balances'
 import MasterGroupDetail from './pages/MasterGroupDetail'
@@ -166,6 +167,7 @@ export default function App() {
                 <Route path="/master/:key" element={<MasterGroupDetail />} />
                 <Route path="/friends/:name" element={<FriendDetail />} />
                 <Route path="/account" element={<Account />} />
+                <Route path="/lessons/:slug" element={<Lesson />} />
                 <Route path="/loans" element={<Loans />} />
                 <Route path="/notifications" element={<Notifications />} />
                 <Route path="/balances/:kind" element={<Balances />} />

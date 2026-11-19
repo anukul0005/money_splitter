@@ -471,3 +471,7 @@ export const attachDiscussionFile = (id, file, caption = '') => {
 }
 export const setQuoteOpinion = (id, qid, text, polished = false) => api.put(`/discussions/${id}/quotes/${qid}/opinion`, { text, polished })
 export const reactInDiscussion = (id, target, targetId, kind) => api.post(`/discussions/${id}/reactions`, { target, target_id: targetId, kind })
+
+// Lessons (routers/lessons.py): the list, and one lesson's self-contained HTML
+export const lessonsList = () => api.get('/lessons')
+export const lessonHtml = (slug) => api.get(`/lessons/${encodeURIComponent(slug)}`, { responseType: 'text', transformResponse: (d) => d })

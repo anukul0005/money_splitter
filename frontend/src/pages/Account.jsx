@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   changePassword, setRecovery, getRecoveryQuestion, getMe, setMyEmail, setMyBirthday,
   setMyDailySummary, setMyNewsAlerts, setMySalary, listMyUpiIds, addUpiId, deleteUpiId, listDrinksAccess, setDrinksAccess, listNewMembers,
+  lessonsList,
 } from '../api'
 import { useUser, isAdmin, hasFullAccess } from '../UserContext'
 import UnlockAccess from '../components/UnlockAccess'
@@ -329,6 +330,9 @@ export default function Account() {
 
         {/* ── The app's font ── */}
         <FontCard />
+
+        {/* ── Lessons (only for the people the backend shows them to) ── */}
+        <LessonsCard />
 
         {/* ── Security question ── */}
         <div className="card">
@@ -917,6 +921,30 @@ function DrinksAccess() {
         {rows && shown.length === 0 && <p className="text-xs text-gray-400 py-2">No one matches.</p>}
       </div>
       {err && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2 mt-2">{err}</p>}
+    </div>
+  )
+}
+
+/** Lessons: the interactive learning pages (backend routers/lessons.py) - hidden when there are none for me. */
+function LessonsCard() {
+  const nav = useNavigate()
+  const [items, setItems] = useState([])
+  useEffect(() => { lessonsList().then((r) => setItems(r.data || [])).catch(() => setItems([])) }, [])
+  if (!items.length) return null
+  return (
+    <div className="card">
+      <h2 className="text-sm font-bold text-gray-800">Lessons</h2>
+      <p className="text-xs text-gray-500 leading-relaxed mt-1 mb-2">Interactive pages to learn the betting models, on your own data.</p>
+      {items.map((x) => (
+        <button key={x.slug} onClick={() => nav(`/lessons/${x.slug}`)}
+          className="w-full text-left flex items-center gap-3 py-2.5 border-t border-gray-100 first:border-t-0">
+          <span className="flex-1 min-w-0">
+            <span className="block text-sm font-bold text-gray-800">{x.title}</span>
+            <span className="block text-[11px] text-gray-500 leading-snug">{x.about}</span>
+          </span>
+          <span className="text-gray-300 text-lg">›</span>
+        </button>
+      ))}
     </div>
   )
 }
