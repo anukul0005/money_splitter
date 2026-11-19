@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   changePassword, setRecovery, getRecoveryQuestion, getMe, setMyEmail, setMyBirthday,
-  setMyDailySummary, setMyNewsAlerts, setMySalary, listMyUpiIds, addUpiId, deleteUpiId, listDrinksAccess, setDrinksAccess, listNewMembers,
+  setMyDailySummary, setMyNewsAlerts, setMySalary, listMyUpiIds, addUpiId, deleteUpiId, listDrinksAccess, setDrinksAccess, listBetAccess, setBetAccess, listNewMembers,
   lessonsList,
 } from '../api'
 import { useUser, isAdmin, hasFullAccess } from '../UserContext'
@@ -637,6 +637,9 @@ export default function Account() {
 
         {/* ── Admin: who sees the Drinks section of Recommend ── */}
         {isAdmin(user) && <DrinksAccess />}
+        {isAdmin(user) && <AccessList list={listBetAccess} save={setBetAccess} title="Who sees Betting"
+          about="Turn on the people who should see the betting side of Sports - analytics, teams, their bets and P&L. Everyone else gets Sports news only. Admins always see it."
+          onText="sees Betting" offText="news only" what="Betting" />}
 
         {/* ── Sports news notifications ── */}
         {(
@@ -913,6 +916,57 @@ function DrinksAccess() {
             </span>
             <button type="button" role="switch" aria-checked={u.on} onClick={() => flip(u)} disabled={u.admin || busy === u.name}
               aria-label={`Drinks for ${u.name}`}
+              className={`relative w-11 h-6 rounded-full transition-colors shrink-0 disabled:opacity-50 ${u.on ? 'bg-brand-500' : 'bg-gray-300'}`}>
+              <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${u.on ? 'translate-x-5' : ''}`} />
+            </button>
+          </div>
+        ))}
+        {rows && shown.length === 0 && <p className="text-xs text-gray-400 py-2">No one matches.</p>}
+      </div>
+      {err && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2 mt-2">{err}</p>}
+    </div>
+  )
+}
+
+/** Admin only: every user, with an on/off switch (here: the betting side of Sports). */
+function AccessList({ list, save, title, about, onText, offText, what }) {
+  const [rows, setRows] = useState(null)
+  const [q, setQ] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState('')
+  useEffect(() => { list().then((r) => setRows(r.data)).catch(() => setErr("Couldn't load the users.")) }, [])
+  const flip = async (u) => {
+    const next = !u.on
+    setBusy(u.name); setErr('')
+    setRows((rs) => rs.map((x) => (x.name === u.name ? { ...x, on: next } : x)))
+    try { await save(u.name, next) }
+    catch (e) {
+      setRows((rs) => rs.map((x) => (x.name === u.name ? { ...x, on: !next } : x)))
+      setErr(e.response?.data?.detail || 'Could not change that.')
+    } finally { setBusy('') }
+  }
+  const term = q.trim().toLowerCase()
+  const shown = (rows || []).filter((u) => !term || u.name.toLowerCase().includes(term) || (u.full_name || '').toLowerCase().includes(term))
+  const onCount = (rows || []).filter((u) => u.on && !u.admin).length
+  return (
+    <div className="card">
+      <h2 className="text-sm font-bold text-gray-800">{title}</h2>
+      <p className="text-xs text-gray-500 leading-relaxed mt-1 mb-2">
+        {about}{rows ? ` ${onCount} turned on.` : ''}
+      </p>
+      {rows && rows.length > 8 && (
+        <input value={q} onChange={(e) => setQ(e.target.value)} className="input text-xs py-2 mb-2" placeholder="Search people…" />
+      )}
+      {!rows && !err && <p className="text-xs text-gray-400">Loading…</p>}
+      <div className="max-h-80 overflow-y-auto -mx-1 px-1">
+        {shown.map((u) => (
+          <div key={u.name} className="flex items-center justify-between py-2 border-b border-amber-100 last:border-0">
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold text-gray-800 truncate">{u.full_name && u.full_name !== u.name ? u.full_name : u.name}</span>
+              <span className="block text-[10px] text-gray-400">{u.full_name && u.full_name !== u.name ? `${u.name} · ` : ''}{u.admin ? 'admin - always on' : u.on ? onText : offText}</span>
+            </span>
+            <button type="button" role="switch" aria-checked={u.on} onClick={() => flip(u)} disabled={u.admin || busy === u.name}
+              aria-label={`${what} for ${u.name}`}
               className={`relative w-11 h-6 rounded-full transition-colors shrink-0 disabled:opacity-50 ${u.on ? 'bg-brand-500' : 'bg-gray-300'}`}>
               <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${u.on ? 'translate-x-5' : ''}`} />
             </button>

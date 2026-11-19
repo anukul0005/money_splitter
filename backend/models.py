@@ -108,6 +108,10 @@ class User(Base):
     # shown on their own home page. Optional; `name` stays the login and the
     # name every group, expense and balance is keyed on.
     full_name = Column(String(100), nullable=True)
+    # The betting side of Sports (the sports section: analytics, teams, bets,
+    # P&L) - off for everyone until an admin switches it on (users.py
+    # /admin/bet-access). Admins always have it; see has_bet_access.
+    bet_access = Column(Boolean, nullable=False, default=False, server_default="false")
     access_code_hash = Column(String(128), nullable=True)
     access_code_salt = Column(String(64), nullable=True)
     access_code_expires_at = Column(DateTime(timezone=True), nullable=True)
@@ -116,6 +120,10 @@ class User(Base):
     @property
     def has_full_access(self) -> bool:
         return bool(self.full_access or self.is_admin)
+
+    @property
+    def has_bet_access(self) -> bool:
+        return bool(self.bet_access or self.is_admin or (self.name or "").lower() in ("anukul", "anubhav"))
 
 
 class Group(Base):

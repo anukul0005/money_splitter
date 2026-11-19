@@ -76,6 +76,8 @@ export const setMyNewsAlerts    = (sport, enabled) => api.post('/users/me/news-a
 // Admin: who sees the drinks side (Recommend's Drinks, the party forecast)
 export const listDrinksAccess   = ()          => api.get('/users/admin/drinks-access')
 export const listNewMembers     = (limit = 10) => api.get('/users/admin/new-members', { params: { limit } })
+export const listBetAccess     = ()          => api.get('/users/admin/bet-access')
+export const setBetAccess      = (name, enabled) => api.post('/users/admin/bet-access', { name, enabled })
 export const setDrinksAccess    = (name, enabled) => api.post('/users/admin/drinks-access', { name, enabled })
 export const setMySalary        = (data)     => api.post('/users/me/salary', data)
 // multipart, not JSON - axios sets the right Content-Type + boundary on

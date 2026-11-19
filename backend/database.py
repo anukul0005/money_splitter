@@ -200,6 +200,7 @@ _ADDED_COLUMNS = [
     ("football_matches", "away_sot", "INTEGER"),
     ("book_odds", "odds_draw", "DOUBLE PRECISION"),
     ("users", "full_access", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("users", "bet_access", "BOOLEAN NOT NULL DEFAULT FALSE"),
     ("users", "full_name", "VARCHAR(100)"),
     ("users", "access_code_hash", "VARCHAR(128)"),
     ("users", "access_code_salt", "VARCHAR(64)"),

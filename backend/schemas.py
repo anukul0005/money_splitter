@@ -50,6 +50,8 @@ class UserMeOut(UserOut):
     show_drinks: bool = True
     # The drinks side of the app - see models.User.full_access.
     has_full_access: bool = False
+    # The betting side of Sports - see models.User.bet_access.
+    has_bet_access: bool = False
     # Pay and when it's credited - see models.User.
     monthly_salary: Optional[float] = None
     salary_day: Optional[str] = None

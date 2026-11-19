@@ -18,5 +18,7 @@ export const isAdmin = (user) =>
  *  never sees it, or any mention of it. */
 export const hasFullAccess = (user) => !!user?.has_full_access || isAdmin(user)
 
-/** The sports section is open to everyone signed in (backend routers/tennis.owner). */
-export const isAnalyticsUser = (user) => !!user
+/** The betting side of Sports (analytics, teams, bets, P&L - backend
+ *  routers/tennis.owner): only for people an admin has switched on
+ *  (models.User.bet_access), and admins. Everyone else gets the news. */
+export const isAnalyticsUser = (user) => !!user?.has_bet_access || isAdmin(user)

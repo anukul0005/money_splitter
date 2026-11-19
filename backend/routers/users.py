@@ -90,7 +90,7 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
         raise HTTPException(401, "Incorrect username or password")
     return LoginOut(
         id=user.id, name=user.name, is_admin=user.is_admin, email=user.email,
-        created_at=user.created_at, token=create_token(user), has_full_access=user.has_full_access,
+        created_at=user.created_at, token=create_token(user), has_full_access=user.has_full_access, has_bet_access=user.has_bet_access,
     )
 
 
@@ -641,6 +641,30 @@ def set_drinks_access(payload: SetDrinksAccess, db: Session = Depends(get_db),
     return {"name": target.name, "on": payload.enabled}
 
 
+# ── who sees the betting side of Sports: an admin picks, user by user ──────
+@router.get("/admin/bet-access", response_model=list)
+def bet_access(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    _admin(caller)
+    rows = db.query(User).order_by(User.name).all()
+    return [{"name": u.name, "full_name": u.full_name, "admin": bool(u.is_admin or u.name.lower() in ADMIN_NAMES),
+             "on": u.has_bet_access} for u in rows]
+
+
+@router.post("/admin/bet-access", response_model=dict)
+def set_bet_access(payload: SetDrinksAccess, db: Session = Depends(get_db),
+                   caller: User = Depends(current_user)):
+    _admin(caller)
+    target = db.query(User).filter(User.name.ilike((payload.name or "").strip())).first()
+    if not target:
+        raise HTTPException(404, f"No user named {payload.name}")
+    if target.is_admin or target.name.lower() in ADMIN_NAMES:
+        raise HTTPException(400, "Admins always have betting")
+    target.bet_access = payload.enabled
+    db.commit()
+    print(f"[access] {caller.name} turned betting {'on' if payload.enabled else 'off'} for {target.name}")
+    return {"name": target.name, "on": payload.enabled}
+
+
 @router.post("/me/salary", response_model=UserMeOut)
 def set_my_salary(payload: SetSalary, db: Session = Depends(get_db),
                   caller: User = Depends(current_user)):
@@ -911,7 +935,7 @@ def verify_login_code(payload: VerifyLoginCode, db: Session = Depends(get_db)):
 
     return LoginOut(
         id=user.id, name=user.name, is_admin=user.is_admin, email=user.email,
-        created_at=user.created_at, token=create_token(user), has_full_access=user.has_full_access,
+        created_at=user.created_at, token=create_token(user), has_full_access=user.has_full_access, has_bet_access=user.has_bet_access,
     )
 
 
