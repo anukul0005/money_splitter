@@ -243,6 +243,7 @@ _ADDED_COLUMNS = [
     ("users", "news_football", "BOOLEAN NOT NULL DEFAULT TRUE"),
     ("users", "news_badminton", "BOOLEAN NOT NULL DEFAULT TRUE"),
     ("users", "news_hockey", "BOOLEAN NOT NULL DEFAULT TRUE"),
+    ("users", "news_telecom", "BOOLEAN NOT NULL DEFAULT TRUE"),
     ("recipe_kitchens", "plan_json", "TEXT"),
     ("recipe_kitchens", "log_json", "TEXT"),
     ("recipe_kitchens", "weeks_json", "TEXT"),

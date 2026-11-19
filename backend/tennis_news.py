@@ -1,4 +1,5 @@
-"""Sports news - tennis, football, badminton and hockey headlines, newest first.
+"""News - tennis, football, badminton and hockey headlines, and the telecom
+sector (ET Telecom, TelecomTalk, Mobile World Live, Light Reading), newest first.
 
 Read from the publishers' own RSS feeds (tennis: the Guardian, BBC Sport,
 Sky Sports, ESPN, Tennis365; football: the Guardian, ESPN; badminton:
@@ -56,8 +57,14 @@ FEEDS = [
     ("hockey", "The Hindu", "https://www.thehindu.com/sport/hockey/feeder/default.rss"),
     ("hockey", "Hindustan Times", "https://www.hindustantimes.com/feeds/rss/sports/hockey/rssfeed.xml"),
     ("hockey", "BBC Sport", "https://feeds.bbci.co.uk/sport/hockey/rss.xml"),
+    # telecom sector: India's operators and regulator first, then the global trade desks
+    ("telecom", "ET Telecom", "https://telecom.economictimes.indiatimes.com/rss/topstories"),
+    ("telecom", "TelecomTalk", "https://telecomtalk.info/feed/"),
+    ("telecom", "Mobile World Live", "https://www.mobileworldlive.com/feed/"),
+    ("telecom", "Light Reading", "https://www.lightreading.com/rss.xml"),
 ]
-SPORTS = {"tennis": "🎾", "football": "⚽", "badminton": "🏸", "hockey": "🏑"}
+# each news section and its icon (telecom isn't a sport, but rides the same reader)
+SPORTS = {"tennis": "🎾", "football": "⚽", "badminton": "🏸", "hockey": "🏑", "telecom": "📡"}
 # Sports whose news - the page and the pushes - is for every app user, not
 # just the sports-section people (routers.tennis.ANALYTICS_USERS): all of them;
 # each person picks theirs with the switches in Account
@@ -78,7 +85,8 @@ HEADLINE_WORDS = 20
 REPEAT_WINDOW = timedelta(hours=12)   # a story about the same names as one notified this recently isn't pushed
 _MEDIA = "{http://search.yahoo.com/mrss/}"
 _STOP = {"after", "with", "from", "that", "this", "have", "will", "into", "over", "about", "their", "says",
-         "said", "what", "when", "they", "been", "were", "more", "than", "tennis", "open", "badminton", "hockey"}
+         "said", "what", "when", "they", "been", "were", "more", "than", "tennis", "open", "badminton", "hockey",
+         "telecom", "network", "networks", "mobile"}
 
 _lock = threading.Lock()
 _last = 0.0

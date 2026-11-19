@@ -71,9 +71,9 @@ export default function Account() {
 
   // ── Nightly summary of yesterday's spending ──
   const [summaryOn, setSummaryOn]       = useState(false)
-  const [news, setNews]                 = useState({ tennis: true, football: true, badminton: true, hockey: true })
+  const [news, setNews]                 = useState({ tennis: true, football: true, badminton: true, hockey: true, telecom: true })
   const newsOf = (u) => ({ tennis: u.news_tennis !== false, football: u.news_football !== false,
-    badminton: u.news_badminton !== false, hockey: u.news_hockey !== false })
+    badminton: u.news_badminton !== false, hockey: u.news_hockey !== false, telecom: u.news_telecom !== false })
 
   const [newsErr, setNewsErr]           = useState('')
   const [summaryBusy, setSummaryBusy]   = useState(false)
@@ -644,11 +644,11 @@ export default function Account() {
         {/* ── Sports news notifications ── */}
         {(
           <div className="card">
-            <h2 className="text-sm font-bold text-gray-800">Sports news notifications</h2>
+            <h2 className="text-sm font-bold text-gray-800">News notifications</h2>
             <p className="text-xs text-gray-500 leading-relaxed mt-1 mb-2">
-              A notification with the headline when a new story lands in Sports news.
+              A notification with the headline when a new story lands in the news - each section on or off.
             </p>
-            {[['tennis', '🎾 Tennis'], ['football', '⚽ Football'], ['badminton', '🏸 Badminton'], ['hockey', '🏑 Hockey']].map(([k, label]) => (
+            {[['tennis', '🎾 Tennis'], ['football', '⚽ Football'], ['badminton', '🏸 Badminton'], ['hockey', '🏑 Hockey'], ['telecom', '📡 Telecom sector']].map(([k, label]) => (
               <div key={k} className="flex items-center justify-between py-2 border-b border-amber-100 last:border-0">
                 <span className="text-sm font-semibold text-gray-800">{label}</span>
                 <button type="button" role="switch" aria-checked={news[k]} onClick={() => toggleNews(k)}

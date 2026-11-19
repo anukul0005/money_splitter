@@ -4,8 +4,8 @@ import { tennisNews } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 
 const SEEN_KEY = 'tennisNewsSeen'
-const LABEL = { tennis: '🎾 Tennis', football: '⚽ Football', badminton: '🏸 Badminton', hockey: '🏑 Hockey' }
-const ICON = { tennis: '🎾', football: '⚽', badminton: '🏸', hockey: '🏑' }
+const LABEL = { tennis: '🎾 Tennis', football: '⚽ Football', badminton: '🏸 Badminton', hockey: '🏑 Hockey', telecom: '📡 Telecom' }
+const ICON = { tennis: '🎾', football: '⚽', badminton: '🏸', hockey: '🏑', telecom: '📡' }
 
 // "12m ago", "3h ago", "2d ago"
 function ago(iso) {
@@ -56,7 +56,7 @@ export default function TennisNews() {
     <div className="max-w-2xl mx-auto px-4 sm:px-5 pt-6 pb-24 space-y-4">
       <div>
         <button onClick={() => nav(-1)} className="text-xs font-bold text-gray-400 hover:text-gray-600">← Back</button>
-        <h1 className="text-2xl font-black text-gray-900 tracking-tight mt-1">Sports news</h1>
+        <h1 className="text-2xl font-black text-gray-900 tracking-tight mt-1">News</h1>
         <p className="text-[11px] text-gray-400">
           {(data.sports || []).map((s) => (LABEL[s] || s).split(' ')[1]).join(', ')} headlines, newest first · updates every 10 minutes
         </p>
