@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { SuggestTag, useSuggestions } from '../components/Suggest'
 import { badmintonLive, bookCompare, badmintonSummary, hockeyLive, peek, tennisDay, tennisEarlyBreak, tennisLive, tennisLivePoints, tennisMyPicks, tennisOddsDays, tennisPatterns, tennisPickHistory, sportPickHistory, tennisPlayer, tennisPlayers, tennisPressure, tennisRankings, onBackInView, tennisSets, tennisSetsTourney, tennisSummary } from '../api'
 import RankingList, { RankingSwitch } from '../components/RankingList'
-import Badminton, { B_TABS } from './Badminton'
+import Badminton, { B_EVENTS, B_TABS } from './Badminton'
 import Hockey, { H_TABS } from './Hockey'
 import Football, { F_TABS } from './Football'
 import DatePicker from '../components/DatePicker'
@@ -1628,6 +1628,9 @@ export default function BettingAnalytics() {
   const setSport = (k) => startTransition(() => go({ sport: k === 'tennis' ? null : k, he: null }))
   const setBtab = (t) => startTransition(() => go({ btab: t }))
   const setBp = (id) => go({ btab: id ? 'players' : btab, bp: id || null })
+  // badminton's event (MS, WS, MD, WD, XD or all) - as tennis's tour, in the address
+  const bev = params.get('bev') || 'all'
+  const setBev = (e) => startTransition(() => go({ bev: e === 'all' ? null : e }))
   const [bOpened, setBOpened] = useState(() => new Set([btab]))
   useEffect(() => { setBOpened((s) => (s.has(btab) ? s : new Set([...s, btab]))) }, [btab])
   const [bsum, setBsum] = useState(null)
@@ -1732,7 +1735,13 @@ export default function BettingAnalytics() {
               <br />
               {bsum?.sync?.running ? (bsum.sync.todo ? `reading BWF's archive - ${bsum.sync.done} of ${bsum.sync.todo} tournaments` : "reading BWF's calendars, 2018 to now…") : 'live scores from bwfbadminton.com'}
             </p>
-            <div className="grid grid-cols-5 mt-2.5 rounded-md border border-amber-300 overflow-hidden">
+            <div className="flex mt-2 rounded-md border border-amber-300 overflow-hidden" role="group" aria-label="Event">
+              {B_EVENTS.map(([k, l]) => (
+                <button key={k} onClick={() => setBev(k)} aria-pressed={bev === k}
+                  className={`flex-1 py-1 text-[11px] font-bold ${bev === k ? 'bg-field-950 text-white' : 'bg-white text-gray-600'}`}>{l}</button>
+              ))}
+            </div>
+            <div className="grid grid-cols-5 mt-2 rounded-md border border-amber-300 overflow-hidden">
               {B_TABS.map(([k, l]) => (
                 <button key={k} onClick={() => setBtab(k)}
                   className={`py-1.5 text-[11px] font-bold ${btab === k ? 'bg-brand-400 text-white' : 'bg-white text-gray-600'}`}>
@@ -1781,10 +1790,10 @@ export default function BettingAnalytics() {
           </Pane>
         ))}
         {sport === 'badminton' && [...bOpened].map((k) => (
-          <Pane key={`b-${k}`} hidden={k !== btab} deps={`${k === btab}|${k === 'players' ? bp : ''}|${k === 'results' ? bsum?.matches : ''}`}>
+          <Pane key={`b-${k}`} hidden={k !== btab} deps={`${k === btab}|${bev}|${k === 'players' ? bp : ''}|${k === 'results' ? bsum?.matches : ''}`}>
             <Safe what="this tab">
               {k === 'picks' ? <MyPicks sport="badminton" active={k === btab} />
-                : <Badminton tab={k} active={k === btab} player={bp} setPlayer={setBp} sum={bsum} />}
+                : <Badminton tab={k} active={k === btab} player={bp} setPlayer={setBp} sum={bsum} event={bev} />}
             </Safe>
           </Pane>
         ))}

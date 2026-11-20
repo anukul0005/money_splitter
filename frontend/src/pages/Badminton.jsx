@@ -19,6 +19,9 @@ import {
 export const B_TABS = [['live', 'Live'], ['results', 'Results'], ['picks', 'My picks'], ['players', 'Players'], ['stats', 'Stats']]
 const EVENTS = [['MS', "Men's singles"], ['WS', "Women's singles"], ['MD', "Men's doubles"], ['WD', "Women's doubles"], ['XD', 'Mixed']]
 export const EVENT = Object.fromEntries(EVENTS)
+// the event switch at the top of Badminton (as tennis's ATP / WTA): all, or one event
+export const B_EVENTS = [['all', 'All'], ...EVENTS.map(([k]) => [k, k])]
+const inEvent = (event, e) => !event || event === 'all' || e === event
 export const ROUND = { Final: 'Final', SF: 'Semifinals', QF: 'Quarterfinals', R16: 'Round of 16', R32: 'Round of 32', R64: 'Round of 64' }
 const ENDING = { 1: 'W/O', 2: 'Ret.', 3: 'DQ' }
 export const fmtDate = (iso) => (iso ? new Date(`${iso.slice(0, 10)}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' }) : '')
@@ -188,7 +191,7 @@ export function CardHead({ title, sub, logo }) {
 
 // ── Live ────────────────────────────────────────────────────────────────────
 
-function Live({ active, onPlayer }) {
+function Live({ active, onPlayer, event }) {
   const [d, setD] = useState(() => peek('/badminton/live') || null)   // the last list at once, then fresh
   const [picks, setPick] = useSportPicks('badminton', active)
   const [books, setBook] = useBookOdds('badminton', active)
@@ -205,9 +208,13 @@ function Live({ active, onPlayer }) {
   if (!d && !err) return <p className="text-xs text-gray-400 text-center py-6">Loading live matches…</p>
   if (!d) return <p className="text-sm text-red-600 text-center py-6">Couldn't reach BWF's live scores - try again in a minute.</p>
   if (!d.tournaments.length) return <p className="text-sm text-gray-400 text-center py-10">No BWF tournament on right now - see Results for the latest.</p>
+  const tours = d.tournaments.map((t) => ({ ...t, matches: t.matches.filter((m) => inEvent(event, m.event)) }))
   return (
     <div className="space-y-4">
-      {d.tournaments.map((t) => (
+      {tours.every((t) => !t.matches.length) && (
+        <p className="text-sm text-gray-400 text-center py-6">No {EVENT[event]?.toLowerCase()} matches in today's order of play.</p>
+      )}
+      {tours.map((t) => (
         <div key={t.id} className="card p-0 overflow-hidden">
           <CardHead title={t.name} sub={t.category} logo={t.logo} />
           <p className="px-4 pt-2 text-[10px] text-gray-400">{t.dates}{t.venue ? ` · ${t.venue}` : ''}</p>
@@ -220,7 +227,7 @@ function Live({ active, onPlayer }) {
                 {ms.length === 0 && <p className="text-xs text-gray-400 py-1">Nothing on court right now.</p>}
                 {ms.map((m) => (
                   <div key={m.id}>
-                    <Match m={m} onPlayer={onPlayer} showEvent />
+                    <Match m={m} onPlayer={onPlayer} showEvent={inEvent(event, '')} />
                     {m.state === 'upcoming' && <div className="pl-9"><SuggestTag s={sugg?.[String(m.id)]} /></div>}
                     {picks && m.side1.players[0]?.name !== 'TBD' && m.side2.players[0]?.name !== 'TBD' && (
                       <SportPick sport="badminton" mkey={String(m.id)} pick={picks[String(m.id)]} onSaved={setPick} model={m.model?.odds}
@@ -249,9 +256,10 @@ function Live({ active, onPlayer }) {
 
 // ── Results ─────────────────────────────────────────────────────────────────
 
-function Tournament({ id, onBack, onPlayer }) {
+function Tournament({ id, onBack, onPlayer, event }) {
   const [d, setD] = useState(null)
-  const [ev, setEv] = useState('MS')
+  const [pick, setEv] = useState('MS')
+  const ev = event && event !== 'all' ? event : pick      // the switch at the top decides, when set
   useEffect(() => { setD(null); badmintonTournament(id).then((r) => setD(r.data)).catch(() => setD({ error: true })) }, [id])
   if (!d) return <p className="text-xs text-gray-400 text-center py-6">Loading…</p>
   if (d.error) return <p className="text-sm text-red-600 text-center py-6">Couldn't load this tournament.</p>
@@ -263,7 +271,7 @@ function Tournament({ id, onBack, onPlayer }) {
         <CardHead title={d.tournament.name} sub={d.tournament.category?.replace('HSBC BWF World Tour ', '')} logo={d.tournament.logo} />
         <p className="px-4 py-2 text-[10px] text-gray-400">{fmtDate(d.tournament.start)} – {fmtDate(d.tournament.end)}{d.tournament.location ? ` · ${d.tournament.location}` : ''}</p>
       </div>
-      <Seg value={ev} onChange={setEv} options={EVENTS.map(([k]) => [k, k])} />
+      {(!event || event === 'all') && <Seg value={ev} onChange={setEv} options={EVENTS.map(([k]) => [k, k])} />}
       {rounds.length === 0 && <p className="text-sm text-gray-400 text-center py-8">No {EVENT[ev].toLowerCase()} matches read yet.</p>}
       {rounds.map((r) => (
         <div key={r.round} className="card py-2">
@@ -306,7 +314,7 @@ const fmtDay = (iso) => (iso ? new Date(`${iso}T00:00:00`).toLocaleDateString('e
   { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : '')
 
 /** One day's matches, as tennis's Results: ‹ date › to step between days with matches. */
-function ByDate({ onPlayer, onTournament }) {
+function ByDate({ onPlayer, onTournament, event }) {
   const [params, setParams] = useSearchParams()
   const date = params.get('bd') || ''
   const setDate = (v) => setParams((p) => { const q = new URLSearchParams(p); v ? q.set('bd', v) : q.delete('bd'); return q }, { replace: true })
@@ -317,6 +325,8 @@ function ByDate({ onPlayer, onTournament }) {
     badmintonDay(date).then((r) => setDay(r.data)).catch(() => setDay({ tournaments: [] })).finally(() => setBusy(false))
   }, [date])
   const shown = date || day?.date || ''
+  const tours = (day?.tournaments || []).map((t) => ({ ...t, events: t.events.filter((e) => inEvent(event, e.event)) })).filter((t) => t.events.length)
+  const count = tours.reduce((n, t) => n + t.events.reduce((k, e) => k + e.matches.length, 0), 0)
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
@@ -327,14 +337,14 @@ function ByDate({ onPlayer, onTournament }) {
           className="px-3 py-2 rounded-md border border-amber-300 bg-white text-sm font-black disabled:opacity-30">›</button>
       </div>
       <div className="flex items-center justify-between">
-        <p className="text-xs font-bold text-gray-500">{day?.date ? fmtDay(day.date) : ''}{day?.count ? ` · ${day.count} matches` : ''}</p>
+        <p className="text-xs font-bold text-gray-500">{day?.date ? fmtDay(day.date) : ''}{count ? ` · ${count} ${inEvent(event, '') ? '' : `${event} `}matches` : ''}</p>
         <button onClick={() => setDate('')} className="text-[11px] font-bold text-brand-600">Latest ›</button>
       </div>
       {busy && <p className="text-xs text-gray-400 text-center py-6">Loading…</p>}
-      {!busy && day && day.tournaments.length === 0 && (
-        <p className="text-sm text-gray-400 text-center py-10">No matches on this day - use ‹ › to jump to the nearest day with matches.</p>
+      {!busy && day && tours.length === 0 && (
+        <p className="text-sm text-gray-400 text-center py-10">No {inEvent(event, '') ? '' : `${EVENT[event].toLowerCase()} `}matches on this day - use ‹ › to step to another day.</p>
       )}
-      {!busy && day?.tournaments.map((t) => (
+      {!busy && day && tours.map((t) => (
         <div key={t.id} className="card p-0 overflow-hidden">
           <button onClick={() => onTournament(t.id)} className="w-full text-left"><CardHead title={`${t.name} ›`} sub={t.category?.replace('HSBC BWF World Tour ', '')} logo={t.logo} /></button>
           {t.events.map((e) => (
@@ -349,7 +359,7 @@ function ByDate({ onPlayer, onTournament }) {
   )
 }
 
-function Results({ onPlayer, sum }) {
+function Results({ onPlayer, sum, event }) {
   const [year, setYear] = useState(0)
   const [d, setD] = useState(null)
   // the open tournament lives in the address, so Back from a match page returns to it
@@ -360,13 +370,13 @@ function Results({ onPlayer, sum }) {
   // By date (as tennis) or by tournament - also in the address
   const view = params.get('bv') || 'day'
   const setView = (v) => setParams((p) => { const q = new URLSearchParams(p); q.set('bv', v); return q }, { replace: true })
-  if (open) return <Tournament id={open} onBack={() => setOpen(null)} onPlayer={onPlayer} />
+  if (open) return <Tournament id={open} onBack={() => setOpen(null)} onPlayer={onPlayer} event={event} />
   const toggle = <Seg value={view} onChange={setView} options={[['day', 'By date'], ['tournaments', 'Tournaments']]} />
   if (view === 'day') {
     return (
       <div className="space-y-3">
         {toggle}
-        <ByDate onPlayer={onPlayer} onTournament={setOpen} />
+        <ByDate onPlayer={onPlayer} onTournament={setOpen} event={event} />
         <ComingUp list={d?.upcoming} />
       </div>
     )
@@ -395,9 +405,9 @@ function Results({ onPlayer, sum }) {
             </div>
             <span className="text-brand-600 font-bold text-xs">›</span>
           </div>
-          {Object.keys(t.champions).length > 0 && (
+          {Object.keys(t.champions).some((e) => inEvent(event, e)) && (
             <div className="mt-2 grid grid-cols-1 gap-0.5">
-              {Object.entries(t.champions).map(([e, ps]) => (
+              {Object.entries(t.champions).filter(([e]) => inEvent(event, e)).map(([e, ps]) => (
                 <p key={e} className="text-[11px] text-gray-600 truncate"><span className="inline-block w-7 font-black text-gray-400">{e}</span>🏆 {ps.map((p) => p.name).join(' / ')}</p>
               ))}
             </div>
@@ -511,7 +521,7 @@ function BwfRankings({ event, onPlayer }) {
   return <RankingList title={`${EVENT[event]} rankings`} sub={rk?.week || ''} rows={rows} first={20} max={50} loading={!rk} />
 }
 
-function Players({ sel, onPlayer }) {
+function Players({ sel, onPlayer, event }) {
   const [q, setQ] = useState('')
   const [rev, setRev] = useState('MS')        // the rankings shown: men's or women's singles
   const [list, setList] = useState([])
@@ -533,7 +543,8 @@ function Players({ sel, onPlayer }) {
         </button>
       ))}
       {q.trim().length >= 2 && list.length === 0 && <p className="text-xs text-gray-400 text-center py-6">No player by that name on file.</p>}
-      {q.trim().length < 2 && (
+      {q.trim().length < 2 && !inEvent(event, '') && <BwfRankings key={event} event={event} onPlayer={onPlayer} />}
+      {q.trim().length < 2 && inEvent(event, '') && (
         <RankingSwitch value={rev} onChange={setRev} options={[['MS', "Men's singles"], ['WS', "Women's singles"]]}>
           <BwfRankings key={rev} event={rev} onPlayer={onPlayer} />
         </RankingSwitch>
@@ -544,8 +555,9 @@ function Players({ sel, onPlayer }) {
 
 // ── Stats ───────────────────────────────────────────────────────────────────
 
-function Stats({ onPlayer }) {
-  const [ev, setEv] = useState('MS')
+function Stats({ onPlayer, event }) {
+  const [pick, setEv] = useState('MS')
+  const ev = event && event !== 'all' ? event : pick      // the switch at the top decides, when set
   const [since, setSince] = useState(new Date().getFullYear() - 1)
   const [d, setD] = useState(null)
   useEffect(() => { setD(null); badmintonStats(ev, since).then((r) => setD(r.data)).catch(() => setD({ error: true })) }, [ev, since])
@@ -553,7 +565,7 @@ function Stats({ onPlayer }) {
   for (let y = new Date().getFullYear(); y >= 2018; y -= 1) years.push(y)
   return (
     <div className="space-y-3">
-      <Seg value={ev} onChange={setEv} options={EVENTS.map(([k]) => [k, k])} />
+      {inEvent(event, '') && <Seg value={ev} onChange={setEv} options={EVENTS.map(([k]) => [k, k])} />}
       <div className="flex items-center gap-2">
         <span className="text-[11px] font-bold text-gray-500">Since</span>
         <select value={since} onChange={(e) => setSince(+e.target.value)} className="rounded-md border border-amber-300 bg-white px-2 py-1 text-sm font-bold">
@@ -607,14 +619,14 @@ function Stats({ onPlayer }) {
 }
 
 /** The badminton tab shown (`tab`), with `player` the one open on Players. */
-export default function Badminton({ tab, active, player, setPlayer, sum }) {
+export default function Badminton({ tab, active, player, setPlayer, sum, event = 'all' }) {
   const onPlayer = (id) => setPlayer(id)
   return (
     <>
-      {tab === 'live' && <Live active={active} onPlayer={onPlayer} />}
-      {tab === 'results' && <Results onPlayer={onPlayer} sum={sum} />}
-      {tab === 'players' && <Players sel={player} onPlayer={onPlayer} />}
-      {tab === 'stats' && <Stats onPlayer={onPlayer} />}
+      {tab === 'live' && <Live active={active} onPlayer={onPlayer} event={event} />}
+      {tab === 'results' && <Results onPlayer={onPlayer} sum={sum} event={event} />}
+      {tab === 'players' && <Players sel={player} onPlayer={onPlayer} event={event} />}
+      {tab === 'stats' && <Stats onPlayer={onPlayer} event={event} />}
     </>
   )
 }
