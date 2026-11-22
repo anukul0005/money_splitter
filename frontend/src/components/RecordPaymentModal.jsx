@@ -13,22 +13,23 @@ const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigi
  * No group picker: a payment settles a debt, and the debt already lives in
  * specific groups, so the server places the amount against the outstanding
  * balance (largest first, split across groups if one doesn't cover it).
- * `prefillFriend` preselects the other side.
+ * `prefillFriend` preselects the other side; `prefill` ({ from, to, amount })
+ * fills in a suggested transfer (Settle up's "Record").
  *
  * Pass `payment` to correct an existing one instead. Balances are derived from
  * payments rather than stored, so amending the row is enough — every group
  * total and friend balance it touches recomputes on the next read.
  */
-export default function RecordPaymentModal({ onClose, onSaved, prefillFriend, payment }) {
+export default function RecordPaymentModal({ onClose, onSaved, prefillFriend, payment, prefill }) {
   const user = useUser()
   const editing = !!payment
 
   const [people, setPeople]   = useState([])
   const [loading, setLoading] = useState(true)
   const [form, setForm] = useState({
-    from_member: payment?.from_member || '',
-    to_member:   payment?.to_member || prefillFriend || '',
-    amount:      payment ? String(payment.amount) : '',
+    from_member: payment?.from_member || prefill?.from || '',
+    to_member:   payment?.to_member || prefill?.to || prefillFriend || '',
+    amount:      payment ? String(payment.amount) : prefill?.amount ? String(Math.round(prefill.amount)) : '',
     note:        payment?.note || '',
     date:        payment?.date || new Date().toISOString().slice(0, 10),
   })

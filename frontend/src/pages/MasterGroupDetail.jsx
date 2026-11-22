@@ -5,6 +5,7 @@ import { useUser } from '../UserContext'
 import GroupCard from '../components/GroupCard'
 import LoadingSpinner from '../components/LoadingSpinner'
 import StatsPanel from '../components/StatsPanel'
+import MasterSettleUp from '../components/MasterSettleUp'
 import { buildMasterGroups } from '../utils/masterGroups'
 import Dropdown from '../components/Dropdown'
 import { MailSyncButton, StatementUploadButton, useStatementUpload } from '../components/StatementUpload'
@@ -81,6 +82,7 @@ export default function MasterGroupDetail() {
   const [master,  setMaster]  = useState(location.state?.master ?? null)
   const [loading, setLoading] = useState(!location.state?.master)
   const [showStats, setShowStats] = useState(false)
+  const [showSettle, setShowSettle] = useState(false)   // the combined settle-up view
   const [stats, setStats]         = useState(null)
   const [statsLoading, setStatsLoading] = useState(false)
   const [picking, setPicking]     = useState(false)
@@ -204,8 +206,24 @@ export default function MasterGroupDetail() {
               {adding ? 'Adding…' : 'Add'}
             </button>
           )}
+          {(master.names ?? []).length > 1 && (
+            <button
+              onClick={() => { setShowSettle((v) => !v); setShowStats(false) }}
+              title={showSettle ? 'Back to groups' : 'Settle up across all these groups'}
+              aria-label="Settle up"
+              aria-pressed={showSettle}
+              className={`flex-shrink-0 flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-bold active:scale-95 transition-all shadow-sm border ${
+                showSettle ? 'bg-brand-400 border-brand-400 text-white' : 'bg-cream border-amber-200 text-gray-500 hover:bg-amber-50'
+              }`}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+              </svg>
+              Settle up
+            </button>
+          )}
           <button
-            onClick={() => setShowStats((v) => !v)}
+            onClick={() => { setShowStats((v) => !v); setShowSettle(false) }}
             title={showStats ? 'Back to groups' : 'Stats across all these groups'}
             aria-label="Stats"
             aria-pressed={showStats}
@@ -321,7 +339,9 @@ export default function MasterGroupDetail() {
       {upload.input}
       {upload.panel}
 
-      {showStats ? (
+      {showSettle ? (
+        <MasterSettleUp master={master} me={user?.name} />
+      ) : showStats ? (
         statsLoading ? <LoadingSpinner /> : (
           <StatsPanel
             stats={stats}
