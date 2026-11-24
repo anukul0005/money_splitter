@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     azure_vision_key: str = ""
     azure_vision_endpoint: str = ""
     google_vision_api_key: str = ""
+    # Google Places API (New) - looking up any restaurant by name
+    # (google_places.py). Its own key, restricted to the Places API (New).
+    google_places_api_key: str = ""
     # Structured extraction of a scanned receipt's fields (GPT-OSS-120B via
     # Groq) - see llm_receipt_parser.py. Falls back to the regex extractor
     # in receipt_parser.py when this is blank. statement_extractor.py (the
