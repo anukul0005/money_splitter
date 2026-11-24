@@ -11,6 +11,7 @@ import DatePicker from '../components/DatePicker'
 import TimePicker from '../components/TimePicker'
 import { dn } from '../utils/displayName'
 import { compressImage } from '../utils/compressImage'
+import GuestsEditor, { chargedTotal, guestsJson } from '../components/GuestsEditor'
 
 const PAYMENT_MODES = [
   { value: 'cash',        label: 'Cash' },
@@ -71,6 +72,15 @@ export default function AddExpense() {
   const [savedNoTitle, setSavedNoTitle] = useState(false)
 
   const amountRef = useRef(null)
+  // People there who aren't in the group - a note, or charged a share
+  const [guests, setGuests] = useState([])
+  const amtVal = parseFloat(form.amount) || 0
+  const headcount = members.length <= 1 ? 1 : splitMode === 'equal' ? (parseInt(form.divider) || members.length || 1) : members.length
+  const nCharged = guests.filter((g) => g.charge).length
+  const perHead = amtVal && nCharged ? amtVal / (headcount + nCharged) : 0
+  const guestOff = chargedTotal(guests, perHead)
+  // What the members split: the expense less what charged guests pay
+  const memberBase = Math.round((amtVal - guestOff) * 100) / 100
 
   useEffect(() => {
     getGroups()
@@ -106,7 +116,7 @@ export default function AddExpense() {
   }
 
   const buildSplitJson = () => {
-    const amt = parseFloat(form.amount)
+    const amt = memberBase
     if (!amt) return null
 
     if (splitMode === 'gentleman' && members.length === 2) {
@@ -153,7 +163,7 @@ export default function AddExpense() {
     }
 
     setCustomPcts(newPcts)
-    const total = parseFloat(form.amount)
+    const total = memberBase
     if (!isNaN(total) && total > 0) {
       const newAmts = { ...customAmts }
       memberNames.forEach((n) => {
@@ -165,7 +175,7 @@ export default function AddExpense() {
   }
 
   const onAmtChange = (name, amtStr) => {
-    const total = parseFloat(form.amount)
+    const total = memberBase
     const amtNum = parseFloat(amtStr)
     const isEmpty = amtStr === ''
     const pctNum = (!isEmpty && !isNaN(amtNum) && !isNaN(total) && total > 0)
@@ -262,6 +272,7 @@ export default function AddExpense() {
     setCustomPcts(Object.fromEntries(members.map((m) => [m.name, ''])))
     setCustomAmts(Object.fromEntries(members.map((m) => [m.name, ''])))
     setTouchedPcts({})
+    setGuests([])
     setTimeout(() => amountRef.current?.focus(), 50)
   }
 
@@ -275,6 +286,7 @@ export default function AddExpense() {
     if (!form.paid_by) return setError('Select who paid')
     if (splitMode === 'custom' && Math.abs(customTotal - 100) > 0.5)
       return setError('Custom percentages must add up to 100%')
+    if (guests.length && memberBase <= 0) return setError("Guests' shares must come to less than the whole amount")
 
     setSubmitting(true)
     try {
@@ -287,6 +299,7 @@ export default function AddExpense() {
         divider:      splitMode === 'equal' ? (Number(form.divider) || members.length || 2) : members.length,
         notes:        form.notes || null,
         split_json:   buildSplitJson(),
+        guests:       guestsJson(guests, perHead),
         payment_mode: form.payment_mode || null,
         txn_time:     form.txn_time || null,
         receipt_json: receipt ? JSON.stringify(receipt) : null,
@@ -615,7 +628,8 @@ export default function AddExpense() {
               </div>
               {form.amount && form.divider && (
                 <p className="text-xs text-gray-500 mt-1.5">
-                  Each pays: <span className="font-black text-brand-600">₹{(parseFloat(form.amount) / parseInt(form.divider)).toFixed(2)}</span>
+                  Each pays: <span className="font-black text-brand-600">₹{(memberBase / parseInt(form.divider)).toFixed(2)}</span>
+                  {guestOff > 0 && <span className="text-gray-400"> (after ₹{guestOff.toFixed(2)} from guests)</span>}
                 </p>
               )}
             </>
@@ -626,7 +640,7 @@ export default function AddExpense() {
             <div className="space-y-2">
               {members.map((m, i) => {
                 const pct = gentlemanFlipped ? (i === 0 ? 35 : 65) : (i === 0 ? 65 : 35)
-                const amt = form.amount ? (parseFloat(form.amount) * pct / 100).toFixed(2) : null
+                const amt = form.amount ? (memberBase * pct / 100).toFixed(2) : null
                 return (
                   <div key={m.id} className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-md px-3 py-2.5">
                     <span className="text-sm font-bold text-gray-800 flex-1">{dn(m.name, members.map((x) => x.name))}</span>
@@ -684,6 +698,12 @@ export default function AddExpense() {
             </div>
           )}
         </div>
+        )}
+
+        {/* Guests: people there who aren't in the group */}
+        {form.group_id && (
+          <GuestsEditor guests={guests} setGuests={setGuests} perHead={perHead}
+            memberNames={members.map((m) => m.name)} payer={form.paid_by} />
         )}
 
         {/* Title with autocomplete from existing group expenses */}

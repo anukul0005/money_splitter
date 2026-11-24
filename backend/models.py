@@ -187,6 +187,10 @@ class Expense(Base):
     divider = Column(Integer, nullable=False, default=2)
     individual_amount = Column(Float, nullable=True)
     split_json = Column(Text, nullable=True)   # JSON: {memberName: amount} for custom splits
+    # People there who aren't in the group - JSON [{"name", "charge", "amount", "loan_id"}].
+    # Just a note unless charged: then their share comes off what the members
+    # split and is a Loan from the payer to them (expense_guests).
+    guests = Column(Text, nullable=True)
     payment_mode = Column(String(50), nullable=True)  # cash / upi / credit_card / debit_card
     notes = Column(Text, nullable=True)
     settled_by = Column(Text, nullable=True)   # JSON array of member names who settled their share

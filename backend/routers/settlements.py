@@ -1,4 +1,5 @@
 import json
+import expense_guests
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from auth import current_user, member_group
@@ -31,7 +32,9 @@ def _calculate(group: Group, include_payments: bool = True) -> SettlementOut:
             participants = member_names[:divider]
 
         if payer in paid:
-            paid[payer] += amount
+            # less what guests outside the group were charged: they owe the
+            # payer that directly, as loans (expense_guests)
+            paid[payer] += amount - expense_guests.charged(exp)
 
         settled_members: list[str] = json.loads(exp.settled_by) if exp.settled_by else []
 

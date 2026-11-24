@@ -352,6 +352,29 @@ export default function GroupDetail() {
                       </div>
                     )}
 
+                    {/* Guests: people there who aren't in the group */}
+                    {(() => {
+                      let gs = []
+                      try { gs = JSON.parse(e.guests || '[]') || [] } catch { /* ignore */ }
+                      if (!gs.length) return null
+                      return (
+                        <div className="mt-1 flex flex-wrap items-center gap-1">
+                          <span className="text-[10px] font-bold text-gray-400">With</span>
+                          {gs.map((g) => g.charge ? (
+                            <button key={g.name} onClick={() => g.loan_id && nav(`/loans?tab=loans&loan=${g.loan_id}`)}
+                              className="text-[10px] font-bold text-green-700 bg-green-50 border border-green-200 px-1.5 py-px"
+                              title={`${g.name} owes ${e.paid_by} this - on the Loans page`}>
+                              {g.name} · {INR(g.amount)} charged
+                            </button>
+                          ) : (
+                            <span key={g.name} className="text-[10px] font-bold text-gray-600 bg-gray-50 border border-gray-200 px-1.5 py-px">
+                              {g.name}
+                            </span>
+                          ))}
+                        </div>
+                      )
+                    })()}
+
                     {/* Monthly: pass a spend on to people (each share a loan to them) */}
                     {isMonthly && (() => {
                       const sent = passedOn[String(e.id)] || []

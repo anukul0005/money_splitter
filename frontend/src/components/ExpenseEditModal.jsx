@@ -5,6 +5,7 @@ import ReceiptInfo from './ReceiptInfo'
 import Dropdown from './Dropdown'
 import DatePicker from './DatePicker'
 import { dn } from '../utils/displayName'
+import GuestsEditor, { chargedTotal, guestsJson, parseGuests } from './GuestsEditor'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 const r2  = (n) => Math.round(n * 100) / 100
@@ -36,8 +37,12 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
     catch { return null }
   })()
 
+  // What the members split when it was saved: the expense less its charged guests
+  const savedGuests = parseGuests(expense.guests)
+  const savedBase = r2(expense.amount - chargedTotal(savedGuests, 0))
+
   const initPcts = () => {
-    const baseAmt = expense.amount
+    const baseAmt = savedBase
     if (parsedSplit && baseAmt > 0) {
       const base = Object.fromEntries(members.map((m) => [m, '0']))
       Object.entries(parsedSplit).forEach(([k, v]) => {
@@ -89,7 +94,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
   const [splitMode,   setSplitMode]   = useState(parsedSplit ? 'custom' : 'equal')
   const [customPcts,  setCustomPcts]  = useState(initPcts)
   const [customAmts,  setCustomAmts]  = useState(() => {
-    const base = expense.amount
+    const base = savedBase
     if (parsedSplit && base > 0) {
       return Object.fromEntries(members.map((m) => [m, String(r2(parsedSplit[m] ?? 0))]))
     }
@@ -107,7 +112,13 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
     parsedSplit ? Object.fromEntries(members.map((m) => [m, true])) : {}
   )
 
-  const amtNum      = parseFloat(amount) || 0
+  const [guests,      setGuests]      = useState(savedGuests)
+  const totalNum    = parseFloat(amount) || 0
+  const nCharged    = guests.filter((g) => g.charge).length
+  const perHead     = totalNum && nCharged ? totalNum / ((members.length || 1) + nCharged) : 0
+  const guestOff    = chargedTotal(guests, perHead)
+  // What the members split: the expense less what charged guests pay
+  const amtNum      = r2(totalNum - guestOff)
   const pctTotal    = members.reduce((s, m) => s + parseFloat(customPcts[m] || 0), 0)
   const pctBalanced = Math.abs(pctTotal - 100) <= 0.5
 
@@ -193,8 +204,12 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
   const handleSave = async () => {
     setError('')
 
-    if (!amtNum || amtNum <= 0) {
+    if (!totalNum || totalNum <= 0) {
       setError('Amount must be a positive number.')
+      return
+    }
+    if (amtNum <= 0) {
+      setError("Guests' shares must come to less than the whole amount.")
       return
     }
     let payload
@@ -203,7 +218,8 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
         group_id:          group.id,
         date:              date || null,
         title:             title.trim() || null,
-        amount:            r2(amtNum),
+        amount:            r2(totalNum),
+        guests:            guestsJson(guests, perHead),
         paid_by:           paidBy,
         payment_mode:      paymentMode || null,
         divider:           members.length,
@@ -221,7 +237,8 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
         group_id:          group.id,
         date:              date || null,
         title:             title.trim() || null,
-        amount:            r2(amtNum),
+        amount:            r2(totalNum),
+        guests:            guestsJson(guests, perHead),
         paid_by:           paidBy,
         payment_mode:      paymentMode || null,
         divider:           members.length,
@@ -391,6 +408,8 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
               onChange={(e) => setNotes(e.target.value)}
             />
           </div>
+
+          <GuestsEditor guests={guests} setGuests={setGuests} perHead={perHead} memberNames={members} payer={paidBy} />
 
           {/* Split type toggle — hidden for solo groups */}
           {members.length > 1 && (

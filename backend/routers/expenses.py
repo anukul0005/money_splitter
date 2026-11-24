@@ -19,6 +19,7 @@ from activity import record_activity
 from spend_categories import UNCLASSIFIED, categorize, tea_stall_overpaid
 from statement_import import StatementLocked, is_self_transfer, own_accounts, parse_statement, time_bucket
 import expense_classifier
+import expense_guests
 import merchant_memory
 import payee_classifier
 
@@ -95,6 +96,9 @@ def _summary(expense: Expense) -> str:
         # in a single <span> with no whitespace-pre styling, so a "\n" here
         # would just collapse into a run-on space instead of a real line break.
         line += f" · Note: {note}"
+    guests = expense_guests.describe(expense)
+    if guests:
+        line += f" · {guests}"
     return line
 
 
@@ -200,7 +204,10 @@ def create_expense(payload: ExpenseCreate, background_tasks: BackgroundTasks,
     # highlighted in the group, until one is added.
     given = bool(payload.category)
     wordless = not title and not (payload.notes or "").strip()
-    individual = payload.individual_amount or _compute_individual(payload.amount, payload.divider)
+    guests = expense_guests.clean(db, caller, group, payload.guests, payload.amount)
+    # Charged guests' shares come off what the members split
+    off = sum(g.get("amount", 0) for g in guests if g["charge"])
+    individual = payload.individual_amount or _compute_individual(payload.amount - off, payload.divider)
     expense = Expense(
         group_id=payload.group_id,
         date=payload.date,
@@ -222,6 +229,7 @@ def create_expense(payload: ExpenseCreate, background_tasks: BackgroundTasks,
     )
     db.add(expense)
     db.flush()
+    expense_guests.sync(db, caller, group, expense, guests)
 
     summary = _summary(expense)
     # Who did it comes from the token; the summary says who paid
@@ -257,7 +265,12 @@ def update_expense(expense_id: int, payload: ExpenseCreate, background_tasks: Ba
     title = (payload.title or "").strip() or None
     wordless = not title and not (payload.notes or "").strip()
 
-    individual = payload.individual_amount or _compute_individual(payload.amount, payload.divider)
+    # Guests are only touched by a client that sends them
+    guests = (expense_guests.clean(db, caller, group, payload.guests, payload.amount)
+              if "guests" in payload.model_fields_set else None)
+    off = (sum(g.get("amount", 0) for g in guests if g["charge"]) if guests is not None
+           else expense_guests.charged(expense))
+    individual = payload.individual_amount or _compute_individual(payload.amount - off, payload.divider)
     expense.date = payload.date
     # Changed description or notes: the category is worked out again from
     # the new text (expense_classifier). Unchanged text keeps what it has,
@@ -298,6 +311,11 @@ def update_expense(expense_id: int, payload: ExpenseCreate, background_tasks: Ba
         expense.txn_time = payload.txn_time
         expense.time_bucket = time_bucket(payload.txn_time)
     # settled_by is intentionally not reset on edit
+    if guests is not None:
+        expense_guests.sync(db, caller, group, expense, guests)
+    elif expense.guests:
+        # unchanged guests: their loans follow the new payer, amount, date
+        expense_guests.sync(db, caller, group, expense, expense_guests.parse(expense.guests))
     if expense.category_source == "user":
         # A category picked by hand on a statement payment teaches what its
         # payee is; a rewritten description does so once it's categorised.
@@ -343,6 +361,7 @@ def delete_expense(expense_id: int, background_tasks: BackgroundTasks,
     summary = f"{expense.title or expense.category or 'Expense'}: ₹{expense.amount:,.0f}"
     record_activity(db, group, caller.name, "deleted an expense", summary)
 
+    expense_guests.drop(db, expense)
     db.delete(expense)
     db.commit()
 

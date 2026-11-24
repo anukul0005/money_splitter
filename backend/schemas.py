@@ -178,6 +178,7 @@ class ExpenseBase(BaseModel):
     divider: int = 2
     individual_amount: Optional[float] = None
     split_json: Optional[str] = None   # JSON: {memberName: amount} for custom/gentleman splits
+    guests: Optional[str] = None       # JSON: [{name, charge, amount}] - see models.Expense.guests
     payment_mode: Optional[str] = None  # cash / upi / credit_card / debit_card
     notes: Optional[str] = None
     # Who is logged in and entering this — not necessarily who paid, so the
