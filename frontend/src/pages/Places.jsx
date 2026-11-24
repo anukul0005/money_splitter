@@ -69,7 +69,7 @@ export default function Places({ tab, setTab }) {
           <div className="flex gap-2">
             <input className="input flex-1 min-w-0" placeholder="e.g. Haldiram's Sector 18 Noida" value={q}
               onChange={(e) => setQ(e.target.value)} autoComplete="off" enterKeyHint="search" />
-            <button type="submit" disabled={busy} className="btn-primary px-4 shrink-0">{busy ? '…' : 'Search'}</button>
+            <button type="submit" disabled={busy} className="btn-primary !w-auto px-5 shrink-0">{busy ? '…' : 'Search'}</button>
           </div>
           <div className="flex items-center justify-between gap-2">
             <button type="button" onClick={toggleNear}
