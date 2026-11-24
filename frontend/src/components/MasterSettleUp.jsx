@@ -60,6 +60,7 @@ export default function MasterSettleUp({ master, me }) {
   if (err) return <p className="text-xs text-red-600 px-5 mt-4">{err}</p>
   if (!data) return <LoadingSpinner />
 
+  const lower = (me || '').toLowerCase()
   // A group in a line: how many expenses, what they came to, when, who paid, the biggest ones
   const summary = (exps) => {
     const total = exps.reduce((t, e) => t + e.amount, 0)
@@ -80,7 +81,6 @@ export default function MasterSettleUp({ master, me }) {
     if (s.balances.some((b) => !isSettled(b.net))) perGroup.push({ g, tx: s.transactions, sum: summary(exps) })
   }
   const plan = pairwise(data.map(({ s }) => s.transactions || []))
-  const lower = (me || '').toLowerCase()
   const others = (master.names || []).filter((n) => n.toLowerCase() !== lower)
 
   const payments = data.flatMap(({ g, s }) => (s.payments || []).map((p) => ({ ...p, groupName: g.name, groupId: g.id })))
