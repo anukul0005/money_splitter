@@ -1,4 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { getGroups } from '../api'
+
+// Everyone in the viewer's groups - offered as guests, so a guest who is
+// someone you know keeps their spelling ("Nandani", not "Nandini")
+let knownCache = null
 
 // People at an expense who aren't in its group (backend expense_guests).
 // Each one is a note unless charged; a charged guest's share comes off what
@@ -35,9 +40,20 @@ export const parseGuests = (raw) => {
 export default function GuestsEditor({ guests, setGuests, perHead, total = 0, memberNames = [], payer }) {
   const [name, setName] = useState('')
   const [err, setErr] = useState('')
+  const [known, setKnown] = useState(knownCache || [])
+  useEffect(() => {
+    if (knownCache) return
+    getGroups().then((r) => {
+      const all = {}
+      for (const g of r.data || []) for (const n of g.member_names || []) all[n.toLowerCase()] = all[n.toLowerCase()] || n
+      knownCache = Object.values(all).sort((a, b) => a.localeCompare(b))
+      setKnown(knownCache)
+    }).catch(() => {})
+  }, [])
   const add = () => {
-    const n = name.trim().replace(/\s+/g, ' ')
+    let n = name.trim().replace(/\s+/g, ' ')
     if (!n) return
+    n = known.find((k) => k.toLowerCase() === n.toLowerCase()) || n
     if (memberNames.some((m) => m.toLowerCase() === n.toLowerCase())) return setErr(`${n} is already in this group`)
     if (guests.some((g) => g.name.toLowerCase() === n.toLowerCase())) return setErr(`${n} is already added`)
     setGuests([...guests, { name: n, charge: false, amount: '', pct: '', unit: '₹' }])
@@ -89,11 +105,15 @@ export default function GuestsEditor({ guests, setGuests, perHead, total = 0, me
         </div>
       )}
       <div className="flex gap-2">
-        <input className="input flex-1" placeholder="Add a name, e.g. Anjali" value={name}
+        <input className="input flex-1" placeholder="Add a name, e.g. Anjali" value={name} list="guest-known-people" autoComplete="off"
           onChange={(e) => { setName(e.target.value); setErr('') }}
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add() } }} />
         <button type="button" onClick={add} className="px-4 text-xs font-bold border border-amber-200 bg-amber-50 text-gray-700">Add</button>
       </div>
+      <datalist id="guest-known-people">
+        {known.filter((k) => !memberNames.some((m) => m.toLowerCase() === k.toLowerCase())
+          && !guests.some((g) => g.name.toLowerCase() === k.toLowerCase())).map((k) => <option key={k} value={k} />)}
+      </datalist>
       {err && <p className="text-xs text-red-500 mt-1">{err}</p>}
       {guests.length > 0 && (
         <p className="text-[10px] text-gray-400 mt-1">
