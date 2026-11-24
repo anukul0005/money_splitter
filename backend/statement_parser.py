@@ -99,7 +99,7 @@ def _first_after(text: str, key: str, start: int, want_date: bool, year_hint: in
 
 
 def parse_summary(text: str) -> dict:
-    out: dict = {k: None for k in list(_LABELS) + ["interest", "taxes", "period_from", "period_to", "reward_points"]}
+    out: dict = {k: None for k in list(_LABELS) + ["interest", "taxes", "period_from", "period_to", "reward_points", "total_outstanding"]}
     # A transaction line ("PAYMENT RECEIVED 12,000.00") is never where a summary figure is
     lines = [ln for ln in text.splitlines() if not _starts_with_date(ln)]
     text = "\n".join(lines)
@@ -128,6 +128,21 @@ def parse_summary(text: str) -> dict:
                 out[key] = _to_date(val)
             elif key not in _DATE_KEYS and kind == "amount":
                 out[key] = val
+    # SBI Card's ACCOUNT SUMMARY: labels over several lines, then one row of
+    # five values - previous balance, payments & credits, purchases & other
+    # debits, fees/taxes/interest, total outstanding. Its "Total Amount Due"
+    # (incl. EMI) is less than the outstanding by the EMI principal not yet due.
+    acct = re.search(r"account\s*summary", text, re.I)
+    if acct and re.search(r"total\s*outstanding", text[acct.end():acct.end() + 400], re.I):
+        for ln in text[acct.end():acct.end() + 600].splitlines():
+            vals = [v for v, _, _ in _amounts(ln)]
+            if len(vals) == 5 and not re.search(r"[A-Za-z]{3}", ln):
+                (out["previous_balance"], out["payments_credits"], out["purchases_debits"],
+                 out["fees_charges"], out["total_outstanding"]) = vals
+                due = re.search(r"total\s*amount\s*due[^\d]{0,30}([\d,]+\.\d{2})", text, re.I)
+                if due:
+                    out["total_due"] = _num(due.group(1))
+                break
     # Otherwise the value right after its label
     for key, rx in _LABEL_RE.items():
         if out[key] is not None:
@@ -178,7 +193,7 @@ def _starts_with_date(line: str) -> bool:
     if not (_date_at_start(line) and _amounts(line)):
         return False
     rest = AMOUNT.sub(" ", DATE.sub(" ", line))
-    return bool(re.search(r"[A-Za-z]{3,}", re.sub(r"(?:dr|cr|rs|inr)", " ", rest, flags=re.I)))
+    return bool(re.search(r"[A-Za-z]{3,}", re.sub(r"b(?:dr|cr|rs|inr)b", " ", rest, flags=re.I)))
 
 
 # ── the transactions ─────────────────────────────────────────────────────────
@@ -199,6 +214,9 @@ _FX = re.compile(r"\b(usd|eur|gbp|aed|sgd|jpy|aud|cad|chf|thb|hkd)\s*([\d,]+\.\d
 
 
 def _kind(desc: str, credit: bool) -> str:
+    desc = re.sub(r"\(\s*excl[^)]*\)", " ", desc, flags=re.I)     # SBI's "(EXCL TAX 8.10)" says nothing of the kind
+    if not credit and re.search(r"\bfee\b", desc, re.I):
+        return "fee"                                            # "MERCHANT EMI PROC FEE" is a fee, not an EMI
     for k, rx in _KINDS:
         if re.search(rx, desc, re.I):
             if credit and k in ("fee", "interest", "tax", "emi"):
@@ -214,6 +232,11 @@ def parse_transactions(text: str, year_hint: int | None = None) -> list[dict]:
     after one, with no date and no amount, is the rest of its description."""
     txns: list[dict] = []
     last = None
+    # SBI Card marks every line: D debit, C credit, M a monthly instalment of
+    # an EMI (its principal is already in the previous balance), and nothing
+    # on the greyed lines that "do not form part of Purchases & Other Debits"
+    # (TRANSFER TO MERCHANT EMI: a purchase moved onto an EMI).
+    marked = bool(re.search(r"C\s*=\s*Credit\s*;?\s*D\s*=\s*Debit", text, re.I))
     pending = None                       # a dated line whose amount is on the next line
     for raw in text.splitlines():
         line = raw.strip()
@@ -229,10 +252,20 @@ def parse_transactions(text: str, year_hint: int | None = None) -> list[dict]:
         if m and not amounts and not _NOT_A_TXN.search(line):
             pending = line
             continue
+        if marked and not m and amounts and last is not None and re.match(r"(?:i|c|s)?gst\b", line, re.I) \
+                and re.search(r"\s[DC]$", line):
+            # an undated tax line ("IGST DB @ 18.00% 167.98 D"): dated with the line above it
+            credit = line.endswith("C")
+            txns.append({"date": last["date"], "time": None,
+                         "description": " ".join(AMOUNT.sub(" ", line[:amounts[-1][1]]).split())[:120] or "GST",
+                         "amount": abs(amounts[-1][0]), "type": "credit" if credit else "debit", "kind": "tax",
+                         "foreign_amount": None, "currency": None, "mark": "C" if credit else "D"})
+            continue
         if not m or not amounts or _NOT_A_TXN.search(line):
-            # a description that ran onto a second line
+            # a description that ran onto a second line (not the page's own headings)
             if last is not None and not amounts and not DATE.search(line) and len(line) < 60 \
-                    and re.search(r"[A-Za-z]{3}", line) and not re.search(r"page\s*\d|statement|continued", line, re.I):
+                    and re.search(r"[A-Za-z]{3}", line) \
+                    and not re.search(r"page\s*\d|statement|continued|important\s*messages|transactions?\s*(?:details|for)|date\s*amount", line, re.I):
                 last["description"] = f"{last['description']} {line}"[:120]
             last = None if (m or amounts) else last
             continue
@@ -255,7 +288,10 @@ def parse_transactions(text: str, year_hint: int | None = None) -> list[dict]:
         desc = " ".join(desc.split()).strip(" -|:")
         if not desc:
             continue
-        if tail.startswith(("cr", "c ")) or tail == "c" or head.endswith(("+", "Cr", "CR")) or line[a_start] == "-":
+        mark = tail.upper() if marked and tail.upper() in ("C", "D", "M") else None
+        if marked and mark in ("M", None):
+            credit = False
+        elif tail.startswith(("cr", "c ")) or tail == "c" or head.endswith(("+", "Cr", "CR")) or line[a_start] == "-":
             credit = True
         elif tail.startswith(("dr", "d ")) or tail == "d":
             credit = False
@@ -265,6 +301,15 @@ def parse_transactions(text: str, year_hint: int | None = None) -> list[dict]:
              "type": "credit" if credit else "debit", "kind": _kind(desc, credit),
              "foreign_amount": _num(fx.group(2)) if fx else None,
              "currency": fx.group(1).upper() if fx else None}
+        if marked:
+            t["mark"] = mark
+            if mark == "M":
+                t["kind"] = "emi"
+                t["memo"] = "EMI instalment - already in the previous balance"
+            elif mark is None:
+                if re.search(r"\bemi\b|flexipay|instal", desc, re.I):
+                    t["kind"] = "emi"
+                t["memo"] = "greyed on the statement - not part of this bill's totals"
         txns.append(t)
         last = t
     return txns

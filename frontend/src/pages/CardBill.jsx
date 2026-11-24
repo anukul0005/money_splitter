@@ -303,6 +303,19 @@ function BillBreakup({ billId: id }) {
                 <span className={`font-bold ${sign === '−' ? 'text-green-700' : 'text-gray-800'}`}>{sign}{INR(v)}</span>
               </div>
             ))}
+            {/* SBI: what's outstanding, less the EMI principal billed in later months, is what's due now */}
+            {s.total_outstanding != null && s.total_due != null && s.total_outstanding - s.total_due >= 1 && (
+              <>
+                <div className="flex items-center justify-between text-xs pt-1.5 border-t border-dashed border-amber-200">
+                  <span className="text-gray-600">Total outstanding</span>
+                  <span className="font-bold text-gray-800">{INR(s.total_outstanding)}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-gray-600">On EMI - billed in later months</span>
+                  <span className="font-bold text-green-700">−{INR(s.total_outstanding - s.total_due)}</span>
+                </div>
+              </>
+            )}
             <div className="flex items-center justify-between text-sm pt-1.5 border-t border-dashed border-amber-200">
               <span className="font-bold text-gray-900">Total due</span>
               <span className="font-black text-gray-900">{INR(s.total_due ?? b.total_due ?? 0)}</span>
@@ -316,7 +329,7 @@ function BillBreakup({ billId: id }) {
           {d.check && (
             <p className={`text-[11px] font-bold pt-1 ${d.check.ok ? 'text-green-700' : 'text-amber-700'}`}>
               {d.check.ok
-                ? '✓ The transactions below add up to this bill'
+                ? (d.check.on_emi ? '✓ The transactions below add up to the total outstanding' : '✓ The transactions below add up to this bill')
                 : `The transactions add up to ${INR(d.check.expected)}, the bill says ${INR(d.check.total_due)} - a line or two may not have been read`}
             </p>
           )}

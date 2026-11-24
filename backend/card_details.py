@@ -285,6 +285,8 @@ def reconcile(summary: dict, txns: list[dict], period: tuple | None = None) -> N
     leaving out makes it add up."""
     for t in txns:
         t.pop("excluded", None)
+        if t.get("memo"):
+            t["excluded"] = t["memo"]         # what the statement itself keeps out of its totals (SBI's M and grey lines)
     start, end = summary.get("period_from"), summary.get("period_to")
     if not (start and end) and period:
         start, end = period                  # the bill's own (statement date based) - see credit_cards._cycle
@@ -323,7 +325,8 @@ def reconcile(summary: dict, txns: list[dict], period: tuple | None = None) -> N
 def _balances(summary: dict, txns: list[dict]) -> bool:
     """Previous balance - the lines' credits + their debits = total due, to
     two rupees."""
-    prev, total = summary.get("previous_balance"), summary.get("total_due")
+    prev = summary.get("previous_balance")
+    total = summary.get("total_outstanding") if summary.get("total_outstanding") is not None else summary.get("total_due")
     if prev is None or total is None:
         return False
     live = [t for t in txns if not t.get("excluded")]
@@ -392,9 +395,16 @@ def assemble(summary: dict, txns: list[dict], read_at: str | None, period: tuple
     # statement states the pieces: says whether the list is complete.
     check = None
     prev, total = summary.get("previous_balance"), summary.get("total_due")
+    # SBI: the lines add up to the total outstanding; the amount due is less by
+    # the EMI principal still to be billed in later months
+    if summary.get("total_outstanding") is not None:
+        total = summary["total_outstanding"]
     if prev is not None and total is not None:
         expected = round(prev - credits + debits, 2)
         check = {"expected": expected, "total_due": total, "ok": abs(expected - total) <= 2}
+        if summary.get("total_outstanding") is not None and summary.get("total_due") is not None:
+            check["outstanding"] = summary["total_outstanding"]
+            check["on_emi"] = round(summary["total_outstanding"] - summary["total_due"], 2)
     elif summary.get("purchases_debits") is not None:
         expected = debits
         check = {"expected": expected, "total_due": summary["purchases_debits"],
