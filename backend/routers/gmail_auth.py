@@ -135,6 +135,9 @@ def callback(code: str | None = None, state: str | None = None, error: str | Non
             row.refresh_token_encrypted = secret_box.encrypt(creds.refresh_token)
         db.commit()
 
+    # Card bills missed while Gmail was lapsed: fetched now, not tomorrow
+    import card_autosync
+    card_autosync.catch_up(user.id)
     return RedirectResponse(f"{page}gmail=connected")
 
 

@@ -11,6 +11,11 @@ A bill's email can lag its date by days, so a bill not found yet - or
 found but not readable yet - is tried again each day for RETRY_DAYS after
 its bill date, then left for the page's own buttons. A bill already saved
 and read is never touched again. The owner is told when a new bill lands.
+
+Gmail access lapses now and then (Google's "invalid_grant"); the daily run
+then tells the owner once a day to reconnect, and reconnecting
+(routers/gmail_auth.callback) runs the sync for them straight away, looking
+back CATCH_UP_DAYS so bills missed while it was lapsed are fetched too.
 """
 from __future__ import annotations
 
@@ -18,14 +23,29 @@ import threading
 from datetime import date, datetime, timezone
 
 RETRY_DAYS = 10
+CATCH_UP_DAYS = 40
 _running = threading.Lock()
+_lapse_told: dict[int, date] = {}       # user -> the day they were last told Gmail lapsed
 
 
-def _due(card, today: date) -> list[date]:
+def _due(card, today: date, within: int = RETRY_DAYS) -> list[date]:
     """This card's bill dates still worth trying: the latest one(s) on or
-    before today, within RETRY_DAYS."""
+    before today, within `within` days."""
     import card_bills
-    return [d for d in card_bills.recent_bill_dates(card.bill_day, today, 2) if (today - d).days <= RETRY_DAYS]
+    return [d for d in card_bills.recent_bill_dates(card.bill_day, today, 2) if (today - d).days <= within]
+
+
+def _lapsed(out: list[dict]) -> bool:
+    return bool(out) and all("invalid_grant" in (r.get("why") or "") or "expired" in (r.get("why") or "").lower()
+                             for r in out if r["status"] == "not_yet") and any(r["status"] == "not_yet" for r in out)
+
+
+def _tell_lapsed(db, owner: str, cards: list[str]) -> None:
+    from emailer import send_notice
+    send_notice(db, owner, "Reconnect Gmail to fetch your card bills",
+                [f"Gmail access has lapsed, so these bills couldn't be fetched: {', '.join(cards)}.",
+                 "Reconnect Gmail on the Credit cards page - the bills are fetched as soon as you do."],
+                "Gmail lapsed - reconnect to fetch card bills")
 
 
 def _tell(db, owner: str, card: str, bill, details: dict | None, error: str | None) -> None:
@@ -45,14 +65,14 @@ def _tell(db, owner: str, card: str, bill, details: dict | None, error: str | No
     send_notice(db, owner, f"{card} bill: {due}{when}", lines, f"{card}: {due}{when}")
 
 
-def sync_user(db, user_id: int, today: date) -> list[dict]:
+def sync_user(db, user_id: int, today: date, within: int = RETRY_DAYS) -> list[dict]:
     """Every due bill of this user's cards: fetched, read, owner told."""
     import card_bills
     import card_details
     from models import CreditCard, CreditCardStatement, GmailConnection, User
 
     cards = db.query(CreditCard).filter(CreditCard.user_id == user_id).all()
-    jobs = [(c, d) for c in cards for d in _due(c, today)]
+    jobs = [(c, d) for c in cards for d in _due(c, today, within)]
     if not jobs:
         return []
     owner = db.get(User, user_id)
@@ -80,6 +100,14 @@ def sync_user(db, user_id: int, today: date) -> list[dict]:
                 print(f"[card_autosync] notice failed: {e}")
         out.append({"card": r["card"], "period": r["period"], "status": "new" if new else "saved",
                     "read": bool(details) or bool(bill.details_json and not error), "error": error})
+    if _lapsed(out):
+        if _lapse_told.get(user_id) != today:
+            _lapse_told[user_id] = today
+            try:
+                _tell_lapsed(db, owner.name, [r["card"] for r in out if r["status"] == "not_yet"])
+            except Exception as e:   # pragma: no cover
+                print(f"[card_autosync] lapse notice failed: {e}")
+        return out
     conn = db.query(GmailConnection).filter(GmailConnection.user_id == user_id).first()
     if conn:
         conn.last_synced_at = datetime.now(timezone.utc)
@@ -111,6 +139,22 @@ def run_all(today: date) -> dict:
     finally:
         db.close()
         _running.release()
+
+
+def catch_up(user_id: int) -> None:
+    """Right after Gmail is (re)connected: this user's bills from the last
+    CATCH_UP_DAYS, in the background."""
+    def run():
+        from database import get_session_factory
+        db = get_session_factory()()
+        try:
+            print(f"[card_autosync] catch-up {user_id}: {sync_user(db, user_id, date.today(), CATCH_UP_DAYS)}")
+        except Exception as e:
+            db.rollback()
+            print(f"[card_autosync] catch-up {user_id} failed: {e}")
+        finally:
+            db.close()
+    threading.Thread(target=run, daemon=True, name="card-catch-up").start()
 
 
 def start(today: date) -> None:

@@ -87,6 +87,9 @@ _LABELS = {
 }
 _DATE_KEYS = {"due_date", "statement_date"}
 _LABEL_RE = {k: re.compile(v, re.I) for k, v in _LABELS.items()}
+# In a row of labels only: the statement period, whose value is two dates
+# ("23/10/2026 - 21/11/2026") - unseen, it shifted every value after it
+_PERIOD_RE = re.compile(r"(?:statement|billing)\s*period", re.I)
 
 
 def _first_after(text: str, key: str, start: int, want_date: bool, year_hint: int | None):
@@ -107,22 +110,30 @@ def parse_summary(text: str) -> dict:
     for i, line in enumerate(lines[:-1]):
         if _amounts(line):
             continue                       # a row of labels has no amounts in it
-        spans = sorted(((m.start(), m.end(), k) for k, rx in _LABEL_RE.items() for m in [rx.search(line)] if m),
+        spans = sorted(((m.start(), m.end(), k) for k, rx in {**_LABEL_RE, "_period": _PERIOD_RE}.items()
+                        for m in [rx.search(line)] if m),
                        key=lambda x: (x[0], -(x[1] - x[0])))
         found, end = [], -1
         for st, en, k in spans:            # overlapping labels ("Minimum Amount Due" holds "Amount Due"): the first, longest
             if st >= end:
                 found.append((st, k))
                 end = en
-        if len(found) < 2:
+        if len([k for _, k in found if k != "_period"]) < 2:
             continue
         nxt = " ".join(lines[i + 1:i + 3])
         tokens = sorted([(m.start(), "date", m) for m in DATE.finditer(nxt)] +
                         [(s, "amount", v) for v, s, _ in _amounts(nxt)], key=lambda t: t[0])
-        if len(tokens) < len(found):
+        if len(tokens) < len(found) + any(k == "_period" for _, k in found):
             continue
-        for (pos, key), (_, kind, val) in zip(found, tokens):
-            if out[key] is not None:
+        toks = iter(tokens)
+        for pos, key in found:
+            _, kind, val = next(toks, (None, None, None))
+            if key == "_period":
+                _, kind2, val2 = next(toks, (None, None, None))
+                if kind == "date" and kind2 == "date" and out["period_from"] is None:
+                    out["period_from"], out["period_to"] = _to_date(val), _to_date(val2)
+                continue
+            if kind is None or out[key] is not None:
                 continue
             if key in _DATE_KEYS and kind == "date":
                 out[key] = _to_date(val)
@@ -157,8 +168,12 @@ def parse_summary(text: str) -> dict:
     seg = text[pm.end():pm.end() + 80] if pm else ""
     ds = [_to_date(m) for m in DATE.finditer(seg)]
     ds = [d for d in ds if d]
-    if len(ds) >= 2:
+    if len(ds) >= 2 and out["period_from"] is None:
         out["period_from"], out["period_to"] = ds[0], ds[1]
+    # A bill is never due before it's made: a due date read from the wrong
+    # place (the period's start, say) is better left blank
+    if out["due_date"] and out["statement_date"] and str(out["due_date"]) <= str(out["statement_date"]):
+        out["due_date"] = None
     rp = re.search(r"reward\s*points?[^\n\d]{0,40}([\d,]+)", text, re.I)
     if rp:
         try:
