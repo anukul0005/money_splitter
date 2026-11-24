@@ -116,7 +116,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
   const totalNum    = parseFloat(amount) || 0
   const nCharged    = guests.filter((g) => g.charge).length
   const perHead     = totalNum && nCharged ? totalNum / ((members.length || 1) + nCharged) : 0
-  const guestOff    = chargedTotal(guests, perHead)
+  const guestOff    = chargedTotal(guests, perHead, totalNum)
   // What the members split: the expense less what charged guests pay
   const amtNum      = r2(totalNum - guestOff)
   const pctTotal    = members.reduce((s, m) => s + parseFloat(customPcts[m] || 0), 0)
@@ -219,7 +219,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
         date:              date || null,
         title:             title.trim() || null,
         amount:            r2(totalNum),
-        guests:            guestsJson(guests, perHead),
+        guests:            guestsJson(guests, perHead, totalNum),
         paid_by:           paidBy,
         payment_mode:      paymentMode || null,
         divider:           members.length,
@@ -238,7 +238,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
         date:              date || null,
         title:             title.trim() || null,
         amount:            r2(totalNum),
-        guests:            guestsJson(guests, perHead),
+        guests:            guestsJson(guests, perHead, totalNum),
         paid_by:           paidBy,
         payment_mode:      paymentMode || null,
         divider:           members.length,
@@ -409,7 +409,7 @@ export default function ExpenseEditModal({ expense, group, onSave, onClose }) {
             />
           </div>
 
-          <GuestsEditor guests={guests} setGuests={setGuests} perHead={perHead} memberNames={members} payer={paidBy} />
+          <GuestsEditor guests={guests} setGuests={setGuests} perHead={perHead} total={totalNum} memberNames={members} payer={paidBy} />
 
           {/* Split type toggle — hidden for solo groups */}
           {members.length > 1 && (

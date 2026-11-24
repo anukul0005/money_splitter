@@ -57,6 +57,7 @@ export default function AddExpense() {
   const [customPcts, setCustomPcts]             = useState({})
   const [customAmts, setCustomAmts]             = useState({})
   const [touchedPcts, setTouchedPcts]           = useState({})
+  const [rupeeAmts, setRupeeAmts]               = useState({})
 
   const [form, setForm] = useState({
     group_id:     defaultGroup,
@@ -78,7 +79,7 @@ export default function AddExpense() {
   const headcount = members.length <= 1 ? 1 : splitMode === 'equal' ? (parseInt(form.divider) || members.length || 1) : members.length
   const nCharged = guests.filter((g) => g.charge).length
   const perHead = amtVal && nCharged ? amtVal / (headcount + nCharged) : 0
-  const guestOff = chargedTotal(guests, perHead)
+  const guestOff = chargedTotal(guests, perHead, amtVal)
   // What the members split: the expense less what charged guests pay
   const memberBase = Math.round((amtVal - guestOff) * 100) / 100
 
@@ -127,6 +128,12 @@ export default function AddExpense() {
       })
     }
 
+    if (splitMode === 'rupees') {
+      const obj = {}
+      members.forEach((m) => { obj[m.name] = Math.round((parseFloat(rupeeAmts[m.name]) || 0) * 100) / 100 })
+      return JSON.stringify(obj)
+    }
+
     if (splitMode === 'custom') {
       const obj = {}
       members.forEach((m) => {
@@ -139,6 +146,9 @@ export default function AddExpense() {
   }
 
   const customTotal = members.reduce((s, m) => s + parseFloat(customPcts[m.name] || 0), 0)
+  // Custom ₹: each member's amount typed in, adding up to what the members split
+  const rupeeTotal = Math.round(members.reduce((s, m) => s + (parseFloat(rupeeAmts[m.name]) || 0), 0) * 100) / 100
+  const rupeeLeft = Math.round((memberBase - rupeeTotal) * 100) / 100
 
   const r2 = (n) => Math.round(n * 100) / 100
 
@@ -272,6 +282,7 @@ export default function AddExpense() {
     setCustomPcts(Object.fromEntries(members.map((m) => [m.name, ''])))
     setCustomAmts(Object.fromEntries(members.map((m) => [m.name, ''])))
     setTouchedPcts({})
+    setRupeeAmts({})
     setGuests([])
     setTimeout(() => amountRef.current?.focus(), 50)
   }
@@ -286,6 +297,8 @@ export default function AddExpense() {
     if (!form.paid_by) return setError('Select who paid')
     if (splitMode === 'custom' && Math.abs(customTotal - 100) > 0.5)
       return setError('Custom percentages must add up to 100%')
+    if (splitMode === 'rupees' && Math.abs(rupeeLeft) > 0.5)
+      return setError(`The amounts must add up to ₹${memberBase.toFixed(2)} - ${rupeeLeft > 0 ? `₹${rupeeLeft.toFixed(2)} still to assign` : `₹${(-rupeeLeft).toFixed(2)} too much`}`)
     if (guests.length && memberBase <= 0) return setError("Guests' shares must come to less than the whole amount")
 
     setSubmitting(true)
@@ -299,7 +312,7 @@ export default function AddExpense() {
         divider:      splitMode === 'equal' ? (Number(form.divider) || members.length || 2) : members.length,
         notes:        form.notes || null,
         split_json:   buildSplitJson(),
-        guests:       guestsJson(guests, perHead),
+        guests:       guestsJson(guests, perHead, amtVal),
         payment_mode: form.payment_mode || null,
         txn_time:     form.txn_time || null,
         receipt_json: receipt ? JSON.stringify(receipt) : null,
@@ -596,6 +609,43 @@ export default function AddExpense() {
               >
                 Custom %
               </button>
+              <button
+                type="button"
+                onClick={() => setSplitMode('rupees')}
+                className={`px-3 py-1.5 text-xs font-bold transition-colors border ${
+                  splitMode === 'rupees' ? 'bg-purple-500 text-white border-purple-500' : 'bg-amber-50 text-gray-600 border-amber-200'
+                }`}
+              >
+                Custom ₹
+              </button>
+            </div>
+          )}
+
+          {/* Custom ₹ - each member's amount */}
+          {splitMode === 'rupees' && (
+            <div className="space-y-2">
+              {members.map((m) => (
+                <div key={m.id} className="flex items-center gap-2">
+                  <span className="text-sm font-bold text-gray-700 flex-1 truncate">{dn(m.name, members.map((x) => x.name))}</span>
+                  <div className="relative w-36">
+                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 font-bold pointer-events-none">₹</span>
+                    <input
+                      type="number" inputMode="decimal" min="0" step="any"
+                      className="input w-full text-right pl-6"
+                      placeholder="0"
+                      value={rupeeAmts[m.name] ?? ''}
+                      onChange={(e) => setRupeeAmts((a) => ({ ...a, [m.name]: e.target.value }))}
+                    />
+                  </div>
+                </div>
+              ))}
+              {amtVal > 0 && (
+                <div className={`flex items-center justify-between text-xs font-black pt-1 ${Math.abs(rupeeLeft) <= 0.5 ? 'text-brand-600' : 'text-red-500'}`}>
+                  <span>{Math.abs(rupeeLeft) <= 0.5 ? '✓ Balanced'
+                    : rupeeLeft > 0 ? `₹${rupeeLeft.toFixed(2)} left to assign` : `₹${(-rupeeLeft).toFixed(2)} over`}</span>
+                  <span className="text-gray-500">₹{rupeeTotal.toFixed(2)} of ₹{memberBase.toFixed(2)}{guestOff > 0 ? ' (after guests)' : ''}</span>
+                </div>
+              )}
             </div>
           )}
 
@@ -702,7 +752,7 @@ export default function AddExpense() {
 
         {/* Guests: people there who aren't in the group */}
         {form.group_id && (
-          <GuestsEditor guests={guests} setGuests={setGuests} perHead={perHead}
+          <GuestsEditor guests={guests} setGuests={setGuests} perHead={perHead} total={amtVal}
             memberNames={members.map((m) => m.name)} payer={form.paid_by} />
         )}
 
