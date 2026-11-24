@@ -17,25 +17,27 @@ const monthOf = (iso) => {
   return Number.isNaN(d.getTime()) ? 'Undated' : d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
 }
 
-/** Fewest transfers that clear the combined balances: biggest debtor pays biggest creditor. */
-function transfers(net) {
-  const owe = Object.entries(net).filter(([, v]) => v < -0.5).map(([k, v]) => [k, -v]).sort((a, b) => b[1] - a[1])
-  const get = Object.entries(net).filter(([, v]) => v > 0.5).sort((a, b) => b[1] - a[1])
-  const out = []
-  let i = 0, j = 0
-  while (i < owe.length && j < get.length) {
-    const x = Math.min(owe[i][1], get[j][1])
-    if (x >= 1) out.push({ from: owe[i][0], to: get[j][0], amount: x })
-    owe[i][1] -= x; get[j][1] -= x
-    if (owe[i][1] < 0.5) i += 1
-    if (get[j][1] < 0.5) j += 1
+/** Person to person: each group's "who pays whom", added up across the
+ *  groups and netted within each pair only - a debt is never moved onto
+ *  someone else (A owes B, B owes C stays two payments, not A paying C). */
+function pairwise(groupTx) {
+  const pair = {}                              // "a|b" (a < b) -> what a owes b, net
+  for (const tx of groupTx) {
+    for (const t of tx) {
+      const [a, b] = [t.from_member, t.to_member]
+      const k = a < b ? `${a}|${b}` : `${b}|${a}`
+      pair[k] = (pair[k] || 0) + (a < b ? t.amount : -t.amount)
+    }
   }
-  return out
+  return Object.entries(pair)
+    .map(([k, v]) => { const [a, b] = k.split('|'); return v > 0 ? { from: a, to: b, amount: v } : { from: b, to: a, amount: -v } })
+    .filter((t) => t.amount >= 1)
+    .sort((x, y) => y.amount - x.amount)
 }
 
 /**
- * Settle up across every group of a master ("With Anubhav"): the balances
- * of all its groups added together, the transfers that clear them, a Record
+ * Settle up across every group of a master ("With Anubhav"): what each
+ * person owes each other person across all its groups (pairwise), a Record
  * button, and every payment made in these groups as one timeline by month.
  * Recording uses the app's "Record a payment" (payments/auto), which pays
  * down what's owed between the two wherever it sits.
@@ -57,17 +59,11 @@ export default function MasterSettleUp({ master, me }) {
   if (err) return <p className="text-xs text-red-600 px-5 mt-4">{err}</p>
   if (!data) return <LoadingSpinner />
 
-  const net = {}
   const perGroup = []
   for (const { g, s } of data) {
-    let open = false
-    for (const b of s.balances) {
-      net[b.member] = (net[b.member] || 0) + b.net
-      if (!isSettled(b.net)) open = true
-    }
-    if (open) perGroup.push({ g, tx: s.transactions })
+    if (s.balances.some((b) => !isSettled(b.net))) perGroup.push({ g, tx: s.transactions })
   }
-  const plan = transfers(net)
+  const plan = pairwise(data.map(({ s }) => s.transactions || []))
   const lower = (me || '').toLowerCase()
   const others = (master.names || []).filter((n) => n.toLowerCase() !== lower)
 
