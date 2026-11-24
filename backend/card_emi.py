@@ -174,7 +174,21 @@ def bookings_for_bill(db, user_id: int, txns: list[dict]) -> dict[str, "object"]
     return out
 
 
-def plan(b, due_gap: int | None, pass_on_gap: int) -> dict:
+def _bank_due(billed: date, due_day: int | None, due_gap: int | None) -> date:
+    """The card's payment due date for a statement: the next `due_day` after
+    it (the day-of-month its bills are due on), else statement + usual gap."""
+    import calendar
+    if due_day:
+        y, m = billed.year, billed.month
+        for _ in range(2):
+            d = date(y, m, min(due_day, calendar.monthrange(y, m)[1]))
+            if d > billed:
+                return d
+            y, m = (y, m + 1) if m < 12 else (y + 1, 1)
+    return billed + timedelta(days=due_gap if due_gap is not None else 20)
+
+
+def plan(b, due_gap: int | None, pass_on_gap: int, due_day: int | None = None) -> dict:
     """What someone this EMI is passed on to pays back, instalment by
     instalment: EMI + GST on its interest (+ the processing fee and its GST
     on the first), each due `pass_on_gap` days before the bank's due date
@@ -183,8 +197,8 @@ def plan(b, due_gap: int | None, pass_on_gap: int) -> dict:
     fee = round((b.processing_fee or 0) * (1 + GST), 2)
     # part of the purchase not converted: billed in full, so due with the first
     outside = round(max((b.txn_amount or b.amount) - b.amount, 0), 2)
-    gap = (due_gap if due_gap is not None else 20) - max(0, pass_on_gap or 0)
-    first_due = date.fromisoformat(rows[0]["date"]) + timedelta(days=gap) if rows else None
+    first_due = (_bank_due(date.fromisoformat(rows[0]["date"]), due_day, due_gap)
+                 - timedelta(days=max(0, pass_on_gap or 0))) if rows else None
     out = []
     for k, r in enumerate(rows):
         extra = (fee + outside) if k == 0 else 0

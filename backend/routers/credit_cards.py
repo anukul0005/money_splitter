@@ -496,7 +496,10 @@ def _emi_bookings(db: Session, bill: CreditCardStatement, card, txns: list, call
         return {}
     bills = db.query(CreditCardStatement).filter(CreditCardStatement.card_id == bill.card_id).all() if bill.card_id else [bill]
     gap = _due_gap(bills)
-    return {line: card_emi.plan(b, gap, card.pass_on_gap if card else 2) for line, b in found.items()}
+    # the day of the month this card's bills are due (SBI: the 10th), from its latest bill
+    latest = max((x for x in bills if x.due_date), key=lambda x: x.due_date, default=None)
+    due_day = int(latest.due_date[8:10]) if latest else None
+    return {line: card_emi.plan(b, gap, card.pass_on_gap if card else 2, due_day) for line, b in found.items()}
 
 
 @router.post("/emi/scan", response_model=dict)
