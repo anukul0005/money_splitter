@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getSettlement } from '../api'
+import { getSettlement, getGroup } from '../api'
 import RecordPaymentModal from './RecordPaymentModal'
 import LoadingSpinner from './LoadingSpinner'
 import { isSettled } from '../utils/money'
@@ -50,7 +50,8 @@ export default function MasterSettleUp({ master, me }) {
   const [editing, setEditing] = useState(null)    // a payment being corrected
   const load = () => {
     setErr('')
-    Promise.all(master.groups.map((g) => getSettlement(g.id).then((r) => ({ g, s: r.data })).catch(() => null)))
+    Promise.all(master.groups.map((g) => Promise.all([getSettlement(g.id), getGroup(g.id).catch(() => null)])
+      .then(([r, full]) => ({ g, s: r.data, exps: full?.data?.expenses || [] })).catch(() => null)))
       .then((rows) => setData(rows.filter(Boolean)))
       .catch(() => setErr("Couldn't load the balances."))
   }
@@ -59,9 +60,24 @@ export default function MasterSettleUp({ master, me }) {
   if (err) return <p className="text-xs text-red-600 px-5 mt-4">{err}</p>
   if (!data) return <LoadingSpinner />
 
+  // A group in a line: how many expenses, what they came to, when, who paid, the biggest ones
+  const summary = (exps) => {
+    const total = exps.reduce((t, e) => t + e.amount, 0)
+    const days = exps.map((e) => (e.date || '').slice(0, 10)).filter(Boolean).sort()
+    const fmt = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+    const when = days.length ? (days[0] === days[days.length - 1] ? fmt(days[0]) : `${fmt(days[0])} – ${fmt(days[days.length - 1])}`) : ''
+    const paid = {}
+    for (const e of exps) paid[e.paid_by] = (paid[e.paid_by] || 0) + e.amount
+    const payers = Object.entries(paid).sort((a, b) => b[1] - a[1])
+      .map(([n, v]) => `${n.toLowerCase() === lower ? 'You' : dn(n)} ${INR(v)}`).join(', ')
+    const top = [...exps].sort((a, b) => b.amount - a.amount).slice(0, 2)
+      .map((e) => `${(e.title || e.category || 'Expense').replace(/^\W+/, '').slice(0, 24)} ${INR(e.amount)}`).join(', ')
+    return { line1: [`${exps.length} expense${exps.length === 1 ? '' : 's'} · ${INR(total)}`, when].filter(Boolean).join(' · '),
+             line2: payers ? `Paid: ${payers}` : '', line3: top ? `Biggest: ${top}` : '' }
+  }
   const perGroup = []
-  for (const { g, s } of data) {
-    if (s.balances.some((b) => !isSettled(b.net))) perGroup.push({ g, tx: s.transactions })
+  for (const { g, s, exps } of data) {
+    if (s.balances.some((b) => !isSettled(b.net))) perGroup.push({ g, tx: s.transactions, sum: summary(exps) })
   }
   const plan = pairwise(data.map(({ s }) => s.transactions || []))
   const lower = (me || '').toLowerCase()
@@ -118,11 +134,14 @@ export default function MasterSettleUp({ master, me }) {
       {perGroup.length > 0 && (
         <div className="card py-2">
           <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Open in {perGroup.length} group{perGroup.length > 1 ? 's' : ''}</p>
-          {perGroup.map(({ g, tx }) => (
+          {perGroup.map(({ g, tx, sum }) => (
             <button key={g.id} onClick={() => nav(`/groups/${g.id}`)} className="w-full flex items-start gap-2 py-1.5 border-b border-amber-100 last:border-0 text-left">
               <span className="flex-1 min-w-0">
                 <span className="block text-[13px] font-bold text-gray-800 truncate">{g.name}</span>
-                <span className="block text-[11px] text-gray-500">
+                <span className="block text-[11px] text-gray-600">{sum.line1}</span>
+                {sum.line2 && <span className="block text-[10px] text-gray-400 truncate">{sum.line2}</span>}
+                {sum.line3 && <span className="block text-[10px] text-gray-400 truncate">{sum.line3}</span>}
+                <span className="block text-[11px] text-gray-500 mt-0.5">
                   {tx.map((t) => `${dn(t.from_member)} → ${dn(t.to_member)} ${INR(t.amount)}`).join(' · ')}
                 </span>
               </span>
