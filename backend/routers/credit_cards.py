@@ -380,6 +380,53 @@ def _emi_covered(db: Session, bill: CreditCardStatement, caller: User) -> dict:
     return out
 
 
+def _booking_covered(db: Session, bill: CreditCardStatement, caller: User) -> dict:
+    """line -> {loan_id, to, at, of}: this bill's "FP EMI 02/06" when the
+    purchase behind that EMI (a CardEmiBooking, card_emi.py) was passed on
+    with the EMI - the loan already holds every instalment, the first too."""
+    import json
+    import card_emi
+    from models import Loan
+    if not bill.details_json:
+        return {}
+    try:
+        txns = json.loads(bill.details_json).get("transactions") or []
+    except ValueError:
+        return {}
+    here = [(i, _EMI.search(t.get("description") or ""), t) for i, t in enumerate(txns)]
+    here = [(i, m, t) for i, m, t in here if m]
+    if not here:
+        return {}
+    covered = []                                   # (loan, booking)
+    by_bill: dict[int, dict] = {}
+    for l in db.query(Loan).filter(Loan.card_ref.like("bill:%"), Loan.emi_plan.isnot(None)).order_by(Loan.id):
+        if l.lender.lower() != caller.name.lower():
+            continue
+        try:
+            sid, idx = (int(v) for v in l.card_ref.split(":")[1:3])
+        except ValueError:
+            continue
+        if sid not in by_bill:
+            src = db.get(CreditCardStatement, sid)
+            ok = src and src.user_id == caller.id and src.card_id == bill.card_id and src.details_json
+            by_bill[sid] = card_emi.bookings_for_bill(db, caller.id, json.loads(src.details_json).get("transactions") or []) if ok else {}
+        b = by_bill[sid].get(str(idx))
+        if b and b.schedule_json:
+            covered.append((l, b))
+    out: dict[str, dict] = {}
+    for l, b in covered:
+        rows = json.loads(b.schedule_json)
+        for i, m, t in here:
+            at, of = int(m.group(1)), int(m.group(2))
+            if of != (b.tenure or len(rows)) or str(i) in out:
+                continue
+            row = next((r for r in rows if r["n"] == at), None)
+            # the statement's instalment: its EMI, or (SBI) the EMI less its interest, billed apart
+            if row and min(abs(t["amount"] - row["emi"]), abs(t["amount"] - row["principal"])) < 1:
+                out[str(i)] = {"loan_id": l.id, "to": l.borrower, "at": at, "of": of}
+    return out
+
+
 class LineCategory(BaseModel):
     category: str
     subcategory: str | None = None
@@ -544,7 +591,7 @@ def bill_details(bill_id: int, db: Session = Depends(get_db), caller: User = Dep
             # Lines passed on to someone as a loan: line -> [{loan_id, to, amount}]
             "transfers": _transfers(db, bill.id, caller),
             # Later instalments of an EMI already passed on from an earlier bill
-            "emi_covered": _emi_covered(db, bill, caller)}
+            "emi_covered": {**_booking_covered(db, bill, caller), **_emi_covered(db, bill, caller)}}
     live = card_details.status(bill.id)
     if live and live["status"] == "reading":
         return {**head, **live}
