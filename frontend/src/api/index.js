@@ -480,3 +480,10 @@ export const reactInDiscussion = (id, target, targetId, kind) => api.post(`/disc
 // Lessons (routers/lessons.py): the list, and a signed address for one lesson's page (a frame can't send the login header)
 export const lessonsList = () => api.get('/lessons')
 export const lessonSrc = (slug, font, size) => api.get(`/lessons/${encodeURIComponent(slug)}/link`, { params: { font, size } }).then((r) => `${BASE}${r.data.path}`)
+// ── Places (Google) ───────────────────────────────────────────────────────────
+// Any restaurant on Google Places, with your own visits there (backend
+// routers/gplaces.py). Every Google call is counted - getPlacesUsage.
+export const getPlacesUsage  = ()             => api.get('/gplaces/usage')
+export const searchGPlaces   = (q, near)      => api.get('/gplaces/search', { params: { q, ...(near || {}) } })
+export const getGPlace       = (id, refresh)  => api.get(`/gplaces/place/${encodeURIComponent(id)}`, { params: refresh ? { refresh: true } : {} })
+export const getRecentGPlaces = ()            => api.get('/gplaces/recent')

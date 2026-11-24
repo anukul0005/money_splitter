@@ -36,6 +36,7 @@ import MLAnalysis  from './pages/MLAnalysis'
 import Insights    from './pages/Insights'
 import CardBill    from './pages/CardBill'
 import MyPlaces     from './pages/MyPlaces'
+import PlaceDetail  from './pages/PlaceDetail'
 import Login       from './pages/Login'
 import ResetPassword from './pages/ResetPassword'
 import AdminRecovery from './pages/AdminRecovery'
@@ -163,6 +164,7 @@ export default function App() {
                 <Route path="/insights" element={<Insights />} />
                 <Route path="/credit-cards/card/:id" element={<CardBill />} />
                 <Route path="/food/places" element={<MyPlaces />} />
+                <Route path="/places/:pid" element={<PlaceDetail />} />
                 <Route path="/drinks/bottles" element={<MyBottles />} />
                 <Route path="/master/:key" element={<MasterGroupDetail />} />
                 <Route path="/friends/:name" element={<FriendDetail />} />

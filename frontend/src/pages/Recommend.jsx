@@ -12,6 +12,7 @@ import AskBox from '../components/AskBox'
 import PriceEditForm from '../components/PriceEditForm'
 import ProductReviewForm from '../components/ProductReviewForm'
 import RecommendTabs from '../components/RecommendTabs'
+import Places from './Places'
 import RecommendFood from './RecommendFood'
 import Forecast from './Forecast'
 import Recipes from './Recipes'
@@ -270,6 +271,7 @@ function useTab(fallback) {
 function BasicRecommend() {
   const [tab, setTab] = useTab('food')
   if (tab === 'recipes') return <Recipes tab={tab} setTab={setTab} />
+  if (tab === 'places') return <Places tab={tab} setTab={setTab} />
   return <RecommendFood tab={tab} setTab={setTab} />
 }
 
@@ -575,6 +577,7 @@ function DrinksRecommend() {
   if (tab === 'food') return <RecommendFood tab={tab} setTab={setTab} />
   if (tab === 'forecast') return <Forecast tab={tab} setTab={setTab} />
   if (tab === 'recipes') return <Recipes tab={tab} setTab={setTab} />
+  if (tab === 'places') return <Places tab={tab} setTab={setTab} />
 
   if (!meta) return <LoadingSpinner />
 

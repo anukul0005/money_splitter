@@ -1,7 +1,7 @@
 import { hasFullAccess, useUser } from '../UserContext'
 
 /**
- * Drinks / food / forecast switch, shared by all three halves of the
+ * Drinks / food / places / recipes / forecast switch, shared by all three halves of the
  * recommender.
  *
  * It lives in its own file rather than in any one page because each page
@@ -9,15 +9,17 @@ import { hasFullAccess, useUser } from '../UserContext'
  * between them would read as the page jumping on every switch.
  */
 export default function RecommendTabs({ tab, setTab }) {
-  // Without full access: food and recipes only
+  // Without full access: food, places and recipes only
   const full = hasFullAccess(useUser())
   const tabs = full ? [
     ['drinks',   'Drinks'],
     ['food',     'Food'],
+    ['places',   'Places'],
     ['recipes',  'Recipes'],
     ['forecast', 'Forecast'],
   ] : [
     ['food',     'Food'],
+    ['places',   'Places'],
     ['recipes',  'Recipes'],
   ]
   return (

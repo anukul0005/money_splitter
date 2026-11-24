@@ -1879,3 +1879,45 @@ class SportPick(Base):
     ref = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class GooglePlace(Base):
+    """A restaurant looked up on Google Places (google_places.py), kept so a
+    second look - by anyone - costs no API call. `details_json` is the paid
+    "details" answer (rating, hours...), refreshed once it's
+    routers/gplaces.DETAILS_TTL_DAYS old."""
+    __tablename__ = "google_places"
+
+    place_id = Column(String(200), primary_key=True)
+    name = Column(String(300), nullable=True)
+    address = Column(Text, nullable=True)
+    lat = Column(Float, nullable=True)
+    lon = Column(Float, nullable=True)
+    kind = Column(String(100), nullable=True)
+    details_json = Column(Text, nullable=True)
+    details_at = Column(DateTime(timezone=True), nullable=True)
+    views = Column(Integer, nullable=False, default=0)
+    last_viewed_by = Column(String(100), nullable=True)
+    last_viewed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class GooglePlaceSearch(Base):
+    """One search's answer (the place ids, in order), keyed by the
+    normalised query and rough location - a repeat search is free."""
+    __tablename__ = "google_place_searches"
+
+    qkey = Column(String(400), primary_key=True)
+    place_ids = Column(Text, nullable=False)        # JSON list
+    at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class GooglePlacesUsage(Base):
+    """Calls made to Google Places per day and kind ("search" / "details"),
+    plus the ones answered from the cache ("search_cached" / ...) - the
+    on-screen counter against the free monthly allowance."""
+    __tablename__ = "google_places_usage"
+
+    day = Column(String(10), primary_key=True)      # YYYY-MM-DD (IST)
+    kind = Column(String(30), primary_key=True)
+    count = Column(Integer, nullable=False, default=0)
