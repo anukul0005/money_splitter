@@ -551,12 +551,17 @@ def _emi_bookings(db: Session, bill: CreditCardStatement, card, txns: list, call
 
 @router.post("/emi/scan", response_model=dict)
 def scan_emi_bookings(db: Session = Depends(get_db), caller: User = Depends(current_user)):
-    """Look through Gmail for EMI booking emails now (the daily card sync does it too)."""
+    """Look through Gmail for EMI booking emails - only ever on the owner's tap."""
     import card_emi
     try:
         added = card_emi.scan(db, caller.id)
     except RuntimeError as e:
         raise HTTPException(400, str(e))
+    except Exception as e:
+        db.rollback()
+        if "invalid_grant" in str(e) or "expired" in str(e).lower():
+            raise HTTPException(400, "Gmail access has lapsed - reconnect Gmail on the Credit cards page, then try again")
+        raise HTTPException(502, f"Couldn't search Gmail ({str(e)[:80]})")
     return {"added": added}
 
 

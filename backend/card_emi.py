@@ -8,8 +8,8 @@ processing fee. The bank says exactly what in a booking email (SBI: "Details
 of Merchant EMI booked on your SBI Credit Card": amount, rate, tenure, fee,
 EMI, first EMI date) with the repayment schedule attached as a PDF.
 
-scan() reads those emails into CardEmiBooking (from the daily card sync, or
-on request); bookings_for_bill() matches them to a bill's lines (same amount,
+scan() reads those emails into CardEmiBooking when the owner asks (the bill
+page's "Find EMI bookings" - never on its own); bookings_for_bill() matches them to a bill's lines (same amount,
 purchase dated within a few days); plan() turns one into what someone it's
 passed on to pays back: each instalment with its GST, the fee and its GST on
 the first, each due the card's `pass_on_gap` days before the bank's own due

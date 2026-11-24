@@ -215,7 +215,7 @@ function BillBreakup({ billId: id }) {
     return () => { gen.current++ }
   }, [id])
 
-  // EMI bookings: looked for in Gmail by the daily sync - or now, on request
+  // EMI bookings: looked for in Gmail only when you tap "Find EMI bookings"
   const [emiBusy, setEmiBusy] = useState(false)
   const findEmis = async () => {
     setEmiBusy(true); setError('')

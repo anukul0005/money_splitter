@@ -52,20 +52,12 @@ def sync_user(db, user_id: int, today: date) -> list[dict]:
     from models import CreditCard, CreditCardStatement, GmailConnection, User
 
     cards = db.query(CreditCard).filter(CreditCard.user_id == user_id).all()
-    if not cards:
-        return []
-    service, passwords = card_bills.gmail_for(db, user_id)
-    # EMI bookings (card_emi.py): read before the bills, so a bill read today finds its EMIs
-    try:
-        import card_emi
-        card_emi.scan(db, user_id, service, passwords)
-    except Exception as e:
-        db.rollback()
-        print(f"[card_autosync] EMI bookings: {e}")
     jobs = [(c, d) for c in cards for d in _due(c, today)]
     if not jobs:
         return []
     owner = db.get(User, user_id)
+    service, passwords = card_bills.gmail_for(db, user_id)
+    # (EMI booking emails are looked for only when the owner asks - "Find EMI bookings", card_emi.scan)
     out = []
     for card, d in jobs:
         r = card_bills.fetch_one(db, user_id, card, d, service, passwords)
