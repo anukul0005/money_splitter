@@ -1706,6 +1706,36 @@ class CreditCard(Base):
     # This card's statement PDF password, encrypted (secret_box) - tried
     # first on its PDFs, before the older per-bank BankPassword entries.
     pdf_password_encrypted = Column(Text, nullable=True)
+    # Passing a spend on as an EMI (card_emi.py): each instalment is due this
+    # many days before the card's own payment due date
+    pass_on_gap = Column(Integer, nullable=False, default=2, server_default="2")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class CardEmiBooking(Base):
+    """A card purchase the bank turned into an EMI, read from its booking
+    email (SBI: "Details of Merchant EMI booked on your SBI Credit Card") and
+    the repayment schedule attached to it - see card_emi.py. Matched to the
+    bill line it came from, so passing that line on carries the bank's EMIs,
+    interest and taxes instead of the bare purchase amount."""
+
+    __tablename__ = "card_emi_bookings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    gmail_message_id = Column(String(100), nullable=False, unique=True, index=True)
+    bank = Column(String(100), nullable=True)
+    amount = Column(Float, nullable=False)                # what went on EMI (the booking amount)
+    txn_amount = Column(Float, nullable=True)             # the purchase it came from (may be more: part converted)
+    txn_date = Column(String(10), nullable=True)          # YYYY-MM-DD of the purchase
+    rate_pct = Column(Float, nullable=True)               # per year
+    tenure = Column(Integer, nullable=True)               # months
+    processing_fee = Column(Float, nullable=True)         # before tax
+    emi_amount = Column(Float, nullable=True)
+    first_emi_date = Column(String(10), nullable=True)
+    # [{"n", "date" (the statement it's billed on), "emi", "interest", "principal", "tax"}]
+    schedule_json = Column(Text, nullable=True)
+    source = Column(String(10), nullable=True)            # "schedule" (the bank's PDF) | "estimate"
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

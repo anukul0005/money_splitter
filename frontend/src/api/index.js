@@ -175,6 +175,8 @@ export const setCardLineCategory = (id, line, body) => api.post(`/credit-cards/b
 export const fetchCardMonth     = (id, period) => api.post(`/credit-cards/cards/${id}/fetch-month`, null, { params: { period } })
 export const getCardPassword    = (id)        => api.get(`/credit-cards/cards/${id}/password`)
 export const setCardNumber      = (id, last4) => api.put(`/credit-cards/cards/${id}/number`, { last4 })
+export const scanCardEmis       = ()          => api.post('/credit-cards/emi/scan')
+export const setPassOnGap       = (id, days)  => api.put(`/credit-cards/cards/${id}/pass-on-gap`, { days })
 export const setCardPassword    = (id, password) => api.put(`/credit-cards/cards/${id}/password`, { password })
 export const revealBankPassword = (bank)      => api.get(`/credit-cards/banks/${encodeURIComponent(bank)}/password`)
 export const getScanProgress    = ()          => api.get('/credit-cards/scan/progress')

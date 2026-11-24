@@ -192,7 +192,7 @@ def list_cards(db: Session = Depends(get_db), caller: User = Depends(current_use
         last = card_bills.recent_bill_dates(c.bill_day, today, 1)[0]
         y, m = (last.year, last.month + 1) if last.month < 12 else (last.year + 1, 1)
         out.append({"id": c.id, "bank": c.bank, "label": c.label, "last4": c.last4, "bill_day": c.bill_day,
-                    "has_password": bool(c.pdf_password_encrypted),
+                    "has_password": bool(c.pdf_password_encrypted), "pass_on_gap": c.pass_on_gap,
                     "name": card_bills.card_name(c), "last_bill": last.isoformat(),
                     "next_bill": card_bills.bill_date(c.bill_day, y, m).isoformat(),
                     "bills": [_bill_out(b, pays.get(b.id, []), i == 0, gap) for i, b in enumerate(bills)]})
@@ -484,6 +484,48 @@ def set_line_category(bill_id: int, line: int, payload: LineCategory, db: Sessio
     return {"ok": True, "merchant": card_details.merchant_name(t["description"])}
 
 
+def _emi_bookings(db: Session, bill: CreditCardStatement, card, txns: list, caller: User) -> dict:
+    """line -> the bank's EMI for it, as passing it on would charge (card_emi.plan)."""
+    import card_emi
+    try:
+        found = card_emi.bookings_for_bill(db, caller.id, txns)
+    except Exception as e:                    # never stops the bill showing
+        print(f"[card_emi] match: {e}")
+        return {}
+    if not found:
+        return {}
+    bills = db.query(CreditCardStatement).filter(CreditCardStatement.card_id == bill.card_id).all() if bill.card_id else [bill]
+    gap = _due_gap(bills)
+    return {line: card_emi.plan(b, gap, card.pass_on_gap if card else 2) for line, b in found.items()}
+
+
+@router.post("/emi/scan", response_model=dict)
+def scan_emi_bookings(db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Look through Gmail for EMI booking emails now (the daily card sync does it too)."""
+    import card_emi
+    try:
+        added = card_emi.scan(db, caller.id)
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+    return {"added": added}
+
+
+class PassOnGapIn(BaseModel):
+    days: int
+
+
+@router.put("/cards/{card_id}/pass-on-gap", response_model=dict)
+def set_pass_on_gap(card_id: int, payload: PassOnGapIn, db: Session = Depends(get_db),
+                    caller: User = Depends(current_user)):
+    """How many days before this card's due date an EMI passed on is due."""
+    card = _own_card(db, card_id, caller)
+    if not 0 <= payload.days <= 25:
+        raise HTTPException(400, "Between 0 and 25 days")
+    card.pass_on_gap = payload.days
+    db.commit()
+    return {"pass_on_gap": card.pass_on_gap}
+
+
 @router.get("/bills/{bill_id}/details", response_model=dict)
 def bill_details(bill_id: int, db: Session = Depends(get_db), caller: User = Depends(current_user)):
     """The bill's breakup from its PDF: "ready" with the details, "reading"
@@ -514,7 +556,7 @@ def bill_details(bill_id: int, db: Session = Depends(get_db), caller: User = Dep
                                       saved.get("read_at"), _cycle(bill))
         saved.pop("source_text", None)
         fresh.pop("source_text", None)
-        return {**head, "status": "ready", **saved, **fresh}
+        return {**head, "status": "ready", **saved, **fresh, "emi_bookings": _emi_bookings(db, bill, card, ts, caller)}
     return {**head, **(live or {"status": "none"})}
 
 

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   getCardBillDetails, readCardBillDetails, listCards, fetchCardMonth, getCardCategories, setCardLineCategory,
-  getCardPassword, setCardPassword, setCardNumber, listCardBanks, setCardBankPassword, deleteCardBank, revealBankPassword,
+  getCardPassword, setCardPassword, setCardNumber, scanCardEmis, setPassOnGap, listCardBanks, setCardBankPassword, deleteCardBank, revealBankPassword,
 } from '../api'
 import Dropdown from '../components/Dropdown'
 import { PassOnSheet, emiOf, passable } from '../components/PassOn'
@@ -215,6 +215,18 @@ function BillBreakup({ billId: id }) {
     return () => { gen.current++ }
   }, [id])
 
+  // EMI bookings: looked for in Gmail by the daily sync - or now, on request
+  const [emiBusy, setEmiBusy] = useState(false)
+  const findEmis = async () => {
+    setEmiBusy(true); setError('')
+    try {
+      const r = await scanCardEmis()
+      const fresh = await getCardBillDetails(id)
+      setD(fresh.data)
+      if (!r.data.added && !Object.keys(fresh.data.emi_bookings || {}).length) setError('No EMI booking emails found for this bill.')
+    } catch (e) { setError(e.response?.data?.detail || 'Could not look for EMI bookings.') }
+    finally { setEmiBusy(false) }
+  }
   const readAgain = async () => {
     setError('')
     try {
@@ -414,6 +426,7 @@ function BillBreakup({ billId: id }) {
                 const sent = d.transfers?.[String(line)] || []
                 const sentTotal = sent.reduce((s, t) => s + t.amount, 0)
                 const covered = d.emi_covered?.[String(line)]   // a later instalment of an EMI already passed on
+                const booking = d.emi_bookings?.[String(line)]  // the bank turned this purchase into an EMI (card_emi.py)
                 return (
                 <div key={i} className="flex items-start justify-between gap-3 py-1.5 border-b border-amber-100 last:border-0">
                   <div className="min-w-0">
@@ -450,6 +463,12 @@ function BillBreakup({ billId: id }) {
                         )}
                       </div>
                     )}
+                    {booking && (
+                      <p className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded px-1.5 py-px mt-0.5 inline-block">
+                        On EMI{booking.bank ? ` with ${booking.bank}` : ''} · {booking.tenure} × {INR(booking.instalments[1]?.emi ?? booking.instalments[0]?.emi ?? 0)}
+                        {booking.rate_pct != null ? ` · ${booking.rate_pct}% a year` : ''} · costs {INR(booking.total)} in all
+                      </p>
+                    )}
                     {sent.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-0.5">
                         {sent.map((t) => (
@@ -466,7 +485,7 @@ function BillBreakup({ billId: id }) {
                         → {covered.to} · EMI {covered.at} of {covered.of}, in the loan already
                       </button>
                     )}
-                    {!covered && x.category !== 'Card fees & interest' && (x.type === 'debit' || emiOf(x)) && sentTotal < passable(x) - 0.5 && (
+                    {!covered && x.category !== 'Card fees & interest' && (x.type === 'debit' || emiOf(x)) && sentTotal < (booking ? booking.total : passable(x)) - 0.5 && (
                       <button onClick={() => setPassing({ x, line, already: sentTotal })}
                         className="text-[10px] font-bold text-brand-500 mt-0.5">{sent.length ? '+ pass on more' : 'Split / pass on'}</button>
                     )}
@@ -499,12 +518,14 @@ function BillBreakup({ billId: id }) {
           {d.pages ? ` (pages 1–${d.pages.read} of ${d.pages.total}${d.pages.read < d.pages.total ? ' - the rest are terms and offers' : ''})` : ''}
           {d.read_at ? ` on ${new Date(d.read_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}` : ''}
           {t.categorised ? ` · ${t.categorised_by_ai} of ${t.categorised} spends categorised by AI` : ''} ·{' '}
-          <button onClick={readAgain} className="font-bold text-brand-500">Read again</button>
+          <button onClick={readAgain} className="font-bold text-brand-500">Read again</button> ·{' '}
+          <button onClick={findEmis} disabled={emiBusy} className="font-bold text-brand-500 disabled:opacity-50">{emiBusy ? 'Looking…' : 'Find EMI bookings'}</button>
         </p>
         {error && <p className="text-xs text-red-600 text-center">{error}</p>}
       </div>
       {passing && (
         <PassOnSheet x={passing.x} all={d.transactions} refKey={`bill:${id}:${passing.line}`} already={passing.already} source={b?.card || ''} dueDate={b?.due_date}
+          booking={d.emi_bookings?.[String(passing.line)]}
           onClose={() => setPassing(null)}
           onDone={() => { setPassing(null); getCardBillDetails(id).then((r) => setD(r.data)).catch(() => {}) }} />
       )}
@@ -603,6 +624,32 @@ function CardNumberRow({ card, onChanged }) {
         The last 4 digits printed on the statement - bills are matched to this card by them. Your saved bills stay when you change it.
       </p>
       {err && <p className="text-[11px] text-red-600">{err}</p>}
+      <PassOnGapRow card={card} onChanged={onChanged} />
+    </div>
+  )
+}
+
+/** An EMI passed on to someone: each instalment due this many days before the card's own due date. */
+function PassOnGapRow({ card, onChanged }) {
+  const [v, setV] = useState(String(card.pass_on_gap ?? 2))
+  const [msg, setMsg] = useState('')
+  useEffect(() => { setV(String(card.pass_on_gap ?? 2)) }, [card.pass_on_gap])
+  const save = async () => {
+    const n = parseInt(v, 10)
+    if (Number.isNaN(n) || n === card.pass_on_gap) return
+    try { await setPassOnGap(card.id, n); setMsg('Saved'); onChanged() } catch (x) { setMsg(x.response?.data?.detail || 'Could not save.') }
+  }
+  return (
+    <div className="pt-3 mt-2 border-t border-amber-100">
+      <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">EMIs passed on</p>
+      <div className="flex items-center gap-2 mt-1 text-xs text-gray-600">
+        <span>Due</span>
+        <input className="input w-14 text-center text-sm py-1" inputMode="numeric" value={v} maxLength={2}
+          onChange={(e) => { setV(e.target.value.replace(/\D/g, '')); setMsg('') }} onBlur={save}
+          onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()} />
+        <span>days before this card's due date</span>
+        {msg && <span className="text-[10px] text-green-700 font-bold">{msg}</span>}
+      </div>
     </div>
   )
 }

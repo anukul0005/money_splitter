@@ -41,8 +41,13 @@ export const passable = (x) => { const e = emiOf(x); return e ? r2(x.amount * (e
  * you, in their You owe, and in both Loans sections; anyone not on the app
  * is simply named.
  */
-export function PassOnSheet({ x, all = [], refKey, source, dueDate, already = 0, onDone, onClose }) {
+export function PassOnSheet({ x, all = [], refKey, source, dueDate, already = 0, booking, onDone, onClose }) {
   const e = emiOf(x)
+  // The bank turned this purchase into an EMI (backend card_emi.plan): passed
+  // on with its instalments, interest, GST and fee - each due a few days
+  // before the card's own due date
+  const [withBank, setWithBank] = useState(!!booking)
+  const bank = booking && withBank ? booking : null
   const [asEmi, setAsEmi] = useState(!!e)
   const [count, setCount] = useState(e ? String(e.of - e.at + 1) : '3')       // instalments still to pay
   const [inst, setInst] = useState(String(x.amount))
@@ -72,7 +77,7 @@ export function PassOnSheet({ x, all = [], refKey, source, dueDate, already = 0,
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   useEffect(() => { getFriends().then((r) => setFriends(r.data.map((f) => f.name))).catch(() => {}) }, [])
-  const left = r2((asEmi ? perInst * nInst : x.amount) - already)
+  const left = r2((bank ? bank.total : asEmi ? perInst * nInst : x.amount) - already)
   const even = people.length ? r2(left / (people.length + (withMe ? 1 : 0))) : 0
   const share = (n) => (amts[n] !== undefined && amts[n] !== '' ? parseFloat(amts[n]) || 0 : even)
   const total = r2(people.reduce((s, n) => s + share(n), 0))
@@ -85,13 +90,24 @@ export function PassOnSheet({ x, all = [], refKey, source, dueDate, already = 0,
     try {
       for (const person of people) {
         if (share(person) <= 0) continue
-        // An EMI: the share paid back in equal monthly instalments (the last takes the rounding)
-        const each = Math.floor((100 / emiDates.length) * 10000) / 10000
-        const pcts = emiDates.map((_, k) => (k < emiDates.length - 1 ? each : Math.round((100 - each * (emiDates.length - 1)) * 10000) / 10000))
+        let plan
+        if (bank) {
+          // the bank's instalments, each the same share of this person's part
+          const ps = bank.instalments.map((t) => Math.round((t.amount / bank.total) * 100 * 10000) / 10000)
+          ps[ps.length - 1] = Math.round((100 - ps.slice(0, -1).reduce((s, p) => s + p, 0)) * 10000) / 10000
+          plan = { emi: bank.instalments.map((t, k) => ({ pct: ps[k], date: t.due })) }
+        } else if (asEmi) {
+          // An EMI: the share paid back in equal monthly instalments (the last takes the rounding)
+          const each = Math.floor((100 / emiDates.length) * 10000) / 10000
+          const pcts = emiDates.map((_, k) => (k < emiDates.length - 1 ? each : Math.round((100 - each * (emiDates.length - 1)) * 10000) / 10000))
+          plan = { emi: emiDates.map((date, k) => ({ pct: pcts[k], date })) }
+        } else plan = { due_date: due }
+        const what = bank
+          ? ` · ${bank.bank || 'Bank'} EMI ${bank.tenure} months${bank.rate_pct != null ? ` @ ${bank.rate_pct}% p.a.` : ''}: ${INR(bank.amount)} + interest ${INR(bank.interest)} + GST ${INR(bank.tax)}${bank.fee ? ` + processing fee ${INR(bank.fee)}` : ''}${bank.outside ? ` + ${INR(bank.outside)} not converted` : ''}`
+          : asEmi ? ` · ${emiDates.length} monthly EMIs` : ''
         await createLoan({
-          role: 'lent', other: person, amount: share(person), start_date: x.date || todayIso(),
-          ...(asEmi ? { emi: emiDates.map((date, k) => ({ pct: pcts[k], date })) } : { due_date: due }),
-          note: `${x.description}${source ? ` · ${source}` : ''}${x.date ? ` · ${day(x.date)}` : ''}${asEmi ? ` · ${emiDates.length} monthly EMIs` : ''}`,
+          role: 'lent', other: person, amount: share(person), start_date: x.date || todayIso(), ...plan,
+          note: `${x.description}${source ? ` · ${source}` : ''}${x.date ? ` · ${day(x.date)}` : ''}${what}`,
           card_ref: refKey,
         })
       }
@@ -110,7 +126,38 @@ export function PassOnSheet({ x, all = [], refKey, source, dueDate, already = 0,
           </div>
           <button type="button" onClick={onClose} className="text-xs font-bold text-gray-400">Close</button>
         </div>
-        {e && (
+        {booking && (
+          <div className="bg-amber-50 border border-amber-200 rounded-md p-3 space-y-2">
+            <label className="flex items-start gap-2 text-xs font-bold text-gray-800">
+              <input type="checkbox" className="mt-0.5" checked={withBank} onChange={(ev) => { setWithBank(ev.target.checked); setAmts({}) }} />
+              <span>
+                Pass on with the EMI - {booking.tenure} months{booking.rate_pct != null ? ` at ${booking.rate_pct}% a year` : ''}
+                <span className="block font-normal text-[10px] text-gray-500">
+                  {booking.source === 'schedule' ? `${booking.bank || 'The bank'}'s own repayment schedule` : 'Worked out from the booking email (no schedule attached) - may be a few rupees off'}
+                </span>
+              </span>
+            </label>
+            {withBank && (
+              <>
+                <div className="text-[11px] text-gray-700 space-y-0.5">
+                  {booking.instalments.map((t) => (
+                    <div key={t.n} className="flex justify-between gap-2 tabular-nums">
+                      <span className="text-gray-500">{t.n}. due {day(t.due)}</span>
+                      <span>{INR(t.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[10px] text-gray-500 leading-snug">
+                  {INR(booking.amount)} + interest {INR(booking.interest)} + GST on it {INR(booking.tax)}
+                  {booking.fee ? ` + processing fee ${INR(booking.fee)} (in the 1st)` : ''}
+                  {booking.outside ? ` + ${INR(booking.outside)} not converted (in the 1st)` : ''} = <b>{INR(booking.total)}</b>.
+                  Each due a few days before your card's due date (set on the card's page).
+                </p>
+              </>
+            )}
+          </div>
+        )}
+        {e && !bank && (
           <div className="bg-amber-50 border border-amber-200 rounded-md p-3 space-y-2">
             <label className="flex items-center gap-2 text-xs font-bold text-gray-800">
               <input type="checkbox" checked={asEmi} onChange={(ev) => { setAsEmi(ev.target.checked); setAmts({}) }} />
@@ -171,7 +218,7 @@ export function PassOnSheet({ x, all = [], refKey, source, dueDate, already = 0,
                 {withMe ? `Your share: ${INR(r2(left - total))} · ` : ''}Passing on {INR(total)} of {INR(left)}
               </p>
             </div>
-            {!asEmi && (
+            {!asEmi && !bank && (
               <div>
                 <p className="text-[10px] font-bold text-gray-500 mb-1">Pay back by</p>
                 <DatePicker value={due} onChange={setDue} />
