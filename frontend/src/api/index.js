@@ -174,6 +174,7 @@ export const getCardCategories = ()           => api.get('/credit-cards/categori
 export const setCardLineCategory = (id, line, body) => api.post(`/credit-cards/bills/${id}/lines/${line}/category`, body)
 export const fetchCardMonth     = (id, period) => api.post(`/credit-cards/cards/${id}/fetch-month`, null, { params: { period } })
 export const getCardPassword    = (id)        => api.get(`/credit-cards/cards/${id}/password`)
+export const setCardNumber      = (id, last4) => api.put(`/credit-cards/cards/${id}/number`, { last4 })
 export const setCardPassword    = (id, password) => api.put(`/credit-cards/cards/${id}/password`, { password })
 export const revealBankPassword = (bank)      => api.get(`/credit-cards/banks/${encodeURIComponent(bank)}/password`)
 export const getScanProgress    = ()          => api.get('/credit-cards/scan/progress')

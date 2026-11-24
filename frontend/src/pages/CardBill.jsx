@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   getCardBillDetails, readCardBillDetails, listCards, fetchCardMonth, getCardCategories, setCardLineCategory,
-  getCardPassword, setCardPassword, listCardBanks, setCardBankPassword, deleteCardBank, revealBankPassword,
+  getCardPassword, setCardPassword, setCardNumber, listCardBanks, setCardBankPassword, deleteCardBank, revealBankPassword,
 } from '../api'
 import Dropdown from '../components/Dropdown'
 import { PassOnSheet, emiOf, passable } from '../components/PassOn'
@@ -567,6 +567,46 @@ function PasswordRow({ name, reveal, save, remove, empty }) {
  * and the older ones saved by bank name, which are still tried on every
  * card. Shown only on request; the server decrypts for the owner alone.
  */
+/** The card's last 4 digits - change them when the card is reissued; the
+ *  bill search matches statements on them. Saved bills stay. */
+function CardNumberRow({ card, onChanged }) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const save = async (e) => {
+    e.preventDefault()
+    setBusy(true); setErr('')
+    try { await setCardNumber(card.id, value); setEditing(false); onChanged() }
+    catch (x) { setErr(x.response?.data?.detail || 'Could not save that.') }
+    finally { setBusy(false) }
+  }
+  return (
+    <div className="card space-y-1">
+      <Label>Card number</Label>
+      <div className="flex items-center justify-between gap-3 text-sm">
+        <span className="font-bold text-gray-800 tabular-nums">{card.last4 ? `•••• ${card.last4}` : 'Not set'}</span>
+        {!editing && (
+          <button onClick={() => { setEditing(true); setValue(card.last4 || ''); setErr('') }}
+            className="text-[11px] font-bold text-gray-400 hover:text-brand-500">{card.last4 ? 'Edit' : 'Set'}</button>
+        )}
+      </div>
+      {editing && (
+        <form className="flex gap-2 mt-2" onSubmit={save}>
+          <input className="input text-sm flex-1 min-w-0 tabular-nums" value={value} autoFocus inputMode="numeric" maxLength={4}
+            placeholder="Last 4 digits" autoComplete="off" onChange={(e) => setValue(e.target.value.replace(/\D/g, ''))} />
+          <button type="submit" disabled={busy || (value && value.length !== 4)} className="btn-primary text-xs py-2 px-3 w-auto disabled:opacity-50">Save</button>
+          <button type="button" onClick={() => setEditing(false)} className="text-xs font-bold text-gray-500 px-1">Cancel</button>
+        </form>
+      )}
+      <p className="text-[11px] text-gray-400 leading-relaxed">
+        The last 4 digits printed on the statement - bills are matched to this card by them. Your saved bills stay when you change it.
+      </p>
+      {err && <p className="text-[11px] text-red-600">{err}</p>}
+    </div>
+  )
+}
+
 function PasswordsPanel({ card, onChanged }) {
   const [others, setOthers] = useState([])
   const loadOthers = () => listCardBanks().then((r) => setOthers(r.data)).catch(() => {})
@@ -717,7 +757,7 @@ export default function CardPage() {
           </div>
         )}
 
-        {card && <div className="mt-4"><PasswordsPanel card={card} onChanged={load} /></div>}
+        {card && <div className="mt-4 space-y-4"><CardNumberRow card={card} onChanged={load} /><PasswordsPanel card={card} onChanged={load} /></div>}
       </div>
     </div>
   )

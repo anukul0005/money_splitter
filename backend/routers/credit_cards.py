@@ -211,13 +211,32 @@ def add_card(payload: CardIn, db: Session = Depends(get_db), caller: User = Depe
 def update_card(card_id: int, payload: CardIn, db: Session = Depends(get_db), caller: User = Depends(current_user)):
     card = _own_card(db, card_id, caller)
     fields = _clean_card(payload)
-    if (fields["bill_day"], fields["bank"], fields["last4"]) != (card.bill_day, card.bank, card.last4):
-        # Found on the old day / bank / card - fetch again with the new one.
+    if (fields["bill_day"], fields["bank"]) != (card.bill_day, card.bank):
+        # Found on the old day / bank - fetch again with the new one. (A new
+        # card number alone keeps them: the same card, reissued.)
         db.query(CreditCardStatement).filter(CreditCardStatement.card_id == card.id).delete()
     for k, v in fields.items():
         setattr(card, k, v)
     db.commit()
     return {"id": card.id}
+
+
+class CardNumberIn(BaseModel):
+    last4: str | None = None
+
+
+@router.put("/cards/{card_id}/number", response_model=dict)
+def set_card_number(card_id: int, payload: CardNumberIn, db: Session = Depends(get_db),
+                    caller: User = Depends(current_user)):
+    """Change the card's last 4 digits (a reissued card) - its saved bills stay;
+    empty clears it. The bill search matches statements on this number."""
+    card = _own_card(db, card_id, caller)
+    last4 = (payload.last4 or "").strip() or None
+    if last4 and not (len(last4) == 4 and last4.isdigit()):
+        raise HTTPException(400, "Last 4 digits must be 4 numbers")
+    card.last4 = last4
+    db.commit()
+    return {"last4": last4, "name": card_bills.card_name(card)}
 
 
 class CardPasswordIn(BaseModel):
