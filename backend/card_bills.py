@@ -179,7 +179,11 @@ def _check(card, d: date, f: dict) -> str | None:
     if f.get("total_due") is None:
         return "no amount"
     if card.last4 and f.get("card_last4") and f["card_last4"] != card.last4:
-        return f"another card (••{f['card_last4']})"
+        # The only card from this bank: a new number on its statement is the
+        # card reissued (or the number saved wrong) - it's still this card's
+        # bill. With two cards from one bank the number tells them apart.
+        if not (getattr(card, "_lone", False) and f["card_last4"] not in getattr(card, "_others", ())):
+            return f"another card (••{f['card_last4']})"
     if f.get("statement_date"):
         try:
             if abs((date.fromisoformat(f["statement_date"]) - d).days) > CHECK_DAYS:
@@ -265,6 +269,10 @@ def fetch_one(db, user_id: int, card, d: date, service, passwords: list[str]) ->
             .filter(CreditCardStatement.card_id == card.id, CreditCardStatement.period == period).first())
     if have:
         return {**row, "status": "already_saved", "bill_id": have.id, "total_due": have.total_due}
+    from models import CreditCard
+    mine = db.query(CreditCard).filter(CreditCard.user_id == user_id, CreditCard.id != card.id).all()
+    card._lone = not any(c.bank == card.bank for c in mine)
+    card._others = {c.last4 for c in mine if c.last4}
     try:
         r = find_bill(service, card, d, passwords_for(card, passwords))
     except Exception as e:
@@ -284,6 +292,9 @@ def fetch_one(db, user_id: int, card, d: date, service, passwords: list[str]) ->
             "bank", "card_last4", "statement_date", "due_date", "total_due", "minimum_due")}),
     )
     db.add(bill)
+    if card._lone and r.get("card_last4") and card.last4 and r["card_last4"] != card.last4:
+        print(f"[card_bills] {card_name(card)}: the statement's card ends {r['card_last4']} - saved number updated")
+        card.last4 = r["card_last4"]
     db.commit()
     return {**row, "status": "found", "bill_id": bill.id, "total_due": r.get("total_due"), "source": r["source"]}
 
