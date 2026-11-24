@@ -555,7 +555,15 @@ def bill_details(bill_id: int, db: Session = Depends(get_db), caller: User = Dep
         card_details.rerule(saved.get("transactions") or [])
         ts = saved.get("transactions") or []
         card_details.apply_known(ts, card_details.known_categories(db, ts, caller.name))
-        fresh = card_details.assemble(saved.get("summary") or {}, saved.get("transactions") or [],
+        summary = saved.get("summary") or {}
+        # the card's previous amount due: lets the bill read as what's paid this month (card_details._due_view)
+        before = (db.query(CreditCardStatement).filter(CreditCardStatement.card_id == bill.card_id,
+                                                       CreditCardStatement.period < (bill.period or ""))
+                  .order_by(CreditCardStatement.period.desc()).first()) if bill.card_id else None
+        summary.pop("previous_due", None)
+        if before and before.total_due is not None:
+            summary["previous_due"] = before.total_due
+        fresh = card_details.assemble(summary, saved.get("transactions") or [],
                                       saved.get("read_at"), _cycle(bill))
         saved.pop("source_text", None)
         fresh.pop("source_text", None)

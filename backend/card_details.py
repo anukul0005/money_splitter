@@ -369,23 +369,72 @@ def rerule(txns: list[dict]) -> None:
         t["category"], t["subcategory"] = got[0], got[1]
 
 
+def _due_view(summary: dict, txns: list[dict]) -> bool:
+    """Read a bill as what's paid this month, when its lines carry SBI's
+    marks and the card's previous amount due is known: a purchase turned
+    into an EMI counts only the part that wasn't converted (`on_emi`: the
+    rest is billed as instalments, its greyed TRANSFER TO ... EMI line goes
+    with it); this month's instalments (the M lines) count; "INTEREST ON
+    EMI" stays out - each instalment already holds its interest. Then the
+    previous amount due - payments & credits + these lines = the amount due."""
+    if summary.get("previous_due") is None or not any(t.get("mark") for t in txns):
+        return False
+    when = lambda t: date.fromisoformat(t["date"]) if t.get("date") else None
+    for tr in txns:
+        if tr.get("mark") is not None or not tr.get("memo") or not re.search(r"emi|flexipay|instal", tr.get("description") or "", re.I):
+            continue
+        cands = [p for p in txns if p is not tr and p.get("mark") == "D" and p.get("kind") in ("purchase", "other")
+                 and not p.get("on_emi") and p["amount"] >= tr["amount"] - 1]
+        try:
+            cands = [p for p in cands if not (when(p) and when(tr)) or 0 <= (when(tr) - when(p)).days <= 10]
+        except ValueError:
+            pass
+        # the same amount first, else a "#" purchase (the bank's mark for one converted in part)
+        p = min(cands, key=lambda p: (abs(p["amount"] - tr["amount"]) > 1, not (p.get("description") or "").startswith("#"),
+                                      p["amount"] - tr["amount"]), default=None)
+        if p and (abs(p["amount"] - tr["amount"]) <= 1 or (p.get("description") or "").startswith("#")):
+            p["on_emi"] = round(min(tr["amount"], p["amount"]), 2)
+            tr["excluded"] = "on EMI - the purchase above, billed as instalments"
+        else:
+            # a purchase from an earlier bill turned into an EMI since: taken
+            # off this bill (its instalments come later) - a credit here
+            tr.pop("excluded", None)
+            tr["type"], tr["kind"] = "credit", "emi"
+            tr["category"], tr["subcategory"] = "EMI instalments", "earlier purchase moved to EMI"
+    has_m = False
+    for t in txns:
+        if t.get("mark") == "M":
+            t.pop("excluded", None)
+            t["category"], t["subcategory"] = "EMI instalments", None
+            has_m = True
+    if has_m:
+        for t in txns:
+            if t.get("kind") == "interest" and re.search(r"\bemi\b", t.get("description") or "", re.I) and not t.get("excluded"):
+                t["excluded"] = "inside this month's EMI instalments"
+    return True
+
+
 def assemble(summary: dict, txns: list[dict], read_at: str | None, period: tuple | None = None) -> dict:
     """The bill's breakup from its lines - only the ones that are the bill's
     (see reconcile). Run on every read, and again whenever a saved bill is
     shown, so a fix here reaches bills read before it."""
     reconcile(summary, txns, period)
+    for t in txns:
+        t.pop("on_emi", None)
+    due_view = _due_view(summary, txns)
     live = [t for t in txns if not t.get("excluded")]
-    debits = round(sum(t["amount"] for t in live if t["type"] == "debit"), 2)
+    eff = lambda t: t["amount"] - (t.get("on_emi") or 0)       # a purchase on EMI: only what wasn't converted
+    debits = round(sum(eff(t) for t in live if t["type"] == "debit"), 2)
     credits = round(sum(t["amount"] for t in live if t["type"] == "credit"), 2)
     by_cat = defaultdict(lambda: [0.0, 0])
     by_merchant = defaultdict(lambda: [0.0, 0])
     names: dict[str, str] = {}
     for t in live:
-        if t["type"] == "debit" and t["category"] != "Card fees & interest":
-            by_cat[t["category"]][0] += t["amount"]
+        if t["type"] == "debit" and t["category"] != "Card fees & interest" and eff(t) > 0.005:
+            by_cat[t["category"]][0] += eff(t)
             by_cat[t["category"]][1] += 1
             key = shown_key(t)
-            by_merchant[key][0] += t["amount"]
+            by_merchant[key][0] += eff(t)
             by_merchant[key][1] += 1
             names.setdefault(key, shown_name(t))
     fees = round(sum(t["amount"] for t in live if t["category"] == "Card fees & interest"), 2)
@@ -397,7 +446,13 @@ def assemble(summary: dict, txns: list[dict], read_at: str | None, period: tuple
     prev, total = summary.get("previous_balance"), summary.get("total_due")
     # SBI: the lines add up to the total outstanding; the amount due is less by
     # the EMI principal still to be billed in later months
-    if summary.get("total_outstanding") is not None:
+    if due_view and total is not None:
+        # what's paid this month: the previous amount due carried, less payments, plus this bill's lines
+        expected = round(summary["previous_due"] - credits + debits, 2)
+        check = {"expected": expected, "total_due": total, "ok": abs(expected - total) <= 2, "view": "due",
+                 "on_emi": round(sum(t.get("on_emi") or 0 for t in txns), 2)}
+        prev = None                       # done
+    elif summary.get("total_outstanding") is not None:
         total = summary["total_outstanding"]
     if prev is not None and total is not None:
         expected = round(prev - credits + debits, 2)
@@ -405,7 +460,7 @@ def assemble(summary: dict, txns: list[dict], read_at: str | None, period: tuple
         if summary.get("total_outstanding") is not None and summary.get("total_due") is not None:
             check["outstanding"] = summary["total_outstanding"]
             check["on_emi"] = round(summary["total_outstanding"] - summary["total_due"], 2)
-    elif summary.get("purchases_debits") is not None:
+    elif summary.get("purchases_debits") is not None and not due_view:
         expected = debits
         check = {"expected": expected, "total_due": summary["purchases_debits"],
                  "ok": abs(expected - summary["purchases_debits"]) <= 2 or abs(spent - summary["purchases_debits"]) <= 2}

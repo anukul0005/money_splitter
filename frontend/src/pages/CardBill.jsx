@@ -341,7 +341,9 @@ function BillBreakup({ billId: id }) {
           {d.check && (
             <p className={`text-[11px] font-bold pt-1 ${d.check.ok ? 'text-green-700' : 'text-amber-700'}`}>
               {d.check.ok
-                ? (d.check.on_emi ? '✓ The transactions below add up to the total outstanding' : '✓ The transactions below add up to this bill')
+                ? (d.check.view === 'due'
+                  ? `✓ The transactions below add up to the amount due${d.check.on_emi ? ` - ${INR(d.check.on_emi)} of purchases went on EMI and counts as this month's instalments` : ''}`
+                  : d.check.on_emi ? '✓ The transactions below add up to the total outstanding' : '✓ The transactions below add up to this bill')
                 : `The transactions add up to ${INR(d.check.expected)}, the bill says ${INR(d.check.total_due)} - a line or two may not have been read`}
             </p>
           )}
@@ -463,6 +465,11 @@ function BillBreakup({ billId: id }) {
                         )}
                       </div>
                     )}
+                    {x.on_emi > 0 && (
+                      <p className="text-[10px] text-gray-500 mt-0.5">
+                        {x.on_emi >= x.amount - 0.5 ? 'All' : `${INR(x.on_emi)} of it`} went on EMI - billed as monthly instalments, not counted here
+                      </p>
+                    )}
                     {booking && (
                       <p className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded px-1.5 py-px mt-0.5 inline-block">
                         On EMI{booking.bank ? ` with ${booking.bank}` : ''} · {booking.tenure} × {INR(booking.instalments[1]?.emi ?? booking.instalments[0]?.emi ?? 0)}
@@ -490,8 +497,13 @@ function BillBreakup({ billId: id }) {
                         className="text-[10px] font-bold text-brand-500 mt-0.5">{sent.length ? '+ pass on more' : 'Split / pass on'}</button>
                     )}
                   </div>
-                  <span className={`text-xs font-bold shrink-0 ${x.type === 'credit' ? 'text-green-700' : 'text-gray-900'}`}>
-                    {x.type === 'credit' ? '−' : ''}{INR(x.amount)}
+                  <span className={`text-xs font-bold shrink-0 text-right ${x.type === 'credit' ? 'text-green-700' : 'text-gray-900'}`}>
+                    {x.on_emi > 0 ? (
+                      <>
+                        {INR(Math.max(x.amount - x.on_emi, 0))}
+                        <span className="block text-[10px] font-normal text-gray-400 line-through">{INR(x.amount)}</span>
+                      </>
+                    ) : <>{x.type === 'credit' ? '−' : ''}{INR(x.amount)}</>}
                   </span>
                 </div>
                 )
@@ -502,10 +514,13 @@ function BillBreakup({ billId: id }) {
           {leftOut.length > 0 && (
             <details className="text-[11px] text-gray-500">
               <summary className="cursor-pointer font-bold">{leftOut.length} line{leftOut.length === 1 ? '' : 's'} left out - not part of this bill</summary>
-              <p className="text-[10px] text-gray-400 mt-1">Dated outside the bill, or not in its totals - usually the statement's worked example of how interest is charged.</p>
+              <p className="text-[10px] text-gray-400 mt-1">Lines on the statement that aren't counted - each says why.</p>
               {leftOut.map((x, k) => (
                 <div key={k} className="flex justify-between gap-3 py-1 border-b border-amber-50 text-gray-400">
-                  <span className="min-w-0 truncate">{x.date ? `${day(x.date)} · ` : ''}{x.description}</span>
+                  <span className="min-w-0">
+                    <span className="block truncate">{x.date ? `${day(x.date)} · ` : ''}{x.description}</span>
+                    <span className="block text-[10px] text-gray-400/80">{x.excluded}</span>
+                  </span>
                   <span className="shrink-0 line-through">{INR(x.amount)}</span>
                 </div>
               ))}
