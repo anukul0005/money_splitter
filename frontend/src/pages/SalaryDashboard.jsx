@@ -277,12 +277,22 @@ export default function SalaryDashboard() {
               <span className="text-xs font-bold text-gray-800">Groups <span className="font-normal text-gray-400">your share</span></span>
               <span className="text-xs font-black text-gray-900">{INR(mo.spend.groups)} <span className="text-[10px] font-bold text-gray-400">{pct(mo.spend.groups, salary)}%</span></span>
             </div>
-            {mo.groups.length > 0 ? mo.groups.map((g) => (
-              <button key={g.id} onClick={() => nav(`/groups/${g.id}`)} className="w-full flex items-center justify-between py-1 text-left hover:bg-amber-50 -mx-2 px-2">
-                <span className="text-xs text-gray-700 truncate pr-2">{g.emoji} {g.name}</span>
-                <span className="text-xs font-bold text-gray-900 shrink-0">{INR(g.value)} ›</span>
-              </button>
-            )) : <p className="text-[11px] text-gray-400 mt-1">No group spending this month.</p>}
+            {mo.groups.length > 0 ? mo.groups.map((g) => {
+              const d = (x) => (x ? `${+x.slice(8, 10)} ${MON[+x.slice(5, 7) - 1]}` : '')
+              const when = g.first ? (g.first === g.last ? d(g.first) : `${d(g.first)}–${d(g.last)}`) : ''
+              const who = (g.with || []).length > 3 ? `${g.with.slice(0, 3).join(', ')} +${g.with.length - 3}` : (g.with || []).join(', ')
+              return (
+                <button key={g.id} onClick={() => nav(`/groups/${g.id}`)} className="w-full flex items-start justify-between gap-2 py-1.5 text-left border-b border-amber-100/70 last:border-0">
+                  <span className="min-w-0">
+                    <span className="block text-xs font-semibold text-gray-800 break-words">{g.emoji} {g.name}</span>
+                    <span className="block text-[10px] text-gray-400">
+                      {[when, g.count ? `${g.count} expense${g.count === 1 ? '' : 's'}` : '', who && `with ${who}`].filter(Boolean).join(' · ')}
+                    </span>
+                  </span>
+                  <span className="text-xs font-bold text-gray-900 shrink-0">{INR(g.value)} ›</span>
+                </button>
+              )
+            }) : <p className="text-[11px] text-gray-400 mt-1">No group spending this month.</p>}
           </div>
           {SOURCES.filter((s) => s.key === 'recurring' || s.key === 'repayments').map((s) => {
             const v = mo.spend[s.key] || 0
@@ -447,26 +457,28 @@ function SourceRow({ s, v, salary, ym, onOpen, onChanged }) {
   const byAmount = (a, b) => b.amount - a.amount || String(b.date || '').localeCompare(String(a.date || ''))
   const sorted = data ? [...data.items].sort(order === 'date' ? byDate : byAmount) : []
   const list = all ? sorted : sorted.slice(0, 15)
+  // A date column only when the items have days (recurring bills are per month)
+  const dated = sorted.some((x) => x.date && x.date.length >= 10)
   const day = (d) => (d && d.length >= 10 ? `${+d.slice(8, 10)} ${MON[+d.slice(5, 7) - 1]}` : '')
   return (
     <div className="border-b border-amber-100 last:border-0">
-      <button onClick={toggle} aria-expanded={open} className="w-full text-left py-2 hover:bg-amber-50 -mx-2 px-2">
+      <button onClick={toggle} aria-expanded={open} className="w-full text-left py-2 md:hover:bg-amber-50">
         <div className="flex items-baseline justify-between gap-2">
           <span className="text-xs font-bold text-gray-800">
-            <span className="inline-block w-3 text-gray-400">{open ? '▾' : '▸'}</span>{s.label} <span className="text-[10px] font-normal text-gray-400">{s.note}</span>
+            {s.label} <span className="text-gray-400 text-[10px]">{open ? '▾' : '▸'}</span> <span className="text-[10px] font-normal text-gray-400">{s.note}</span>
           </span>
           <span className="text-xs font-black text-gray-900 shrink-0">{INR(v)} <span className="text-[10px] font-bold text-gray-400">{pct(v, salary)}%</span></span>
         </div>
-        <div className="h-1.5 bg-amber-100 mt-1 ml-3">
+        <div className="h-1.5 bg-amber-100 mt-1">
           <div className="h-full" style={{ width: `${Math.min(100, (v / salary) * 100)}%`, background: s.color }} />
         </div>
       </button>
       {open && (
-        <div className="ml-3 mb-2 bg-amber-50/50 border border-amber-100 px-3 py-2">
+        <div className="mb-2 bg-amber-50/50 border border-amber-100 px-3 py-2">
           {!data && !err && <p className="text-[11px] text-gray-400">Loading…</p>}
           {err && <p className="text-[11px] text-red-600">{err}</p>}
           {data && data.items.length === 0 && <p className="text-[11px] text-gray-400">Nothing this month.</p>}
-          {data && data.items.length > 1 && (
+          {data && data.items.length > 3 && (
             <div className="flex justify-end mb-1">
               <div className="flex border border-amber-200 bg-white">
                 {[['date', 'By date'], ['amount', 'Biggest first']].map(([k, label]) => (
@@ -497,7 +509,7 @@ function SourceRow({ s, v, salary, ym, onOpen, onChanged }) {
             const off = x.key && marked.has(x.key)
             return (
               <div key={x.key || i} className={`flex items-baseline gap-2 py-1 border-b border-amber-100/70 last:border-0 ${off ? 'opacity-50' : ''}`}>
-                <span className="text-[10px] text-gray-400 w-11 shrink-0 tabular-nums">{day(x.date)}</span>
+                {dated && <span className="text-[10px] text-gray-400 w-11 shrink-0 tabular-nums">{day(x.date)}</span>}
                 <span className="flex-1 min-w-0">
                   <span className={`block text-[11px] font-semibold text-gray-800 truncate ${off ? 'line-through' : ''}`}>{x.title}</span>
                   {x.detail && <span className="block text-[10px] text-gray-400 truncate">{x.detail}</span>}

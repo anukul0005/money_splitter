@@ -64,7 +64,7 @@ def _bill_ym(s) -> str | None:
 def _card_lines(db: Session, caller: User, want: set[str], groups: dict | None = None) -> list[dict]:
     """Every card spend on the bills of the months `want`, each with its
     status and why. `groups` ({id: {name, ...}}) lets entered expenses match."""
-    from datetime import date as _d
+    from datetime import date as _d, timedelta
     from card_bills import card_name
     from models import CreditCard
     marks = {}
@@ -77,8 +77,9 @@ def _card_lines(db: Session, caller: User, want: set[str], groups: dict | None =
     passed = {ref: who for ref, who in db.query(Loan.card_ref, Loan.borrower).filter(
         Loan.card_ref.like("bill:%"), Loan.lender.ilike(caller.name))}
     cards = {c.id: c for c in db.query(CreditCard).filter(CreditCard.user_id == caller.id)}
+    stmts = db.query(CreditCardStatement).filter(CreditCardStatement.user_id == caller.id).all()
     out = []
-    for s in db.query(CreditCardStatement).filter(CreditCardStatement.user_id == caller.id):
+    for s in stmts:
         ym = _bill_ym(s)
         if ym not in want:
             continue
@@ -87,7 +88,17 @@ def _card_lines(db: Session, caller: User, want: set[str], groups: dict | None =
             details = json.loads(s.details_json) if s.details_json else None
         except ValueError:
             details = None
-        bill = {"bill_id": s.id, "bill_date": s.statement_date, "card": card, "ym": ym}
+        # The bill's own cycle as printed on it; failing that, the day after
+        # the card's previous bill to this one's date
+        summ = (details or {}).get("summary") or {}
+        frm, to = summ.get("period_from"), summ.get("period_to") or summ.get("statement_date") or s.statement_date
+        if not frm and s.statement_date:
+            before = [x.statement_date for x in stmts if x.card_id == s.card_id and x.bank == s.bank
+                      and x.statement_date and x.statement_date < s.statement_date]
+            if before:
+                frm = (_d.fromisoformat(max(before)) + timedelta(days=1)).isoformat()
+        bill = {"bill_id": s.id, "bill_date": s.statement_date, "card": card, "ym": ym,
+                "bill_from": frm, "bill_to": to}
         lines = (details or {}).get("transactions") or []
         if lines:
             for i, t in enumerate(lines):
@@ -265,6 +276,18 @@ def dashboard(months: int = 12, db: Session = Depends(get_db), caller: User = De
         if not solo:
             top_groups[ym][gid] += share
 
+    # each shared group's month: how many expenses, from when to when
+    gstat = defaultdict(lambda: {"count": 0, "first": None, "last": None})
+    shared = [gid for gid, g in gmeta.items() if len(g.get("members", [])) > 1]
+    if shared:
+        for gid, d in (db.query(Expense.group_id, Expense.date)
+                       .filter(Expense.group_id.in_(shared), Expense.date >= yms[0])):
+            if d and d[:7] in want:
+                st = gstat[(gid, d[:7])]
+                st["count"] += 1
+                st["first"] = min(st["first"] or d[:10], d[:10])
+                st["last"] = max(st["last"] or d[:10], d[:10])
+
     # ── credit cards: each bill's lines in that bill's month, counted unless
     #    already entered in a group, passed on, or fixed by the caller ──
     card = {ym: defaultdict(float) for ym in yms}          # status -> amount
@@ -330,8 +353,13 @@ def dashboard(months: int = 12, db: Session = Depends(get_db), caller: User = De
             "cards": {"gross": round(sum(card[ym].values()), 2),
                       **{k: round(card[ym][k], 2) for k in ("mine", "group", "not_mine", "passed")},
                       "count": sum(card_n[ym].values()), "counted": card_n[ym]["mine"]},
-            "groups": [{"id": gid, "name": gmeta[gid]["name"], "emoji": gmeta[gid]["emoji"], "value": round(v, 2)}
-                       for gid, v in sorted(top_groups[ym].items(), key=lambda kv: -kv[1]) if gid in gmeta],
+            # in date order - each with how many expenses and who else was in it
+            "groups": sorted(
+                [{"id": gid, "name": gmeta[gid]["name"], "emoji": gmeta[gid]["emoji"], "value": round(v, 2),
+                  "count": gstat[(gid, ym)]["count"], "first": gstat[(gid, ym)]["first"], "last": gstat[(gid, ym)]["last"],
+                  "with": [m for m in gmeta[gid].get("members", []) if m.lower() != me]}
+                 for gid, v in top_groups[ym].items() if gid in gmeta],
+                key=lambda g: (g["first"] or "9999", g["name"])),
         }
         out[ym]["invested"] = round(out[ym]["invest"]["auto"] + out[ym]["invest"]["manual"], 2)
 
@@ -640,8 +668,8 @@ def card_lines(month: str, db: Session = Depends(get_db), caller: User = Depends
     bills = {}
     for l in lines:
         b = bills.setdefault(l["bill_id"], {"bill_id": l["bill_id"], "card": l["card"], "bill_date": l["bill_date"],
-                                            "from": l["date"], "to": l["date"], "counted": 0.0, "not_counted": 0.0, "lines": 0})
-        b["from"], b["to"] = min(b["from"], l["date"]), max(b["to"], l["date"])
+                                            "from": l["bill_from"], "to": l["bill_to"],
+                                            "counted": 0.0, "not_counted": 0.0, "lines": 0})
         b["counted" if l["status"] == "mine" else "not_counted"] += l["amount"]
         b["lines"] += 1
     for b in bills.values():

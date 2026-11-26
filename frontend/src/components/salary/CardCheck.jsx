@@ -112,7 +112,7 @@ export default function CardCheck({ ym, onChanged }) {
               <div key={b.bill_id} className="flex items-baseline justify-between gap-2 text-[11px]">
                 <span className="min-w-0 text-gray-700">
                   <span className="font-bold">{b.card}</span>
-                  <span className="text-gray-400"> · bill {day(b.bill_date)} · {day(b.from)}–{day(b.to)}</span>
+                  <span className="text-gray-400"> · bill {day(b.bill_date)}{b.from && b.to ? ` · ${day(b.from)}–${day(b.to)}` : ''}</span>
                 </span>
                 <span className="font-black text-gray-900 shrink-0">{INR(b.counted)}</span>
               </div>
