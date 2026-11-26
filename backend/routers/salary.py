@@ -57,6 +57,10 @@ router = APIRouter(prefix="/salary", tags=["salary"])
 CHECKS = ("mine", "group", "not_mine")
 
 
+def _inr(n: float) -> str:
+    return f"₹{n:,.0f}"
+
+
 def _bill_ym(s) -> str | None:
     return s.period or (s.statement_date or "")[:7] or None
 
@@ -74,7 +78,7 @@ def _card_lines(db: Session, caller: User, want: set[str], groups: dict | None =
             rules[k[5:]] = st
         else:
             marks[k] = st or "group"
-    passed = {ref: who for ref, who in db.query(Loan.card_ref, Loan.borrower).filter(
+    passed = {ref: (who, amt) for ref, who, amt in db.query(Loan.card_ref, Loan.borrower, Loan.principal).filter(
         Loan.card_ref.like("bill:%"), Loan.lender.ilike(caller.name))}
     cards = {c.id: c for c in db.query(CreditCard).filter(CreditCard.user_id == caller.id)}
     stmts = db.query(CreditCardStatement).filter(CreditCardStatement.user_id == caller.id).all()
@@ -106,9 +110,17 @@ def _card_lines(db: Session, caller: User, want: set[str], groups: dict | None =
                     continue
                 key = line_key(s.id, t)
                 title = t.get("description") or "Card spend"
-                out.append({**bill, "key": key, "date": t["date"][:10], "amount": round(float(t.get("amount") or 0), 2),
-                            "title": title, "merchant": merchant_name(title), "category": t.get("category"),
-                            "passed_to": passed.get(f"bill:{s.id}:{i}")})
+                amount = round(float(t.get("amount") or 0), 2)
+                line = {**bill, "key": key, "date": t["date"][:10], "amount": amount,
+                        "title": title, "merchant": merchant_name(title), "category": t.get("category"), "passed_to": None}
+                p = passed.get(f"bill:{s.id}:{i}")
+                if p and p[1] < amount - 1:
+                    # passed on in part: that part is theirs, the rest still yours
+                    out.append({**line, "amount": round(p[1], 2), "passed_to": p[0]})
+                    out.append({**line, "key": key + ":rest", "amount": round(amount - p[1], 2),
+                                "title": f"{title} (your part - {_inr(p[1])} passed on to {p[0]})"})
+                else:
+                    out.append({**line, "passed_to": p[0] if p else None})
         elif s.total_due:
             out.append({**bill, "key": line_key(s.id), "date": s.statement_date or f"{ym}-01", "amount": round(s.total_due, 2),
                         "title": f"{card} bill (not broken down yet)", "merchant": card, "category": None,
@@ -127,7 +139,7 @@ def _card_lines(db: Session, caller: User, want: set[str], groups: dict | None =
     for l in sorted(out, key=lambda l: l["date"]):
         l["payee"] = l["merchant"]                      # what the statement calls it
         l["payee_key"] = _merchant_key(l["merchant"])
-        if l.get("whole_bill"):
+        if l.get("whole_bill") or l["passed_to"]:
             continue
         try:
             ld = _d.fromisoformat(l["date"])
@@ -186,10 +198,10 @@ def _card_lines(db: Session, caller: User, want: set[str], groups: dict | None =
 
     # 3. counted or not, and why
     for l in out:
-        if l["key"] in marks:
-            l["status"], l["why"], l["fixed"] = marks[l["key"]], "fixed by you", "line"
-        elif l["passed_to"]:
+        if l["passed_to"]:                      # money someone else owes you back - never yours
             l["status"], l["why"] = "passed", f"passed on to {l['passed_to']}"
+        elif l["key"] in marks:
+            l["status"], l["why"], l["fixed"] = marks[l["key"]], "fixed by you", "line"
         elif l.get("entered"):
             e = l["entered"]
             l["status"], l["why"] = "group", f"entered as {e['title'] or 'an expense'} in {groups[e['group_id']]['name']}"
