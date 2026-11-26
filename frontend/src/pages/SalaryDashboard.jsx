@@ -64,6 +64,7 @@ export default function SalaryDashboard() {
   const [noSalary, setNoSalary] = useState(false)
   const [editing, setEditing] = useState(null)   // a manual investment being edited, or {} for a new one
   const [version, setVersion] = useState(0)      // bumped when a card line's check changes
+  const [groupsOpen, setGroupsOpen] = useState(false)
 
   const load = async () => {
     setError('')
@@ -272,11 +273,20 @@ export default function SalaryDashboard() {
           {SOURCES.filter((s) => s.key === 'monthly').map((s) => (
             <SourceRow key={`${s.key}-${ym}`} s={s} v={mo.spend.monthly || 0} salary={salary} ym={ym} onOpen={() => nav(s.to)} onChanged={load} />
           ))}
-          <div className="py-2 border-b border-amber-100">
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="text-xs font-bold text-gray-800">Groups <span className="font-normal text-gray-400">your share</span></span>
-              <span className="text-xs font-black text-gray-900">{INR(mo.spend.groups)} <span className="text-[10px] font-bold text-gray-400">{pct(mo.spend.groups, salary)}%</span></span>
-            </div>
+          <div className="border-b border-amber-100">
+            <button onClick={() => setGroupsOpen((o) => !o)} aria-expanded={groupsOpen} className="w-full text-left py-2 md:hover:bg-amber-50">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-xs font-bold text-gray-800">
+                  Groups <span className="text-gray-400 text-[10px]">{groupsOpen ? '▾' : '▸'}</span> <span className="text-[10px] font-normal text-gray-400">your share{mo.groups.length ? ` · ${mo.groups.length} group${mo.groups.length === 1 ? '' : 's'}` : ''}</span>
+                </span>
+                <span className="text-xs font-black text-gray-900 shrink-0">{INR(mo.spend.groups)} <span className="text-[10px] font-bold text-gray-400">{pct(mo.spend.groups, salary)}%</span></span>
+              </div>
+              <div className="h-1.5 bg-amber-100 mt-1">
+                <div className="h-full" style={{ width: `${Math.min(100, (mo.spend.groups / salary) * 100)}%`, background: '#3b82f6' }} />
+              </div>
+            </button>
+            {groupsOpen && (
+            <div className="mb-2 bg-amber-50/50 border border-amber-100 px-3 py-1">
             {mo.groups.length > 0 ? mo.groups.map((g) => {
               const d = (x) => (x ? `${+x.slice(8, 10)} ${MON[+x.slice(5, 7) - 1]}` : '')
               const when = g.first ? (g.first === g.last ? d(g.first) : `${d(g.first)}–${d(g.last)}`) : ''
@@ -292,7 +302,9 @@ export default function SalaryDashboard() {
                   <span className="text-xs font-bold text-gray-900 shrink-0">{INR(g.value)} ›</span>
                 </button>
               )
-            }) : <p className="text-[11px] text-gray-400 mt-1">No group spending this month.</p>}
+            }) : <p className="text-[11px] text-gray-400 py-1">No group spending this month.</p>}
+            </div>
+            )}
           </div>
           {SOURCES.filter((s) => s.key === 'recurring' || s.key === 'repayments').map((s) => {
             const v = mo.spend[s.key] || 0
