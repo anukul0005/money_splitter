@@ -20,6 +20,7 @@ function Line({ l, onFix, busy }) {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className={`text-xs font-bold break-words ${counted ? 'text-gray-900' : 'text-gray-400 line-through decoration-gray-300'}`}>{l.merchant}</p>
+          {l.note && <p className="text-[11px] text-gray-700 break-words">{l.note}</p>}
           <p className="text-[10px] text-gray-400 break-words">{day(l.date)} · {l.title}</p>
           {l.why && (
             <p className="text-[10px] text-gray-500">
@@ -91,7 +92,6 @@ export default function CardCheck({ ym, onChanged }) {
   const notCounted = data.lines.filter((l) => l.status !== 'mine')
   const list = show === 'counted' ? counted : show === 'not' ? notCounted : []
   const shown = all ? list : list.slice(0, 20)
-  const mk = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
 
   return (
     <div className="card" id="sal-cards">
@@ -133,7 +133,7 @@ export default function CardCheck({ ym, onChanged }) {
           </div>
           {show && (
             <div className="mt-1">
-              {shown.map((l) => <Line key={l.key} l={{ ...l, merchant_key: mk(l.merchant) }} onFix={fix} busy={busy} />)}
+              {shown.map((l) => <Line key={l.key} l={{ ...l, merchant_key: l.payee_key }} onFix={fix} busy={busy} />)}
               {list.length > 20 && (
                 <button onClick={() => setAll((a) => !a)} className="text-[11px] font-bold text-brand-600 mt-1">
                   {all ? 'Show fewer' : `Show all ${list.length}`}

@@ -118,42 +118,87 @@ def _card_lines(db: Session, caller: User, want: set[str], groups: dict | None =
     entered = []
     if groups and out:
         lo = min(l["date"] for l in out)
-        entered = (db.query(Expense.date, Expense.amount, Expense.title, Expense.group_id)
+        entered = (db.query(Expense.date, Expense.amount, Expense.title, Expense.group_id, Expense.venue)
                    .filter(Expense.group_id.in_(list(groups)), Expense.payment_mode == "credit_card",
                            Expense.paid_by.ilike(caller.name), Expense.date >= lo).all())
-    used = set()
 
+    # 1. each line against the card expenses already entered - one each
+    used = set()
     for l in sorted(out, key=lambda l: l["date"]):
-        mk = _merchant_key(l["merchant"])
+        l["payee"] = l["merchant"]                      # what the statement calls it
+        l["payee_key"] = _merchant_key(l["merchant"])
+        if l.get("whole_bill"):
+            continue
+        try:
+            ld = _d.fromisoformat(l["date"])
+        except ValueError:
+            continue
+        for j, (d, amt, title, gid, venue) in enumerate(entered):
+            if j in used or not d or abs((amt or 0) - l["amount"]) > 1:
+                continue
+            try:
+                if abs((_d.fromisoformat(d[:10]) - ld).days) > 3:
+                    continue
+            except ValueError:
+                continue
+            used.add(j)
+            l["entered"] = {"title": title, "venue": venue, "group_id": gid}
+            break
+
+    # 2. the name you gave it: the matched expense's place or description;
+    #    else one a matched line of the same payee got; else a place saved
+    #    on the payee; else your latest description of a payment to it
+    def tidy(t):
+        t = " ".join((t or "").split())
+        return t[:1].upper() + t[1:] if t else None
+    #    A known brand (Swiggy, Blinkit...) keeps its name - one order's
+    #    description isn't every order's - and shows that description as a note.
+    for l in out:
+        l["brand"] = not l.get("whole_bill") and _brand(l["title"]) is not None
+    learnt = {}
+    for l in sorted(out, key=lambda l: l["date"]):
+        if l.get("entered") and not l["brand"]:
+            learnt[l["payee_key"]] = tidy(l["entered"]["venue"] or l["entered"]["title"])
+    keys = {l["payee_key"] for l in out if not l["brand"]} - set(learnt)
+    if keys:
+        from merchant_memory import key as _mkey, labels_for
+        for k, lab in labels_for(db, keys, caller.name).items():
+            if lab.venue:
+                learnt.setdefault(k, tidy(lab.venue))
+        keys -= set(learnt)
+        if keys and groups:
+            for m, t, v in (db.query(Expense.merchant, Expense.title, Expense.venue)
+                            .filter(Expense.group_id.in_(list(groups)), Expense.merchant.isnot(None))
+                            .order_by(Expense.date.desc())):
+                k = _merchant_key(merchant_name(m))
+                if k in keys and k not in learnt:
+                    name = v or (t if t and _mkey(t) != _mkey(m) else None)
+                    if name:
+                        learnt[k] = tidy(name)
+    for l in out:
+        n = tidy(l["entered"]["venue"] or l["entered"]["title"]) if l.get("entered") else learnt.get(l["payee_key"])
+        if not n or _merchant_key(n) == l["payee_key"]:
+            continue
+        if l["brand"]:
+            l["note"] = n                     # "We fit - Swiggy order", on this line only
+        else:
+            l["merchant"] = n
+
+    # 3. counted or not, and why
+    for l in out:
         if l["key"] in marks:
             l["status"], l["why"], l["fixed"] = marks[l["key"]], "fixed by you", "line"
-            continue
-        if l["passed_to"]:
+        elif l["passed_to"]:
             l["status"], l["why"] = "passed", f"passed on to {l['passed_to']}"
-            continue
-        if not l.get("whole_bill"):
-            try:
-                ld = _d.fromisoformat(l["date"])
-            except ValueError:
-                ld = None
-            for j, (d, amt, title, gid) in enumerate(entered):
-                if ld is None or j in used or not d or abs((amt or 0) - l["amount"]) > 1:
-                    continue
-                try:
-                    if abs((_d.fromisoformat(d[:10]) - ld).days) > 3:
-                        continue
-                except ValueError:
-                    continue
-                used.add(j)
-                l["status"], l["why"] = "group", f"entered as {title or 'an expense'} in {groups[gid]['name']}"
-                l["group_id"] = gid
-                break
-            if l.get("status"):
-                continue
-        if mk in rules:
-            l["status"], l["why"], l["fixed"] = rules[mk], f"your rule for {l['merchant']}", "rule"
-            continue
-        l["status"], l["why"] = "mine", None
+        elif l.get("entered"):
+            e = l["entered"]
+            l["status"], l["why"] = "group", f"entered as {e['title'] or 'an expense'} in {groups[e['group_id']]['name']}"
+            l["group_id"] = e["group_id"]
+        elif l["payee_key"] in rules:
+            l["status"], l["why"], l["fixed"] = rules[l["payee_key"]], f"your rule for {l['payee']}", "rule"
+        else:
+            l["status"], l["why"] = "mine", None
+        l.pop("entered", None)
     return out
 
 # ── merchants: a statement's payee, an expense's place, as one name ────────────
@@ -679,7 +724,7 @@ def card_lines(month: str, db: Session = Depends(get_db), caller: User = Depends
         tot[l["status"]] += l["amount"]
     rules = [{"merchant_key": k[5:], "status": st} for k, st in db.query(SalaryCardSkip.line_key, SalaryCardSkip.status)
              .filter(SalaryCardSkip.user_id == caller.id, SalaryCardSkip.line_key.like("rule:%"))]
-    names = {_merchant_key(l["merchant"]): l["merchant"] for l in lines}
+    names = {l["payee_key"]: l["merchant"] for l in lines}
     for r in rules:
         r["merchant"] = names.get(r["merchant_key"], r["merchant_key"])
     return {"month": month, "lines": lines, "bills": sorted(bills.values(), key=lambda b: b["bill_date"] or ""),
