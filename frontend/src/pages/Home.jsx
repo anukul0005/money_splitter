@@ -12,7 +12,6 @@ import GroupCard from '../components/GroupCard'
 import NotificationBell from '../components/NotificationBell'
 import MealCheck from '../components/MealCheck'
 import { MONEY_CHANGED } from '../components/PaymentClaimsInbox'
-import useDarkTop from '../utils/useDarkTop'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 
@@ -82,7 +81,6 @@ export default function Home() {
   const myGroupIds     = new Set(myGroups.map((g) => g.id))
   const activeOverview = overview.filter((g) => !g.is_historical && myGroupIds.has(g.id))
 
-  useDarkTop(!loading && !error)
   if (loading) return <LoadingSpinner />
 
   if (error) return (

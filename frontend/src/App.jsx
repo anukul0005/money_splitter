@@ -5,6 +5,7 @@ import Sidebar    from './components/Sidebar'
 import PaymentClaimsInbox from './components/PaymentClaimsInbox'
 import RememberPage from './components/RememberPage'
 import NotificationLinks from './components/NotificationLinks'
+import TopTint from './components/TopTint'
 import Home        from './pages/Home'
 import Groups      from './pages/Groups'
 import GroupDetail from './pages/GroupDetail'
@@ -129,6 +130,7 @@ export default function App() {
             the visible screen (keyboard, collapsing toolbars), and
             position:sticky lagged mid-screen during momentum scrolling.
             Desktop keeps normal page scrolling. */}
+        <TopTint />
         <div key={user.name} className="flex h-[100dvh] overflow-hidden md:h-auto md:min-h-dvh md:overflow-visible bg-canvas">
           {/* Desktop sidebar */}
           <Sidebar user={user} onLogout={handleLogout} />
