@@ -12,6 +12,7 @@ import GroupCard from '../components/GroupCard'
 import NotificationBell from '../components/NotificationBell'
 import MealCheck from '../components/MealCheck'
 import { MONEY_CHANGED } from '../components/PaymentClaimsInbox'
+import useDarkTop from '../utils/useDarkTop'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 
@@ -81,6 +82,7 @@ export default function Home() {
   const myGroupIds     = new Set(myGroups.map((g) => g.id))
   const activeOverview = overview.filter((g) => !g.is_historical && myGroupIds.has(g.id))
 
+  useDarkTop(!loading && !error)
   if (loading) return <LoadingSpinner />
 
   if (error) return (
@@ -136,7 +138,7 @@ export default function Home() {
   const hiddenCount   = hiddenEntries.length
 
   return (
-    <div className="pb-24 md:pb-8">
+    <div className="pb-24 md:pb-8 bg-canvas min-h-[100dvh]">
       {/* Header */}
       <div className="bg-gradient-to-br from-field-800 to-field-950 text-white px-5 pt-10 md:pt-8 pb-6 md:rounded-b-3xl border-b border-field-700">
         <div className="flex items-start justify-between gap-3">
