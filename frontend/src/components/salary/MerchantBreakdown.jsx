@@ -109,7 +109,7 @@ export default function MerchantBreakdown({ ym, version = 0 }) {
           )}
         </>
       )}
-      <p className="text-[10px] text-gray-400 mt-2">Card spends show here once ticked Mine. Group expenses count at your share.</p>
+      <p className="text-[10px] text-gray-400 mt-2">Card spends count in their bill's month. Group expenses count at your share.</p>
     </div>
   )
 }

@@ -51,9 +51,9 @@ function payday(year, month0, day) {
 }
 
 /**
- * Salary dashboard: a month's pay against where it went, in this order -
- * credit card spends (each checked by hand, counted once ticked Mine),
- * groups and the monthly group, then the month merchant by merchant - plus
+ * Salary dashboard: a month's pay against where it went - groups, the
+ * monthly group, and credit cards (each bill counted in the month it's made,
+ * automatically; a line can be fixed), then the month merchant by merchant,
  * investments and the last 12 months. Opened from History's ₹ icon.
  */
 export default function SalaryDashboard() {
@@ -235,11 +235,36 @@ export default function SalaryDashboard() {
           </div>
         )}
 
-        {/* ── 1. Credit cards, checked by hand ── */}
-        <CardCheck ym={ym} onChanged={() => { load(); setVersion((v) => v + 1) }} />
-
-        {/* ── 2. Groups and monthly ── */}
+        {/* ── Where it went: groups, monthly, credit cards ── */}
         <div className="card">
+          <div className="flex items-baseline justify-between mb-2">
+            <h2 className="text-xs font-black text-gray-500 uppercase tracking-widest">Where it went</h2>
+            <span className="text-[10px] text-gray-400">% of salary</span>
+          </div>
+          {[
+            { k: 'groups', label: 'Groups', note: 'your share', v: mo.spend.groups, c: '#3b82f6', to: 'sal-groups' },
+            { k: 'monthly', label: 'Monthly', note: 'your own', v: mo.spend.monthly, c: '#f97316', to: 'sal-groups' },
+            { k: 'cards', label: 'Credit cards', note: "this month's bills", v: mo.spend.cards, c: '#a855f7', to: 'sal-cards' },
+            { k: 'other', label: 'Bills & repayments', note: 'recurring, loans', v: (mo.spend.recurring || 0) + (mo.spend.repayments || 0), c: '#64748b', to: 'sal-groups' },
+          ].filter((r) => r.k !== 'other' || r.v >= 1).map((r) => (
+            <button key={r.k} onClick={() => document.getElementById(r.to)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+              className="w-full text-left py-1.5">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-xs font-bold text-gray-800">{r.label} <span className="font-normal text-gray-400">{r.note}</span></span>
+                <span className="text-xs font-black text-gray-900 shrink-0">{INR(r.v)} <span className="text-[10px] font-bold text-gray-400">{pct(r.v, salary)}%</span></span>
+              </div>
+              <div className="h-1.5 bg-amber-100 mt-1">
+                <div className="h-full" style={{ width: `${Math.min(100, (r.v / Math.max(1, mo.spent)) * 100)}%`, background: r.c }} />
+              </div>
+            </button>
+          ))}
+          <div className="flex justify-between pt-2 mt-1 border-t border-amber-100 text-xs font-black">
+            <span>Total spent</span><span>{INR(mo.spent)} · {pct(mo.spent, salary)}%</span>
+          </div>
+        </div>
+
+        {/* ── Groups and monthly ── */}
+        <div className="card" id="sal-groups">
           <div className="flex items-baseline justify-between mb-2">
             <h2 className="text-xs font-black text-gray-500 uppercase tracking-widest">Groups & monthly</h2>
             <span className="text-[10px] text-gray-400">% of salary</span>
@@ -264,12 +289,15 @@ export default function SalaryDashboard() {
             return v >= 1 ? <SourceRow key={`${s.key}-${ym}`} s={s} v={v} salary={salary} ym={ym} onOpen={() => nav(s.to)} onChanged={load} /> : null
           })}
           <div className="flex justify-between pt-2 text-xs font-black">
-            <span>Total utilised <span className="font-normal text-gray-400">incl. cards ticked Mine</span></span>
-            <span>{INR(mo.spent)} · {pct(mo.spent, salary)}%</span>
+            <span>Groups, monthly & bills</span>
+            <span>{INR(mo.spent - mo.spend.cards)}</span>
           </div>
         </div>
 
-        {/* ── 3. How the month fared, merchant by merchant ── */}
+        {/* ── Credit cards: counted on their own, by bill month ── */}
+        <CardCheck ym={ym} onChanged={() => { load(); setVersion((v) => v + 1) }} />
+
+        {/* ── How the month fared, merchant by merchant ── */}
         <MerchantBreakdown ym={ym} version={version} />
 
         {/* ── Investments ── */}
@@ -365,7 +393,7 @@ export default function SalaryDashboard() {
         </div>
 
         <p className="text-[10px] text-gray-400 px-1">
-          Months are calendar months, and the salary you entered is used for each of them. Money sent to friends, transfers between your own accounts and credit card bill payments aren't counted as spending.
+          Groups and monthly expenses go by calendar month; card spends go by the month their bill is made (a bill on 23 Nov covers 24 Oct - 23 Nov, so it counts in November). The salary you entered is used for every month. Money sent to friends, transfers between your own accounts and credit card bill payments aren't counted as spending.
         </p>
       </div>
     </div>

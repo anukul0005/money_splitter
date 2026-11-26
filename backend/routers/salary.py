@@ -3,8 +3,10 @@ against where it went - spent, invested, or still there.
 
   spent = monthly expenses (the caller's own monthly groups)
         + the caller's share in shared groups
-        + credit card spends the caller checked as theirs ("mine") - each
-          card line waits as "to check" until they do (_card_lines)
+        + credit card spends, each bill in the month it's made (a bill on
+          23 Nov covers 24 Oct - 23 Nov: November), counted automatically
+          unless already entered in a group, passed on as a loan, or fixed
+          by the caller (_card_lines)
         + recurring bills (the caller's share)
         + loan repayments the caller made
   invested = investments the statement imports set aside (StatementSkip,
@@ -40,86 +42,108 @@ def line_key(statement_id: int, t: dict | None = None) -> str:
 
 router = APIRouter(prefix="/salary", tags=["salary"])
 
-# ── card lines, each checked by hand ───────────────────────────────────────────
-# A card line counts as the caller's spending only once they've said so:
+# ── card lines: counted on their own, fixed by hand only when needed ──────────
+# Every card spend counts as the caller's - in the salary month of the bill it
+# came on (a bill made on 23 Nov covers 24 Oct - 23 Nov: November) - unless:
+#   passed    passed on to someone as a loan (Loans)
+#   group     it's a card-paid expense the caller entered in a group or
+#             their monthly group (same amount within a rupee, within 3
+#             days) - counted there instead
+# and the caller can fix any line, or every line from one merchant from now
+# on (a "rule:<merchant>" row), as:
 #   mine      counts
-#   group     already in a group (its share is counted there)
+#   group     already in a group
 #   not_mine  someone else's, a refund, a transfer - not spending
-#   passed    passed on to someone as a loan (Loans) - worked out, not set
-#   todo      not checked yet - shown, not counted
 CHECKS = ("mine", "group", "not_mine")
 
 
-def _card_lines(db: Session, caller: User, want: set[str]) -> list[dict]:
-    """Every card spend in the months `want`, with its check."""
+def _bill_ym(s) -> str | None:
+    return s.period or (s.statement_date or "")[:7] or None
+
+
+def _card_lines(db: Session, caller: User, want: set[str], groups: dict | None = None) -> list[dict]:
+    """Every card spend on the bills of the months `want`, each with its
+    status and why. `groups` ({id: {name, ...}}) lets entered expenses match."""
+    from datetime import date as _d
     from card_bills import card_name
     from models import CreditCard
-    marks = {k: (st or "group") for k, st in db.query(SalaryCardSkip.line_key, SalaryCardSkip.status)
-             .filter(SalaryCardSkip.user_id == caller.id)}
-    passed = {}
-    for ref, who in db.query(Loan.card_ref, Loan.borrower).filter(
-            Loan.card_ref.like("bill:%"), Loan.lender.ilike(caller.name)):
-        passed[ref] = who
+    marks = {}
+    rules = {}
+    for k, st in db.query(SalaryCardSkip.line_key, SalaryCardSkip.status).filter(SalaryCardSkip.user_id == caller.id):
+        if k.startswith("rule:"):
+            rules[k[5:]] = st
+        else:
+            marks[k] = st or "group"
+    passed = {ref: who for ref, who in db.query(Loan.card_ref, Loan.borrower).filter(
+        Loan.card_ref.like("bill:%"), Loan.lender.ilike(caller.name))}
     cards = {c.id: c for c in db.query(CreditCard).filter(CreditCard.user_id == caller.id)}
     out = []
     for s in db.query(CreditCardStatement).filter(CreditCardStatement.user_id == caller.id):
+        ym = _bill_ym(s)
+        if ym not in want:
+            continue
         card = card_name(cards[s.card_id]) if s.card_id in cards else s.bank
         try:
             details = json.loads(s.details_json) if s.details_json else None
         except ValueError:
             details = None
+        bill = {"bill_id": s.id, "bill_date": s.statement_date, "card": card, "ym": ym}
         lines = (details or {}).get("transactions") or []
         if lines:
             for i, t in enumerate(lines):
                 if t.get("excluded") or t.get("type") != "debit" or not t.get("date"):
                     continue
-                ym = t["date"][:7]
-                if ym not in want:
-                    continue
                 key = line_key(s.id, t)
-                who = passed.get(f"bill:{s.id}:{i}")
-                out.append({"key": key, "date": t["date"][:10], "ym": ym, "amount": round(float(t.get("amount") or 0), 2),
-                            "title": t.get("description") or "Card spend", "category": t.get("category"), "card": card,
-                            "status": "passed" if who else marks.get(key, "todo"), "passed_to": who})
-        else:
-            ym = s.period or (s.statement_date or "")[:7]
-            if ym in want and s.total_due:
-                key = line_key(s.id)
-                out.append({"key": key, "date": s.statement_date or f"{ym}-01", "ym": ym, "amount": round(s.total_due, 2),
-                            "title": f"{card} bill (not broken down yet)", "category": None, "card": card,
-                            "status": marks.get(key, "todo"), "passed_to": None, "whole_bill": True})
-    return out
+                title = t.get("description") or "Card spend"
+                out.append({**bill, "key": key, "date": t["date"][:10], "amount": round(float(t.get("amount") or 0), 2),
+                            "title": title, "merchant": merchant_name(title), "category": t.get("category"),
+                            "passed_to": passed.get(f"bill:{s.id}:{i}")})
+        elif s.total_due:
+            out.append({**bill, "key": line_key(s.id), "date": s.statement_date or f"{ym}-01", "amount": round(s.total_due, 2),
+                        "title": f"{card} bill (not broken down yet)", "merchant": card, "category": None,
+                        "passed_to": None, "whole_bill": True})
 
-
-def _suggest(db: Session, caller: User, lines: list[dict], gids: list[int], gnames: dict) -> None:
-    """A line not checked yet that looks like a card-paid group expense the
-    caller entered (same amount, within 3 days) gets a hint: "In a group"."""
-    todo = [l for l in lines if l["status"] == "todo" and not l.get("whole_bill")]
-    if not todo or not gids:
-        return
-    from datetime import date as _d
-    lo = min(l["date"] for l in todo)[:7]
-    exps = (db.query(Expense.date, Expense.amount, Expense.title, Expense.group_id)
-            .filter(Expense.group_id.in_(gids), Expense.payment_mode == "credit_card",
-                    Expense.paid_by.ilike(caller.name), Expense.date >= lo).all())
+    # card-paid expenses already entered, to match lines against
+    entered = []
+    if groups and out:
+        lo = min(l["date"] for l in out)
+        entered = (db.query(Expense.date, Expense.amount, Expense.title, Expense.group_id)
+                   .filter(Expense.group_id.in_(list(groups)), Expense.payment_mode == "credit_card",
+                           Expense.paid_by.ilike(caller.name), Expense.date >= lo).all())
     used = set()
-    for l in todo:
-        try:
-            ld = _d.fromisoformat(l["date"][:10])
-        except ValueError:
-            continue
-        for i, (d, amt, title, gid) in enumerate(exps):
-            if i in used or not d or abs((amt or 0) - l["amount"]) > 1:
-                continue
-            try:
-                if abs((_d.fromisoformat(d[:10]) - ld).days) > 3:
-                    continue
-            except ValueError:
-                continue
-            used.add(i)
-            l["suggest"] = {"status": "group", "why": f"{title or 'An expense'} in {gnames.get(gid, 'a group')}"}
-            break
 
+    for l in sorted(out, key=lambda l: l["date"]):
+        mk = _merchant_key(l["merchant"])
+        if l["key"] in marks:
+            l["status"], l["why"], l["fixed"] = marks[l["key"]], "fixed by you", "line"
+            continue
+        if l["passed_to"]:
+            l["status"], l["why"] = "passed", f"passed on to {l['passed_to']}"
+            continue
+        if not l.get("whole_bill"):
+            try:
+                ld = _d.fromisoformat(l["date"])
+            except ValueError:
+                ld = None
+            for j, (d, amt, title, gid) in enumerate(entered):
+                if ld is None or j in used or not d or abs((amt or 0) - l["amount"]) > 1:
+                    continue
+                try:
+                    if abs((_d.fromisoformat(d[:10]) - ld).days) > 3:
+                        continue
+                except ValueError:
+                    continue
+                used.add(j)
+                l["status"], l["why"] = "group", f"entered as {title or 'an expense'} in {groups[gid]['name']}"
+                l["group_id"] = gid
+                break
+            if l.get("status"):
+                continue
+        if mk in rules:
+            l["status"], l["why"], l["fixed"] = rules[mk], f"your rule for {l['merchant']}", "rule"
+            continue
+        l["status"], l["why"] = "mine", None
+    return out
 
 # ── merchants: a statement's payee, an expense's place, as one name ────────────
 _BRANDS = ["swiggy", "zomato", "blinkit", "zepto", "instamart", "bigbasket", "amazon", "flipkart", "myntra", "ajio",
@@ -241,10 +265,11 @@ def dashboard(months: int = 12, db: Session = Depends(get_db), caller: User = De
         if not solo:
             top_groups[ym][gid] += share
 
-    # ── credit cards: only the lines the caller checked as theirs ──
+    # ── credit cards: each bill's lines in that bill's month, counted unless
+    #    already entered in a group, passed on, or fixed by the caller ──
     card = {ym: defaultdict(float) for ym in yms}          # status -> amount
     card_n = {ym: defaultdict(int) for ym in yms}
-    for l in _card_lines(db, caller, want):
+    for l in _card_lines(db, caller, want, gmeta):
         card[l["ym"]][l["status"]] += l["amount"]
         card_n[l["ym"]][l["status"]] += 1
         if l["status"] == "mine":
@@ -303,8 +328,8 @@ def dashboard(months: int = 12, db: Session = Depends(get_db), caller: User = De
             "cats": c,
             "needs": round(sum(v for k, v in c.items() if k in NEEDS), 2),
             "cards": {"gross": round(sum(card[ym].values()), 2),
-                      **{k: round(card[ym][k], 2) for k in ("mine", "group", "not_mine", "passed", "todo")},
-                      "todo_count": card_n[ym]["todo"], "checked_count": sum(v for k, v in card_n[ym].items() if k != "todo")},
+                      **{k: round(card[ym][k], 2) for k in ("mine", "group", "not_mine", "passed")},
+                      "count": sum(card_n[ym].values()), "counted": card_n[ym]["mine"]},
             "groups": [{"id": gid, "name": gmeta[gid]["name"], "emoji": gmeta[gid]["emoji"], "value": round(v, 2)}
                        for gid, v in sorted(top_groups[ym].items(), key=lambda kv: -kv[1]) if gid in gmeta],
         }
@@ -605,45 +630,77 @@ def _prev(ym: str) -> str:
 
 @router.get("/cards", response_model=dict)
 def card_lines(month: str, db: Session = Depends(get_db), caller: User = Depends(current_user)):
-    """One month's card spends with their checks - "todo" ones first, each
-    with a hint when it looks like a group expense already entered."""
+    """One salary month's card spends - the lines of the bills made that month
+    - each counted or not, and why; the bills themselves; the caller's rules."""
     month = _month(month)
     from routers.stats import get_history
     hist = get_history(db=db, caller=caller)
-    lines = _card_lines(db, caller, {month})
-    _suggest(db, caller, lines, [g["id"] for g in hist["groups"]], {g["id"]: g["name"] for g in hist["groups"]})
-    order = {"todo": 0, "mine": 1, "group": 2, "passed": 3, "not_mine": 4}
-    lines.sort(key=lambda l: (order.get(l["status"], 9), l["date"], -l["amount"]))
+    lines = _card_lines(db, caller, {month}, {g["id"]: g for g in hist["groups"]})
+    lines.sort(key=lambda l: (l["date"], -l["amount"]), reverse=True)
+    bills = {}
     for l in lines:
-        l["merchant"] = merchant_name(l["title"])
+        b = bills.setdefault(l["bill_id"], {"bill_id": l["bill_id"], "card": l["card"], "bill_date": l["bill_date"],
+                                            "from": l["date"], "to": l["date"], "counted": 0.0, "not_counted": 0.0, "lines": 0})
+        b["from"], b["to"] = min(b["from"], l["date"]), max(b["to"], l["date"])
+        b["counted" if l["status"] == "mine" else "not_counted"] += l["amount"]
+        b["lines"] += 1
+    for b in bills.values():
+        b["counted"], b["not_counted"] = round(b["counted"], 2), round(b["not_counted"], 2)
     tot = defaultdict(float)
     for l in lines:
         tot[l["status"]] += l["amount"]
-    return {"month": month, "lines": lines, "totals": {k: round(v, 2) for k, v in tot.items()}}
+    rules = [{"merchant_key": k[5:], "status": st} for k, st in db.query(SalaryCardSkip.line_key, SalaryCardSkip.status)
+             .filter(SalaryCardSkip.user_id == caller.id, SalaryCardSkip.line_key.like("rule:%"))]
+    names = {_merchant_key(l["merchant"]): l["merchant"] for l in lines}
+    for r in rules:
+        r["merchant"] = names.get(r["merchant_key"], r["merchant_key"])
+    return {"month": month, "lines": lines, "bills": sorted(bills.values(), key=lambda b: b["bill_date"] or ""),
+            "totals": {k: round(v, 2) for k, v in tot.items()}, "rules": rules}
 
 
 class CardCheckIn(BaseModel):
     keys: list[str]
-    status: str                   # mine | group | not_mine | todo (clears the check)
+    status: str                   # mine | group | not_mine | auto (back to what the app works out)
+    remember: bool = False        # and every line from the same merchant, from now on
 
 
 @router.post("/card-check", response_model=dict)
 def card_check(payload: CardCheckIn, db: Session = Depends(get_db), caller: User = Depends(current_user)):
-    if payload.status not in (*CHECKS, "todo"):
-        raise HTTPException(400, "Mine, in a group, not mine - or back to check")
+    if payload.status not in (*CHECKS, "auto"):
+        raise HTTPException(400, "Mine, in a group, not mine - or back to automatic")
     keys = list(dict.fromkeys(k.strip()[:300] for k in payload.keys if k and k.strip()))[:500]
     if not keys:
-        raise HTTPException(400, "Nothing to check")
+        raise HTTPException(400, "Nothing to fix")
     own = {sid for (sid,) in db.query(CreditCardStatement.id).filter(CreditCardStatement.user_id == caller.id)}
     for k in keys:
+        if k.startswith("rule:"):
+            continue
         sid = k.split(":", 1)[0]
         if not sid.isdigit() or int(sid) not in own:
             raise HTTPException(404, "No such card spend")
+    if payload.remember:
+        # a rule for each line's merchant; the line itself then follows the rule
+        rule_keys = []
+        for k in keys:
+            if k.startswith("rule:"):
+                rule_keys.append(k)
+            else:
+                desc = k.split(":", 3)[3] if k.count(":") >= 3 else ""
+                mk = _merchant_key(merchant_name(desc))
+                if mk:
+                    rule_keys.append(f"rule:{mk}")
+        line_keys = [k for k in keys if not k.startswith("rule:")]
+        for r in db.query(SalaryCardSkip).filter(SalaryCardSkip.user_id == caller.id,
+                                                 SalaryCardSkip.line_key.in_(line_keys)):
+            db.delete(r)
+        keys = list(dict.fromkeys(rule_keys))
+        if not keys:
+            raise HTTPException(400, "Couldn't tell the merchant - fix just this one")
     rows = {r.line_key: r for r in db.query(SalaryCardSkip).filter(
         SalaryCardSkip.user_id == caller.id, SalaryCardSkip.line_key.in_(keys))}
     for k in keys:
         r = rows.get(k)
-        if payload.status == "todo":
+        if payload.status == "auto":
             if r:
                 db.delete(r)
         elif r:
@@ -659,7 +716,7 @@ def card_check(payload: CardCheckIn, db: Session = Depends(get_db), caller: User
 @router.get("/merchants", response_model=dict)
 def merchants(month: str, db: Session = Depends(get_db), caller: User = Depends(current_user)):
     """Where one month's money went, by merchant, against the month before:
-    card lines checked "mine", the caller's own monthly expenses, and their
+    card lines that count (by their bill's month), the caller's own monthly expenses, and their
     share of group expenses - one name for a payee across all three
     (merchant_name), so Swiggy on a card and a Swiggy order in a group add up."""
     month = _month(month)
@@ -667,12 +724,12 @@ def merchants(month: str, db: Session = Depends(get_db), caller: User = Depends(
     from routers.stats import _member_share, get_history
     me = caller.name.lower()
     rows = []                                  # (ym, name, amount, item)
-    for l in _card_lines(db, caller, {month, prev}):
-        if l["status"] == "mine":
-            rows.append((l["ym"], merchant_name(l["title"]), l["amount"],
-                         {"date": l["date"], "title": l["title"], "amount": l["amount"], "source": l["card"]}))
     hist = get_history(db=db, caller=caller)
     groups = {g["id"]: g for g in hist["groups"]}
+    for l in _card_lines(db, caller, {month, prev}, groups):
+        if l["status"] == "mine":
+            rows.append((l["ym"], l["merchant"], l["amount"],
+                         {"date": l["date"], "title": l["title"], "amount": l["amount"], "source": l["card"]}))
     if groups:
         for e in db.query(Expense).filter(Expense.group_id.in_(list(groups)),
                                           (Expense.date.like(f"{month}%")) | (Expense.date.like(f"{prev}%"))):
