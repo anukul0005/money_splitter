@@ -7,6 +7,8 @@ import {
 import { Bar } from 'react-chartjs-2'
 import { getSalaryDashboard, addInvestment, editInvestment, deleteInvestment, getSalaryItems, setCardSkip, moveMonthlyExpense, moveMonthlyBack } from '../api/index.js'
 import LoadingSpinner from '../components/LoadingSpinner'
+import CardCheck from '../components/salary/CardCheck'
+import MerchantBreakdown from '../components/salary/MerchantBreakdown'
 
 Chart.register(BarElement, BarController, LineElement, LineController, PointElement, CategoryScale, LinearScale, Tooltip)
 
@@ -20,8 +22,6 @@ const ymLong = (ym) => `${['January', 'February', 'March', 'April', 'May', 'June
 const pct = (v, of) => (of > 0 ? Math.round((v / of) * 100) : 0)
 const ordinal = (n) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' })[n % 10] || 'th'}`
 
-// routers/salary.py's NEEDS, for a server that doesn't send its list yet.
-const NEEDS_FALLBACK = ['Bills & Utilities', 'Education', 'Groceries', 'Health', 'Housing', 'Loan repayments', 'Transport']
 const SPENT = '#f97316'
 const INVEST = '#16a34a'
 const LEFT = '#cbd5e1'
@@ -51,10 +51,10 @@ function payday(year, month0, day) {
 }
 
 /**
- * Salary dashboard: a month's pay against where it went - spent (monthly
- * expenses, group shares, card spends not entered already, recurring bills,
- * loan repayments), invested (from statements, plus what's added by hand
- * here), and what's left. Opened from History's ₹ icon.
+ * Salary dashboard: a month's pay against where it went, in this order -
+ * credit card spends (each checked by hand, counted once ticked Mine),
+ * groups and the monthly group, then the month merchant by merchant - plus
+ * investments and the last 12 months. Opened from History's ₹ icon.
  */
 export default function SalaryDashboard() {
   const nav = useNavigate()
@@ -63,6 +63,7 @@ export default function SalaryDashboard() {
   const [error, setError] = useState('')
   const [noSalary, setNoSalary] = useState(false)
   const [editing, setEditing] = useState(null)   // a manual investment being edited, or {} for a new one
+  const [version, setVersion] = useState(0)      // bumped when a card line's check changes
 
   const load = async () => {
     setError('')
@@ -87,7 +88,6 @@ export default function SalaryDashboard() {
     const avg = (f) => (done.length ? done.reduce((s, m) => s + f(data.by_month[m]), 0) / done.length : null)
     return {
       salary, mo, left,
-      wants: Math.max(0, mo.spent - mo.needs),
       avgSpent: avg((x) => x.spent),
       avgInvested: avg((x) => x.invested),
       isCurrent: ym === data.months[data.months.length - 1],
@@ -165,7 +165,6 @@ export default function SalaryDashboard() {
   // ── investments in this month ──
   const autoInv = data.investments.auto.filter((x) => x.date.slice(0, 7) === ym)
   const manualInv = data.investments.manual.filter((r) => (r.recurring ? r.month <= ym && (!r.end_month || ym <= r.end_month) : r.month === ym))
-  const maxCat = Math.max(1, ...Object.values(mo.cats))
 
   const sum = mo.spent + mo.invested
   const bar = over
@@ -236,90 +235,42 @@ export default function SalaryDashboard() {
           </div>
         )}
 
-        {/* ── 50 / 30 / 20 ── */}
-        <div className="card">
-          <h2 className="text-xs font-black text-gray-500 uppercase tracking-widest">The 50 / 30 / 20 check</h2>
-          <p className="text-[10px] text-gray-400 mb-3">A common rule of thumb: about half the pay on needs, a third at most on wants, a fifth or more saved.</p>
-          {(() => {
-            // The same split the totals were made from: needs are the server's
-            // list, every other category is a want.
-            const needSet = new Set(data.needs_categories || NEEDS_FALLBACK)
-            const rows = Object.entries(mo.cats)
-            const needs = rows.filter(([c]) => needSet.has(c))
-            const wants = rows.filter(([c]) => !needSet.has(c))
-            return (
-              <>
-                <RuleBar label="Needs" sub="groceries, rent, bills, transport, health, EMIs" value={view.mo.needs} salary={salary} target={50} max
-                  items={needs} empty="No spending on needs this month." />
-                <RuleBar label="Wants" sub="everything that isn't a need" value={view.wants} salary={salary} target={30} max
-                  items={wants} empty="No spending on wants this month." />
-                <RuleBar label="Invested" sub="from statements + added by you" value={mo.invested} salary={salary} target={20}
-                  items={Object.entries(mo.invest.by_kind)} empty="Nothing invested this month." />
-              </>
-            )
-          })()}
-          <p className="text-[10px] text-gray-300 mt-1 text-center">tap a line to see what's in it</p>
-        </div>
+        {/* ── 1. Credit cards, checked by hand ── */}
+        <CardCheck ym={ym} onChanged={() => { load(); setVersion((v) => v + 1) }} />
 
-        {/* ── Where it went ── */}
+        {/* ── 2. Groups and monthly ── */}
         <div className="card">
           <div className="flex items-baseline justify-between mb-2">
-            <h2 className="text-xs font-black text-gray-500 uppercase tracking-widest">Where the money went</h2>
+            <h2 className="text-xs font-black text-gray-500 uppercase tracking-widest">Groups & monthly</h2>
             <span className="text-[10px] text-gray-400">% of salary</span>
           </div>
-          {SOURCES.map((s) => {
+          {SOURCES.filter((s) => s.key === 'monthly').map((s) => (
+            <SourceRow key={`${s.key}-${ym}`} s={s} v={mo.spend.monthly || 0} salary={salary} ym={ym} onOpen={() => nav(s.to)} onChanged={load} />
+          ))}
+          <div className="py-2 border-b border-amber-100">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-xs font-bold text-gray-800">Groups <span className="font-normal text-gray-400">your share</span></span>
+              <span className="text-xs font-black text-gray-900">{INR(mo.spend.groups)} <span className="text-[10px] font-bold text-gray-400">{pct(mo.spend.groups, salary)}%</span></span>
+            </div>
+            {mo.groups.length > 0 ? mo.groups.map((g) => (
+              <button key={g.id} onClick={() => nav(`/groups/${g.id}`)} className="w-full flex items-center justify-between py-1 text-left hover:bg-amber-50 -mx-2 px-2">
+                <span className="text-xs text-gray-700 truncate pr-2">{g.emoji} {g.name}</span>
+                <span className="text-xs font-bold text-gray-900 shrink-0">{INR(g.value)} ›</span>
+              </button>
+            )) : <p className="text-[11px] text-gray-400 mt-1">No group spending this month.</p>}
+          </div>
+          {SOURCES.filter((s) => s.key === 'recurring' || s.key === 'repayments').map((s) => {
             const v = mo.spend[s.key] || 0
-            if (v < 1 && s.key !== 'monthly') return null
-            return <SourceRow key={`${s.key}-${ym}`} s={s} v={v} salary={salary} ym={ym} onOpen={() => nav(s.to)} onChanged={load} />
+            return v >= 1 ? <SourceRow key={`${s.key}-${ym}`} s={s} v={v} salary={salary} ym={ym} onOpen={() => nav(s.to)} onChanged={load} /> : null
           })}
           <div className="flex justify-between pt-2 text-xs font-black">
-            <span>Total utilised</span><span>{INR(mo.spent)} · {pct(mo.spent, salary)}%</span>
+            <span>Total utilised <span className="font-normal text-gray-400">incl. cards ticked Mine</span></span>
+            <span>{INR(mo.spent)} · {pct(mo.spent, salary)}%</span>
           </div>
-          {mo.cards.gross > 0 && (mo.cards.already_entered > 0 || mo.cards.passed_on > 0) && (
-            <p className="text-[10px] text-gray-400 mt-2">
-              Cards had {INR(mo.cards.gross)} of spends this month:
-              {mo.cards.already_entered > 0 && <> {INR(mo.cards.already_entered)} you'd already entered as card expenses</>}
-              {mo.cards.already_entered > 0 && mo.cards.passed_on > 0 && ' and'}
-              {mo.cards.passed_on > 0 && <> {INR(mo.cards.passed_on)} passed on to others as loans</>}
-              {' '}- not counted twice.
-            </p>
-          )}
-          {mo.cards.bills_without_breakup > 0 && (
-            <p className="text-[10px] text-gray-400 mt-1">A card bill with no breakup yet is counted at its full amount - open it on Credit Cards to read it.</p>
-          )}
-          {mo.groups.length > 0 && (
-            <div className="mt-3 pt-2 border-t border-amber-100">
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Groups this month · your share</p>
-              {mo.groups.map((g) => (
-                <button key={g.id} onClick={() => nav(`/groups/${g.id}`)} className="w-full flex items-center justify-between py-1 text-left hover:bg-amber-50 -mx-2 px-2">
-                  <span className="text-xs text-gray-700 truncate pr-2">{g.emoji} {g.name}</span>
-                  <span className="text-xs font-bold text-gray-900 shrink-0">{INR(g.value)} ›</span>
-                </button>
-              ))}
-            </div>
-          )}
         </div>
 
-        {/* ── Categories, across all of it ── */}
-        {Object.keys(mo.cats).length > 0 && (
-          <div className="card">
-            <div className="flex items-baseline justify-between mb-2">
-              <h2 className="text-xs font-black text-gray-500 uppercase tracking-widest">What it went on</h2>
-              <span className="text-[10px] text-gray-400">expenses, groups & cards together</span>
-            </div>
-            {Object.entries(mo.cats).slice(0, 10).map(([c, v]) => (
-              <div key={c} className="py-1.5">
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-xs font-bold text-gray-800 truncate">{c}</span>
-                  <span className="text-xs font-black text-gray-900 shrink-0">{INR(v)} <span className="text-[10px] font-bold text-gray-400">{pct(v, salary)}%</span></span>
-                </div>
-                <div className="h-1.5 bg-amber-100 mt-1">
-                  <div className="h-full" style={{ width: `${(v / maxCat) * 100}%`, background: SPENT }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+        {/* ── 3. How the month fared, merchant by merchant ── */}
+        <MerchantBreakdown ym={ym} version={version} />
 
         {/* ── Investments ── */}
         <div className="card">
@@ -609,56 +560,6 @@ function HeadStat({ label, value, sub, color }) {
 
 function Legend({ color, label }) {
   return <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5" style={{ background: color }} />{label}</span>
-}
-
-/**
- * One part of the 50/30/20 rule: its share of the pay against the target.
- * Tapping it lists what makes up the amount - `items` as [name, amount].
- */
-function RuleBar({ label, sub, value, salary, target, max, items = [], empty }) {
-  const [open, setOpen] = useState(false)
-  const p = pct(value, salary)
-  const good = max ? p <= target : p >= target
-  const shown = items.filter(([, v]) => v >= 1).sort((a, b) => b[1] - a[1])
-  return (
-    <div className="py-1.5 border-b border-amber-100 last:border-0">
-      <button onClick={() => setOpen((v) => !v)} className="w-full text-left" aria-expanded={open}>
-        <div className="flex items-baseline justify-between gap-2">
-          <span className="text-xs font-bold text-gray-800">
-            <span className="text-gray-400 mr-1">{open ? '▾' : '▸'}</span>
-            {label} <span className="text-[10px] font-normal text-gray-400">{sub}</span>
-          </span>
-          <span className={`text-xs font-black shrink-0 ${good ? 'text-green-600' : 'text-red-500'}`}>
-            {p}% <span className="text-[10px] font-bold text-gray-400">{max ? '≤' : '≥'} {target}%</span>
-          </span>
-        </div>
-        <div className="relative h-2 bg-amber-100 mt-1">
-          <div className="h-full" style={{ width: `${Math.min(100, p)}%`, background: good ? INVEST : OVER }} />
-          <div className="absolute top-[-2px] h-3 w-0.5 bg-gray-700" style={{ left: `${target}%` }} />
-        </div>
-        <p className="text-[10px] text-gray-400 mt-0.5">{INR(value)}</p>
-      </button>
-      {open && (
-        <div className="mt-1.5 mb-1 bg-amber-50/60 border border-amber-100 px-3 py-1.5">
-          {shown.length === 0 && <p className="text-[11px] text-gray-400 py-1">{empty}</p>}
-          {shown.map(([name, v]) => (
-            <div key={name} className="flex items-baseline justify-between gap-2 py-1 border-b border-amber-100/70 last:border-0">
-              <span className="text-[11px] text-gray-700 truncate">{name}</span>
-              <span className="text-[11px] font-bold text-gray-900 shrink-0">
-                {INR(v)}
-                <span className="text-[10px] font-bold text-gray-400 ml-1">{value > 0 ? pct(v, value) : 0}% of {label.toLowerCase()} · {pct(v, salary)}% of pay</span>
-              </span>
-            </div>
-          ))}
-          {shown.length > 0 && (
-            <div className="flex justify-between pt-1 text-[11px] font-black text-gray-800">
-              <span>Total</span><span>{INR(shown.reduce((s, [, v]) => s + v, 0))}</span>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
 }
 
 /** Add or change a hand-entered investment; a monthly one repeats till its last month (or for good). */

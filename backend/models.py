@@ -1626,6 +1626,10 @@ class SalaryCardSkip(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     line_key = Column(String(300), nullable=False)
+    # What the caller said the line is (routers/salary.py CHECKS): "mine"
+    # (counts), "group" (already in a group), "not_mine" (someone else's, a
+    # refund...). NULL is a row from before the check - "group".
+    status = Column(String(20), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

@@ -254,6 +254,10 @@ export const deleteInvestment   = (id)      => api.delete(`/salary/investments/$
 export const getSalaryItems     = (month, source) => api.get('/salary/items', { params: { month, source } })
 // A card spend already counted elsewhere (a group, say): left out of the dashboard - or counted again
 export const setCardSkip        = (key, counted) => api.post('/salary/card-skips', { key, counted })
+// Card lines checked by hand: mine / group / not_mine, or 'todo' to undo
+export const getSalaryCards     = (month)   => api.get('/salary/cards', { params: { month } })
+export const setCardCheck       = (keys, status) => api.post('/salary/card-check', { keys, status })
+export const getSalaryMerchants = (month)   => api.get('/salary/merchants', { params: { month } })
 // A monthly expense that was really money to a person / an investment - and undo
 export const moveMonthlyExpense = (expenseId, kind, remember) => api.post('/salary/move', { expense_id: expenseId, kind, remember })
 export const moveMonthlyBack    = (skipId, undo) => api.post('/salary/move-back', { skip_id: skipId, undo })
