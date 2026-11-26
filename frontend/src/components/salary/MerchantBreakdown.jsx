@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getSalaryMerchants } from '../../api/index.js'
 
+const TOP = 6                     // merchants shown before "All N"
 const INR = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 const MON = MONTHS.map((m) => m.slice(0, 3))
@@ -77,7 +78,7 @@ export default function MerchantBreakdown({ ym, version = 0 }) {
   if (err) return <div className="card"><p className="text-xs text-red-600">{err}</p></div>
   if (!data) return <div className="card"><p className="text-xs text-gray-400">Loading merchants…</p></div>
 
-  const list = all ? data.merchants : data.merchants.slice(0, 15)
+  const list = all ? data.merchants : data.merchants.slice(0, TOP)
   const max = Math.max(1, ...data.merchants.map((m) => m.amount))
   const d = data.total - data.prev_total
 
@@ -97,7 +98,7 @@ export default function MerchantBreakdown({ ym, version = 0 }) {
           </p>
           <div className="flex justify-end text-[10px] text-gray-400 mt-2 pr-0.5">vs {mon(data.prev).slice(0, 3)}</div>
           {list.map((m) => <Row key={m.name} m={m} max={max} nav={nav} />)}
-          {data.merchants.length > 15 && (
+          {data.merchants.length > TOP && (
             <button onClick={() => setAll((a) => !a)} className="text-[11px] font-bold text-brand-600 mt-1">
               {all ? 'Show fewer' : `All ${data.merchants.length} merchants`}
             </button>
