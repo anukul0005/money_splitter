@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { getNote, editNote, deleteNote } from '../api/index.js'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -12,6 +12,15 @@ const num = (c) => {
   return m ? Number(m[0]) : null
 }
 const fmt = (n) => n.toLocaleString('en-IN', { maximumFractionDigits: 2 })
+
+/** A table cell that grows to show all its text - never a box that scrolls */
+function Cell({ value, ...rest }) {
+  const ref = useRef(null)
+  const fit = () => { const el = ref.current; if (el) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px` } }
+  useLayoutEffect(fit, [value])
+  useEffect(() => { window.addEventListener('resize', fit); return () => window.removeEventListener('resize', fit) }, [])
+  return <textarea ref={ref} rows={1} value={value} {...rest} />
+}
 
 /**
  * The note at a glance: how many rows, the total of every column that holds
@@ -218,8 +227,8 @@ export default function NoteDetail() {
                   <td className="text-[10px] text-gray-400 text-center align-top pt-2">{ri + 1}</td>
                   {note.columns.map((c, ci) => (
                     <td key={c} className="border-l border-amber-100 p-0 align-top">
-                      <textarea rows={1} value={r.cells[ci] ?? ''} readOnly={!isMine(r)} onChange={(e) => setCell(ri, ci, e.target.value)} onBlur={saveRows}
-                        className={`w-full min-w-[8rem] px-2 py-1.5 text-xs bg-transparent resize-y focus:outline-none ${isMine(r) ? "focus:bg-amber-50" : "text-gray-600 cursor-default"}`} />
+                      <Cell value={r.cells[ci] ?? ''} readOnly={!isMine(r)} onChange={(e) => setCell(ri, ci, e.target.value)} onBlur={saveRows}
+                        className={`w-full min-w-[8rem] px-2 py-1.5 text-xs bg-transparent resize-none overflow-hidden block focus:outline-none ${isMine(r) ? "focus:bg-amber-50" : "text-gray-600 cursor-default"}`} />
                     </td>
                   ))}
                   <td className="border-l border-amber-100 px-2 py-1.5 align-top text-[11px] text-gray-500 whitespace-nowrap">
