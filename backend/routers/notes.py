@@ -152,6 +152,8 @@ def _rows(raw: list, n: int, old: list[dict], caller: str, remap: bool = False) 
             rid, prev = uuid.uuid4().hex[:12], None
         if prev and (prev.get("by") or "").lower() != me and not remap:
             cells = list(prev["cells"])[:n]
+        elif not any(str(c).strip() for c in cells):
+            continue                   # the caller's own row with nothing in it isn't kept
         out.append({"id": rid, "cells": cells + [""] * (n - len(cells)),
                     "by": prev["by"] if prev else caller, "at": prev.get("at") if prev else now})
     # someone else's rows left out are put back where they were
@@ -272,7 +274,8 @@ def edit_note(note_id: int, payload: NoteEdit, db: Session = Depends(get_db),
     elif payload.rows is not None:
         old = _stored(n)
         rows = _rows(payload.rows, len(cols), old, caller.name)
-        gone = {r["id"] for r in old} - {r["id"] for r in rows}
+        gone = ({r["id"] for r in old if any(str(c).strip() for c in r["cells"])}
+                - {r["id"] for r in rows})
         if gone:
             _keep_version(db, n, f"{len(gone)} row(s) deleted", caller.name)
         n.rows_json = json.dumps(rows)

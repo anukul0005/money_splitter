@@ -218,9 +218,17 @@ export default function NoteDetail() {
 
   const setCell = (ri, ci, v) => { if (rows[ri]) edited.current.add(rows[ri].id); setRows((rs) => rs.map((r, i) => (i === ri ? { ...r, cells: r.cells.map((c, j) => (j === ci ? v : c)) } : r))); setDirty(true) }
   // A new row's id is made here, so saves while it's typed into stay one row
+  // A new row stays on this screen until something's typed into it (an
+  // empty row isn't saved); the page goes to it and its first cell is ready
   const addRow = () => {
-    const next = [...rows, { id: Math.random().toString(36).slice(2, 12), cells: note.columns.map(() => ''), by: user?.name }]
-    setRows(next); save({ rows: next })
+    const rid = Math.random().toString(36).slice(2, 12)
+    edited.current.add(rid)
+    setQ('')
+    setRows((rs) => [...rs, { id: rid, cells: note.columns.map(() => ''), by: user?.name }])
+    setTimeout(() => {
+      const el = document.querySelector(`[data-row="${rid}"] textarea`)
+      el?.scrollIntoView({ block: 'center', behavior: 'smooth' }); el?.focus({ preventScroll: true })
+    }, 60)
   }
   // Rows the AI read from text or speech, checked by the caller: theirs now
   const addRows = (cellRows) => {
@@ -393,7 +401,7 @@ export default function NoteDetail() {
             </thead>
             <tbody>
               {shown.map(([r, ri]) => (
-                <tr key={r.id || ri} className={`border-b border-amber-100 last:border-0 transition-colors duration-700 ${flash.has(r.id) ? 'bg-amber-100' : ''}`}>
+                <tr key={r.id || ri} data-row={r.id} className={`border-b border-amber-100 last:border-0 transition-colors duration-700 ${flash.has(r.id) ? 'bg-amber-100' : ''}`}>
                   <td className="text-center align-top pt-1.5 pb-1 px-0.5">
                     <span className="block text-[10px] text-gray-400 leading-tight">{ri + 1}</span>
                     {/* who added the row - set from their profile, for good */}
