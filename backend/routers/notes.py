@@ -1,6 +1,6 @@
 """Notes: anything worth keeping, as a table whose columns its owner names
-(models.NoteTable). Private, or shared with one of the owner's groups - then
-everyone in that group can see and edit it."""
+(models.NoteTable). Private, or shared with people: anyone on the app it's
+shared with can see and edit it; a name not on the app is just noted."""
 from __future__ import annotations
 
 import json
@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from auth import caller_groups, current_user, is_member, member_group
@@ -23,6 +23,7 @@ MAX_COLS, MAX_ROWS, MAX_CELL = 20, 1000, 2000
 class NoteIn(BaseModel):
     title: str
     columns: list[str]
+    people: list[str] | None = None       # names - on the app or not
     group_id: int | None = None
     rows: list[list[str]] | None = None
 
@@ -31,6 +32,31 @@ class NoteEdit(BaseModel):
     title: str | None = None
     columns: list[str] | None = None
     rows: list[list[str]] | None = None
+    people: list[str] | None = None
+
+
+def _people(db: Session, raw: list[str], owner: str) -> list[dict]:
+    """Each name as the app knows it if someone there has it, otherwise as
+    typed (not on the app); the owner and repeats left out."""
+    out, seen = [], {owner.lower()}
+    for n in raw:
+        n = " ".join(str(n or "").split())[:100]
+        if not n or n.lower() in seen:
+            continue
+        u = db.query(User).filter(func.lower(User.name) == n.lower()).first()
+        name = u.name if u else n
+        seen.add(name.lower())
+        out.append({"name": name, "on_app": bool(u)})
+    if len(out) > 50:
+        raise HTTPException(400, "Share with at most 50 people")
+    return out
+
+
+def _shared(n: NoteTable) -> list[dict]:
+    try:
+        return json.loads(n.shared_with) if n.shared_with else []
+    except ValueError:
+        return []
 
 
 def _cols(raw: list[str]) -> list[str]:
@@ -61,6 +87,7 @@ def _out(n: NoteTable, groups: dict[int, str], full: bool = True) -> dict:
     rows = json.loads(n.rows_json or "[]")
     d = {"id": n.id, "title": n.title, "owner": n.owner, "columns": cols, "count": len(rows),
          "group_id": n.group_id, "group": groups.get(n.group_id) if n.group_id else None,
+         "people": _shared(n),
          "updated_at": n.updated_at, "updated_by": n.updated_by}
     if full:
         d["rows"] = rows
@@ -72,6 +99,8 @@ def _note(db: Session, note_id: int, caller: User) -> NoteTable:
     if n is None:
         raise HTTPException(404, "Note not found")
     if n.owner.lower() == caller.name.lower():
+        return n
+    if any(p.get("on_app") and p["name"].lower() == caller.name.lower() for p in _shared(n)):
         return n
     if n.group_id:
         g = db.get(Group, n.group_id)
@@ -87,9 +116,14 @@ def _group_names(db, caller) -> dict[int, str]:
 @router.get("")
 def list_notes(db: Session = Depends(get_db), caller: User = Depends(current_user)):
     groups = _group_names(db, caller)
+    me = caller.name.lower()
+    # shared_with is JSON text - narrowed in SQL by the name, then checked exactly
     rows = (db.query(NoteTable)
-            .filter(or_(NoteTable.owner.ilike(caller.name), NoteTable.group_id.in_(list(groups) or [-1])))
+            .filter(or_(func.lower(NoteTable.owner) == me, NoteTable.group_id.in_(list(groups) or [-1]),
+                        func.lower(NoteTable.shared_with).contains(me)))
             .order_by(NoteTable.updated_at.desc()).all())
+    rows = [n for n in rows if n.owner.lower() == me or n.group_id in groups
+            or any(p.get("on_app") and p["name"].lower() == me for p in _shared(n))]
     return [_out(n, groups, full=False) for n in rows]
 
 
@@ -101,7 +135,9 @@ def create_note(payload: NoteIn, db: Session = Depends(get_db), caller: User = D
     if payload.group_id:
         member_group(payload.group_id, caller, db, with_history=False)
     cols = _cols(payload.columns)
+    people = _people(db, payload.people or [], caller.name)
     n = NoteTable(owner=caller.name, group_id=payload.group_id or None, title=title,
+                  shared_with=json.dumps(people) if people else None,
                   columns_json=json.dumps(cols), rows_json=json.dumps(_rows(payload.rows or [], len(cols))),
                   updated_by=caller.name)
     db.add(n)
@@ -124,6 +160,11 @@ def edit_note(note_id: int, payload: NoteEdit, db: Session = Depends(get_db),
         if not t:
             raise HTTPException(400, "Give the note a name")
         n.title = t
+    if payload.people is not None:
+        if n.owner.lower() != caller.name.lower():
+            raise HTTPException(403, f"Only {n.owner} can change who it's shared with")
+        people = _people(db, payload.people, n.owner)
+        n.shared_with = json.dumps(people) if people else None
     cols = json.loads(n.columns_json)
     if payload.columns is not None:
         cols = _cols(payload.columns)

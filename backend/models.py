@@ -1955,7 +1955,7 @@ class GroupTreat(Base):
 class NoteTable(Base):
     """A note kept as a table (routers/notes.py): its owner names the columns
     ("Name", "Phone", "Price") and fills in rows. Private to the owner, or
-    shared with one of their groups - then anyone in it can edit."""
+    shared with people (shared_with) or, for older ones, a group."""
     __tablename__ = "note_tables"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -1964,6 +1964,9 @@ class NoteTable(Base):
     title = Column(String(200), nullable=False)
     columns_json = Column(Text, nullable=False)      # ["Name", "Phone", ...]
     rows_json = Column(Text, nullable=True)          # [["Shreya", "98...", ...], ...]
+    # Who else it's for - JSON [{"name", "on_app"}]. People on the app can
+    # open and edit it; a name not on the app is only a record of who it's with.
+    shared_with = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_by = Column(String(100), nullable=True)

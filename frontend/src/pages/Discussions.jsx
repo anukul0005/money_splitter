@@ -1,10 +1,20 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { listDiscussions, createDiscussion, suggestQuoteFields, listNotes, createNote, getGroups } from '../api/index.js'
+import { listDiscussions, createDiscussion, suggestQuoteFields, listNotes, createNote } from '../api/index.js'
+import NotePeople from '../components/NotePeople'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PeoplePicker from '../components/DiscussionPeoplePicker'
 import { useUser } from '../UserContext'
 import { dn as displayName } from '../utils/displayName'
+
+// "only you" / "with Anjali, Shreya" / "by Utkarsh, with you"
+const sharedLine = (n, me) => {
+  const lower = (me || '').toLowerCase()
+  const others = (n.people || []).map((p) => (p.name.toLowerCase() === lower ? 'you' : p.name))
+  if (n.owner.toLowerCase() !== lower) return `by ${n.owner}, with ${others.join(', ') || 'you'}`
+  if (others.length) return `with ${others.join(', ')}`
+  return n.group ? `shared with ${n.group}` : 'only you'
+}
 
 export const ago = (t) => {
   if (!t) return ''
@@ -22,6 +32,7 @@ export const ago = (t) => {
  */
 export default function Discussions() {
   const nav = useNavigate()
+  const user = useUser()
   const [rows, setRows] = useState(null)
   const [error, setError] = useState('')
   const [creating, setCreating] = useState(false)
@@ -71,7 +82,7 @@ export default function Discussions() {
                   </div>
                   <p className="text-[11px] text-gray-500 truncate">{n.columns.join(' · ')}</p>
                   <p className="text-[10px] text-gray-400 mt-0.5">
-                    {n.count} row{n.count === 1 ? '' : 's'} · {n.group ? `shared with ${n.group}` : 'only you'}
+                    {n.count} row{n.count === 1 ? '' : 's'} · {sharedLine(n, user?.name)}
                   </p>
                 </button>
               ))}
@@ -224,16 +235,9 @@ function NewNote({ onCancel, onCreated }) {
   const [title, setTitle] = useState('')
   const [cols, setCols] = useState([])
   const [draft, setDraft] = useState('')
-  const [groups, setGroups] = useState([])
-  const [groupId, setGroupId] = useState('')
+  const [people, setPeople] = useState([])
   const [err, setErr] = useState('')
   const [saving, setSaving] = useState(false)
-
-  useEffect(() => {
-    getGroups().then((r) => setGroups(r.data.filter((g) =>
-      (g.member_names ?? []).length > 1
-      && (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase())))).catch(() => {})
-  }, [user?.name])
 
   const add = () => {
     const parts = draft.split(',').map((x) => x.trim()).filter(Boolean)
@@ -246,7 +250,7 @@ function NewNote({ onCancel, onCreated }) {
     if (!title.trim() || !all.length) return
     setSaving(true); setErr('')
     try {
-      const { data } = await createNote({ title, columns: all, group_id: groupId ? Number(groupId) : null })
+      const { data } = await createNote({ title, columns: all, people: people.map((p) => p.name) })
       onCreated(data.id)
     } catch (e2) {
       setErr(e2.response?.data?.detail || "Couldn't create it.")
@@ -280,12 +284,10 @@ function NewNote({ onCancel, onCreated }) {
           <button type="button" onClick={add} disabled={!draft.trim()} className="text-xs font-bold text-brand-600 disabled:opacity-40 px-2">Add</button>
         </div>
       </div>
-      <label className="block text-[11px] font-bold text-gray-600">Who can see it
-        <select value={groupId} onChange={(e) => setGroupId(e.target.value)} className="input text-sm mt-1">
-          <option value="">Only me</option>
-          {groups.map((g) => <option key={g.id} value={g.id}>Shared with {g.name}</option>)}
-        </select>
-      </label>
+      <div>
+        <p className="text-[11px] font-bold text-gray-600 mb-1">Who can see it</p>
+        <NotePeople me={user?.name} people={people} setPeople={setPeople} />
+      </div>
       {err && <p className="text-xs text-red-600">{typeof err === 'string' ? err : 'Check the details.'}</p>}
       <div className="flex gap-3">
         <button type="submit" disabled={!ready || saving} className="btn-primary !w-auto px-4 text-sm disabled:opacity-50">

@@ -196,6 +196,7 @@ def create_tables():
 # tables it has never seen and never touches an existing one's columns.
 # (table, column, type/definition)
 _ADDED_COLUMNS = [
+    ("note_tables", "shared_with", "TEXT"),
     ("salary_card_skips", "status", "VARCHAR(20)"),
     ("expenses", "guests", "TEXT"),
     ("credit_cards", "pass_on_gap", "INTEGER NOT NULL DEFAULT 2"),
