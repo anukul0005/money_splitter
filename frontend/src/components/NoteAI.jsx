@@ -9,11 +9,23 @@ const asDataUrl = async (file) => {
   return new Promise((ok, fail) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = fail; r.readAsDataURL(small) })
 }
 
+// The column that names each row: one called "Name(s)", else the first
+export const nameCol = (columns) => Math.max(0, columns.findIndex((c) => /\bnames?\b/i.test(c)))
+// A name as compared for repeats: no case, brackets, marks or extra spaces
+// ("Ankush (O)" and "ankush" are the same)
+export const nameKey = (t) => String(t || '').toLowerCase().replace(/\([^)]*\)/g, ' ').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+// The rows (numbers from 1) other than `skip` that already have this name
+export const sameName = (rows, col, name, skip) => {
+  const k = nameKey(name)
+  if (!k) return []
+  return rows.flatMap((r, i) => (i !== skip && nameKey(r.cells[col]) === k ? [i + 1] : []))
+}
+
 /**
  * Rows from what you type, paste or say: the AI reads it into the note's
  * columns, you check (and fix) the rows, then add them - as your rows.
  */
-export function AddByText({ noteId, columns, onAdd, onClose }) {
+export function AddByText({ noteId, columns, existing = [], onAdd, onClose }) {
   const [text, setText] = useState('')
   const [rows, setRows] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -40,6 +52,13 @@ export function AddByText({ noteId, columns, onAdd, onClose }) {
   }
   // Spoken words go straight to the AI; they're kept in the box if it fails
   const voice = useVoice({ onText: (s) => { setText(s); read(s) }, onError: setErr })
+  // Names already in the table, or twice in what was read
+  const nc = nameCol(columns)
+  const dups = (rows || []).map((r, ri) => {
+    const inTable = sameName(existing, nc, r[nc])
+    const inHere = (rows || []).slice(0, ri).some((x) => nameKey(x[nc]) && nameKey(x[nc]) === nameKey(r[nc]))
+    return inTable.length ? `already in row ${inTable.join(', ')}` : inHere ? 'twice here' : ''
+  })
   const add = async () => { if (await onAdd(rows)) { setRows(null); onClose() } }
 
   return (
@@ -80,6 +99,11 @@ export function AddByText({ noteId, columns, onAdd, onClose }) {
       {rows?.length > 0 && (
         <div className="space-y-2 pt-1">
           <p className="text-[11px] font-bold text-gray-600">{rows.length} row{rows.length === 1 ? '' : 's'} to add - fix anything that's off:</p>
+          {dups.some((d) => d) && (
+            <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-300 px-2 py-1.5">
+              Some names are already in the table (marked below). Leave them out with ✕, or add them anyway if they're different people.
+            </p>
+          )}
           <div className="border border-amber-200 overflow-x-auto">
             <table className="w-full text-xs border-collapse">
               <thead><tr className="bg-amber-50">
@@ -88,14 +112,15 @@ export function AddByText({ noteId, columns, onAdd, onClose }) {
               </tr></thead>
               <tbody>
                 {rows.map((r, ri) => (
-                  <tr key={ri} className="border-b border-amber-100 last:border-0">
+                  <tr key={ri} className={`border-b border-amber-100 last:border-0 ${dups[ri] ? 'bg-amber-50' : ''}`}>
                     {columns.map((c, ci) => (
                       <td key={c} className="p-0 border-l first:border-l-0 border-amber-100">
                         <input value={r[ci]} onChange={(e) => setRows((rs) => rs.map((x, i) => (i === ri ? x.map((y, j) => (j === ci ? e.target.value : y)) : x)))}
                           className="w-full min-w-[4rem] px-2 py-1.5 bg-transparent focus:outline-none focus:bg-amber-50" />
                       </td>
                     ))}
-                    <td className="text-center">
+                    <td className="text-center whitespace-nowrap px-1">
+                      {dups[ri] && <span className="text-[9px] font-bold text-amber-700 mr-1">{dups[ri]}</span>}
                       <button onClick={() => setRows((rs) => rs.filter((_, i) => i !== ri))} className="text-gray-300 hover:text-red-600" aria-label="Leave this row out">✕</button>
                     </td>
                   </tr>

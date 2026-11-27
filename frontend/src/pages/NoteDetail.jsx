@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { getNote, editNote, deleteNote, noteInviteLink, joinNote, noteLive } from '../api/index.js'
 import { downloadNotePdf } from '../utils/notePdf'
@@ -6,7 +6,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser } from '../UserContext'
 import { ago } from './Discussions'
 import NotePeople from '../components/NotePeople'
-import { AddByText, Insights } from '../components/NoteAI'
+import { AddByText, Insights, nameCol, nameKey, sameName } from '../components/NoteAI'
 
 // The number a cell starts with - "3*" is 3, "₹1,200" is 1200; null if none
 const num = (c) => {
@@ -43,6 +43,8 @@ function Summary({ columns, rows, me }) {
   rows.forEach((r) => { const k = r.by || 'Unknown'; (people[k] = people[k] || []).push(r) })
   const byWho = Object.entries(people).sort((a, b) => b[1].length - a[1].length)
   const total = sums(rows)
+  // "3*" is tentative - may change either way
+  const tent = columns.map((_, ci) => (numeric[ci] ? rows.reduce((t, r) => t + (String(r.cells[ci] || '').includes('*') ? num(r.cells[ci]) || 0 : 0), 0) : 0))
   const name = (n) => (n.toLowerCase() === (me || '').toLowerCase() ? 'You' : n)
   const cellB = 'border border-amber-200 px-2 py-1.5'
   return (
@@ -57,6 +59,7 @@ function Summary({ columns, rows, me }) {
           <div key={c} className="border border-amber-200 bg-amber-50/60 px-3 py-2 min-w-0">
             <p className="text-[10px] font-black text-gray-500 uppercase tracking-wider break-words leading-tight">{soft(c)}</p>
             <p className="text-2xl font-black text-gray-900 tabular-nums">{fmt(total[ci])}</p>
+            {tent[ci] > 0 && <p className="text-[10px] text-gray-500">{fmt(total[ci] - tent[ci])} sure · {fmt(tent[ci])} tentative*</p>}
           </div>
         ))}
       </div>
@@ -87,6 +90,7 @@ function Summary({ columns, rows, me }) {
           </tr>
         </tbody>
       </table>
+      {tent.some((t) => t > 0) && <p className="text-[10px] text-gray-500">* after a number - tentative, may go up or down.</p>}
     </div>
   )
 }
@@ -112,6 +116,9 @@ export default function NoteDetail() {
   const [title, setTitle] = useState('')
   const [q, setQ] = useState('')
   const [aiOpen, setAiOpen] = useState(false)
+  const [dup, setDup] = useState(null)          // { id, name, rows } - a name typed that's already there
+  const before = useRef('')                     // a cell's text when it was tapped into
+  const okDup = useRef(new Set())               // "id|name" kept anyway after the warning
   const rowsRef = useRef(rows)
   rowsRef.current = rows
   // Live: who else has the note open, and their changes as they're saved
@@ -242,6 +249,16 @@ export default function NoteDetail() {
   const addRows = (cellRows) => {
     const next = [...rowsRef.current, ...cellRows.map((cells) => ({ id: Math.random().toString(36).slice(2, 12), cells, by: user?.name }))]
     setRows(next); return save({ rows: next })
+  }
+  // On leaving a name cell of my row: warn if that name is already in the
+  // table - once per name; keeping it anyway is fine
+  const checkName = (r, ri, ci) => {
+    if (!isMine(r) || ci !== nameCol(note.columns)) return
+    const name = rowsRef.current[ri]?.cells[ci] || ''
+    if (name === before.current) return          // looked at, not changed
+    const there = sameName(rowsRef.current, ci, name, ri)
+    if (there.length && !okDup.current.has(`${r.id}|${nameKey(name)}`)) setDup({ id: r.id, name, rows: there })
+    else if (dup?.id === r.id) setDup(null)
   }
   const delRow = (ri) => { const next = rows.filter((_, i) => i !== ri); setRows(next); save({ rows: next }) }
   const needle = q.trim().toLowerCase()
@@ -389,7 +406,7 @@ export default function NoteDetail() {
           <span className="text-[10px] text-gray-400 whitespace-nowrap">{saving ? 'Saving…' : dirty ? 'Unsaved - tap outside the cell' : 'Saved'}</span>
           {err && <span className="text-[11px] text-red-600">{err}</span>}
         </div>
-        {aiOpen && <AddByText noteId={id} columns={note.columns} onAdd={addRows} onClose={() => setAiOpen(false)} />}
+        {aiOpen && <AddByText noteId={id} columns={note.columns} existing={rows} onAdd={addRows} onClose={() => setAiOpen(false)} />}
 
         <div className="border border-amber-200 bg-white">
           <table className="w-full table-fixed text-xs border-collapse">
@@ -409,7 +426,8 @@ export default function NoteDetail() {
             </thead>
             <tbody>
               {shown.map(([r, ri]) => (
-                <tr key={r.id || ri} data-row={r.id} className={`border-b border-amber-100 last:border-0 transition-colors duration-700 ${flash.has(r.id) ? 'bg-amber-100' : ''}`}>
+                <Fragment key={r.id || ri}>
+                <tr data-row={r.id} className={`border-b border-amber-100 last:border-0 transition-colors duration-700 ${flash.has(r.id) ? 'bg-amber-100' : ''}`}>
                   <td className="text-center align-top pt-1.5 pb-1 px-0.5">
                     <span className="block text-[10px] text-gray-400 leading-tight">{ri + 1}</span>
                     {/* who added the row - set from their profile, for good */}
@@ -420,7 +438,7 @@ export default function NoteDetail() {
                   {note.columns.map((c, ci) => (
                     <td key={c} className="border-l border-amber-100 p-0 align-top">
                       <Cell value={r.cells[ci] ?? ''} readOnly={!isMine(r)} onChange={(e) => setCell(ri, ci, e.target.value)}
-                        onFocus={() => { focused.current = isMine(r) }} onBlur={() => { focused.current = false; saveRows() }}
+                        onFocus={() => { focused.current = isMine(r); before.current = r.cells[ci] ?? '' }} onBlur={() => { focused.current = false; checkName(r, ri, ci); saveRows() }}
                         className={`w-full px-2 py-1.5 text-xs bg-transparent resize-none overflow-hidden block break-words focus:outline-none ${isMine(r) ? "focus:bg-amber-50" : "text-gray-600 cursor-default"}`} />
                     </td>
                   ))}
@@ -428,6 +446,20 @@ export default function NoteDetail() {
                     {isMine(r) && <button onClick={() => window.confirm(`Delete row ${ri + 1}?`) && delRow(ri)} className="text-gray-300 hover:text-red-600" aria-label={`Delete row ${ri + 1}`}>✕</button>}
                   </td>
                 </tr>
+                {dup?.id === r.id && (
+                  <tr>
+                    <td colSpan={note.columns.length + 2} className="bg-amber-50 border-y border-amber-300 px-3 py-2">
+                      <p className="text-[11px] text-amber-900">
+                        <b>{dup.name.trim()}</b> is already in row {dup.rows.map((n) => `${n}${rows[n - 1]?.by ? ` (${rows[n - 1].by.toLowerCase() === user?.name?.toLowerCase() ? 'you' : rows[n - 1].by})` : ''}`).join(', ')}. Same person?
+                      </p>
+                      <div className="flex gap-3 mt-1.5 text-[11px] font-bold">
+                        <button onClick={() => { okDup.current.add(`${r.id}|${nameKey(dup.name)}`); setDup(null) }} className="text-brand-600">Different person - keep it</button>
+                        <button onClick={() => { setDup(null); delRow(ri) }} className="text-red-600">Remove this row</button>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
               {!rows.length && (
                 <tr><td colSpan={note.columns.length + 2} className="text-center text-gray-400 py-6">No rows yet - add the first one.</td></tr>

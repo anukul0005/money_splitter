@@ -59,6 +59,11 @@ export async function downloadNotePdf(note, rows, { me, link }) {
     tableWidth: Math.min(W - 2 * M, 120 + 70 * (numCols.length + 1)),
   })
   y = doc.lastAutoTable.finalY + 16
+  if (rows.some((r) => r.cells.some((c) => /\d\s*\*/.test(String(c || ''))))) {
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(110)
+    doc.text('* after a number - tentative, may go up or down.', M, y - 4)
+    y += 8
+  }
 
   // The whole table
   autoTable(doc, {
