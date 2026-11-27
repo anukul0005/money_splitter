@@ -102,6 +102,7 @@ export default function NoteDetail() {
   const [newCol, setNewCol] = useState('')
   const [title, setTitle] = useState('')
   const [q, setQ] = useState('')
+  const [aiOpen, setAiOpen] = useState(false)
   const rowsRef = useRef(rows)
   rowsRef.current = rows
 
@@ -282,9 +283,19 @@ export default function NoteDetail() {
         <Summary columns={note.columns} rows={rows} me={user?.name} />
         <Insights noteId={id} rowCount={rows.length} stamp={JSON.stringify([note.columns, rows.map((r) => r.cells)])} />
 
-        {rows.length > 8 && (
-          <input value={q} onChange={(e) => setQ(e.target.value)} className="input text-sm max-w-sm" placeholder="Search the rows" />
-        )}
+        {/* Adding rows and searching them, in one line above the table */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <button onClick={addRow} className="text-xs font-bold text-brand-600 whitespace-nowrap">+ Add row</button>
+          <button onClick={() => setAiOpen((v) => !v)} className="text-xs font-bold text-brand-600 whitespace-nowrap">
+            {aiOpen ? 'Close' : '+ Type, speak or photo'}
+          </button>
+          {rows.length > 1 && (
+            <input value={q} onChange={(e) => setQ(e.target.value)} className="input text-xs py-1.5 flex-1 min-w-[8rem] max-w-xs" placeholder="Search the rows" />
+          )}
+          <span className="text-[10px] text-gray-400 whitespace-nowrap">{saving ? 'Saving…' : dirty ? 'Unsaved - tap outside the cell' : 'Saved'}</span>
+          {err && <span className="text-[11px] text-red-600">{err}</span>}
+        </div>
+        {aiOpen && <AddByText noteId={id} columns={note.columns} onAdd={addRows} onClose={() => setAiOpen(false)} />}
 
         <div className="border border-amber-200 bg-white">
           <table className="w-full table-fixed text-xs border-collapse">
@@ -329,12 +340,6 @@ export default function NoteDetail() {
             </tbody>
           </table>
         </div>
-        <div className="flex items-center gap-3">
-          <button onClick={addRow} className="text-xs font-bold text-brand-600">+ Add row</button>
-          <span className="text-[10px] text-gray-400">{saving ? 'Saving…' : dirty ? 'Unsaved - tap outside the cell' : 'Saved'}</span>
-          {err && <span className="text-[11px] text-red-600">{err}</span>}
-        </div>
-        <AddByText noteId={id} columns={note.columns} onAdd={addRows} />
       </div>
     </div>
   )

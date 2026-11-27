@@ -13,8 +13,7 @@ const asDataUrl = async (file) => {
  * Rows from what you type, paste or say: the AI reads it into the note's
  * columns, you check (and fix) the rows, then add them - as your rows.
  */
-export function AddByText({ noteId, columns, onAdd }) {
-  const [open, setOpen] = useState(false)
+export function AddByText({ noteId, columns, onAdd, onClose }) {
   const [text, setText] = useState('')
   const [rows, setRows] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -41,16 +40,13 @@ export function AddByText({ noteId, columns, onAdd }) {
   }
   // Spoken words go straight to the AI; they're kept in the box if it fails
   const voice = useVoice({ onText: (s) => { setText(s); read(s) }, onError: setErr })
-  const add = async () => { if (await onAdd(rows)) { setRows(null); setOpen(false) } }
+  const add = async () => { if (await onAdd(rows)) { setRows(null); onClose() } }
 
-  if (!open) {
-    return <button onClick={() => setOpen(true)} className="text-xs font-bold text-brand-600">+ Add by typing, speaking or a photo</button>
-  }
   return (
     <div className="card space-y-2">
       <div className="flex items-center justify-between">
         <p className="text-xs font-black text-gray-500 uppercase tracking-widest">Add by typing, speaking or a photo</p>
-        <button onClick={() => { setOpen(false); setRows(null); setErr('') }} className="text-[11px] font-bold text-gray-500">Close</button>
+        <button onClick={onClose} className="text-[11px] font-bold text-gray-500">Close</button>
       </div>
       <p className="text-[11px] text-gray-500">
         Say it, paste it in any order (e.g. <i>"Sharma ji family 4 log, both days; Rohit 2, only Haldi"</i>), or add a
