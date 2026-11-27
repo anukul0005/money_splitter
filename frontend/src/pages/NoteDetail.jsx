@@ -209,16 +209,16 @@ export default function NoteDetail() {
           <input value={q} onChange={(e) => setQ(e.target.value)} className="input text-sm max-w-sm" placeholder="Search the rows" />
         )}
 
-        <div className="overflow-x-auto border border-amber-200 bg-white">
-          <table className="text-xs border-collapse min-w-full">
+        <div className="border border-amber-200 bg-white">
+          <table className="w-full table-fixed text-xs border-collapse">
             <thead>
               <tr className="bg-amber-50">
-                <th className="w-8 border-b border-amber-200" />
+                <th className="w-6 border-b border-amber-200" />
                 {note.columns.map((c) => (
-                  <th key={c} className="text-left font-black text-gray-700 px-2 py-2 border-b border-l border-amber-200 whitespace-nowrap">{c}</th>
+                  <th key={c} className="text-left font-black text-gray-700 px-2 py-2 border-b border-l border-amber-200 align-bottom [overflow-wrap:anywhere]">{c}</th>
                 ))}
-                <th className="text-left font-black text-gray-400 px-2 py-2 border-b border-l border-amber-200 whitespace-nowrap">Added by</th>
-                <th className="w-8 border-b border-amber-200" />
+                <th className="text-left font-black text-gray-400 px-2 py-2 border-b border-l border-amber-200 align-bottom w-[4.5rem]">Added by</th>
+                <th className="w-7 border-b border-amber-200" />
               </tr>
             </thead>
             <tbody>
@@ -228,10 +228,10 @@ export default function NoteDetail() {
                   {note.columns.map((c, ci) => (
                     <td key={c} className="border-l border-amber-100 p-0 align-top">
                       <Cell value={r.cells[ci] ?? ''} readOnly={!isMine(r)} onChange={(e) => setCell(ri, ci, e.target.value)} onBlur={saveRows}
-                        className={`w-full min-w-[8rem] px-2 py-1.5 text-xs bg-transparent resize-none overflow-hidden block focus:outline-none ${isMine(r) ? "focus:bg-amber-50" : "text-gray-600 cursor-default"}`} />
+                        className={`w-full px-2 py-1.5 text-xs bg-transparent resize-none overflow-hidden block focus:outline-none ${isMine(r) ? "focus:bg-amber-50" : "text-gray-600 cursor-default"}`} />
                     </td>
                   ))}
-                  <td className="border-l border-amber-100 px-2 py-1.5 align-top text-[11px] text-gray-500 whitespace-nowrap">
+                  <td className="border-l border-amber-100 px-2 py-1.5 align-top text-[11px] text-gray-500 [overflow-wrap:anywhere]">
                     {r.by?.toLowerCase() === user?.name?.toLowerCase() ? 'You' : r.by}
                   </td>
                   <td className="text-center align-top pt-1.5">
