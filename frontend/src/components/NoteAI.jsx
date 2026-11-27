@@ -1,6 +1,13 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { fillNoteRows, noteInsights } from '../api/index.js'
 import { useVoice, canRecord } from './useVoice'
+import { compressImage } from '../utils/compressImage'
+
+// A picture, made small on the phone, as a data: URL
+const asDataUrl = async (file) => {
+  const small = await compressImage(file)
+  return new Promise((ok, fail) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = fail; r.readAsDataURL(small) })
+}
 
 /**
  * Rows from what you type, paste or say: the AI reads it into the note's
@@ -12,11 +19,23 @@ export function AddByText({ noteId, columns, onAdd }) {
   const [rows, setRows] = useState(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [pic, setPic] = useState(null)          // a data: URL
+  const fileRef = useRef(null)
+  const takePic = async (file) => {
+    if (!file || !file.type.startsWith('image/')) return
+    setErr('')
+    try { setPic(await asDataUrl(file)) } catch { setErr("Couldn't open that picture.") }
+  }
+  // A screenshot or photo pasted straight into the box
+  const onPaste = (e) => {
+    const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith('image/'))
+    if (item) { e.preventDefault(); takePic(item.getAsFile()) }
+  }
   const read = async (said) => {
     const t = (said ?? text).trim()
-    if (!t) return
+    if (!t && !pic) return
     setBusy(true); setErr('')
-    try { const { data } = await fillNoteRows(noteId, t); setRows((rs) => [...(rs || []), ...data.rows]); setText('') }
+    try { const { data } = await fillNoteRows(noteId, t, pic); setRows((rs) => [...(rs || []), ...data.rows]); setText(''); setPic(null) }
     catch (e) { setErr(e.response?.data?.detail || "Couldn't read that - try again.") }
     finally { setBusy(false) }
   }
@@ -25,24 +44,34 @@ export function AddByText({ noteId, columns, onAdd }) {
   const add = async () => { if (await onAdd(rows)) { setRows(null); setOpen(false) } }
 
   if (!open) {
-    return <button onClick={() => setOpen(true)} className="text-xs font-bold text-brand-600">+ Add by typing or speaking</button>
+    return <button onClick={() => setOpen(true)} className="text-xs font-bold text-brand-600">+ Add by typing, speaking or a photo</button>
   }
   return (
     <div className="card space-y-2">
       <div className="flex items-center justify-between">
-        <p className="text-xs font-black text-gray-500 uppercase tracking-widest">Add by typing or speaking</p>
+        <p className="text-xs font-black text-gray-500 uppercase tracking-widest">Add by typing, speaking or a photo</p>
         <button onClick={() => { setOpen(false); setRows(null); setErr('') }} className="text-[11px] font-bold text-gray-500">Close</button>
       </div>
       <p className="text-[11px] text-gray-500">
-        Say or paste it the way you'd tell someone - e.g. <i>"Sharma ji family 4 log, both days; Rohit 2, only Haldi"</i>.
-        It's filled into the columns for you to check before adding.
+        Say it, paste it in any order (e.g. <i>"Sharma ji family 4 log, both days; Rohit 2, only Haldi"</i>), or add a
+        photo or screenshot - a handwritten list works too. It's filled into the columns for you to check before adding.
       </p>
-      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} className="input text-sm"
-        placeholder="Type, paste a list or a WhatsApp message…" disabled={busy || voice.hearing} />
+      <textarea value={text} onChange={(e) => setText(e.target.value)} onPaste={onPaste} rows={3} className="input text-sm"
+        placeholder="Type, or paste a list, a WhatsApp message or a screenshot…" disabled={busy || voice.hearing} />
+      {pic && (
+        <div className="flex items-start gap-2">
+          <img src={pic} alt="The picture to read" className="max-h-32 border border-gray-200" />
+          <button onClick={() => setPic(null)} className="text-[11px] font-bold text-gray-500">Remove</button>
+        </div>
+      )}
+      <input ref={fileRef} type="file" accept="image/*" className="hidden"
+        onChange={(e) => { takePic(e.target.files?.[0]); e.target.value = '' }} />
       <div className="flex items-center gap-2 flex-wrap">
-        <button onClick={() => read()} disabled={busy || !text.trim()} className="btn-primary !w-auto text-xs px-4 py-2 disabled:opacity-50">
+        <button onClick={() => read()} disabled={busy || (!text.trim() && !pic)} className="btn-primary !w-auto text-xs px-4 py-2 disabled:opacity-50">
           {busy ? 'Reading…' : 'Fill the rows'}
         </button>
+        <button onClick={() => fileRef.current?.click()} disabled={busy}
+          className="text-xs font-bold px-3 py-2 border border-gray-300 text-gray-700 disabled:opacity-50">Photo</button>
         {canRecord() && (
           <button onClick={voice.recording ? voice.stop : voice.start} disabled={busy || voice.hearing}
             className={`text-xs font-bold px-3 py-2 border ${voice.recording ? 'border-red-500 text-red-600 bg-red-50' : 'border-gray-300 text-gray-700'} disabled:opacity-50`}>
@@ -117,6 +146,7 @@ export function Insights({ noteId, rowCount, stamp }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [seen, setSeen] = useState(null)       // the table as it was when read
+  const [more, setMore] = useState(false)
   if (rowCount < 2) return null
   const run = async () => {
     setBusy(true); setErr('')
@@ -135,8 +165,15 @@ export function Insights({ noteId, rowCount, stamp }) {
       {err && <p className="text-[11px] text-red-600">{err}</p>}
       {data && (
         <>
-          {data.headline && <p className="text-sm font-bold text-gray-900">{data.headline}</p>}
-          {data.points?.length > 0 && (
+          <button onClick={() => setMore((v) => !v)} className="block w-full text-left" aria-expanded={more}>
+            {data.headline && <span className="block text-sm font-bold text-gray-900">{data.headline}</span>}
+            {data.points?.length > 0 && (
+              <span className="block text-[11px] font-bold text-brand-600 mt-1">
+                {more ? 'Hide details ▴' : `${data.points.length} things it noticed ▾`}
+              </span>
+            )}
+          </button>
+          {more && data.points?.length > 0 && (
             <ul className="list-disc pl-4 space-y-1 text-xs text-gray-700">
               {data.points.map((p, i) => <li key={i}>{p}</li>)}
             </ul>
