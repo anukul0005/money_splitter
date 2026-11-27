@@ -1967,6 +1967,9 @@ class NoteTable(Base):
     # Who else it's for - JSON [{"name", "on_app"}]. People on the app can
     # open and edit it; a name not on the app is only a record of who it's with.
     shared_with = Column(Text, nullable=True)
+    # The owner's invite link (routers/notes.py join): whoever opens it, once
+    # logged in, is added to shared_with.
+    invite_token = Column(String(40), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_by = Column(String(100), nullable=True)

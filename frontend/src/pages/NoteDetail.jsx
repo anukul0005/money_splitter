@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
-import { getNote, editNote, deleteNote } from '../api/index.js'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { getNote, editNote, deleteNote, noteInviteLink, joinNote } from '../api/index.js'
+import { downloadNotePdf } from '../utils/notePdf'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser } from '../UserContext'
 import { ago } from './Discussions'
@@ -105,8 +106,21 @@ export default function NoteDetail() {
 
   const [people, setPeople] = useState([])
   const take = (n) => { setNote(n); setRows(n.rows); setCols(n.columns); setTitle(n.title); setPeople(n.people || []); setDirty(false) }
+  const [params, setParams] = useSearchParams()
+  const [notice, setNotice] = useState('')
+  const [busyTop, setBusyTop] = useState('')
   useEffect(() => {
-    getNote(id).then((r) => take(r.data)).catch(() => setErr("Couldn't open this note."))
+    (async () => {
+      // Opened from an invite link: join the note first (after logging in -
+      // the login screen keeps this address), then show it
+      const invite = params.get('invite')
+      if (invite) {
+        try { const { data } = await joinNote(id, invite); if (data.joined) setNotice(`You've been added to ${data.title}.`) }
+        catch (e) { setNotice(e.response?.data?.detail || "That invite link didn't work.") }
+        setParams((p) => { const n = new URLSearchParams(p); n.delete('invite'); return n }, { replace: true })
+      }
+      getNote(id).then((r) => take(r.data)).catch(() => setErr("Couldn't open this note - ask its owner for the link."))
+    })()
   }, [id])
 
   // A save of just the rows keeps what's on screen: the reply mustn't undo
@@ -152,6 +166,33 @@ export default function NoteDetail() {
     const sum = ws.reduce((t, w) => t + w, 0)
     return ws.map((w) => (w / sum) * 100)
   })()
+  const pageLink = `${window.location.origin}/notes/${id}`
+  // The owner's link adds whoever opens it; anyone else shares the plain page
+  const shareLink = async () => {
+    if (!mine) return pageLink
+    const { data } = await noteInviteLink(id)
+    return `${pageLink}?invite=${encodeURIComponent(data.token)}`
+  }
+  const onShare = async () => {
+    setBusyTop('link'); setNotice('')
+    try {
+      const url = await shareLink()
+      const text = `${note.title} - open it in Settle (log in first)`
+      if (navigator.share && /iPhone|iPad|Android/i.test(navigator.userAgent)) {
+        try { await navigator.share({ title: note.title, text, url }) } catch { /* closed */ }
+      } else {
+        await navigator.clipboard.writeText(url)
+        setNotice(mine ? 'Invite link copied - whoever opens it and logs in is added to this note.' : 'Link copied.')
+      }
+    } catch (e) { setNotice(e.response?.data?.detail || "Couldn't make the link.") }
+    finally { setBusyTop('') }
+  }
+  const onPdf = async () => {
+    setBusyTop('pdf'); setNotice('')
+    try { await downloadNotePdf(note, rows, { me: user?.name, link: await shareLink() }) }
+    catch (e) { setNotice(e.response?.data?.detail || "Couldn't make the PDF.") }
+    finally { setBusyTop('') }
+  }
   const isMine = (r) => (r.by || '').toLowerCase() === (user?.name || '').toLowerCase()
 
   const saveCols = async () => {
@@ -167,7 +208,20 @@ export default function NoteDetail() {
   return (
     <div className="pb-24 md:pb-8">
       <div className="bg-gradient-to-br from-field-800 to-field-950 text-white px-5 pt-10 md:pt-8 pb-5 border-b border-field-700">
-        <button onClick={() => nav('/discuss')} className="text-slate-300/70 text-xs font-bold">‹ Discussions & notes</button>
+        <div className="flex items-center justify-between gap-2">
+          <button onClick={() => nav('/discuss')} className="text-slate-300/70 text-xs font-bold">‹ Discussions & notes</button>
+          <div className="flex gap-1.5">
+            <button onClick={onPdf} disabled={!!busyTop}
+              className="text-[10px] font-bold px-2 py-1 border border-slate-300/40 text-slate-200 hover:bg-white/10 disabled:opacity-50">
+              {busyTop === 'pdf' ? 'Making…' : 'PDF'}
+            </button>
+            <button onClick={onShare} disabled={!!busyTop}
+              className="text-[10px] font-bold px-2 py-1 border border-slate-300/40 text-slate-200 hover:bg-white/10 disabled:opacity-50">
+              {busyTop === 'link' ? '…' : mine ? 'Invite link' : 'Link'}
+            </button>
+          </div>
+        </div>
+        {notice && <p className="text-[11px] text-brand-300 mt-2">{notice}</p>}
         <h1 className="text-2xl font-black mt-2 tracking-tight break-words">{note.title}</h1>
         <p className="text-slate-300/70 text-xs mt-1">
           {note.people?.length ? `With ${note.people.map((p) => p.name).join(', ')}` : note.group ? `Shared with ${note.group}` : 'Only you'}

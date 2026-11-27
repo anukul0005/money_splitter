@@ -4,6 +4,7 @@ shared with can see and edit it; a name not on the app is just noted."""
 from __future__ import annotations
 
 import json
+import secrets
 import uuid
 from datetime import datetime, timezone
 
@@ -220,3 +221,36 @@ def delete_note(note_id: int, db: Session = Depends(get_db), caller: User = Depe
         raise HTTPException(403, f"Only {n.owner} can delete this note")
     db.delete(n)
     db.commit()
+
+
+@router.post("/{note_id}/invite-link")
+def invite_link(note_id: int, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """The note's invite token - made once, by its owner."""
+    n = _note(db, note_id, caller)
+    if n.owner.lower() != caller.name.lower():
+        raise HTTPException(403, f"Only {n.owner} can invite people to this note")
+    if not n.invite_token:
+        n.invite_token = secrets.token_urlsafe(16)
+        db.commit()
+    return {"token": n.invite_token}
+
+
+class JoinIn(BaseModel):
+    token: str
+
+
+@router.post("/{note_id}/join")
+def join_note(note_id: int, payload: JoinIn, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Opened from the owner's invite link: the caller is added to the note."""
+    n = db.get(NoteTable, note_id)
+    if n is None or not n.invite_token or not secrets.compare_digest(n.invite_token, payload.token or ""):
+        raise HTTPException(404, "That invite link doesn't work any more")
+    me = caller.name.lower()
+    people = _shared(n)
+    joined = False
+    if n.owner.lower() != me and not any(p["name"].lower() == me and p.get("on_app") for p in people):
+        people = [p for p in people if p["name"].lower() != me] + [{"name": caller.name, "on_app": True}]
+        n.shared_with = json.dumps(people)
+        db.commit()
+        joined = True
+    return {"joined": joined, "title": n.title}
