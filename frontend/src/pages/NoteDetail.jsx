@@ -195,7 +195,8 @@ export default function NoteDetail() {
       return r
     })
     const there = new Set(fresh.rows.map((r) => r.id))
-    rowsRef.current.forEach((l) => { if (!there.has(l.id) && edited.current.has(l.id)) next.push(l) })
+    // my new rows not saved yet stay where new rows go - on top
+    next.unshift(...rowsRef.current.filter((l) => !there.has(l.id) && edited.current.has(l.id)))
     setRows(next); setNote(fresh)
     if (!ec) setTitle(fresh.title)
     if (!sh) setPeople(fresh.people || [])
@@ -241,7 +242,7 @@ export default function NoteDetail() {
     const rid = Math.random().toString(36).slice(2, 12)
     edited.current.add(rid)
     setQ('')
-    setRows((rs) => [...rs, { id: rid, cells: note.columns.map(() => ''), by: user?.name }])
+    setRows((rs) => [{ id: rid, cells: note.columns.map(() => ''), by: user?.name }, ...rs])   // new rows go on top
     setTimeout(() => {
       const el = document.querySelector(`[data-row="${rid}"] textarea`)
       el?.scrollIntoView({ block: 'center', behavior: 'smooth' }); el?.focus({ preventScroll: true })
@@ -249,7 +250,7 @@ export default function NoteDetail() {
   }
   // Rows the AI read from text or speech, checked by the caller: theirs now
   const addRows = (cellRows) => {
-    const next = [...rowsRef.current, ...cellRows.map((cells) => ({ id: Math.random().toString(36).slice(2, 12), cells, by: user?.name }))]
+    const next = [...cellRows.map((cells) => ({ id: Math.random().toString(36).slice(2, 12), cells, by: user?.name })), ...rowsRef.current]
     setRows(next); return save({ rows: next })
   }
   // On leaving a name cell of my row: warn if that name is already in the
@@ -471,6 +472,9 @@ export default function NoteDetail() {
               )}
             </tbody>
           </table>
+          {/* a small + at the foot of the table too; the new row opens on top */}
+          <button onClick={addRow} aria-label="Add a row (it goes on top)" title="Add a row - it goes on top"
+            className="w-full border-t border-amber-200 py-1 text-base leading-none font-black text-brand-600 hover:bg-amber-50">+</button>
         </div>
       </div>
     </div>
