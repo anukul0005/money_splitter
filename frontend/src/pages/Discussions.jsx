@@ -115,7 +115,7 @@ export default function Discussions() {
             </div>
             {d.last && (
               <p className="text-xs text-gray-600 mt-1.5 line-clamp-2">
-                <span className="font-bold">{displayName(d.last.author)}:</span> {d.last.text}
+                <span className="font-bold">{displayName(d.last.author)}:</span> {d.last.text.replace(/^\p{Extended_Pictographic}\uFE0F?\s*/u, '')}
               </p>
             )}
             <div className="flex flex-wrap gap-1.5 mt-2">

@@ -828,7 +828,7 @@ def _run(plan_id: int) -> None:
             f" (over the ₹{spec['budget_per_person']:,} budget by ₹{money['over_by']:,})" if money["over_by"]
             else f" (within ₹{spec['budget_per_person']:,})")
         db.add(DiscussionMessage(discussion_id=d.id, author=plan.created_by, text=(
-            f"🧭 Trip plan: {result['title']}\n{spec['days']} days · {spec['travellers']} people · "
+            f"Trip plan: {result['title']}\n{spec['days']} days · {spec['travellers']} people · "
             f"₹{money['per_person']:,} per person{within}\nSee it in the Plan tab.")[:5000]))
         d.updated_at = datetime.now(timezone.utc)
         step("Done")

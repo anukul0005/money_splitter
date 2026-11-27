@@ -419,7 +419,7 @@ function MessageText({ m, d, mine, onChanged, onQuote }) {
       {m.attachment ? (
         <AttachmentCard a={m.attachment} caption={m.text.split('\u{1F4CE}')[0].trim()} d={d} onQuote={onQuote} />
       ) : (
-        <p className="text-sm text-gray-800 whitespace-pre-line mt-1 break-words"><Rich text={m.text} /></p>
+        <p className="text-sm text-gray-800 whitespace-pre-line mt-1 break-words"><Rich text={m.text.replace(/^\p{Extended_Pictographic}\uFE0F?\s*/u, '')} /></p>
       )}
       {mine && (
         <span className="flex gap-3 mt-1">

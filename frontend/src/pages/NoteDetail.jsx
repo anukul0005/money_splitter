@@ -20,6 +20,7 @@ export default function NoteDetail() {
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [editCols, setEditCols] = useState(false)
+  const [sharing, setSharing] = useState(false)
   const [cols, setCols] = useState([])
   const [newCol, setNewCol] = useState('')
   const [title, setTitle] = useState('')
@@ -65,10 +66,9 @@ export default function NoteDetail() {
     // keep each row's cells under the column they belong to
     const idx = next.map((c) => note.columns.indexOf(c))
     const remapped = rows.map((r) => idx.map((k) => (k >= 0 ? r[k] : '')))
-    const data = { title, columns: next, rows: remapped }
-    if (mine) data.people = people.map((p) => p.name)
-    if (await save(data)) { setEditCols(false); setNewCol('') }
+    if (await save({ title, columns: next, rows: remapped })) { setEditCols(false); setNewCol('') }
   }
+  const saveSharing = async () => { if (await save({ people: people.map((p) => p.name) })) setSharing(false) }
 
   return (
     <div className="pb-24 md:pb-8">
@@ -81,7 +81,11 @@ export default function NoteDetail() {
           {note.updated_at ? ` · edited ${ago(note.updated_at)}${note.updated_by && note.updated_by !== user?.name ? ` by ${note.updated_by}` : ''}` : ''}
         </p>
         <div className="flex gap-4 mt-3 text-[11px] font-bold">
-          <button onClick={() => setEditCols((v) => !v)} className="text-brand-300 hover:text-white">{editCols ? 'Close' : mine ? 'Edit columns, name & sharing' : 'Edit columns & name'}</button>
+          <button onClick={() => { setEditCols((v) => !v); setSharing(false) }} className="text-brand-300 hover:text-white">{editCols ? 'Close' : 'Edit columns & name'}</button>
+          {mine && (
+            <button onClick={() => { setSharing((v) => !v); setEditCols(false); setPeople(note.people || []) }}
+              className="text-brand-300 hover:text-white">{sharing ? 'Close' : 'Who can see it'}</button>
+          )}
           {mine && (
             <button onClick={async () => { if (window.confirm('Delete this note and everything in it?')) { await deleteNote(id); nav('/discuss') } }}
               className="text-red-300 hover:text-white">Delete note</button>
@@ -105,13 +109,19 @@ export default function NoteDetail() {
               </div>
             ))}
             <input value={newCol} onChange={(e) => setNewCol(e.target.value)} className="input text-xs py-1.5" placeholder="Add a column" />
-            {mine && (
-              <div className="pt-1">
-                <p className="text-[11px] font-bold text-gray-600 mb-1">Who can see it</p>
-                <NotePeople me={user?.name} people={people} setPeople={setPeople} />
-              </div>
-            )}
             <button onClick={saveCols} disabled={saving} className="btn-primary !w-auto text-xs px-4 py-2 disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>
+          </div>
+        )}
+
+        {sharing && mine && (
+          <div className="card space-y-2 max-w-2xl">
+            <p className="text-xs font-black text-gray-500 uppercase tracking-widest">Who can see it</p>
+            <p className="text-[11px] text-gray-500">Add people on the app to let them open and edit it; ✕ takes someone off.</p>
+            <NotePeople me={user?.name} people={people} setPeople={setPeople} />
+            <div className="flex gap-3 items-center">
+              <button onClick={saveSharing} disabled={saving} className="btn-primary !w-auto text-xs px-4 py-2 disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>
+              <button onClick={() => { setSharing(false); setPeople(note.people || []) }} className="text-xs font-bold text-gray-500">Cancel</button>
+            </div>
           </div>
         )}
 
