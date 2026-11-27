@@ -13,6 +13,9 @@ const num = (c) => {
 }
 const fmt = (n) => n.toLocaleString('en-IN', { maximumFractionDigits: 2 })
 
+// A heading may break after a comma or slash, not inside a word
+const soft = (t) => String(t).replace(/([,/])/g, '$1\u200B')
+
 /** A table cell that grows to show all its text - never a box that scrolls */
 function Cell({ value, ...rest }) {
   const ref = useRef(null)
@@ -136,6 +139,19 @@ export default function NoteDetail() {
   const shown = rows.map((r, i) => [r, i]).filter(([r]) => !needle || [...r.cells, r.by || ''].some((c) => c.toLowerCase().includes(needle)))
   const mine = note.owner.toLowerCase() === user?.name?.toLowerCase()
   // a row is only ever edited by whoever added it
+  // Each column's share of the width, from what it holds: its longest word
+  // (header or cell) so words aren't split, and how long its entries run
+  const widths = (() => {
+    const longest = (t) => Math.max(0, ...String(t || '').split(/[\s,/-]+/).map((w) => w.length))
+    const ws = note.columns.map((c, ci) => {
+      const cells = rows.map((r) => r.cells[ci] || '').filter(Boolean)
+      const word = Math.max(longest(c) * 1.15, ...cells.map(longest))      // headers are bold
+      const avg = cells.length ? cells.reduce((t, x) => t + x.length, 0) / cells.length : 4
+      return Math.min(24, Math.max(4, word, avg * 0.7))
+    })
+    const sum = ws.reduce((t, w) => t + w, 0)
+    return ws.map((w) => (w / sum) * 100)
+  })()
   const isMine = (r) => (r.by || '').toLowerCase() === (user?.name || '').toLowerCase()
 
   const saveCols = async () => {
@@ -211,36 +227,43 @@ export default function NoteDetail() {
 
         <div className="border border-amber-200 bg-white">
           <table className="w-full table-fixed text-xs border-collapse">
+            <colgroup>
+              <col style={{ width: '2.75rem' }} />
+              {widths.map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}
+              <col style={{ width: '1.5rem' }} />
+            </colgroup>
             <thead>
               <tr className="bg-amber-50">
-                <th className="w-6 border-b border-amber-200" />
+                <th className="border-b border-amber-200 text-[9px] font-bold text-gray-400 align-bottom pb-2">#</th>
                 {note.columns.map((c) => (
-                  <th key={c} className="text-left font-black text-gray-700 px-2 py-2 border-b border-l border-amber-200 align-bottom [overflow-wrap:anywhere]">{c}</th>
+                  <th key={c} className="text-left font-black text-gray-700 px-2 py-2 border-b border-l border-amber-200 align-bottom break-words">{soft(c)}</th>
                 ))}
-                <th className="text-left font-black text-gray-400 px-2 py-2 border-b border-l border-amber-200 align-bottom w-[4.5rem]">Added by</th>
-                <th className="w-7 border-b border-amber-200" />
+                <th className="border-b border-amber-200" />
               </tr>
             </thead>
             <tbody>
               {shown.map(([r, ri]) => (
                 <tr key={r.id || ri} className="border-b border-amber-100 last:border-0">
-                  <td className="text-[10px] text-gray-400 text-center align-top pt-2">{ri + 1}</td>
+                  <td className="text-center align-top pt-1.5 pb-1 px-0.5">
+                    <span className="block text-[10px] text-gray-400 leading-tight">{ri + 1}</span>
+                    {/* who added the row - set from their profile, for good */}
+                    <span className="block text-[8px] text-gray-400 leading-tight truncate" title={`Added by ${r.by}`}>
+                      {r.by?.toLowerCase() === user?.name?.toLowerCase() ? 'You' : r.by}
+                    </span>
+                  </td>
                   {note.columns.map((c, ci) => (
                     <td key={c} className="border-l border-amber-100 p-0 align-top">
                       <Cell value={r.cells[ci] ?? ''} readOnly={!isMine(r)} onChange={(e) => setCell(ri, ci, e.target.value)} onBlur={saveRows}
-                        className={`w-full px-2 py-1.5 text-xs bg-transparent resize-none overflow-hidden block focus:outline-none ${isMine(r) ? "focus:bg-amber-50" : "text-gray-600 cursor-default"}`} />
+                        className={`w-full px-2 py-1.5 text-xs bg-transparent resize-none overflow-hidden block break-words focus:outline-none ${isMine(r) ? "focus:bg-amber-50" : "text-gray-600 cursor-default"}`} />
                     </td>
                   ))}
-                  <td className="border-l border-amber-100 px-2 py-1.5 align-top text-[11px] text-gray-500 [overflow-wrap:anywhere]">
-                    {r.by?.toLowerCase() === user?.name?.toLowerCase() ? 'You' : r.by}
-                  </td>
                   <td className="text-center align-top pt-1.5">
-                    {isMine(r) && <button onClick={() => window.confirm(`Delete row ${ri + 1}?`) && delRow(ri)} className="text-gray-300 hover:text-red-600 px-1" aria-label={`Delete row ${ri + 1}`}>✕</button>}
+                    {isMine(r) && <button onClick={() => window.confirm(`Delete row ${ri + 1}?`) && delRow(ri)} className="text-gray-300 hover:text-red-600" aria-label={`Delete row ${ri + 1}`}>✕</button>}
                   </td>
                 </tr>
               ))}
               {!rows.length && (
-                <tr><td colSpan={note.columns.length + 3} className="text-center text-gray-400 py-6">No rows yet - add the first one.</td></tr>
+                <tr><td colSpan={note.columns.length + 2} className="text-center text-gray-400 py-6">No rows yet - add the first one.</td></tr>
               )}
             </tbody>
           </table>
