@@ -1950,3 +1950,20 @@ class GroupTreat(Base):
     returned_note = Column(String(200), nullable=True)
     created_by = Column(String(100), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class NoteTable(Base):
+    """A note kept as a table (routers/notes.py): its owner names the columns
+    ("Name", "Phone", "Price") and fills in rows. Private to the owner, or
+    shared with one of their groups - then anyone in it can edit."""
+    __tablename__ = "note_tables"
+
+    id = Column(Integer, primary_key=True, index=True)
+    owner = Column(String(100), nullable=False, index=True)
+    group_id = Column(Integer, ForeignKey("groups.id", ondelete="CASCADE"), nullable=True, index=True)
+    title = Column(String(200), nullable=False)
+    columns_json = Column(Text, nullable=False)      # ["Name", "Phone", ...]
+    rows_json = Column(Text, nullable=True)          # [["Shreya", "98...", ...], ...]
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_by = Column(String(100), nullable=True)

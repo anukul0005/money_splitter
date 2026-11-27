@@ -33,6 +33,7 @@ import History     from './pages/History'
 import SalaryDashboard from './pages/SalaryDashboard'
 import Discussions from './pages/Discussions'
 import DiscussionDetail from './pages/DiscussionDetail'
+import NoteDetail from './pages/NoteDetail'
 import MLAnalysis  from './pages/MLAnalysis'
 import Insights    from './pages/Insights'
 import CardBill    from './pages/CardBill'
@@ -162,6 +163,7 @@ export default function App() {
                 <Route path="/salary"     element={<SalaryDashboard />} />
                 <Route path="/discuss"    element={<Discussions />} />
                 <Route path="/discuss/:id" element={<DiscussionDetail />} />
+                <Route path="/notes/:id"  element={<NoteDetail />} />
                 <Route path="/ml-analysis" element={<MLAnalysis />} />
                 <Route path="/insights" element={<Insights />} />
                 <Route path="/credit-cards/card/:id" element={<CardBill />} />

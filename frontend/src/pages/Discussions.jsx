@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { listDiscussions, createDiscussion, suggestQuoteFields } from '../api/index.js'
+import { listDiscussions, createDiscussion, suggestQuoteFields, listNotes, createNote, getGroups } from '../api/index.js'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PeoplePicker from '../components/DiscussionPeoplePicker'
 import { useUser } from '../UserContext'
@@ -25,9 +25,14 @@ export default function Discussions() {
   const [rows, setRows] = useState(null)
   const [error, setError] = useState('')
   const [creating, setCreating] = useState(false)
+  const [noting, setNoting] = useState(false)
+  const [notes, setNotes] = useState(null)
 
   const load = () => listDiscussions().then((r) => setRows(r.data)).catch(() => setError('Could not reach server - try again in a moment.'))
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    listNotes().then((r) => setNotes(r.data)).catch(() => setNotes([]))
+  }, [])
 
   if (!rows && !error) return <LoadingSpinner />
 
@@ -37,20 +42,48 @@ export default function Discussions() {
         <button onClick={() => nav('/')} className="text-slate-300/70 text-xs font-bold">‹ Home</button>
         <h1 className="text-2xl font-black mt-2 tracking-tight">Discussions</h1>
         <p className="text-slate-300/70 text-xs mt-1">
-          Plan with your group - direct enquiries to members, invite others by email, and line up the quotes you get.
+          Plan with your group - direct enquiries, invite others by email, line up quotes. Or keep a note as a table, with your own columns.
         </p>
-        {!creating && (
-          <button onClick={() => setCreating(true)} className="btn-primary text-sm mt-4">+ New discussion</button>
+        {!creating && !noting && (
+          <div className="flex flex-wrap gap-2 mt-4">
+            <button onClick={() => setCreating(true)} className="btn-primary !w-auto text-sm px-4">+ New discussion</button>
+            <button onClick={() => setNoting(true)}
+              className="text-sm font-bold px-4 py-2.5 border border-slate-300/50 text-white hover:bg-white/10">+ New note</button>
+          </div>
         )}
       </div>
 
       <div className="px-4 md:px-5 mt-4 space-y-3 max-w-2xl">
         {creating && <NewDiscussion onCancel={() => setCreating(false)} onCreated={(id) => nav(`/discuss/${id}`)} />}
+        {noting && <NewNote onCancel={() => setNoting(false)} onCreated={(id) => nav(`/notes/${id}`)} />}
         {error && <p className="text-sm text-red-600">{error}</p>}
 
-        {rows?.length === 0 && !creating && (
+        {notes?.length > 0 && (
+          <div>
+            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Notes</p>
+            <div className="space-y-2">
+              {notes.map((n) => (
+                <button key={n.id} onClick={() => nav(`/notes/${n.id}`)}
+                  className="card w-full text-left hover:border-brand-300 active:scale-[0.99] transition-all">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-black text-gray-900 truncate">{n.title}</p>
+                    <span className="text-[10px] text-gray-400 shrink-0">{ago(n.updated_at)}</span>
+                  </div>
+                  <p className="text-[11px] text-gray-500 truncate">{n.columns.join(' · ')}</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">
+                    {n.count} row{n.count === 1 ? '' : 's'} · {n.group ? `shared with ${n.group}` : 'only you'}
+                  </p>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {rows?.length > 0 && notes?.length > 0 && (
+          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest -mb-1">Discussions</p>
+        )}
+
+        {rows?.length === 0 && !creating && !noting && (
           <div className="card text-center py-8">
-            <p className="text-3xl mb-2">💬</p>
             <p className="text-sm font-bold text-gray-800">No discussions yet</p>
             <p className="text-xs text-gray-500 mt-1">Start one for wedding venues, a trip's hotels, caterers - anything the group is planning.</p>
           </div>
@@ -63,7 +96,7 @@ export default function Discussions() {
               <div className="min-w-0">
                 <p className="text-sm font-black text-gray-900 truncate">{d.title}</p>
                 <p className="text-[11px] text-gray-400 truncate">
-                  {d.group.name !== d.title && <>{d.group.emoji} {d.group.name} · </>}
+                  {d.group.name !== d.title && <>{d.group.name} · </>}
                   {d.members.map((n) => displayName(n, d.members)).join(', ')}
                 </p>
               </div>
@@ -153,7 +186,7 @@ function NewDiscussion({ onCancel, onCreated }) {
         <div className="flex items-center justify-between">
           <p className="text-[11px] font-bold text-gray-600">Quote fields <span className="font-normal text-gray-400">- noted for every quote, to compare</span></p>
           <button type="button" onClick={suggest} disabled={!title.trim() || suggesting}
-            className="text-[11px] font-bold text-brand-600 disabled:opacity-40">{suggesting ? 'Thinking…' : '✨ Suggest'}</button>
+            className="text-[11px] font-bold text-brand-600 disabled:opacity-40">{suggesting ? 'Thinking…' : 'Suggest'}</button>
         </div>
         <div className="flex flex-wrap gap-1.5 mt-1.5">
           {params.map((p, i) => (
@@ -175,6 +208,88 @@ function NewDiscussion({ onCancel, onCreated }) {
       <div className="flex gap-3">
         <button type="submit" disabled={!title.trim() || !description.trim() || !(members.length || emails.length) || saving} className="btn-primary text-sm disabled:opacity-50">
           {saving ? 'Creating…' : 'Start discussion'}
+        </button>
+        <button type="button" onClick={onCancel} className="text-sm font-bold text-gray-500">Cancel</button>
+      </div>
+    </form>
+  )
+}
+
+/**
+ * A note: what it's about, the column headers to keep (Name, Phone, Price…),
+ * and whether it's just yours or shared with a group.
+ */
+function NewNote({ onCancel, onCreated }) {
+  const user = useUser()
+  const [title, setTitle] = useState('')
+  const [cols, setCols] = useState([])
+  const [draft, setDraft] = useState('')
+  const [groups, setGroups] = useState([])
+  const [groupId, setGroupId] = useState('')
+  const [err, setErr] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    getGroups().then((r) => setGroups(r.data.filter((g) =>
+      (g.member_names ?? []).length > 1
+      && (g.member_names ?? []).some((n) => n.toLowerCase() === user?.name?.toLowerCase())))).catch(() => {})
+  }, [user?.name])
+
+  const add = () => {
+    const parts = draft.split(',').map((x) => x.trim()).filter(Boolean)
+    setCols((cs) => [...cs, ...parts.filter((p) => !cs.some((c) => c.toLowerCase() === p.toLowerCase()))])
+    setDraft('')
+  }
+  const save = async (e) => {
+    e.preventDefault()
+    const all = [...cols, ...draft.split(',').map((x) => x.trim()).filter(Boolean)]
+    if (!title.trim() || !all.length) return
+    setSaving(true); setErr('')
+    try {
+      const { data } = await createNote({ title, columns: all, group_id: groupId ? Number(groupId) : null })
+      onCreated(data.id)
+    } catch (e2) {
+      setErr(e2.response?.data?.detail || "Couldn't create it.")
+      setSaving(false)
+    }
+  }
+  const ready = title.trim() && (cols.length || draft.trim())
+  return (
+    <form onSubmit={save} className="card space-y-3">
+      <p className="text-xs font-black text-gray-500 uppercase tracking-widest">New note</p>
+      <label className="block text-[11px] font-bold text-gray-600">What do you want to keep?
+        <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} className="input text-sm mt-1"
+          placeholder="e.g. Caterers we called, Books to read, Wi-Fi passwords" />
+      </label>
+      <div>
+        <p className="text-[11px] font-bold text-gray-600">Columns <span className="font-normal text-gray-400">- the headings of the table</span></p>
+        {cols.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-1.5">
+            {cols.map((c, i) => (
+              <span key={c} className="flex items-center gap-1 text-[11px] font-bold bg-amber-50 border border-amber-200 text-gray-700 pl-2 pr-1 py-0.5">
+                {c}
+                <button type="button" onClick={() => setCols((cs) => cs.filter((_, j) => j !== i))} className="text-gray-400 hover:text-red-600 px-0.5" aria-label={`Remove ${c}`}>✕</button>
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="flex gap-2 mt-1.5">
+          <input value={draft} onChange={(e) => setDraft(e.target.value)} className="input text-xs py-1.5 flex-1"
+            placeholder={cols.length ? 'Another column' : 'e.g. Name, Phone, Price, Notes'}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add() } }} />
+          <button type="button" onClick={add} disabled={!draft.trim()} className="text-xs font-bold text-brand-600 disabled:opacity-40 px-2">Add</button>
+        </div>
+      </div>
+      <label className="block text-[11px] font-bold text-gray-600">Who can see it
+        <select value={groupId} onChange={(e) => setGroupId(e.target.value)} className="input text-sm mt-1">
+          <option value="">Only me</option>
+          {groups.map((g) => <option key={g.id} value={g.id}>Shared with {g.name}</option>)}
+        </select>
+      </label>
+      {err && <p className="text-xs text-red-600">{typeof err === 'string' ? err : 'Check the details.'}</p>}
+      <div className="flex gap-3">
+        <button type="submit" disabled={!ready || saving} className="btn-primary !w-auto px-4 text-sm disabled:opacity-50">
+          {saving ? 'Creating…' : 'Create note'}
         </button>
         <button type="button" onClick={onCancel} className="text-sm font-bold text-gray-500">Cancel</button>
       </div>

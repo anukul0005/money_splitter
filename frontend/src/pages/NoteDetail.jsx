@@ -1,0 +1,151 @@
+import { useEffect, useRef, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
+import { getNote, editNote, deleteNote } from '../api/index.js'
+import LoadingSpinner from '../components/LoadingSpinner'
+import { useUser } from '../UserContext'
+import { ago } from './Discussions'
+
+/**
+ * A note: a table with the columns its owner named. Cells save as you leave
+ * them; columns can be added, renamed and removed.
+ */
+export default function NoteDetail() {
+  const { id } = useParams()
+  const nav = useNavigate()
+  const user = useUser()
+  const [note, setNote] = useState(null)
+  const [rows, setRows] = useState([])
+  const [err, setErr] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [dirty, setDirty] = useState(false)
+  const [editCols, setEditCols] = useState(false)
+  const [cols, setCols] = useState([])
+  const [newCol, setNewCol] = useState('')
+  const [title, setTitle] = useState('')
+  const [q, setQ] = useState('')
+  const rowsRef = useRef(rows)
+  rowsRef.current = rows
+
+  const take = (n) => { setNote(n); setRows(n.rows); setCols(n.columns); setTitle(n.title); setDirty(false) }
+  useEffect(() => {
+    getNote(id).then((r) => take(r.data)).catch(() => setErr("Couldn't open this note."))
+  }, [id])
+
+  // A save of just the rows keeps what's on screen: the reply mustn't undo
+  // typing done while it was on its way
+  const save = async (data) => {
+    setSaving(true); setErr('')
+    if (!data.columns) setDirty(false)
+    try {
+      const r = await editNote(id, data)
+      if (data.columns) take(r.data)
+      else setNote(r.data)
+      return true
+    }
+    catch (e) { setErr(e.response?.data?.detail || "Couldn't save - try again."); setDirty(true); return false }
+    finally { setSaving(false) }
+  }
+  const saveRows = () => dirty && save({ rows: rowsRef.current })
+
+  if (err && !note) return <p className="p-6 text-sm text-red-600">{err}</p>
+  if (!note) return <LoadingSpinner />
+
+  const setCell = (ri, ci, v) => { setRows((rs) => rs.map((r, i) => (i === ri ? r.map((c, j) => (j === ci ? v : c)) : r))); setDirty(true) }
+  const addRow = () => { const next = [...rows, note.columns.map(() => '')]; setRows(next); save({ rows: next }) }
+  const delRow = (ri) => { const next = rows.filter((_, i) => i !== ri); setRows(next); save({ rows: next }) }
+  const needle = q.trim().toLowerCase()
+  const shown = rows.map((r, i) => [r, i]).filter(([r]) => !needle || r.some((c) => c.toLowerCase().includes(needle)))
+  const mine = note.owner.toLowerCase() === user?.name?.toLowerCase()
+
+  const saveCols = async () => {
+    const add = newCol.trim()
+    const next = add ? [...cols, add] : cols
+    // keep each row's cells under the column they belong to
+    const idx = next.map((c) => note.columns.indexOf(c))
+    const remapped = rows.map((r) => idx.map((k) => (k >= 0 ? r[k] : '')))
+    if (await save({ title, columns: next, rows: remapped })) { setEditCols(false); setNewCol('') }
+  }
+
+  return (
+    <div className="pb-24 md:pb-8">
+      <div className="bg-gradient-to-br from-field-800 to-field-950 text-white px-5 pt-10 md:pt-8 pb-5 border-b border-field-700">
+        <button onClick={() => nav('/discuss')} className="text-slate-300/70 text-xs font-bold">‹ Discussions & notes</button>
+        <h1 className="text-2xl font-black mt-2 tracking-tight break-words">{note.title}</h1>
+        <p className="text-slate-300/70 text-xs mt-1">
+          {note.group ? `Shared with ${note.group}` : 'Only you'} · {rows.length} row{rows.length === 1 ? '' : 's'}
+          {note.updated_at ? ` · edited ${ago(note.updated_at)}${note.updated_by && note.updated_by !== user?.name ? ` by ${note.updated_by}` : ''}` : ''}
+        </p>
+        <div className="flex gap-4 mt-3 text-[11px] font-bold">
+          <button onClick={() => setEditCols((v) => !v)} className="text-brand-300 hover:text-white">{editCols ? 'Close' : 'Edit columns & name'}</button>
+          {mine && (
+            <button onClick={async () => { if (window.confirm('Delete this note and everything in it?')) { await deleteNote(id); nav('/discuss') } }}
+              className="text-red-300 hover:text-white">Delete note</button>
+          )}
+        </div>
+      </div>
+
+      <div className="px-4 md:px-5 mt-4 space-y-3">
+        {editCols && (
+          <div className="card space-y-2 max-w-2xl">
+            <label className="block text-[11px] font-bold text-gray-600">Name
+              <input value={title} onChange={(e) => setTitle(e.target.value)} className="input text-sm mt-1" />
+            </label>
+            <p className="text-[11px] font-bold text-gray-600">Columns</p>
+            {cols.map((c, i) => (
+              <div key={i} className="flex gap-2 items-center">
+                <input value={c} onChange={(e) => setCols((cs) => cs.map((x, j) => (j === i ? e.target.value : x)))} className="input text-xs py-1.5 flex-1" />
+                <button type="button" disabled={cols.length <= 1}
+                  onClick={() => window.confirm(`Remove the "${c}" column and what's in it?`) && setCols((cs) => cs.filter((_, j) => j !== i))}
+                  className="text-[11px] font-bold text-red-500 disabled:opacity-30">Remove</button>
+              </div>
+            ))}
+            <input value={newCol} onChange={(e) => setNewCol(e.target.value)} className="input text-xs py-1.5" placeholder="Add a column" />
+            <button onClick={saveCols} disabled={saving} className="btn-primary !w-auto text-xs px-4 py-2 disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>
+          </div>
+        )}
+
+        {rows.length > 8 && (
+          <input value={q} onChange={(e) => setQ(e.target.value)} className="input text-sm max-w-sm" placeholder="Search the rows" />
+        )}
+
+        <div className="overflow-x-auto border border-amber-200 bg-white">
+          <table className="text-xs border-collapse min-w-full">
+            <thead>
+              <tr className="bg-amber-50">
+                <th className="w-8 border-b border-amber-200" />
+                {note.columns.map((c) => (
+                  <th key={c} className="text-left font-black text-gray-700 px-2 py-2 border-b border-l border-amber-200 whitespace-nowrap">{c}</th>
+                ))}
+                <th className="w-8 border-b border-amber-200" />
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map(([r, ri]) => (
+                <tr key={ri} className="border-b border-amber-100 last:border-0">
+                  <td className="text-[10px] text-gray-400 text-center align-top pt-2">{ri + 1}</td>
+                  {note.columns.map((c, ci) => (
+                    <td key={c} className="border-l border-amber-100 p-0 align-top">
+                      <textarea rows={1} value={r[ci] ?? ''} onChange={(e) => setCell(ri, ci, e.target.value)} onBlur={saveRows}
+                        className="w-full min-w-[8rem] px-2 py-1.5 text-xs bg-transparent resize-y focus:outline-none focus:bg-amber-50" />
+                    </td>
+                  ))}
+                  <td className="text-center align-top pt-1.5">
+                    <button onClick={() => window.confirm(`Delete row ${ri + 1}?`) && delRow(ri)} className="text-gray-300 hover:text-red-600 px-1" aria-label={`Delete row ${ri + 1}`}>✕</button>
+                  </td>
+                </tr>
+              ))}
+              {!rows.length && (
+                <tr><td colSpan={note.columns.length + 2} className="text-center text-gray-400 py-6">No rows yet - add the first one.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div className="flex items-center gap-3">
+          <button onClick={addRow} className="text-xs font-bold text-brand-600">+ Add row</button>
+          <span className="text-[10px] text-gray-400">{saving ? 'Saving…' : dirty ? 'Unsaved - tap outside the cell' : 'Saved'}</span>
+          {err && <span className="text-[11px] text-red-600">{err}</span>}
+        </div>
+      </div>
+    </div>
+  )
+}

@@ -56,9 +56,9 @@ function AttachmentCard({ a, caption, d, onQuote }) {
       {caption && <p className="text-sm text-gray-800 whitespace-pre-line break-words mb-1.5"><Rich text={caption} /></p>}
       <div className="border border-amber-200 bg-amber-50/50 px-2.5 py-2">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-[11px] font-black text-gray-700 truncate">📎 {a.name}</span>
+          <span className="text-[11px] font-black text-gray-700 truncate">{a.name}</span>
           <span className="flex items-center gap-2 shrink-0">
-            <span className="text-[9px] font-bold text-brand-600 uppercase tracking-widest">✨ AI read</span>
+            <span className="text-[9px] font-bold text-brand-600 uppercase tracking-widest">AI read</span>
             <CopyButton text={(a.vendor ? `${a.vendor}\n` : '') + plain} />
           </span>
         </div>
@@ -191,7 +191,7 @@ export default function DiscussionDetail() {
 
   if (error) return (
     <div className="flex flex-col items-center justify-center min-h-[60vh] px-6 text-center">
-      <p className="text-4xl mb-3">💬</p>
+      
       <p className="text-sm text-gray-600 mb-4">{error}</p>
       <button onClick={() => nav('/discuss')} className="btn-primary text-sm">All discussions</button>
     </div>
@@ -217,7 +217,7 @@ export default function DiscussionDetail() {
             className={`px-2.5 py-2.5 text-xs font-bold border-b-2 -mb-px whitespace-nowrap ${tab === k ? 'border-brand-400 text-gray-900' : 'border-transparent text-gray-400'}`}>
             {label} {n != null && <span className="text-[10px] text-gray-400">{n}</span>}
             {k === 'asks' && mineOpen.length > 0 && <span className="ml-1 text-[9px] font-black bg-red-500 text-white px-1">{mineOpen.length}</span>}
-            {k === 'chat' && pollsWaiting > 0 && <span className="ml-1 text-[9px] font-black bg-brand-400 text-white px-1">{pollsWaiting} 📊</span>}
+            {k === 'chat' && pollsWaiting > 0 && <span className="ml-1 text-[9px] font-black bg-brand-400 text-white px-1">{pollsWaiting}</span>}
           </button>
         ))}
       </div>
@@ -259,7 +259,7 @@ function Header({ d, name, onChanged, onDeleted }) {
       </div>
       <h1 className="text-xl font-black mt-2 tracking-tight">{d.title}</h1>
       <p className="text-slate-300/60 text-[11px] mt-0.5">
-        {d.group.name !== d.title && <>{d.group.emoji} {d.group.name} · </>}
+        {d.group.name !== d.title && <>{d.group.name} · </>}
         {d.members.map((m) => (m.toLowerCase() === d.me.toLowerCase() ? 'You' : name(m))).join(', ')}
         {d.invites.some((i) => !i.accepted_by) && <> · {d.invites.filter((i) => !i.accepted_by).length} invited by email</>}
       </p>
@@ -280,9 +280,9 @@ function Header({ d, name, onChanged, onDeleted }) {
 }
 
 const NOTIFY = [
-  ['all', '🔔', 'All activity', "Messages, polls and quotes - push; email when you're asked"],
-  ['mine', '📨', "Only when I'm asked", 'Just enquiries directed at you (and quotes for yours)'],
-  ['off', '🔕', 'Off', 'No notifications from this discussion'],
+  ['all', 'All', 'All activity', "Messages, polls and quotes - push; email when you're asked"],
+  ['mine', 'Mine', "Only when I'm asked", 'Just enquiries directed at you (and quotes for yours)'],
+  ['off', 'Off', 'Off', 'No notifications from this discussion'],
 ]
 
 /** The caller's own notifications for this discussion: all / only mine / off. */
@@ -298,16 +298,15 @@ function NotifyBell({ d, onChanged }) {
   return (
     <span className="relative">
       <button onClick={() => setOpen((v) => !v)} title={`Notifications: ${cur[2]}`} aria-label={`Notifications: ${cur[2]}`}
-        className="text-sm leading-none text-slate-300/80 hover:text-white">{cur[1]}</button>
+        className="text-[10px] font-bold leading-none text-slate-300/80 hover:text-white border border-slate-300/40 px-1.5 py-1">Notify: {cur[1]}</button>
       {open && (
         <>
           <span className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
           <span className="absolute right-0 mt-2 w-64 bg-white text-gray-800 border border-amber-200 shadow-lg z-30 py-1 block">
             <span className="block px-3 pt-1 pb-1.5 text-[10px] font-black text-gray-400 tracking-widest">NOTIFY ME</span>
-            {NOTIFY.map(([k, icon, label, sub]) => (
+            {NOTIFY.map(([k, , label, sub]) => (
               <button key={k} onClick={() => pick(k)} disabled={saving}
                 className={`w-full text-left px-3 py-2 hover:bg-amber-50 flex gap-2 ${k === cur[0] ? 'bg-brand-50' : ''}`}>
-                <span className="text-sm">{icon}</span>
                 <span>
                   <span className="block text-xs font-bold">{label}{k === cur[0] ? ' ✓' : ''}</span>
                   <span className="block text-[10px] text-gray-400">{sub}</span>
@@ -357,13 +356,13 @@ function DetailsBlock({ d, onChanged }) {
           className="text-[11px] font-bold text-slate-300/80 hover:text-white">
           <span className="inline-block w-3">{show ? '▾' : '▸'}</span>Details
         </button>
-        {busy === 'summary' && <span className="text-[10px] text-slate-300/70">✨ Re-summarising…</span>}
+        {busy === 'summary' && <span className="text-[10px] text-slate-300/70">Re-summarising…</span>}
       </span>
       {show && (
         <>
           {d.description && <p className="text-slate-200/80 text-xs whitespace-pre-line mt-1 pl-3">{d.description}</p>}
           <span className="flex items-center gap-3 mt-1 pl-3">
-            <button onClick={() => { setText(d.description || ''); setEditing(true) }} className="text-[10px] font-bold text-brand-300 hover:text-white">✎ Edit details</button>
+            <button onClick={() => { setText(d.description || ''); setEditing(true) }} className="text-[10px] font-bold text-brand-300 hover:text-white">Edit details</button>
             {d.description && <CopyButton text={d.description} className="!text-slate-400 hover:!text-white" />}
           </span>
         </>
@@ -418,7 +417,7 @@ function MessageText({ m, d, mine, onChanged, onQuote }) {
   return (
     <>
       {m.attachment ? (
-        <AttachmentCard a={m.attachment} caption={m.text.split('📎')[0].trim()} d={d} onQuote={onQuote} />
+        <AttachmentCard a={m.attachment} caption={m.text.split('\u{1F4CE}')[0].trim()} d={d} onQuote={onQuote} />
       ) : (
         <p className="text-sm text-gray-800 whitespace-pre-line mt-1 break-words"><Rich text={m.text} /></p>
       )}
@@ -496,7 +495,7 @@ function EditDiscussion({ d, onSaved, onDeleted }) {
       <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="input text-xs" placeholder="Details (needed) - date, guests, budget, area" />
       <div className="flex items-center justify-between">
         <p className="text-[11px] font-bold text-gray-600">Quote fields</p>
-        <button onClick={suggest} disabled={busy} className="text-[11px] font-bold text-brand-600 disabled:opacity-40">✨ Suggest</button>
+        <button onClick={suggest} disabled={busy} className="text-[11px] font-bold text-brand-600 disabled:opacity-40">Suggest</button>
       </div>
       <div className="flex flex-wrap gap-1.5">
         {fields.map((f, i) => (
@@ -546,7 +545,7 @@ function Chat({ d, name, onChanged, onQuote }) {
   if (gate.length) return (
     <div className="flex-1 px-4 py-4 space-y-3 max-w-2xl w-full">
       <div className="border border-brand-300 bg-brand-50 px-4 py-3">
-        <p className="text-sm font-black text-gray-900">🔒 Answer {gate.length === 1 ? 'this poll' : `these ${gate.length} polls`} to enter the chat</p>
+        <p className="text-sm font-black text-gray-900">Answer {gate.length === 1 ? 'this poll' : `these ${gate.length} polls`} to enter the chat</p>
         <p className="text-xs text-gray-600 mt-0.5">
           {gate.length === 1 ? `${name(gate[0].author)} needs` : 'The group needs'} everyone's answer before going on.
           The chat opens as soon as you vote.
@@ -562,7 +561,7 @@ function Chat({ d, name, onChanged, onQuote }) {
         {pinned.length > 0 && (
           <div className="space-y-2 pb-3 border-b border-dashed border-brand-200">
             <p className="text-[10px] font-black text-brand-600 uppercase tracking-widest">
-              📌 Waiting for your answer{pinned.length > 1 ? ` · ${pinned.length}` : ''}
+              Waiting for your answer{pinned.length > 1 ? ` · ${pinned.length}` : ''}
             </p>
             {pinned.map((p) => <PollCard key={`pin${p.id}`} p={p} d={d} name={name} onChanged={onChanged} />)}
           </div>
@@ -570,7 +569,7 @@ function Chat({ d, name, onChanged, onQuote }) {
         {count === 0 && (
           <div className="text-center py-8">
             <p className="text-sm font-bold text-gray-700">Start the discussion</p>
-            <p className="text-xs text-gray-500 mt-1">Write what you're looking for. Direct it to members to have them enquire, invite others by email, or ask everyone with a 📊 poll.</p>
+            <p className="text-xs text-gray-500 mt-1">Write what you're looking for. Direct it to members to have them enquire, invite others by email, or ask everyone with a poll.</p>
           </div>
         )}
         {items.map((it) => {
@@ -583,7 +582,7 @@ function Chat({ d, name, onChanged, onQuote }) {
                 <div className="flex items-baseline justify-between gap-3">
                   <span className="text-[11px] font-black text-gray-700">{mine ? 'You' : name(m.author)}</span>
                   <span className="flex items-center gap-2">
-                    <span className="text-[10px] text-gray-400">{ago(m.created_at)}{m.polished ? ' · ✨' : ''}{m.edited_at ? ' · edited' : ''}</span>
+                    <span className="text-[10px] text-gray-400">{ago(m.created_at)}{m.polished ? ' · AI' : ''}{m.edited_at ? ' · edited' : ''}</span>
                     <CopyButton text={m.text} />
                   </span>
                 </div>
@@ -599,7 +598,7 @@ function Chat({ d, name, onChanged, onQuote }) {
                   </div>
                 )}
                 {m.invites.length > 0 && (
-                  <p className="text-[10px] text-gray-400 mt-1.5">✉ Invited {m.invites.join(', ')}</p>
+                  <p className="text-[10px] text-gray-400 mt-1.5">Invited {m.invites.join(', ')}</p>
                 )}
 
               </div>
@@ -646,7 +645,7 @@ function PollCard({ p, d, name, onChanged }) {
     if (await send(choices, myNote) && choices.includes(i) && wantsWords(i) && !myNote) setWriting(true)
   }
   const saveNote = async () => { if (await send(p.mine, note.trim())) setWriting(false) }
-  const resultsText = `📊 ${p.question}\n` + p.options.map((o) =>
+  const resultsText = `Poll: ${p.question}\n` + p.options.map((o) =>
     `- ${o.text}: ${o.voters.length} vote${o.voters.length === 1 ? '' : 's'}${o.voters.length
       ? ` (${o.voters.map((v) => name(v) + (noteOf(v) ? ` - "${noteOf(v)}"` : '')).join(', ')})` : ''}`).join('\n')
 
@@ -654,7 +653,7 @@ function PollCard({ p, d, name, onChanged }) {
     <div className="border border-brand-200 bg-white px-3 py-2.5">
       <div className="flex items-baseline justify-between gap-3">
         <span className="text-[10px] font-black text-brand-600 uppercase tracking-widest">
-          📊 Poll · {mineAuthor ? 'you asked' : `${name(p.author)} asks`}{p.closed ? ' · closed' : ''}
+          Poll · {mineAuthor ? 'you asked' : `${name(p.author)} asks`}{p.closed ? ' · closed' : ''}
           {p.mandatory && <span className="ml-1.5 text-[9px] bg-red-500 text-white px-1 py-px normal-case tracking-normal">must answer</span>}
         </span>
         <span className="flex items-center gap-2">
@@ -696,7 +695,7 @@ function PollCard({ p, d, name, onChanged }) {
       </div>
       {p.mine.length > 0 && !p.closed && !writing && (
         <button onClick={() => { setNote(myNote); setWriting(true) }} className="text-[10px] font-bold text-brand-600 mt-1.5">
-          {myNote ? '✎ Edit what you wrote' : '✎ Write something with your vote'}
+          {myNote ? 'Edit what you wrote' : 'Write something with your vote'}
         </button>
       )}
       {writing && !p.closed && (
@@ -745,7 +744,7 @@ function PollForm({ d, onDone, onCancel }) {
   }
   return (
     <div className="mb-2 bg-white border border-brand-200 px-3 py-2.5 space-y-1.5">
-      <p className="text-[10px] font-black text-brand-600 uppercase tracking-widest">📊 New poll - everyone in {d.group.name} can vote</p>
+      <p className="text-[10px] font-black text-brand-600 uppercase tracking-widest">New poll - everyone in {d.group.name} can vote</p>
       <input value={question} onChange={(e) => setQuestion(e.target.value)} maxLength={300} autoFocus
         className="input text-sm" placeholder="e.g. Which venue should we book?" />
       {options.map((o, i) => (
@@ -846,7 +845,7 @@ function Composer({ d, name, onSent }) {
       {polling && <PollForm d={d} onCancel={() => setPolling(false)} onDone={() => { setPolling(false); onSent() }} />}
       {suggestion && (
         <div className="mb-2 bg-white border border-brand-200 px-3 py-2">
-          <p className="text-[10px] font-black text-brand-600 uppercase tracking-widest">✨ AI version</p>
+          <p className="text-[10px] font-black text-brand-600 uppercase tracking-widest">AI version</p>
           <p className="text-sm text-gray-800 whitespace-pre-line mt-1">{suggestion}</p>
           <div className="flex gap-3 mt-2">
             <button onClick={() => { setOriginal(original ?? text); setText(suggestion); setSuggestion(null) }} className="text-xs font-bold text-brand-600">Use this</button>
@@ -886,24 +885,24 @@ function Composer({ d, name, onSent }) {
       {reading && (
         <p className="text-[11px] text-brand-700 mt-1">
           <span className="inline-block w-2 h-2 mr-1.5 rounded-full bg-brand-400 animate-pulse align-middle" />
-          📎 Reading {reading} with AI - this can take up to a minute. Only the summary is kept, not the file.
+          Reading {reading} with AI - this can take up to a minute. Only the summary is kept, not the file.
         </p>
       )}
       <input ref={fileRef} type="file" accept="image/*,application/pdf,.pdf" className="hidden" onChange={(e) => attach(e.target.files?.[0])} />
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mt-2">
         <button onClick={() => setShowDirect((v) => !v)} className={`text-[11px] font-bold ${showDirect || to.length ? 'text-brand-600' : 'text-gray-500'}`}>
-          👥 Direct / invite{to.length + emails.length ? ` (${to.length + emails.length})` : ''}
+          Direct / invite{to.length + emails.length ? ` (${to.length + emails.length})` : ''}
         </button>
         <button onClick={() => setPolling((v) => !v)} className={`text-[11px] font-bold ${polling ? 'text-brand-600' : 'text-gray-500'}`}>
-          📊 Poll
+          Poll
         </button>
         {d.ai && (
           <button onClick={() => fileRef.current?.click()} disabled={!!busy} title="Attach a quotation, menu or brochure (photo or PDF) - the AI summarises it for everyone"
-            className="text-[11px] font-bold text-gray-500 disabled:opacity-40">📎 Attach</button>
+            className="text-[11px] font-bold text-gray-500 disabled:opacity-40">Attach</button>
         )}
         {d.ai && (
           <button onClick={polish} disabled={!text.trim() || !!busy} className="text-[11px] font-bold text-gray-500 disabled:opacity-40">
-            {busy === 'polish' ? 'Improving…' : '✨ Improve with AI'}
+            {busy === 'polish' ? 'Improving…' : 'Improve with AI'}
           </button>
         )}
         <button onClick={send} disabled={!text.trim() || !!busy} className="btn-primary text-xs py-1.5 px-4 ml-auto disabled:opacity-50">
@@ -1053,7 +1052,7 @@ function Quotes({ d, name, tasks, onChanged, quoteFor, clearQuoteFor }) {
                     if (!card?.points?.length) return null
                     return (
                       <div className="bg-brand-50/60 border border-brand-100 px-2 py-1.5 mt-2">
-                        <p className="text-[9px] font-black text-brand-600 uppercase tracking-widest">✨ AI summary of this quote{d.summary.stale ? ' · updating…' : ''}</p>
+                        <p className="text-[9px] font-black text-brand-600 uppercase tracking-widest">AI summary of this quote{d.summary.stale ? ' · updating…' : ''}</p>
                         <ul className="mt-0.5 space-y-0.5">
                           {card.points.map((x, i) => (
                             <li key={i} className="text-[11px] text-gray-700 pl-3 relative"><span className="absolute left-0">·</span><Rich text={x} /></li>
@@ -1117,12 +1116,12 @@ function QuotesSummary({ d, onChanged }) {
   }
   if (!q) return (
     <div className="card !p-3">
-      <p className="text-[10px] font-black text-brand-600 uppercase tracking-widest">✨ AI on the quotes</p>
+      <p className="text-[10px] font-black text-brand-600 uppercase tracking-widest">AI on the quotes</p>
       <p className="text-xs text-gray-500 mt-1">
         {s?.data?.quotes_error ? "The quotes couldn't be compared last time." : 'Not compared yet.'}
       </p>
       <button onClick={run} disabled={busy} className="text-[11px] font-bold text-brand-600 mt-1.5 disabled:opacity-50">
-        {busy ? 'Comparing…' : '✨ Compare the quotes'}
+        {busy ? 'Comparing…' : 'Compare the quotes'}
       </button>
       {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
     </div>
@@ -1133,7 +1132,7 @@ function QuotesSummary({ d, onChanged }) {
     <div className="card !p-0 border-brand-200">
       <button onClick={() => setOpen((v) => !v)} className="w-full text-left px-3 py-2">
         <span className="flex items-center justify-between gap-2">
-          <span className="text-[10px] font-black text-brand-600 uppercase tracking-widest">✨ AI on the quotes</span>
+          <span className="text-[10px] font-black text-brand-600 uppercase tracking-widest">AI on the quotes</span>
           <span className="text-[10px] text-gray-400">
             {busy ? <span className="text-brand-600 font-bold">updating… · </span>
               : s.stale ? <span className="text-amber-600 font-bold">new activity since · </span> : null}{ago(s.at)} {open ? '▴' : '▾'}
@@ -1256,20 +1255,20 @@ function QuoteNotes({ q, d, name, onChanged }) {
           <div key={o.author} className="bg-white border border-amber-200 px-2 py-1.5">
             <p className="text-[10px] font-bold text-gray-800">
               {who(o.author)}
-              <span className="font-normal text-[9px] text-gray-400"> · {ago(o.at)}{o.edited ? ' · edited' : ''}{o.polished ? ' · ✨' : ''}</span>
+              <span className="font-normal text-[9px] text-gray-400"> · {ago(o.at)}{o.edited ? ' · edited' : ''}{o.polished ? ' · AI' : ''}</span>
             </p>
             <p className="text-[11px] text-gray-700 whitespace-pre-line mt-0.5"><Rich text={o.text} /></p>
             {o.id && <Reactions target="opinion" id={o.id} r={o.reactions} d={d} name={name} onChanged={onChanged} small />}
           </div>
         ))}
       {!editing && (
-        <button onClick={start} className="block text-[10px] font-bold text-brand-600">{mine ? '✎ Edit your opinion' : '+ Your opinion'}</button>
+        <button onClick={start} className="block text-[10px] font-bold text-brand-600">{mine ? 'Edit your opinion' : '+ Your opinion'}</button>
       )}
       {editing && (
         <div className="bg-amber-50 border border-amber-200 p-2 space-y-1.5">
           {suggestion && (
             <div className="bg-white border border-brand-200 px-2 py-1.5">
-              <p className="text-[9px] font-black text-brand-600 uppercase tracking-widest">✨ AI version</p>
+              <p className="text-[9px] font-black text-brand-600 uppercase tracking-widest">AI version</p>
               <p className="text-[11px] text-gray-800 whitespace-pre-line mt-0.5">{suggestion}</p>
               <div className="flex gap-3 mt-1">
                 <button onClick={() => { setText(suggestion); setPolished(true); setSuggestion(null) }} className="text-[10px] font-bold text-brand-600">Use this</button>
@@ -1286,7 +1285,7 @@ function QuoteNotes({ q, d, name, onChanged }) {
             </button>
             {d.ai && (
               <button onClick={improve} disabled={!!busy || !text.trim()} className="text-[10px] font-bold text-gray-500 disabled:opacity-40">
-                {busy === 'ai' ? 'Improving…' : '✨ Improve with AI'}
+                {busy === 'ai' ? 'Improving…' : 'Improve with AI'}
               </button>
             )}
             <button onClick={() => { setEditing(false); setErr('') }} className="text-[10px] font-bold text-gray-500">Cancel</button>
@@ -1387,10 +1386,10 @@ function EnquiriesSummary({ d, onChanged }) {
   }
   if (!e) return (
     <div className="card !p-3">
-      <p className="text-[10px] font-black text-brand-600 uppercase tracking-widest">✨ AI on the enquiries</p>
+      <p className="text-[10px] font-black text-brand-600 uppercase tracking-widest">AI on the enquiries</p>
       <p className="text-xs text-gray-500 mt-1">{s?.data?.enquiries_error ? "Couldn't be summarised last time." : 'Not summarised yet.'}</p>
       <button onClick={run} disabled={busy} className="text-[11px] font-bold text-brand-600 mt-1.5 disabled:opacity-50">
-        {busy ? 'Summarising…' : '✨ Summarise the enquiries'}
+        {busy ? 'Summarising…' : 'Summarise the enquiries'}
       </button>
       {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
     </div>
@@ -1409,7 +1408,7 @@ function EnquiriesSummary({ d, onChanged }) {
     <div className="card !p-0 border-brand-200">
       <button onClick={() => setOpen((v) => !v)} className="w-full text-left px-3 py-2">
         <span className="flex items-center justify-between gap-2">
-          <span className="text-[10px] font-black text-brand-600 uppercase tracking-widest">✨ AI on the enquiries</span>
+          <span className="text-[10px] font-black text-brand-600 uppercase tracking-widest">AI on the enquiries</span>
           <span className="text-[10px] text-gray-400">
             {busy ? <span className="text-brand-600 font-bold">updating… · </span>
               : s.stale ? <span className="text-amber-600 font-bold">new activity since · </span> : null}{ago(s.at)} {open ? '▴' : '▾'}
@@ -1447,7 +1446,7 @@ function Asks({ d, name, tasks, onChanged, onQuote }) {
   const me = d.me.toLowerCase()
   if (!tasks.length) return (
     <div className="px-4 py-6 max-w-2xl">
-      <p className="text-xs text-gray-500">Nobody has been asked anything yet. In the chat, tap 👥 Direct / invite to pick who should enquire.</p>
+      <p className="text-xs text-gray-500">Nobody has been asked anything yet. In the chat, tap Direct / invite to pick who should enquire.</p>
     </div>
   )
   const order = (t) => (t.assignee.toLowerCase() === me && t.status === 'open' ? 0 : t.status === 'open' ? 1 : 2)
@@ -1469,7 +1468,6 @@ function Asks({ d, name, tasks, onChanged, onQuote }) {
 
 // ── activity: everything that happened ─────────────────────────────────────
 
-const ACT_ICON = { start: '🆕', message: '💬', enquiry: '📨', invite: '✉️', done: '✅', quote: '🧾', poll: '📊', vote: '🗳️', join: '👋', group: '•' }
 
 /**
  * This discussion's history (every message, enquiry, quote, poll, vote,
@@ -1511,7 +1509,7 @@ function ActivityTab({ d, name }) {
           <div className="card !p-0">
             {g.items.map((r, i) => (
               <div key={i} className="flex gap-2.5 px-3 py-2 border-b border-amber-100 last:border-0">
-                <span className="text-sm leading-5 w-5 text-center shrink-0">{ACT_ICON[r.kind] || '•'}</span>
+                <span className="text-sm leading-5 w-3 text-center shrink-0 text-gray-400">•</span>
                 <span className="flex-1 min-w-0">
                   <span className="block text-xs text-gray-800">
                     <span className="font-bold">{r.actor ? (r.actor.toLowerCase() === me ? 'You' : name(r.actor)) : 'Someone'}</span> {r.text}
@@ -1560,7 +1558,7 @@ function Summary({ d, onChanged }) {
     <div>
       {busy && (
         <div className="bg-white text-gray-800 border border-brand-200 px-3 py-3 mb-1">
-          <p className="text-[10px] font-black text-brand-600 uppercase tracking-widest">✨ AI summary</p>
+          <p className="text-[10px] font-black text-brand-600 uppercase tracking-widest">AI summary</p>
           <p className="text-xs text-gray-500 mt-1">
             <span className="inline-block w-2 h-2 mr-1.5 rounded-full bg-brand-400 animate-pulse align-middle" />
             Writing it from the details, the chat and the quotes…
@@ -1569,7 +1567,7 @@ function Summary({ d, onChanged }) {
       )}
       {!busy && <button onClick={run} disabled={busy}
         className="text-[11px] font-bold border border-brand-300 text-brand-600 bg-white px-2.5 py-1 hover:bg-brand-50 disabled:opacity-50">
-        ✨ Summarise with AI
+        Summarise with AI
       </button>}
       {!busy && <span className="text-[10px] text-gray-400 ml-2">the details and everyone's thoughts, in one read</span>}
       {err && <p className="text-[11px] text-red-600 mt-1">{err}</p>}
@@ -1596,7 +1594,7 @@ function Summary({ d, onChanged }) {
     <div className="bg-white text-gray-800 border border-brand-200">
       <button onClick={() => setOpen((v) => !v)} className="w-full text-left px-3 py-2">
         <span className="flex items-center justify-between gap-2">
-          <span className="text-[10px] font-black text-brand-600 uppercase tracking-widest">✨ AI summary</span>
+          <span className="text-[10px] font-black text-brand-600 uppercase tracking-widest">AI summary</span>
           <span className="text-[10px] text-gray-400">
             {busy ? <span className="text-brand-600 font-bold">updating… · </span>
               : s.stale ? <span className="text-amber-600 font-bold">new activity since · </span> : null}{ago(s.at)} {open ? '▴' : '▾'}

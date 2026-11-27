@@ -38,13 +38,13 @@ export default function PeoplePicker({ me, exclude = [], members, setMembers, em
         <div className="flex flex-wrap gap-1.5">
           {members.map((n) => (
             <span key={n} className="flex items-center gap-1 text-[11px] font-bold bg-brand-50 border border-brand-200 text-gray-800 pl-2 pr-1 py-0.5">
-              👤 {label(n)}
+              {label(n)}
               <button type="button" onClick={() => setMembers(members.filter((x) => x !== n))} className="text-gray-400 hover:text-red-600 px-0.5" aria-label={`Remove ${n}`}>✕</button>
             </span>
           ))}
           {emails.map((e) => (
             <span key={e} className="flex items-center gap-1 text-[11px] font-bold bg-amber-50 border border-amber-200 text-gray-700 pl-2 pr-1 py-0.5">
-              ✉ {e}
+              {e}
               <button type="button" onClick={() => setEmails(emails.filter((x) => x !== e))} className="text-gray-400 hover:text-red-600 px-0.5" aria-label={`Remove ${e}`}>✕</button>
             </span>
           ))}

@@ -114,7 +114,7 @@ export default function TripPlanner({ d, name, onChanged }) {
   return (
     <div className="px-4 pt-3 pb-6 max-w-2xl w-full space-y-3">
       <div className="bg-white border border-amber-200 p-3">
-        <p className="text-sm font-black text-gray-900">✨ Plan a trip with AI</p>
+        <p className="text-sm font-black text-gray-900">Plan a trip with AI</p>
         <p className="text-[11px] text-gray-500 mt-0.5">Say where, when, how many people and the budget - it finds places, weather, road times and prices, and works out the cost.</p>
         {/* Empty and not being typed in: ideas of what to ask, typed out */}
         <div className="relative mt-2">
@@ -343,7 +343,7 @@ function PlanView({ p, me, name, onRevise, onRetry, onDelete, busy }) {
         <div className="bg-white border border-amber-200 p-3 space-y-2">
           {(p.flights || []).map((f) => (
             <p key={`${f.from}${f.to}`} className="text-[11px] text-gray-700">
-              ✈️ <b>{f.from} → {f.to}{f.back ? ' and back' : ''}</b> on {f.site || 'Google Flights'}: from <b>{INR(f.lowest)}</b> a person
+              <b>{f.from} → {f.to}{f.back ? ' and back' : ''}</b> on {f.site || 'Google Flights'}: from <b>{INR(f.lowest)}</b> a person
               {f.back ? ' round trip' : ''}
               {f.level && <span className={`ml-1 text-[10px] font-bold ${f.level === 'low' ? 'text-green-700' : f.level === 'high' ? 'text-red-600' : 'text-gray-500'}`}>· {f.level} for these dates</span>}
               {f.typical && <span className="text-[10px] text-gray-400"> (usually {INR(f.typical[0])}–{INR(f.typical[1])})</span>}
@@ -351,14 +351,14 @@ function PlanView({ p, me, name, onRevise, onRetry, onDelete, busy }) {
           ))}
           {(p.trains || []).map((t) => (
             <p key={`${t.from}${t.to}`} className="text-[11px] text-gray-700">
-              🚆 <b>{t.from} → {t.to}</b>: {t.count} train{t.count > 1 ? 's' : ''}{t.date ? ` on ${day(t.date, { day: 'numeric', month: 'short' })}` : ''}
+              <b>{t.from} → {t.to}</b>: {t.count} train{t.count > 1 ? 's' : ''}{t.date ? ` on ${day(t.date, { day: 'numeric', month: 'short' })}` : ''}
               {t.lowest != null && <> from <b>{INR(t.lowest)}</b> a person</>}
               <span className="text-[10px] text-gray-400"> (fastest {t.fastest}, {t.fastest_hours} h)</span>
             </p>
           ))}
           {(p.stays || []).map((s) => (
             <p key={s.place} className="text-[11px] text-gray-700">
-              🏨 <b>{s.place}</b> on Booking.com, {day(s.checkin, { day: 'numeric', month: 'short' })}: {s.count} places
+              <b>{s.place}</b> on Booking.com, {day(s.checkin, { day: 'numeric', month: 'short' })}: {s.count} places
               from <b>{INR(s.lowest)}</b> a room a night
               <span className="text-[10px] text-gray-400"> (up to {INR(s.highest)})</span>
             </p>

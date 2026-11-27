@@ -99,7 +99,7 @@ def _wants(db: Session, discussion_id: int, name: str, direct: bool) -> bool:
 def _feed(db: Session, group: Group, actor: str, verb: str, d: Discussion, detail: str = "") -> None:
     """The group's activity feed (the bell, and the Activity tab's whole-group
     view) hears the discussion's milestones - not every chat line or vote."""
-    record_activity(db, group, actor, verb, f"💬 {d.title}" + (f" · {detail}" if detail else ""))
+    record_activity(db, group, actor, verb, f"{d.title}" + (f" · {detail}" if detail else ""))
 
 
 # ── list / create ──────────────────────────────────────────────────────────

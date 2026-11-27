@@ -498,3 +498,10 @@ export const getTreats       = (groupId)              => api.get(`/treats/group/
 export const addTreat        = (data)                 => api.post('/treats/', data)
 export const setTreatReturned = (id, returned, note)  => api.post(`/treats/${id}/returned`, { returned, note: note || null })
 export const deleteTreat     = (id)                   => api.delete(`/treats/${id}`)
+
+// Notes - tables with the columns you name (backend routers/notes.py)
+export const listNotes  = ()          => api.get('/notes')
+export const createNote = (data)      => api.post('/notes', data)
+export const getNote    = (id)        => api.get(`/notes/${id}`)
+export const editNote   = (id, data)  => api.patch(`/notes/${id}`, data)
+export const deleteNote = (id)        => api.delete(`/notes/${id}`)
