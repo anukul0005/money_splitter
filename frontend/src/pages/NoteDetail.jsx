@@ -6,6 +6,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser } from '../UserContext'
 import { ago } from './Discussions'
 import NotePeople from '../components/NotePeople'
+import { AddByText, Insights } from '../components/NoteAI'
 
 // The number a cell starts with - "3*" is 3, "₹1,200" is 1200; null if none
 const num = (c) => {
@@ -148,6 +149,11 @@ export default function NoteDetail() {
     const next = [...rows, { id: Math.random().toString(36).slice(2, 12), cells: note.columns.map(() => ''), by: user?.name }]
     setRows(next); save({ rows: next })
   }
+  // Rows the AI read from text or speech, checked by the caller: theirs now
+  const addRows = (cellRows) => {
+    const next = [...rowsRef.current, ...cellRows.map((cells) => ({ id: Math.random().toString(36).slice(2, 12), cells, by: user?.name }))]
+    setRows(next); return save({ rows: next })
+  }
   const delRow = (ri) => { const next = rows.filter((_, i) => i !== ri); setRows(next); save({ rows: next }) }
   const needle = q.trim().toLowerCase()
   const shown = rows.map((r, i) => [r, i]).filter(([r]) => !needle || [...r.cells, r.by || ''].some((c) => c.toLowerCase().includes(needle)))
@@ -274,6 +280,7 @@ export default function NoteDetail() {
         )}
 
         <Summary columns={note.columns} rows={rows} me={user?.name} />
+        <Insights noteId={id} rowCount={rows.length} stamp={JSON.stringify([note.columns, rows.map((r) => r.cells)])} />
 
         {rows.length > 8 && (
           <input value={q} onChange={(e) => setQ(e.target.value)} className="input text-sm max-w-sm" placeholder="Search the rows" />
@@ -327,6 +334,7 @@ export default function NoteDetail() {
           <span className="text-[10px] text-gray-400">{saving ? 'Saving…' : dirty ? 'Unsaved - tap outside the cell' : 'Saved'}</span>
           {err && <span className="text-[11px] text-red-600">{err}</span>}
         </div>
+        <AddByText noteId={id} columns={note.columns} onAdd={addRows} />
       </div>
     </div>
   )
