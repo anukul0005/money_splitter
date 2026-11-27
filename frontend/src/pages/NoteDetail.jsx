@@ -90,7 +90,7 @@ function Summary({ columns, rows, me }) {
           </tr>
         </tbody>
       </table>
-      {tent.some((t) => t > 0) && <p className="text-[10px] text-gray-500">* after a number - tentative, may go up or down.</p>}
+      <p className="text-[10px] text-gray-500">* after a number means tentative - it may go up or down.</p>
     </div>
   )
 }
@@ -406,6 +406,9 @@ export default function NoteDetail() {
           <span className="text-[10px] text-gray-400 whitespace-nowrap">{saving ? 'Saving…' : dirty ? 'Unsaved - tap outside the cell' : 'Saved'}</span>
           {err && <span className="text-[11px] text-red-600">{err}</span>}
         </div>
+        <p className="text-[11px] text-gray-500">
+          <b className="text-gray-700">*</b> after a number means <b className="text-gray-700">tentative</b> (may go up or down) - e.g. write <b className="text-gray-700">3*</b> if you're not sure.
+        </p>
         {aiOpen && <AddByText noteId={id} columns={note.columns} existing={rows} onAdd={addRows} onClose={() => setAiOpen(false)} />}
 
         <div className="border border-amber-200 bg-white">
