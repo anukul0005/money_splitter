@@ -117,13 +117,20 @@ def _rows(raw: list, n: int, old: list[dict], caller: str, remap: bool = False) 
     return out
 
 
+def _rev(n: NoteTable) -> str:
+    """A fingerprint of everything shown - changes whenever anyone edits."""
+    import hashlib
+    raw = "\x1f".join([n.title or "", n.columns_json or "", n.rows_json or "", n.shared_with or ""])
+    return hashlib.sha1(raw.encode()).hexdigest()[:16]
+
+
 def _out(n: NoteTable, groups: dict[int, str], full: bool = True) -> dict:
     cols = json.loads(n.columns_json or "[]")
     rows = _stored(n)
     d = {"id": n.id, "title": n.title, "owner": n.owner, "columns": cols, "count": len(rows),
          "group_id": n.group_id, "group": groups.get(n.group_id) if n.group_id else None,
          "people": _shared(n),
-         "updated_at": n.updated_at, "updated_by": n.updated_by}
+         "updated_at": n.updated_at, "updated_by": n.updated_by, "rev": _rev(n)}
     if full:
         d["rows"] = rows
     return d
@@ -480,3 +487,30 @@ def insights(note_id: int, db: Session = Depends(get_db), caller: User = Depends
               "charts": charts}
     _insight_cache[n.id] = (stamp, result)
     return result
+
+
+# ── live: who's on the note now, and its changes, for the open page ───────
+
+# {note id: {name: (last seen, what they're doing)}} - one API process, so
+# memory is enough; a restart just forgets who was here a moment ago
+_here: dict[int, dict[str, tuple[float, str]]] = {}
+
+
+@router.get("/{note_id}/live")
+def live(note_id: int, rev: str = "", doing: str = "", db: Session = Depends(get_db),
+         caller: User = Depends(current_user)):
+    """Polled every few seconds by the open note: marks the caller as here
+    (viewing / editing / adding), says who else is, and sends the note again
+    only when it changed since `rev`."""
+    import time
+    n = _note(db, note_id, caller)
+    now = time.time()
+    seen = _here.setdefault(n.id, {})
+    seen[caller.name] = (now, doing if doing in ("viewing", "editing", "adding") else "viewing")
+    for k in [k for k, v in seen.items() if now - v[0] > 15]:
+        del seen[k]
+    out = {"rev": _rev(n), "here": [{"name": k, "doing": v[1]} for k, v in seen.items()
+                                    if k.lower() != caller.name.lower()]}
+    if rev != out["rev"]:
+        out["note"] = _out(n, _group_names(db, caller))
+    return out

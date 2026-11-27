@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { getNote, editNote, deleteNote, noteInviteLink, joinNote } from '../api/index.js'
+import { getNote, editNote, deleteNote, noteInviteLink, joinNote, noteLive } from '../api/index.js'
 import { downloadNotePdf } from '../utils/notePdf'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser } from '../UserContext'
@@ -105,6 +105,17 @@ export default function NoteDetail() {
   const [aiOpen, setAiOpen] = useState(false)
   const rowsRef = useRef(rows)
   rowsRef.current = rows
+  // Live: who else has the note open, and their changes as they're saved
+  const [here, setHere] = useState([])
+  const [flash, setFlash] = useState(() => new Set())
+  const noteRef = useRef(null)
+  noteRef.current = note
+  const edited = useRef(new Set())     // my rows with typing not yet saved
+  const inFlight = useRef(0)           // saves on their way
+  const seq = useRef(0)                // saves started
+  const focused = useRef(false)        // a cell is being typed in
+  const ui = useRef({})
+  ui.current = { editCols, sharing, aiOpen, me: (user?.name || '').toLowerCase() }
 
   const [people, setPeople] = useState([])
   const take = (n) => { setNote(n); setRows(n.rows); setCols(n.columns); setTitle(n.title); setPeople(n.people || []); setDirty(false) }
@@ -130,21 +141,81 @@ export default function NoteDetail() {
   const save = async (data) => {
     setSaving(true); setErr('')
     if (!data.columns) setDirty(false)
+    const was = new Set(edited.current)
+    edited.current.clear()
+    seq.current += 1; inFlight.current += 1
     try {
       const r = await editNote(id, data)
+      // the reply carries anyone else's changes too
       if (data.columns) take(r.data)
-      else setNote(r.data)
+      else merge(r.data)
       return true
     }
-    catch (e) { setErr(e.response?.data?.detail || "Couldn't save - try again."); setDirty(true); return false }
-    finally { setSaving(false) }
+    catch (e) {
+      was.forEach((x) => edited.current.add(x))
+      setErr(e.response?.data?.detail || "Couldn't save - try again."); setDirty(true); return false
+    }
+    finally { inFlight.current -= 1; setSaving(false) }
   }
+
+  // The note as saved, folded into what's on screen: everyone's rows as they
+  // are now, except my rows with typing not yet saved; others' changes flash
+  const merge = (fresh) => {
+    const cur = noteRef.current
+    if (!cur) return take(fresh)
+    const { editCols: ec, sharing: sh, me } = ui.current
+    if (JSON.stringify(fresh.columns) !== JSON.stringify(cur.columns)) {
+      if (edited.current.size || ec) return            // after my edits are saved
+      return take(fresh)
+    }
+    const local = Object.fromEntries(rowsRef.current.map((r) => [r.id, r]))
+    const changed = []
+    const next = fresh.rows.map((r) => {
+      const l = local[r.id]
+      if (l && edited.current.has(r.id)) return l
+      if ((r.by || '').toLowerCase() !== me && (!l || l.cells.join('\u0001') !== r.cells.join('\u0001'))) changed.push(r.id)
+      return r
+    })
+    const there = new Set(fresh.rows.map((r) => r.id))
+    rowsRef.current.forEach((l) => { if (!there.has(l.id) && edited.current.has(l.id)) next.push(l) })
+    setRows(next); setNote(fresh)
+    if (!ec) setTitle(fresh.title)
+    if (!sh) setPeople(fresh.people || [])
+    if (changed.length) {
+      setFlash(new Set(changed))
+      setTimeout(() => setFlash(new Set()), 2500)
+    }
+  }
+  const mergeRef = useRef(merge)
+  mergeRef.current = merge
+
+  // Every 3s while the page is in view (and at once on coming back to it)
+  useEffect(() => {
+    let gone = false
+    const tick = async () => {
+      if (document.hidden || !noteRef.current) return
+      const at = seq.current
+      const { aiOpen: adding } = ui.current
+      try {
+        const { data } = await noteLive(id, noteRef.current.rev, adding ? 'adding' : focused.current ? 'editing' : 'viewing')
+        if (gone) return
+        setHere(data.here || [])
+        // a save started meanwhile brings a newer copy itself
+        if (data.note && at === seq.current && !inFlight.current) mergeRef.current(data.note)
+      } catch { /* next time */ }
+    }
+    const t = setInterval(tick, 3000)
+    const back = () => { if (!document.hidden) tick() }
+    document.addEventListener('visibilitychange', back)
+    window.addEventListener('focus', back)
+    return () => { gone = true; clearInterval(t); document.removeEventListener('visibilitychange', back); window.removeEventListener('focus', back) }
+  }, [id])
   const saveRows = () => dirty && save({ rows: rowsRef.current })
 
   if (err && !note) return <p className="p-6 text-sm text-red-600">{err}</p>
   if (!note) return <LoadingSpinner />
 
-  const setCell = (ri, ci, v) => { setRows((rs) => rs.map((r, i) => (i === ri ? { ...r, cells: r.cells.map((c, j) => (j === ci ? v : c)) } : r))); setDirty(true) }
+  const setCell = (ri, ci, v) => { if (rows[ri]) edited.current.add(rows[ri].id); setRows((rs) => rs.map((r, i) => (i === ri ? { ...r, cells: r.cells.map((c, j) => (j === ci ? v : c)) } : r))); setDirty(true) }
   // A new row's id is made here, so saves while it's typed into stay one row
   const addRow = () => {
     const next = [...rows, { id: Math.random().toString(36).slice(2, 12), cells: note.columns.map(() => ''), by: user?.name }]
@@ -283,6 +354,12 @@ export default function NoteDetail() {
         <Summary columns={note.columns} rows={rows} me={user?.name} />
         <Insights noteId={id} rowCount={rows.length} stamp={JSON.stringify([note.columns, rows.map((r) => r.cells)])} />
 
+        {here.length > 0 && (
+          <p className="flex items-center gap-1.5 text-[11px] text-gray-600">
+            <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            {here.map((h) => `${h.name} ${h.doing === 'adding' ? 'is adding rows' : h.doing === 'editing' ? 'is typing' : 'is here'}`).join(' · ')}
+          </p>
+        )}
         {/* Adding rows and searching them, in one line above the table */}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <button onClick={addRow} className="text-xs font-bold text-brand-600 whitespace-nowrap">+ Add row</button>
@@ -315,7 +392,7 @@ export default function NoteDetail() {
             </thead>
             <tbody>
               {shown.map(([r, ri]) => (
-                <tr key={r.id || ri} className="border-b border-amber-100 last:border-0">
+                <tr key={r.id || ri} className={`border-b border-amber-100 last:border-0 transition-colors duration-700 ${flash.has(r.id) ? 'bg-amber-100' : ''}`}>
                   <td className="text-center align-top pt-1.5 pb-1 px-0.5">
                     <span className="block text-[10px] text-gray-400 leading-tight">{ri + 1}</span>
                     {/* who added the row - set from their profile, for good */}
@@ -325,7 +402,8 @@ export default function NoteDetail() {
                   </td>
                   {note.columns.map((c, ci) => (
                     <td key={c} className="border-l border-amber-100 p-0 align-top">
-                      <Cell value={r.cells[ci] ?? ''} readOnly={!isMine(r)} onChange={(e) => setCell(ri, ci, e.target.value)} onBlur={saveRows}
+                      <Cell value={r.cells[ci] ?? ''} readOnly={!isMine(r)} onChange={(e) => setCell(ri, ci, e.target.value)}
+                        onFocus={() => { focused.current = isMine(r) }} onBlur={() => { focused.current = false; saveRows() }}
                         className={`w-full px-2 py-1.5 text-xs bg-transparent resize-none overflow-hidden block break-words focus:outline-none ${isMine(r) ? "focus:bg-amber-50" : "text-gray-600 cursor-default"}`} />
                     </td>
                   ))}

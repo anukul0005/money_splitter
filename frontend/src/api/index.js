@@ -509,3 +509,4 @@ export const noteInviteLink = (id)        => api.post(`/notes/${id}/invite-link`
 export const joinNote       = (id, token) => api.post(`/notes/${id}/join`, { token })
 export const fillNoteRows  = (id, text, image = null) => api.post(`/notes/${id}/fill`, { text, image }, { timeout: 120000 })
 export const noteInsights  = (id)       => api.post(`/notes/${id}/insights`, {}, { timeout: 60000 })
+export const noteLive      = (id, rev, doing) => api.get(`/notes/${id}/live`, { params: { rev, doing } })
