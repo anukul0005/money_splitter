@@ -44,39 +44,47 @@ function Summary({ columns, rows, me }) {
   const byWho = Object.entries(people).sort((a, b) => b[1].length - a[1].length)
   const total = sums(rows)
   const name = (n) => (n.toLowerCase() === (me || '').toLowerCase() ? 'You' : n)
+  const cellB = 'border border-amber-200 px-2 py-1.5'
   return (
-    <div className="card max-w-2xl">
-      <div className="flex flex-wrap gap-x-6 gap-y-2">
-        <div>
-          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Rows</p>
-          <p className="text-2xl font-black text-gray-900">{rows.length}</p>
+    <div className="card max-w-2xl space-y-3">
+      {/* the totals, each in its own box */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div className="border border-amber-200 bg-amber-50/60 px-3 py-2">
+          <p className="text-[10px] font-black text-gray-500 uppercase tracking-wider">Rows</p>
+          <p className="text-2xl font-black text-gray-900 tabular-nums">{rows.length}</p>
         </div>
         {columns.map((c, ci) => total[ci] !== null && (
-          <div key={c}>
-            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Total {c}</p>
-            <p className="text-2xl font-black text-gray-900">{fmt(total[ci])}</p>
+          <div key={c} className="border border-amber-200 bg-amber-50/60 px-3 py-2 min-w-0">
+            <p className="text-[10px] font-black text-gray-500 uppercase tracking-wider break-words leading-tight">{soft(c)}</p>
+            <p className="text-2xl font-black text-gray-900 tabular-nums">{fmt(total[ci])}</p>
           </div>
         ))}
       </div>
-      <table className="w-full text-xs mt-3">
+      {/* the same for each person who added rows */}
+      <table className="w-full table-fixed text-xs border-collapse">
         <thead>
-          <tr className="text-[10px] text-gray-400 uppercase tracking-widest">
-            <th className="text-left font-black pb-1">Added by</th>
-            <th className="text-right font-black pb-1">Rows</th>
-            {columns.map((c, ci) => numeric[ci] && <th key={c} className="text-right font-black pb-1 pl-3">{c}</th>)}
+          <tr className="bg-amber-50 text-[10px] text-gray-600 uppercase tracking-wider">
+            <th className={`${cellB} text-left font-black w-[28%]`}>Added by</th>
+            <th className={`${cellB} text-right font-black`}>Rows</th>
+            {columns.map((c, ci) => numeric[ci] && <th key={c} className={`${cellB} text-right font-black break-words leading-tight align-bottom`}>{soft(c)}</th>)}
           </tr>
         </thead>
         <tbody>
           {byWho.map(([who, rs]) => {
             const s2 = sums(rs)
             return (
-              <tr key={who} className="border-t border-amber-100">
-                <td className="py-1.5 font-bold text-gray-800">{name(who)}</td>
-                <td className="py-1.5 text-right font-black text-gray-900">{rs.length}</td>
-                {columns.map((c, ci) => numeric[ci] && <td key={c} className="py-1.5 text-right font-black text-gray-900 pl-3">{fmt(s2[ci])}</td>)}
+              <tr key={who}>
+                <td className={`${cellB} font-bold text-gray-800 break-words`}>{name(who)}</td>
+                <td className={`${cellB} text-right font-black text-gray-900 tabular-nums`}>{rs.length}</td>
+                {columns.map((c, ci) => numeric[ci] && <td key={c} className={`${cellB} text-right font-black text-gray-900 tabular-nums`}>{fmt(s2[ci])}</td>)}
               </tr>
             )
           })}
+          <tr className="bg-amber-50">
+            <td className={`${cellB} font-black text-gray-900`}>Total</td>
+            <td className={`${cellB} text-right font-black text-gray-900 tabular-nums`}>{rows.length}</td>
+            {columns.map((c, ci) => numeric[ci] && <td key={c} className={`${cellB} text-right font-black text-gray-900 tabular-nums`}>{fmt(total[ci])}</td>)}
+          </tr>
         </tbody>
       </table>
     </div>
