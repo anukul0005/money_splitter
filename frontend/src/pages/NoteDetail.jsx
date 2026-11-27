@@ -64,12 +64,14 @@ function Summary({ columns, rows, me }) {
         ))}
       </div>
       {/* the same for each person who added rows */}
-      <table className="w-full table-fixed text-xs border-collapse">
+      {/* Sized by the browser from what each column holds: a heading wraps
+          only between words (or after a comma), whatever it's renamed to */}
+      <table className="w-full table-auto text-xs border-collapse">
         <thead>
-          <tr className="bg-amber-50 text-[10px] text-gray-600 uppercase tracking-wider">
-            <th className={`${cellB} text-left font-black w-[28%]`}>Added by</th>
-            <th className={`${cellB} text-right font-black`}>Rows</th>
-            {columns.map((c, ci) => numeric[ci] && <th key={c} className={`${cellB} text-right font-black break-words leading-tight align-bottom`}>{soft(c)}</th>)}
+          <tr className="bg-amber-50 text-[11px] text-gray-600 leading-tight">
+            <th className={`${cellB} text-left font-bold align-bottom`}>Added by</th>
+            <th className={`${cellB} text-right font-bold align-bottom`}>Rows</th>
+            {columns.map((c, ci) => numeric[ci] && <th key={c} className={`${cellB} text-right font-bold align-bottom [overflow-wrap:normal] [word-break:normal]`}>{soft(c)}</th>)}
           </tr>
         </thead>
         <tbody>
@@ -77,7 +79,7 @@ function Summary({ columns, rows, me }) {
             const s2 = sums(rs)
             return (
               <tr key={who}>
-                <td className={`${cellB} font-bold text-gray-800 break-words`}>{name(who)}</td>
+                <td className={`${cellB} font-bold text-gray-800`}>{name(who)}</td>
                 <td className={`${cellB} text-right font-black text-gray-900 tabular-nums`}>{rs.length}</td>
                 {columns.map((c, ci) => numeric[ci] && <td key={c} className={`${cellB} text-right font-black text-gray-900 tabular-nums`}>{fmt(s2[ci])}</td>)}
               </tr>
