@@ -1925,3 +1925,28 @@ class GooglePlacesUsage(Base):
     day = Column(String(10), primary_key=True)      # YYYY-MM-DD (IST)
     kind = Column(String(30), primary_key=True)
     count = Column(Integer, nullable=False, default=0)
+
+
+class GroupTreat(Base):
+    """Someone outside the group - not on the app - paid for the group
+    (Shreya got the drinks for you and Anjali). No money moved between the
+    members, so it's kept out of expenses and balances entirely: a note of
+    who treated whom, for how much, and whether it's been returned yet.
+    `split` keeps each person's share in view ("₹1,500 each") so a treat
+    returned on your own is easy to size; otherwise it's the whole amount,
+    together."""
+    __tablename__ = "group_treats"
+
+    id = Column(Integer, primary_key=True, index=True)
+    group_id = Column(Integer, ForeignKey("groups.id", ondelete="CASCADE"), nullable=False, index=True)
+    by_name = Column(String(100), nullable=False)        # who treated
+    title = Column(String(200), nullable=True)
+    amount = Column(Float, nullable=False)
+    date = Column(String(20), nullable=True)
+    members = Column(Text, nullable=True)                # JSON [member names treated]; null -> everyone
+    split = Column(Boolean, nullable=False, default=False)
+    notes = Column(Text, nullable=True)
+    returned_on = Column(String(20), nullable=True)      # when it was paid back - a party, a dinner
+    returned_note = Column(String(200), nullable=True)
+    created_by = Column(String(100), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

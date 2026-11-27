@@ -9,6 +9,7 @@ import StatsPanel from '../components/StatsPanel'
 import { useUser } from '../UserContext'
 import { dn } from '../utils/displayName'
 import { PassOnSheet, passable } from '../components/PassOn'
+import GroupTreats from '../components/GroupTreats'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 
@@ -232,6 +233,7 @@ export default function GroupDetail() {
       {/* Expenses tab */}
       {tab === 'expenses' && (
         <div className="px-5 grid grid-cols-1 md:grid-cols-2 gap-2">
+          <GroupTreats groupId={id} members={group.members} />
           {group.expenses.length === 0 && (
             <div className="col-span-2 text-center py-12 text-gray-400">
               <svg className="w-10 h-10 mx-auto mb-2 text-gray-300" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">

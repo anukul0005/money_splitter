@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { getGroups, createExpense, scanReceipt } from '../api'
+import { getGroups, createExpense, scanReceipt, addTreat } from '../api'
 import { useStatementUpload, ANY_STATEMENT, MailSyncWide } from '../components/StatementUpload'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ReceiptCropper from '../components/ReceiptCropper'
@@ -71,6 +71,14 @@ export default function AddExpense() {
     txn_time:     '',
   })
   const [savedNoTitle, setSavedNoTitle] = useState(false)
+  const [savedTreat, setSavedTreat] = useState(false)
+
+  // Paid by someone not in the group (a treat): kept as a note on the
+  // group, out of every balance - backend routers/treats.py
+  const [treat, setTreat]           = useState(false)
+  const [treatBy, setTreatBy]       = useState('')
+  const [treatWho, setTreatWho]     = useState([])     // member names treated
+  const [treatSplit, setTreatSplit] = useState(true)
 
   const amountRef = useRef(null)
   // People there who aren't in the group - a note, or charged a share
@@ -98,6 +106,7 @@ export default function AddExpense() {
         setMembers(ms)
         const autoPaidBy = ms.length === 1 ? ms[0].name : ''
         setForm((f) => ({ ...f, divider: String(ms.length || 2), paid_by: autoPaidBy }))
+        setTreat(false); setTreatBy(''); setTreatWho(ms.map((m) => m.name))
         setSplitMode('equal')
         setGentlemanFlipped(false)
         setCustomPcts(Object.fromEntries(ms.map((m) => [m.name, ''])))
@@ -287,6 +296,34 @@ export default function AddExpense() {
     setTimeout(() => amountRef.current?.focus(), 50)
   }
 
+  const saveTreat = async () => {
+    if (!treatBy.trim()) return setError('Who treated you?')
+    if (!treatWho.length) return setError('Pick who was treated')
+    setSubmitting(true)
+    try {
+      await addTreat({
+        group_id: Number(form.group_id),
+        by_name:  treatBy.trim(),
+        amount:   parseFloat(form.amount),
+        title:    form.title.trim() || null,
+        date:     form.date || null,
+        members:  treatWho,
+        split:    treatSplit,
+        notes:    form.notes || null,
+      })
+      localStorage.setItem(STORED_GROUP_KEY, form.group_id)
+      setSavedTreat(true)
+      setSavedNoTitle(false)
+      setSuccessCount((n) => n + 1)
+      setForm((f) => ({ ...f, title: '', amount: '', notes: '' }))
+      setTreatBy('')
+    } catch (err) {
+      setError(err?.response?.data?.detail || 'Something went wrong')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
@@ -294,6 +331,7 @@ export default function AddExpense() {
     // No description is fine: it's saved, and stays highlighted in the
     // group until one is added.
     if (!form.amount || isNaN(form.amount)) return setError('Enter a valid amount')
+    if (treat) return saveTreat()
     if (!form.paid_by) return setError('Select who paid')
     if (splitMode === 'custom' && Math.abs(customTotal - 100) > 0.5)
       return setError('Custom percentages must add up to 100%')
@@ -320,6 +358,7 @@ export default function AddExpense() {
       })
       localStorage.setItem(STORED_GROUP_KEY, form.group_id)
       setSavedNoTitle(!form.title.trim())
+      setSavedTreat(false)
       setSuccessCount((n) => n + 1)
       resetExpenseFields(form.group_id)
     } catch (err) {
@@ -373,7 +412,9 @@ export default function AddExpense() {
       {successCount > 0 && (
         <div className="mx-5 mt-4 bg-brand-400/10 border border-brand-400/30 rounded-md px-4 py-2.5 flex items-center justify-between">
           <p className="text-sm font-bold text-brand-700">
-            {savedNoTitle
+            {savedTreat
+              ? "Treat noted - it's on the group under Treats to return, out of everyone's balance."
+              : savedNoTitle
               ? 'Saved without a description - it stays highlighted in the group until you add one.'
               : 'Expense saved. Add another below.'}
           </p>
@@ -535,9 +576,9 @@ export default function AddExpense() {
                   <button
                     type="button"
                     key={m.id}
-                    onClick={() => setForm((f) => ({ ...f, paid_by: m.name }))}
+                    onClick={() => { setTreat(false); setForm((f) => ({ ...f, paid_by: m.name })) }}
                     className={`px-4 py-2 text-sm font-bold transition-colors border ${
-                      form.paid_by === m.name
+                      !treat && form.paid_by === m.name
                         ? 'bg-brand-400 text-white border-brand-400'
                         : 'bg-amber-50 text-gray-700 border-amber-200'
                     }`}
@@ -545,6 +586,15 @@ export default function AddExpense() {
                     {dn(m.name, members.map((x) => x.name))}
                   </button>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => setTreat(true)}
+                  className={`px-4 py-2 text-sm font-bold transition-colors border ${
+                    treat ? 'bg-brand-400 text-white border-brand-400' : 'bg-white text-gray-600 border-dashed border-amber-300'
+                  }`}
+                >
+                  Someone not in the group
+                </button>
               </div>
             ) : (
               <input className="input" placeholder="Name of person who paid" value={form.paid_by} onChange={set('paid_by')} />
@@ -552,6 +602,46 @@ export default function AddExpense() {
           </div>
         )}
 
+        {/* A treat: paid by someone not in the group */}
+        {treat && members.length > 1 && (
+          <div className="p-3 bg-amber-50 border border-amber-200 space-y-3">
+            <div>
+              <label className="label">Who paid?</label>
+              <input className="input" placeholder="e.g. Shreya" value={treatBy} onChange={(e) => setTreatBy(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Who was treated</label>
+              <div className="flex flex-wrap gap-2">
+                {members.map((m) => {
+                  const on = treatWho.includes(m.name)
+                  return (
+                    <button type="button" key={m.id}
+                      onClick={() => setTreatWho((w) => (on ? w.filter((n) => n !== m.name) : [...w, m.name]))}
+                      className={`px-3 py-1.5 text-xs font-bold border ${on ? 'bg-brand-400 text-white border-brand-400' : 'bg-white text-gray-600 border-amber-200'}`}>
+                      {dn(m.name, members.map((x) => x.name))}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              {[[true, 'Split it'], [false, "Don't split"]].map(([v, label]) => (
+                <button type="button" key={label} onClick={() => setTreatSplit(v)}
+                  className={`px-3 py-1.5 text-xs font-bold border ${treatSplit === v ? 'bg-brand-400 text-white border-brand-400' : 'bg-white text-gray-600 border-amber-200'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-gray-600">
+              {treatSplit && amtVal > 0 && treatWho.length
+                ? <>Notes <span className="font-black">₹{(amtVal / treatWho.length).toFixed(0)} each</span> - </>
+                : 'Noted as one treat for all of you - '}
+              no one in the group owes anyone. It stays under Treats to return until you mark it returned.
+            </p>
+          </div>
+        )}
+
+        {!treat && (<>
         {/* Payment mode */}
         <div>
           <label className="label">Payment Mode</label>
@@ -755,6 +845,7 @@ export default function AddExpense() {
           <GuestsEditor guests={guests} setGuests={setGuests} perHead={perHead} total={amtVal}
             memberNames={members.map((m) => m.name)} payer={form.paid_by} />
         )}
+        </>)}
 
         {/* Title with autocomplete from existing group expenses */}
         <div>
@@ -804,7 +895,7 @@ export default function AddExpense() {
         {error && <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-md px-4 py-3">{error}</p>}
 
         <button type="submit" className="btn-primary" disabled={submitting}>
-          {submitting ? 'Saving…' : 'Add Expense'}
+          {submitting ? 'Saving…' : treat ? 'Note the treat' : 'Add Expense'}
         </button>
       </form>
 
