@@ -4,6 +4,7 @@ shared with can see and edit it; a name not on the app is just noted."""
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -25,13 +26,13 @@ class NoteIn(BaseModel):
     columns: list[str]
     people: list[str] | None = None       # names - on the app or not
     group_id: int | None = None
-    rows: list[list[str]] | None = None
+    rows: list[dict | list] | None = None
 
 
 class NoteEdit(BaseModel):
     title: str | None = None
     columns: list[str] | None = None
-    rows: list[list[str]] | None = None
+    rows: list[dict | list] | None = None
     people: list[str] | None = None
 
 
@@ -72,19 +73,41 @@ def _cols(raw: list[str]) -> list[str]:
     return out
 
 
-def _rows(raw: list[list[str]], n: int) -> list[list[str]]:
+def _stored(n: NoteTable) -> list[dict]:
+    """The note's rows as [{id, cells, by, at}] - older ones, kept as plain
+    lists, were all added by the owner."""
+    out = []
+    for i, r in enumerate(json.loads(n.rows_json or "[]")):
+        out.append(r if isinstance(r, dict) else {"id": f"r{i}", "cells": r, "by": n.owner, "at": None})
+    return out
+
+
+def _rows(raw: list, n: int, old: list[dict], caller: str) -> list[dict]:
+    """The rows sent, each [{id, cells}] (or a bare list of cells): a row the
+    note already has keeps who added it and when; a new one is the caller's.
+    Who added a row is never taken from what's sent."""
     if len(raw) > MAX_ROWS:
         raise HTTPException(400, f"At most {MAX_ROWS} rows")
+    known = {r["id"]: r for r in old}
+    now = datetime.now(timezone.utc).isoformat()
     out = []
-    for r in raw:
-        cells = [str(c if c is not None else "")[:MAX_CELL] for c in (r or [])][:n]
-        out.append(cells + [""] * (n - len(cells)))
+    for i, r in enumerate(raw):
+        if isinstance(r, dict):
+            rid, cells = str(r.get("id") or "")[:40], r.get("cells") or []
+        else:            # an older client: rows by position
+            rid, cells = (old[i]["id"] if i < len(old) else ""), r
+        cells = [str(c if c is not None else "")[:MAX_CELL] for c in cells][:n]
+        prev = known.get(rid)
+        if not rid or rid in {x["id"] for x in out}:
+            rid = uuid.uuid4().hex[:12]
+        out.append({"id": rid, "cells": cells + [""] * (n - len(cells)),
+                    "by": prev["by"] if prev else caller, "at": prev["at"] if prev else now})
     return out
 
 
 def _out(n: NoteTable, groups: dict[int, str], full: bool = True) -> dict:
     cols = json.loads(n.columns_json or "[]")
-    rows = json.loads(n.rows_json or "[]")
+    rows = _stored(n)
     d = {"id": n.id, "title": n.title, "owner": n.owner, "columns": cols, "count": len(rows),
          "group_id": n.group_id, "group": groups.get(n.group_id) if n.group_id else None,
          "people": _shared(n),
@@ -138,7 +161,7 @@ def create_note(payload: NoteIn, db: Session = Depends(get_db), caller: User = D
     people = _people(db, payload.people or [], caller.name)
     n = NoteTable(owner=caller.name, group_id=payload.group_id or None, title=title,
                   shared_with=json.dumps(people) if people else None,
-                  columns_json=json.dumps(cols), rows_json=json.dumps(_rows(payload.rows or [], len(cols))),
+                  columns_json=json.dumps(cols), rows_json=json.dumps(_rows(payload.rows or [], len(cols), [], caller.name)),
                   updated_by=caller.name)
     db.add(n)
     db.commit()
@@ -170,8 +193,9 @@ def edit_note(note_id: int, payload: NoteEdit, db: Session = Depends(get_db),
         cols = _cols(payload.columns)
         n.columns_json = json.dumps(cols)
     if payload.rows is not None or payload.columns is not None:
-        rows = payload.rows if payload.rows is not None else json.loads(n.rows_json or "[]")
-        n.rows_json = json.dumps(_rows(rows, len(cols)))
+        old = _stored(n)
+        rows = payload.rows if payload.rows is not None else old
+        n.rows_json = json.dumps(_rows(rows, len(cols), old, caller.name))
     n.updated_at, n.updated_by = datetime.now(timezone.utc), caller.name
     db.commit()
     db.refresh(n)

@@ -53,11 +53,15 @@ export default function NoteDetail() {
   if (err && !note) return <p className="p-6 text-sm text-red-600">{err}</p>
   if (!note) return <LoadingSpinner />
 
-  const setCell = (ri, ci, v) => { setRows((rs) => rs.map((r, i) => (i === ri ? r.map((c, j) => (j === ci ? v : c)) : r))); setDirty(true) }
-  const addRow = () => { const next = [...rows, note.columns.map(() => '')]; setRows(next); save({ rows: next }) }
+  const setCell = (ri, ci, v) => { setRows((rs) => rs.map((r, i) => (i === ri ? { ...r, cells: r.cells.map((c, j) => (j === ci ? v : c)) } : r))); setDirty(true) }
+  // A new row's id is made here, so saves while it's typed into stay one row
+  const addRow = () => {
+    const next = [...rows, { id: Math.random().toString(36).slice(2, 12), cells: note.columns.map(() => ''), by: user?.name }]
+    setRows(next); save({ rows: next })
+  }
   const delRow = (ri) => { const next = rows.filter((_, i) => i !== ri); setRows(next); save({ rows: next }) }
   const needle = q.trim().toLowerCase()
-  const shown = rows.map((r, i) => [r, i]).filter(([r]) => !needle || r.some((c) => c.toLowerCase().includes(needle)))
+  const shown = rows.map((r, i) => [r, i]).filter(([r]) => !needle || [...r.cells, r.by || ''].some((c) => c.toLowerCase().includes(needle)))
   const mine = note.owner.toLowerCase() === user?.name?.toLowerCase()
 
   const saveCols = async () => {
@@ -65,7 +69,7 @@ export default function NoteDetail() {
     const next = add ? [...cols, add] : cols
     // keep each row's cells under the column they belong to
     const idx = next.map((c) => note.columns.indexOf(c))
-    const remapped = rows.map((r) => idx.map((k) => (k >= 0 ? r[k] : '')))
+    const remapped = rows.map((r) => ({ ...r, cells: idx.map((k) => (k >= 0 ? r.cells[k] : '')) }))
     if (await save({ title, columns: next, rows: remapped })) { setEditCols(false); setNewCol('') }
   }
   const saveSharing = async () => { if (await save({ people: people.map((p) => p.name) })) setSharing(false) }
@@ -137,26 +141,30 @@ export default function NoteDetail() {
                 {note.columns.map((c) => (
                   <th key={c} className="text-left font-black text-gray-700 px-2 py-2 border-b border-l border-amber-200 whitespace-nowrap">{c}</th>
                 ))}
+                <th className="text-left font-black text-gray-400 px-2 py-2 border-b border-l border-amber-200 whitespace-nowrap">Added by</th>
                 <th className="w-8 border-b border-amber-200" />
               </tr>
             </thead>
             <tbody>
               {shown.map(([r, ri]) => (
-                <tr key={ri} className="border-b border-amber-100 last:border-0">
+                <tr key={r.id || ri} className="border-b border-amber-100 last:border-0">
                   <td className="text-[10px] text-gray-400 text-center align-top pt-2">{ri + 1}</td>
                   {note.columns.map((c, ci) => (
                     <td key={c} className="border-l border-amber-100 p-0 align-top">
-                      <textarea rows={1} value={r[ci] ?? ''} onChange={(e) => setCell(ri, ci, e.target.value)} onBlur={saveRows}
+                      <textarea rows={1} value={r.cells[ci] ?? ''} onChange={(e) => setCell(ri, ci, e.target.value)} onBlur={saveRows}
                         className="w-full min-w-[8rem] px-2 py-1.5 text-xs bg-transparent resize-y focus:outline-none focus:bg-amber-50" />
                     </td>
                   ))}
+                  <td className="border-l border-amber-100 px-2 py-1.5 align-top text-[11px] text-gray-500 whitespace-nowrap">
+                    {r.by ? (r.by.toLowerCase() === user?.name?.toLowerCase() ? 'You' : r.by) : ''}
+                  </td>
                   <td className="text-center align-top pt-1.5">
                     <button onClick={() => window.confirm(`Delete row ${ri + 1}?`) && delRow(ri)} className="text-gray-300 hover:text-red-600 px-1" aria-label={`Delete row ${ri + 1}`}>✕</button>
                   </td>
                 </tr>
               ))}
               {!rows.length && (
-                <tr><td colSpan={note.columns.length + 2} className="text-center text-gray-400 py-6">No rows yet - add the first one.</td></tr>
+                <tr><td colSpan={note.columns.length + 3} className="text-center text-gray-400 py-6">No rows yet - add the first one.</td></tr>
               )}
             </tbody>
           </table>
