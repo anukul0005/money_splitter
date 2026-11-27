@@ -32,6 +32,7 @@ export function AddByText({ noteId, columns, existing = [], onAdd, onClose }) {
   const [err, setErr] = useState('')
   const [pic, setPic] = useState(null)          // a data: URL
   const fileRef = useRef(null)
+  const camRef = useRef(null)          // opens the camera straight away
   const takePic = async (file) => {
     if (!file || !file.type.startsWith('image/')) return
     setErr('')
@@ -81,12 +82,16 @@ export function AddByText({ noteId, columns, existing = [], onAdd, onClose }) {
       )}
       <input ref={fileRef} type="file" accept="image/*" className="hidden"
         onChange={(e) => { takePic(e.target.files?.[0]); e.target.value = '' }} />
+      <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden"
+        onChange={(e) => { takePic(e.target.files?.[0]); e.target.value = '' }} />
       <div className="flex items-center gap-2 flex-wrap">
         <button onClick={() => read()} disabled={busy || (!text.trim() && !pic)} className="btn-primary !w-auto text-xs px-4 py-2 disabled:opacity-50">
           {busy ? 'Reading…' : 'Fill the rows'}
         </button>
+        <button onClick={() => camRef.current?.click()} disabled={busy}
+          className="text-xs font-bold px-3 py-2 border border-gray-300 text-gray-700 disabled:opacity-50">Camera</button>
         <button onClick={() => fileRef.current?.click()} disabled={busy}
-          className="text-xs font-bold px-3 py-2 border border-gray-300 text-gray-700 disabled:opacity-50">Photo</button>
+          className="text-xs font-bold px-3 py-2 border border-gray-300 text-gray-700 disabled:opacity-50">Gallery</button>
         {canRecord() && (
           <button onClick={voice.recording ? voice.stop : voice.start} disabled={busy || voice.hearing}
             className={`text-xs font-bold px-3 py-2 border ${voice.recording ? 'border-red-500 text-red-600 bg-red-50' : 'border-gray-300 text-gray-700'} disabled:opacity-50`}>
