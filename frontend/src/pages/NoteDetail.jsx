@@ -126,6 +126,8 @@ export default function NoteDetail() {
   const needle = q.trim().toLowerCase()
   const shown = rows.map((r, i) => [r, i]).filter(([r]) => !needle || [...r.cells, r.by || ''].some((c) => c.toLowerCase().includes(needle)))
   const mine = note.owner.toLowerCase() === user?.name?.toLowerCase()
+  // a row is only ever edited by whoever added it
+  const isMine = (r) => (r.by || '').toLowerCase() === (user?.name || '').toLowerCase()
 
   const saveCols = async () => {
     const add = newCol.trim()
@@ -216,24 +218,15 @@ export default function NoteDetail() {
                   <td className="text-[10px] text-gray-400 text-center align-top pt-2">{ri + 1}</td>
                   {note.columns.map((c, ci) => (
                     <td key={c} className="border-l border-amber-100 p-0 align-top">
-                      <textarea rows={1} value={r.cells[ci] ?? ''} onChange={(e) => setCell(ri, ci, e.target.value)} onBlur={saveRows}
-                        className="w-full min-w-[8rem] px-2 py-1.5 text-xs bg-transparent resize-y focus:outline-none focus:bg-amber-50" />
+                      <textarea rows={1} value={r.cells[ci] ?? ''} readOnly={!isMine(r)} onChange={(e) => setCell(ri, ci, e.target.value)} onBlur={saveRows}
+                        className={`w-full min-w-[8rem] px-2 py-1.5 text-xs bg-transparent resize-y focus:outline-none ${isMine(r) ? "focus:bg-amber-50" : "text-gray-600 cursor-default"}`} />
                     </td>
                   ))}
                   <td className="border-l border-amber-100 px-2 py-1.5 align-top text-[11px] text-gray-500 whitespace-nowrap">
-                    {r.at ? (r.by?.toLowerCase() === user?.name?.toLowerCase() ? 'You' : r.by) : (
-                      // from before who added a row was kept: anyone in the note can set it
-                      <select value={r.by || ''} title="Added before this was recorded - pick who added it"
-                        onChange={(e) => { const next = rows.map((x, i) => (i === ri ? { ...x, by: e.target.value } : x)); setRows(next); save({ rows: next }) }}
-                        className="bg-transparent text-[11px] text-gray-600 border-b border-dashed border-gray-300 focus:outline-none">
-                        {[note.owner, ...(note.people || []).map((p) => p.name)].map((n) => (
-                          <option key={n} value={n}>{n.toLowerCase() === user?.name?.toLowerCase() ? 'You' : n}</option>
-                        ))}
-                      </select>
-                    )}
+                    {r.by?.toLowerCase() === user?.name?.toLowerCase() ? 'You' : r.by}
                   </td>
                   <td className="text-center align-top pt-1.5">
-                    <button onClick={() => window.confirm(`Delete row ${ri + 1}?`) && delRow(ri)} className="text-gray-300 hover:text-red-600 px-1" aria-label={`Delete row ${ri + 1}`}>✕</button>
+                    {isMine(r) && <button onClick={() => window.confirm(`Delete row ${ri + 1}?`) && delRow(ri)} className="text-gray-300 hover:text-red-600 px-1" aria-label={`Delete row ${ri + 1}`}>✕</button>}
                   </td>
                 </tr>
               ))}

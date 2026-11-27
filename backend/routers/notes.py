@@ -74,23 +74,23 @@ def _cols(raw: list[str]) -> list[str]:
 
 
 def _stored(n: NoteTable) -> list[dict]:
-    """The note's rows as [{id, cells, by, at}]. Rows from before who added
-    them was kept (plain lists, or at=None) have no known author: `by` is a
-    guess - the owner - that anyone in the note can correct (_rows)."""
+    """The note's rows as [{id, cells, by, at}] (plain lists, from before who
+    added a row was kept, are the owner's)."""
     out = []
     for i, r in enumerate(json.loads(n.rows_json or "[]")):
         out.append(r if isinstance(r, dict) else {"id": f"r{i}", "cells": r, "by": n.owner, "at": None})
     return out
 
 
-def _rows(raw: list, n: int, old: list[dict], caller: str, names: set[str] = frozenset()) -> list[dict]:
-    """The rows sent, each [{id, cells}] (or a bare list of cells): a row the
-    note already has keeps who added it and when; a new one is the caller's.
-    Who added a row is only taken from what's sent for a row from before
-    that was recorded (at=None) - and then only someone in the note
-    (`names`, lower-case)."""
+def _rows(raw: list, n: int, old: list[dict], caller: str, remap: bool = False) -> list[dict]:
+    """The rows sent, each [{id, cells}] (or a bare list of cells). A row
+    belongs to whoever added it, for good - who added it is never taken from
+    what's sent - and only they can change or remove it: anyone else's row
+    keeps its stored cells, and stays even if left out. `remap` is a change
+    of columns, which moves everyone's cells to where their column went."""
     if len(raw) > MAX_ROWS:
         raise HTTPException(400, f"At most {MAX_ROWS} rows")
+    me = caller.lower()
     known = {r["id"]: r for r in old}
     now = datetime.now(timezone.utc).isoformat()
     out = []
@@ -102,14 +102,17 @@ def _rows(raw: list, n: int, old: list[dict], caller: str, names: set[str] = fro
         cells = [str(c if c is not None else "")[:MAX_CELL] for c in cells][:n]
         prev = known.get(rid)
         if not rid or rid in {x["id"] for x in out}:
-            rid = uuid.uuid4().hex[:12]
-        by = prev["by"] if prev else caller
-        if prev and prev.get("at") is None and isinstance(r, dict):
-            want = " ".join(str(r.get("by") or "").split())
-            if want and want.lower() in names:
-                by = want
+            rid, prev = uuid.uuid4().hex[:12], None
+        if prev and (prev.get("by") or "").lower() != me and not remap:
+            cells = list(prev["cells"])[:n]
         out.append({"id": rid, "cells": cells + [""] * (n - len(cells)),
-                    "by": by, "at": prev["at"] if prev else now})
+                    "by": prev["by"] if prev else caller, "at": prev.get("at") if prev else now})
+    # someone else's rows left out are put back where they were
+    sent = {x["id"] for x in out}
+    for i, r in enumerate(old):
+        if r["id"] not in sent and (r.get("by") or "").lower() != me:
+            cells = list(r["cells"])[:n]
+            out.insert(min(i, len(out)), {**r, "cells": cells + [""] * (n - len(cells))})
     return out
 
 
@@ -203,8 +206,7 @@ def edit_note(note_id: int, payload: NoteEdit, db: Session = Depends(get_db),
     if payload.rows is not None or payload.columns is not None:
         old = _stored(n)
         rows = payload.rows if payload.rows is not None else old
-        names = {n.owner.lower()} | {p["name"].lower() for p in _shared(n)}
-        n.rows_json = json.dumps(_rows(rows, len(cols), old, caller.name, names))
+        n.rows_json = json.dumps(_rows(rows, len(cols), old, caller.name, remap=payload.columns is not None))
     n.updated_at, n.updated_by = datetime.now(timezone.utc), caller.name
     db.commit()
     db.refresh(n)
