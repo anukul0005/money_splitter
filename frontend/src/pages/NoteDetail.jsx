@@ -6,6 +6,69 @@ import { useUser } from '../UserContext'
 import { ago } from './Discussions'
 import NotePeople from '../components/NotePeople'
 
+// The number a cell starts with - "3*" is 3, "₹1,200" is 1200; null if none
+const num = (c) => {
+  const m = String(c || '').replace(/[₹,\s]/g, '').match(/^-?\d+(\.\d+)?/)
+  return m ? Number(m[0]) : null
+}
+const fmt = (n) => n.toLocaleString('en-IN', { maximumFractionDigits: 2 })
+
+/**
+ * The note at a glance: how many rows, the total of every column that holds
+ * numbers, and the same for each person who added rows.
+ */
+function Summary({ columns, rows, me }) {
+  if (!rows.length) return null
+  // A column is a number column when most of its filled cells start with one
+  const numeric = columns.map((_, ci) => {
+    const filled = rows.map((r) => r.cells[ci]).filter((c) => String(c || '').trim())
+    return filled.length > 0 && filled.filter((c) => num(c) !== null).length >= filled.length * 0.6
+  })
+  const sums = (rs) => columns.map((_, ci) => (numeric[ci] ? rs.reduce((t, r) => t + (num(r.cells[ci]) || 0), 0) : null))
+  const people = {}
+  rows.forEach((r) => { const k = r.by || 'Unknown'; (people[k] = people[k] || []).push(r) })
+  const byWho = Object.entries(people).sort((a, b) => b[1].length - a[1].length)
+  const total = sums(rows)
+  const name = (n) => (n.toLowerCase() === (me || '').toLowerCase() ? 'You' : n)
+  return (
+    <div className="card max-w-2xl">
+      <div className="flex flex-wrap gap-x-6 gap-y-2">
+        <div>
+          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Rows</p>
+          <p className="text-2xl font-black text-gray-900">{rows.length}</p>
+        </div>
+        {columns.map((c, ci) => total[ci] !== null && (
+          <div key={c}>
+            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Total {c}</p>
+            <p className="text-2xl font-black text-gray-900">{fmt(total[ci])}</p>
+          </div>
+        ))}
+      </div>
+      <table className="w-full text-xs mt-3">
+        <thead>
+          <tr className="text-[10px] text-gray-400 uppercase tracking-widest">
+            <th className="text-left font-black pb-1">Added by</th>
+            <th className="text-right font-black pb-1">Rows</th>
+            {columns.map((c, ci) => numeric[ci] && <th key={c} className="text-right font-black pb-1 pl-3">{c}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {byWho.map(([who, rs]) => {
+            const s2 = sums(rs)
+            return (
+              <tr key={who} className="border-t border-amber-100">
+                <td className="py-1.5 font-bold text-gray-800">{name(who)}</td>
+                <td className="py-1.5 text-right font-black text-gray-900">{rs.length}</td>
+                {columns.map((c, ci) => numeric[ci] && <td key={c} className="py-1.5 text-right font-black text-gray-900 pl-3">{fmt(s2[ci])}</td>)}
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 /**
  * A note: a table with the columns its owner named. Cells save as you leave
  * them; columns can be added, renamed and removed.
@@ -128,6 +191,8 @@ export default function NoteDetail() {
             </div>
           </div>
         )}
+
+        <Summary columns={note.columns} rows={rows} me={user?.name} />
 
         {rows.length > 8 && (
           <input value={q} onChange={(e) => setQ(e.target.value)} className="input text-sm max-w-sm" placeholder="Search the rows" />
