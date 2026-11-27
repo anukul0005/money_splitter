@@ -99,6 +99,7 @@ export default function NoteDetail() {
   const [editCols, setEditCols] = useState(false)
   const [sharing, setSharing] = useState(false)
   const [cols, setCols] = useState([])
+  const [colFrom, setColFrom] = useState([])   // each column's place before editing (null: new)
   const [newCol, setNewCol] = useState('')
   const [title, setTitle] = useState('')
   const [q, setQ] = useState('')
@@ -118,7 +119,7 @@ export default function NoteDetail() {
   ui.current = { editCols, sharing, aiOpen, me: (user?.name || '').toLowerCase() }
 
   const [people, setPeople] = useState([])
-  const take = (n) => { setNote(n); setRows(n.rows); setCols(n.columns); setTitle(n.title); setPeople(n.people || []); setDirty(false) }
+  const take = (n) => { setNote(n); setRows(n.rows); setCols(n.columns); setColFrom(n.columns.map((_, i) => i)); setTitle(n.title); setPeople(n.people || []); setDirty(false) }
   const [params, setParams] = useSearchParams()
   const [notice, setNotice] = useState('')
   const [busyTop, setBusyTop] = useState('')
@@ -276,10 +277,10 @@ export default function NoteDetail() {
   const saveCols = async () => {
     const add = newCol.trim()
     const next = add ? [...cols, add] : cols
-    // keep each row's cells under the column they belong to
-    const idx = next.map((c) => note.columns.indexOf(c))
-    const remapped = rows.map((r) => ({ ...r, cells: idx.map((k) => (k >= 0 ? r.cells[k] : '')) }))
-    if (await save({ title, columns: next, rows: remapped })) { setEditCols(false); setNewCol('') }
+    // each column says which one it was, so a renamed column keeps its cells
+    // (the server moves everyone's cells itself)
+    const from = add ? [...colFrom, null] : colFrom
+    if (await save({ title, columns: next, column_from: from, columns_was: note.columns })) { setEditCols(false); setNewCol('') }
   }
   const saveSharing = async () => { if (await save({ people: people.map((p) => p.name) })) setSharing(false) }
 
@@ -307,7 +308,7 @@ export default function NoteDetail() {
           {note.updated_at ? ` · edited ${ago(note.updated_at)}${note.updated_by && note.updated_by !== user?.name ? ` by ${note.updated_by}` : ''}` : ''}
         </p>
         <div className="flex gap-4 mt-3 text-[11px] font-bold">
-          <button onClick={() => { setEditCols((v) => !v); setSharing(false) }} className="text-brand-300 hover:text-white">{editCols ? 'Close' : 'Edit columns & name'}</button>
+          <button onClick={() => { setEditCols((v) => !v); setSharing(false); setCols(note.columns); setColFrom(note.columns.map((_, i) => i)); setTitle(note.title); setNewCol('') }} className="text-brand-300 hover:text-white">{editCols ? 'Close' : 'Edit columns & name'}</button>
           {mine && (
             <button onClick={() => { setSharing((v) => !v); setEditCols(false); setPeople(note.people || []) }}
               className="text-brand-300 hover:text-white">{sharing ? 'Close' : 'Who can see it'}</button>
@@ -330,7 +331,7 @@ export default function NoteDetail() {
               <div key={i} className="flex gap-2 items-center">
                 <input value={c} onChange={(e) => setCols((cs) => cs.map((x, j) => (j === i ? e.target.value : x)))} className="input text-xs py-1.5 flex-1" />
                 <button type="button" disabled={cols.length <= 1}
-                  onClick={() => window.confirm(`Remove the "${c}" column and what's in it?`) && setCols((cs) => cs.filter((_, j) => j !== i))}
+                  onClick={() => window.confirm(`Remove the "${c}" column and what's in it?`) && (setCols((cs) => cs.filter((_, j) => j !== i)), setColFrom((cs) => cs.filter((_, j) => j !== i)))}
                   className="text-[11px] font-bold text-red-500 disabled:opacity-30">Remove</button>
               </div>
             ))}

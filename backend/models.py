@@ -1973,3 +1973,18 @@ class NoteTable(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_by = Column(String(100), nullable=True)
+
+
+class NoteVersion(Base):
+    """A note as it was just before a change that can lose data - a column
+    renamed, moved or removed, or rows deleted - so it can be put back."""
+    __tablename__ = "note_versions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    note_id = Column(Integer, ForeignKey("note_tables.id", ondelete="CASCADE"), nullable=False, index=True)
+    title = Column(String(200), nullable=False)
+    columns_json = Column(Text, nullable=False)
+    rows_json = Column(Text, nullable=True)
+    reason = Column(String(200), nullable=True)
+    changed_by = Column(String(100), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from auth import caller_groups, current_user, is_member, member_group
 from database import get_db
-from models import Group, NoteTable, User
+from models import Group, NoteTable, NoteVersion, User
 
 router = APIRouter(prefix="/notes", tags=["notes"])
 
@@ -33,6 +33,9 @@ class NoteIn(BaseModel):
 class NoteEdit(BaseModel):
     title: str | None = None
     columns: list[str] | None = None
+    # for each column sent, which column it was (its index before), None if new
+    column_from: list[int | None] | None = None
+    columns_was: list[str] | None = None     # the columns column_from counts in
     rows: list[dict | list] | None = None
     people: list[str] | None = None
 
@@ -72,6 +75,49 @@ def _cols(raw: list[str]) -> list[str]:
     if len(out) > MAX_COLS:
         raise HTTPException(400, f"At most {MAX_COLS} columns")
     return out
+
+
+def _new_cols(raw: list[str], frm: list | None, old: list[str]) -> tuple[list[str], list[int | None]]:
+    """The columns sent, cleaned, and where each one's cells come from. A
+    column keeps its cells when renamed: by the index it says it came from,
+    or (from an older page that doesn't say) by its name, else - a rename -
+    by the left-over old column in the same place."""
+    out, src = [], []
+    for i, c in enumerate(raw):
+        c = " ".join(str(c or "").split())[:60]
+        if not c or c.lower() in {x.lower() for x in out}:
+            continue
+        k = frm[i] if frm is not None and i < len(frm) else None
+        out.append(c)
+        src.append(k if isinstance(k, int) and 0 <= k < len(old) else None)
+    if not out:
+        raise HTTPException(400, "Give the table at least one column")
+    if len(out) > MAX_COLS:
+        raise HTTPException(400, f"At most {MAX_COLS} columns")
+    if frm is None:
+        names = {c.lower(): i for i, c in enumerate(old)}
+        src = [names.get(c.lower()) for c in out]
+        left = [i for i in range(len(old)) if i not in src]
+        for j, k in enumerate(src):
+            if k is None and left:
+                # a renamed column: the unclaimed old one in its place, or the next one left
+                pick = j if j in left else left[0]
+                src[j] = pick
+                left.remove(pick)
+    seen = set()
+    src = [k if k is not None and k not in seen and not seen.add(k) else None for k in src]
+    return out, src
+
+
+def _keep_version(db: Session, n: NoteTable, reason: str, by: str) -> None:
+    """The note as it is now, kept before a change that can lose data (the
+    last 50 for each note)."""
+    db.add(NoteVersion(note_id=n.id, title=n.title, columns_json=n.columns_json, rows_json=n.rows_json,
+                       reason=reason[:200], changed_by=by))
+    old = (db.query(NoteVersion).filter(NoteVersion.note_id == n.id)
+           .order_by(NoteVersion.id.desc()).offset(49).all())
+    for v in old:
+        db.delete(v)
 
 
 def _stored(n: NoteTable) -> list[dict]:
@@ -209,12 +255,27 @@ def edit_note(note_id: int, payload: NoteEdit, db: Session = Depends(get_db),
         n.shared_with = json.dumps(people) if people else None
     cols = json.loads(n.columns_json)
     if payload.columns is not None:
-        cols = _cols(payload.columns)
-        n.columns_json = json.dumps(cols)
-    if payload.rows is not None or payload.columns is not None:
+        # The cells move with their columns here, from what's saved - never
+        # from the page's copy, which may be behind or matched by name
+        if payload.column_from is not None and payload.columns_was is not None and payload.columns_was != cols:
+            raise HTTPException(409, "Someone changed the columns meanwhile - close and edit them again")
+        new, src = _new_cols(payload.columns, payload.column_from, cols)
+        if new != cols:
+            dropped = [cols[i] for i in range(len(cols)) if i not in src]
+            _keep_version(db, n, "columns: " + " | ".join(cols) + " -> " + " | ".join(new)
+                          + (f" (removed {', '.join(dropped)})" if dropped else ""), caller.name)
+            moved = []
+            for r in _stored(n):
+                cells = list(r["cells"])
+                moved.append({**r, "cells": [cells[k] if k is not None and k < len(cells) else "" for k in src]})
+            n.columns_json, n.rows_json, cols = json.dumps(new), json.dumps(moved), new
+    elif payload.rows is not None:
         old = _stored(n)
-        rows = payload.rows if payload.rows is not None else old
-        n.rows_json = json.dumps(_rows(rows, len(cols), old, caller.name, remap=payload.columns is not None))
+        rows = _rows(payload.rows, len(cols), old, caller.name)
+        gone = {r["id"] for r in old} - {r["id"] for r in rows}
+        if gone:
+            _keep_version(db, n, f"{len(gone)} row(s) deleted", caller.name)
+        n.rows_json = json.dumps(rows)
     n.updated_at, n.updated_by = datetime.now(timezone.utc), caller.name
     db.commit()
     db.refresh(n)
