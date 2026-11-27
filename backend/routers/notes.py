@@ -74,18 +74,21 @@ def _cols(raw: list[str]) -> list[str]:
 
 
 def _stored(n: NoteTable) -> list[dict]:
-    """The note's rows as [{id, cells, by, at}] - older ones, kept as plain
-    lists, were all added by the owner."""
+    """The note's rows as [{id, cells, by, at}]. Rows from before who added
+    them was kept (plain lists, or at=None) have no known author: `by` is a
+    guess - the owner - that anyone in the note can correct (_rows)."""
     out = []
     for i, r in enumerate(json.loads(n.rows_json or "[]")):
         out.append(r if isinstance(r, dict) else {"id": f"r{i}", "cells": r, "by": n.owner, "at": None})
     return out
 
 
-def _rows(raw: list, n: int, old: list[dict], caller: str) -> list[dict]:
+def _rows(raw: list, n: int, old: list[dict], caller: str, names: set[str] = frozenset()) -> list[dict]:
     """The rows sent, each [{id, cells}] (or a bare list of cells): a row the
     note already has keeps who added it and when; a new one is the caller's.
-    Who added a row is never taken from what's sent."""
+    Who added a row is only taken from what's sent for a row from before
+    that was recorded (at=None) - and then only someone in the note
+    (`names`, lower-case)."""
     if len(raw) > MAX_ROWS:
         raise HTTPException(400, f"At most {MAX_ROWS} rows")
     known = {r["id"]: r for r in old}
@@ -100,8 +103,13 @@ def _rows(raw: list, n: int, old: list[dict], caller: str) -> list[dict]:
         prev = known.get(rid)
         if not rid or rid in {x["id"] for x in out}:
             rid = uuid.uuid4().hex[:12]
+        by = prev["by"] if prev else caller
+        if prev and prev.get("at") is None and isinstance(r, dict):
+            want = " ".join(str(r.get("by") or "").split())
+            if want and want.lower() in names:
+                by = want
         out.append({"id": rid, "cells": cells + [""] * (n - len(cells)),
-                    "by": prev["by"] if prev else caller, "at": prev["at"] if prev else now})
+                    "by": by, "at": prev["at"] if prev else now})
     return out
 
 
@@ -195,7 +203,8 @@ def edit_note(note_id: int, payload: NoteEdit, db: Session = Depends(get_db),
     if payload.rows is not None or payload.columns is not None:
         old = _stored(n)
         rows = payload.rows if payload.rows is not None else old
-        n.rows_json = json.dumps(_rows(rows, len(cols), old, caller.name))
+        names = {n.owner.lower()} | {p["name"].lower() for p in _shared(n)}
+        n.rows_json = json.dumps(_rows(rows, len(cols), old, caller.name, names))
     n.updated_at, n.updated_by = datetime.now(timezone.utc), caller.name
     db.commit()
     db.refresh(n)

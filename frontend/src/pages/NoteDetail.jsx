@@ -156,7 +156,16 @@ export default function NoteDetail() {
                     </td>
                   ))}
                   <td className="border-l border-amber-100 px-2 py-1.5 align-top text-[11px] text-gray-500 whitespace-nowrap">
-                    {r.by ? (r.by.toLowerCase() === user?.name?.toLowerCase() ? 'You' : r.by) : ''}
+                    {r.at ? (r.by?.toLowerCase() === user?.name?.toLowerCase() ? 'You' : r.by) : (
+                      // from before who added a row was kept: anyone in the note can set it
+                      <select value={r.by || ''} title="Added before this was recorded - pick who added it"
+                        onChange={(e) => { const next = rows.map((x, i) => (i === ri ? { ...x, by: e.target.value } : x)); setRows(next); save({ rows: next }) }}
+                        className="bg-transparent text-[11px] text-gray-600 border-b border-dashed border-gray-300 focus:outline-none">
+                        {[note.owner, ...(note.people || []).map((p) => p.name)].map((n) => (
+                          <option key={n} value={n}>{n.toLowerCase() === user?.name?.toLowerCase() ? 'You' : n}</option>
+                        ))}
+                      </select>
+                    )}
                   </td>
                   <td className="text-center align-top pt-1.5">
                     <button onClick={() => window.confirm(`Delete row ${ri + 1}?`) && delRow(ri)} className="text-gray-300 hover:text-red-600 px-1" aria-label={`Delete row ${ri + 1}`}>✕</button>
