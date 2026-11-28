@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
-  getLoans, createLoan, repayLoan, deleteLoan, setOffLoans,
+  getLoans, createLoan, repayLoan, deleteLoan, setOffLoans, setOffLoanGroups,
   createBill, stopBill, stopBillMember, repayBill, updateBillDay, getFriends,
   listUpiIdsFor, createPaymentClaim,
 } from '../api'
@@ -53,6 +53,7 @@ export default function Loans() {
   const blankLoan = { role: 'lent', other: '', amount: '', start_date: '', due_date: '', interest: false, note: '',
                       emi: false, emiCount: 3, emiFirst: '', emiRows: [] }
   const [loan, setLoan] = useState(blankLoan)
+  const [setOff, setSetOff] = useState(null)   // loan id whose set-off-against-groups panel is open
   const [bill, setBill] = useState({ title: '', amount: '', members: [], day_of_month: 1 })
 
   const load = () => getLoans().then((r) => setData(r.data)).catch(() => setError('Could not load.'))
@@ -499,7 +500,7 @@ export default function Loans() {
                 )}
                 {l.payments.length > 0 && (
                   <p className="text-[11px] text-gray-400 mt-1">
-                    Repaid: {l.payments.map((p) => `${INR(p.amount)} on ${p.date}${p.set_off ? ' (set off against the other loan)' : ''}`).join(', ')}
+                    Repaid: {l.payments.map((p) => `${INR(p.amount)} on ${p.date}${p.set_off ? ' (set off against the other loan)' : p.netted ? ' (set off against groups)' : ''}`).join(', ')}
                   </p>
                 )}
                 <div className="flex gap-2 mt-3">
@@ -513,12 +514,45 @@ export default function Loans() {
                       {openPayKey === `loan-${l.id}` ? 'Hide UPI' : 'Pay via UPI'}
                     </button>
                   )}
+                  {!l.paid && l.group_set_off && (
+                    <button onClick={() => setSetOff(setOff === l.id ? null : l.id)}
+                      className="flex-1 py-2 text-xs font-bold bg-white border border-gray-300 text-gray-700 rounded-md">
+                      {setOff === l.id ? 'Close' : 'Set off against groups'}
+                    </button>
+                  )}
                   <button
                     onClick={() => confirm('Delete this loan?') && run(() => deleteLoan(l.id))}
                     className="px-3 py-2 text-xs font-bold text-gray-400 hover:text-red-500">
                     Delete
                   </button>
                 </div>
+                {setOff === l.id && l.group_set_off && (
+                  <div className="mt-2 border border-amber-200 bg-amber-50 p-3 text-xs space-y-2">
+                    {l.group_set_off.amount > 0 ? (
+                      <>
+                        <p className="text-gray-800">
+                          {iOwe ? <><b>{dn(other)}</b> owes you</> : <>You owe <b>{dn(other)}</b></>} {INR(l.group_set_off.amount)} in{' '}
+                          {l.group_set_off.groups.map((g) => `${g.group} (${INR(g.amount)})`).join(', ')}.
+                        </p>
+                        <p className="text-gray-600">
+                          Setting it off takes {INR(l.group_set_off.amount)} off this loan and squares that much in
+                          {l.group_set_off.groups.length === 1 ? ' that group' : ' those groups'} - no money changes hands.
+                          {l.group_set_off.amount < l.total_due - 0.01 && ` ${INR(l.total_due - l.group_set_off.amount)} of the loan stays open.`}
+                        </p>
+                        <div className="flex gap-3 items-center">
+                          <button onClick={() => run(() => setOffLoanGroups(l.id)).then(() => setSetOff(null))}
+                            className="px-3 py-1.5 font-bold bg-amber-600 text-white rounded-md">Set off {INR(l.group_set_off.amount)}</button>
+                          <button onClick={() => setSetOff(null)} className="font-bold text-gray-500">Cancel</button>
+                        </div>
+                        <p className="text-[10px] text-gray-500">To undo it, delete the set-off payment in the group's payments.</p>
+                      </>
+                    ) : (
+                      <p className="text-gray-600">
+                        Nothing to set off - {iOwe ? `${dn(other)} doesn't owe you` : `you don't owe ${dn(other)}`} anything in the groups you share.
+                      </p>
+                    )}
+                  </div>
+                )}
                 {openPayKey === `loan-${l.id}` && (
                   <PayPanel personName={other} amount={l.total_due}
                     note={`Loan repayment to ${dn(other)}`} kind="loan" refId={l.id} />
