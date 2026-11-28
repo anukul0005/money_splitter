@@ -145,6 +145,8 @@ export const repayLoan         = (id, data)  => api.post(`/loans/${id}/payments`
 export const deleteLoan        = (id)        => api.delete(`/loans/${id}`)
 export const setOffLoans       = (person)    => api.post('/loans/set-off', { person })
 export const setOffLoanGroups  = (id)        => api.post(`/loans/${id}/set-off-groups`)
+export const groupSetOffOffers = (gid)       => api.get(`/loans/group/${gid}/set-off`)
+export const groupSetOff       = (gid, person) => api.post(`/loans/group/${gid}/set-off`, { person })
 export const createBill        = (data)      => api.post('/loans/bills', data)
 export const markChargePaid    = (id)        => api.post(`/loans/bills/charges/${id}/paid`)
 export const repayBill         = (id, data)  => api.post(`/loans/bills/${id}/repay`, data)

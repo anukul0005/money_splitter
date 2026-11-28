@@ -631,3 +631,90 @@ def set_off_groups(loan_id: int, db: Session = Depends(get_db), caller: User = D
     db.add(LoanPayment(loan_id=loan.id, amount=total, date=today, settlement_ref=ref))
     db.commit()
     return {"ok": True, "amount": total, "groups": [{"group": g.name, "amount": a} for g, a in pieces]}
+
+
+# ── the same, started from a group: its debt set off against loans ────────
+
+def _group_offers(db: Session, caller: User, g: Group) -> list[dict]:
+    """In group g, each person the caller is square-able with through loans:
+    what's owed between them here, set against open loans running the other
+    way (oldest first). Only the caller's own pairs - their loans are theirs."""
+    import settle_up  # noqa: F401
+    from routers.stats import _pairwise_group_debts
+    me = caller.name
+    d = _pairwise_group_debts(g)
+    open_loans = [l for l in db.query(Loan).all()
+                  if (_same(l.lender, me) or _same(l.borrower, me)) and outstanding(l)["total_due"] > 0.01]
+    out = []
+    for m in g.members:
+        if _same(m.name, me):
+            continue
+        net = sum(v for (a, b), v in d.items() if _same(a, m.name) and _same(b, me)) \
+            - sum(v for (a, b), v in d.items() if _same(a, me) and _same(b, m.name))
+        if abs(net) <= 0.01:
+            continue
+        # they owe me here -> loans where I borrowed from them; I owe here -> loans they took from me
+        payer, receiver = (m.name, me) if net > 0 else (me, m.name)
+        loans = sorted([l for l in open_loans if _same(l.lender, payer) and _same(l.borrower, receiver)],
+                       key=lambda l: (l.start_date or "", l.id))
+        if not loans:
+            continue
+        left, parts = round(abs(net), 2), []
+        for l in loans:
+            if left <= 0.01:
+                break
+            amt = round(min(outstanding(l)["total_due"], left), 2)
+            parts.append({"loan_id": l.id, "principal": l.principal, "start_date": l.start_date, "amount": amt})
+            left = round(left - amt, 2)
+        total = round(sum(x["amount"] for x in parts), 2)
+        if total > 0.01:
+            out.append({"person": m.name, "payer": payer, "receiver": receiver, "group_owed": round(abs(net), 2),
+                        "amount": total, "loans": parts})
+    return out
+
+
+def _group_for(db: Session, caller: User, group_id: int) -> Group:
+    g = db.get(Group, group_id)
+    if g is None or not is_member(g, caller):
+        raise HTTPException(404, "Group not found")
+    return g
+
+
+@router.get("/group/{group_id}/set-off", response_model=list)
+def group_set_off_offers(group_id: int, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    return _group_offers(db, caller, _group_for(db, caller, group_id))
+
+
+class GroupSetOffIn(BaseModel):
+    person: str = Field(min_length=1, max_length=100)
+
+
+@router.post("/group/{group_id}/set-off", response_model=dict)
+def group_set_off(group_id: int, payload: GroupSetOffIn, db: Session = Depends(get_db),
+                  caller: User = Depends(current_user)):
+    """Settle what's owed with one person in this group against the open
+    loans running the other way: the group records the debtor paying, the
+    loans count that much repaid - no money moves. One settlement_ref, so
+    deleting that payment takes it all back."""
+    import uuid
+    from activity import record_activity
+    from models import Payment
+    g = _group_for(db, caller, group_id)
+    offer = next((o for o in _group_offers(db, caller, g) if _same(o["person"], payload.person)), None)
+    if offer is None:
+        raise HTTPException(400, "Nothing to set off with them here")
+    today = date.today().isoformat()
+    ref = uuid.uuid4().hex
+    names = {m.name.lower(): m.name for m in g.members}
+    total = offer["amount"]
+    loans_txt = ", ".join(f"₹{x['principal']:,.0f}" + (f" from {x['start_date']}" if x["start_date"] else "")
+                          for x in offer["loans"])
+    db.add(Payment(group_id=g.id, from_member=names[offer["payer"].lower()], to_member=names[offer["receiver"].lower()],
+                   amount=total, date=today, settlement_ref=ref, settlement_amount=total,
+                   note=f"Set off against the loan{'s' if len(offer['loans']) > 1 else ''} ({loans_txt})"))
+    for x in offer["loans"]:
+        db.add(LoanPayment(loan_id=x["loan_id"], amount=x["amount"], date=today, settlement_ref=ref))
+    record_activity(db, g, caller.name, "set off against a loan",
+                    f"₹{total:,.0f} {offer['payer']} owed {offer['receiver']} here, set off against the loan")
+    db.commit()
+    return {"ok": True, "amount": total}

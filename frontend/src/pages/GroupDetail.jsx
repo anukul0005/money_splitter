@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { getGroup, getSettlement, getGroupStats, deleteExpense, deleteGroup, getMonthlySkipped, getLoans } from '../api'
+import { getGroup, getSettlement, getGroupStats, deleteExpense, deleteGroup, getMonthlySkipped, getLoans, groupSetOffOffers, groupSetOff } from '../api'
 import LoadingSpinner from '../components/LoadingSpinner'
 import ExpenseEditModal from '../components/ExpenseEditModal'
 import ReceiptInfo from '../components/ReceiptInfo'
@@ -49,13 +49,26 @@ export default function GroupDetail() {
   }, [tab, id, skipped])
   useEffect(() => { setSkipped(null); setTab('expenses') }, [id])
 
+  // Loans with someone here running the other way: settle this group's
+  // debt against them (backend loans.py group set-off)
+  const [offers, setOffers] = useState([])
+  const [offerOpen, setOfferOpen] = useState('')
+  const [offerBusy, setOfferBusy] = useState(false)
+  const [offerErr, setOfferErr] = useState('')
   const fetchData = () =>
     Promise.all([getGroup(id), getSettlement(id), getGroupStats(id)])
       .then(([g, s, st]) => {
         setGroup(g.data)
         setSettlement(s.data)
         setStats(st.data)
+        groupSetOffOffers(id).then((r) => setOffers(r.data || [])).catch(() => setOffers([]))
       })
+  const doSetOff = async (o) => {
+    setOfferBusy(true); setOfferErr('')
+    try { await groupSetOff(id, o.person); setOfferOpen(''); await fetchData() }
+    catch (e) { setOfferErr(e.response?.data?.detail || "Couldn't set that off - try again.") }
+    finally { setOfferBusy(false) }
+  }
 
   // Silent refresh — no spinner, preserves scroll position
   const reload = () => fetchData()
@@ -526,6 +539,46 @@ export default function GroupDetail() {
               </div>
             )}
           </div>
+
+          {offers.length > 0 && (
+            <div className="card md:col-span-2 border border-amber-200">
+              <h4 className="text-xs font-bold text-gray-500 mb-2">Settle up against loans</h4>
+              <div className="space-y-2">
+                {offers.map((o) => {
+                  const theyOwe = o.payer.toLowerCase() !== (currentUser?.name || '').toLowerCase()
+                  return (
+                    <div key={o.person} className="border border-amber-200 bg-amber-50/60 rounded-md p-3 text-xs space-y-2">
+                      <p className="text-gray-800">
+                        {theyOwe ? <><b>{d(o.person)}</b> owes you {INR(o.group_owed)} here, and you owe them on a loan.</>
+                          : <>You owe <b>{d(o.person)}</b> {INR(o.group_owed)} here, and they owe you on a loan.</>}
+                      </p>
+                      {offerOpen === o.person ? (
+                        <>
+                          <p className="text-gray-600">
+                            Setting off {INR(o.amount)} squares that much here and takes it off the loan{o.loans.length > 1 ? 's' : ''}
+                            {' '}({o.loans.map((x) => `${INR(x.principal)}${x.start_date ? ` from ${x.start_date}` : ''}: ${INR(x.amount)}`).join('; ')}) - no money changes hands.
+                            {o.amount < o.group_owed - 0.01 && ` ${INR(o.group_owed - o.amount)} stays owed here.`}
+                          </p>
+                          <div className="flex gap-3 items-center">
+                            <button onClick={() => doSetOff(o)} disabled={offerBusy}
+                              className="px-3 py-1.5 font-bold bg-amber-600 text-white rounded-md disabled:opacity-50">{offerBusy ? 'Setting off…' : `Set off ${INR(o.amount)}`}</button>
+                            <button onClick={() => setOfferOpen('')} className="font-bold text-gray-500">Cancel</button>
+                          </div>
+                          {offerErr && <p className="text-red-600">{offerErr}</p>}
+                          <p className="text-[10px] text-gray-500">To undo it, tap the set-off in Recorded payments and delete it.</p>
+                        </>
+                      ) : (
+                        <button onClick={() => { setOfferOpen(o.person); setOfferErr('') }}
+                          className="px-3 py-1.5 font-bold border border-amber-300 bg-white text-gray-700 rounded-md">
+                          Settle up against loan · {INR(o.amount)}
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Recorded payments. Recording happens from the Friends page, which
               covers every group in one place; tap a row here to correct one. */}
