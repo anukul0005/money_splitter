@@ -192,6 +192,9 @@ class Expense(Base):
     # split and is a Loan from the payer to them (expense_guests).
     guests = Column(Text, nullable=True)
     payment_mode = Column(String(50), nullable=True)  # cash / upi / credit_card / debit_card
+    # A card bill's line this expense was put in a group from (routers/
+    # credit_cards.py to-group): "bill:<statement id>:<line>"
+    card_ref = Column(String(40), nullable=True, index=True)
     notes = Column(Text, nullable=True)
     settled_by = Column(Text, nullable=True)   # JSON array of member names who settled their share
     # "HH:MM" the money actually moved, optional - and its coarse label,

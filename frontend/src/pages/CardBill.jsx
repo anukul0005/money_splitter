@@ -6,6 +6,7 @@ import {
 } from '../api'
 import Dropdown from '../components/Dropdown'
 import { PassOnSheet, emiOf, passable } from '../components/PassOn'
+import { cardLineToGroup } from '../api'
 
 const INR = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
 const day = (iso) => (iso ? new Date(`${iso}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '')
@@ -492,7 +493,13 @@ function BillBreakup({ billId: id }) {
                         → {covered.to} · EMI {covered.at} of {covered.of}, in the loan already
                       </button>
                     )}
-                    {!covered && x.category !== 'Card fees & interest' && (x.type === 'debit' || emiOf(x)) && sentTotal < (booking ? booking.total : passable(x)) - 0.5 && (
+                    {d.in_groups?.[String(line)] && (
+                      <button onClick={() => nav(`/groups/${d.in_groups[String(line)].group_id}`)}
+                        className="text-[10px] font-bold text-green-700 bg-green-50 border border-green-200 rounded px-1.5 py-px mt-0.5">
+                        → in {d.in_groups[String(line)].group}
+                      </button>
+                    )}
+                    {!covered && !d.in_groups?.[String(line)] && x.category !== 'Card fees & interest' && (x.type === 'debit' || emiOf(x)) && sentTotal < (booking ? booking.total : passable(x)) - 0.5 && (
                       <button onClick={() => setPassing({ x, line, already: sentTotal })}
                         className="text-[10px] font-bold text-brand-500 mt-0.5">{sent.length ? '+ pass on more' : 'Split / pass on'}</button>
                     )}
@@ -541,6 +548,7 @@ function BillBreakup({ billId: id }) {
       {passing && (
         <PassOnSheet x={passing.x} all={d.transactions} refKey={`bill:${id}:${passing.line}`} already={passing.already} source={b?.card || ''} dueDate={b?.due_date}
           booking={d.emi_bookings?.[String(passing.line)]}
+          onGroup={passing.x.type === 'debit' && !emiOf(passing.x) ? (data) => cardLineToGroup(id, passing.line, data) : null}
           onClose={() => setPassing(null)}
           onDone={() => { setPassing(null); getCardBillDetails(id).then((r) => setD(r.data)).catch(() => {}) }} />
       )}

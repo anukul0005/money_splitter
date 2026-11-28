@@ -190,6 +190,7 @@ export const unsubscribePush    = (data)     => api.post('/push/unsubscribe', da
 
 // ── Groups ────────────────────────────────────────────────────────────────────
 export const getGroups   = ()            => api.get('/groups/')
+export const cardLineToGroup = (billId, line, data) => api.post(`/credit-cards/bills/${billId}/lines/${line}/to-group`, data)
 export const getGroup    = (id)          => api.get(`/groups/${id}`)
 export const createGroup = (data)        => api.post('/groups/', data)
 export const updateGroup = (id, data)    => api.patch(`/groups/${id}`, data)

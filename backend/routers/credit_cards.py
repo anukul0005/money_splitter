@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -595,6 +595,8 @@ def bill_details(bill_id: int, db: Session = Depends(get_db), caller: User = Dep
                      "statement_date": bill.statement_date},
             # Lines passed on to someone as a loan: line -> [{loan_id, to, amount}]
             "transfers": _transfers(db, bill.id, caller),
+            # Lines put into a group: line -> {group_id, group, expense_id}
+            "in_groups": _in_groups(db, bill.id),
             # Later instalments of an EMI already passed on from an earlier bill
             "emi_covered": {**_booking_covered(db, bill, caller), **_emi_covered(db, bill, caller)}}
     live = card_details.status(bill.id)
@@ -673,3 +675,113 @@ def fetch(months: int = 2, db: Session = Depends(get_db), caller: User = Depends
 @router.get("/scan/progress", response_model=dict)
 def scan_progress(caller: User = Depends(current_user)):
     return statement_sync.get_progress(caller.id)
+
+
+# ── a card line put into the group for its date ──────────────────────────────
+
+_MON = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+
+
+def _in_groups(db: Session, bill_id: int) -> dict:
+    from models import Expense, Group
+    out = {}
+    for e, g in (db.query(Expense, Group).join(Group, Group.id == Expense.group_id)
+                 .filter(Expense.card_ref.like(f"bill:{bill_id}:%"))):
+        out[e.card_ref.rsplit(":", 1)[1]] = {"group_id": g.id, "group": g.name, "expense_id": e.id}
+    return out
+
+
+def _date_group_key(name: str) -> str | None:
+    """A group named for a day ("17 nov 26", "05 Jul 26", "17 November 2026")
+    as "2026-11-17"; None for any other name."""
+    import re
+    m = re.fullmatch(r"\s*(\d{1,2})\s+([a-z]{3})[a-z]*\.?\s+(\d{2}|\d{4})\s*", (name or "").lower())
+    if not m or m.group(2) not in _MON:
+        return None
+    y = int(m.group(3))
+    y = y + 2000 if y < 100 else y
+    return f"{y:04d}-{_MON.index(m.group(2)) + 1:02d}-{int(m.group(1)):02d}"
+
+
+class ToGroupIn(BaseModel):
+    people: list[str]                       # who shares it with you
+    with_me: bool = True                    # you're in the split too
+    shares: dict[str, float] | None = None  # name -> amount, when not equal
+
+
+@router.post("/bills/{bill_id}/lines/{line}/to-group", response_model=dict)
+def line_to_group(bill_id: int, line: int, payload: ToGroupIn, background_tasks: BackgroundTasks,
+                  db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """Put a card spend, whole, into the group for its date - the caller's
+    group named for that day ("17 Nov 26"), with the people added if they
+    aren't in it; or a new group of that name. Paid by the caller's card,
+    split between the people (and the caller). The salary dashboard then
+    counts it in the group, not on the card."""
+    import json
+    from auth import caller_groups
+    from models import Expense
+    from routers.expenses import create_expense
+    from routers.groups import create_group, update_group
+    from schemas import ExpenseCreate, GroupCreate, GroupUpdate
+    bill = _own_bill(db, bill_id, caller)
+    txns = (json.loads(bill.details_json or "{}").get("transactions") or [])
+    if not 0 <= line < len(txns):
+        raise HTTPException(404, "No such line on this bill")
+    t = txns[line]
+    if t.get("type") != "debit" or not t.get("amount"):
+        raise HTTPException(400, "Only a spend can go into a group")
+    ref = f"bill:{bill.id}:{line}"
+    if db.query(Expense.id).filter(Expense.card_ref == ref).first():
+        raise HTTPException(400, "This spend is in a group already")
+    me = caller.name
+    people = []
+    for n in payload.people:
+        n = " ".join((n or "").split())[:100]
+        if n and n.lower() != me.lower() and n.lower() not in {p.lower() for p in people}:
+            people.append(n)
+    if not people:
+        raise HTTPException(400, "Pick who it's shared with")
+    day = (t.get("date") or "")[:10]
+    if len(day) != 10:
+        raise HTTPException(400, "This spend has no date")
+    # the group for that day: an active one of the caller's, else a new one
+    group = next((g for g in caller_groups(db, caller, history=False)
+                  if _date_group_key(g.name) == day), None)
+    y, m, d = day.split("-")
+    if group is None:
+        made = create_group(GroupCreate(name=f"{int(d)} {_MON[int(m) - 1].title()} {y[2:]}", members=[me, *people],
+                                        created_by=me), background_tasks, db, caller)
+        group_id, created = made.id, True
+    else:
+        have = {mb.name.lower() for mb in group.members}
+        missing = [n for n in people if n.lower() not in have]
+        if missing:
+            update_group(group.id, GroupUpdate(members_add=missing, updated_by=me), background_tasks, db, caller)
+        group_id, created = group.id, False
+    split = [me, *people] if payload.with_me else people
+    names = {}
+    from models import Group
+    g = db.get(Group, group_id)
+    for mb in g.members:
+        names[mb.name.lower()] = mb.name
+    split = [names.get(n.lower(), n) for n in split]
+    amount = round(float(t["amount"]), 2)
+    shares = None
+    if payload.shares:
+        shares = {names.get(k.lower(), k): round(float(v), 2) for k, v in payload.shares.items() if v and float(v) > 0}
+        if payload.with_me and me not in shares:
+            shares[names.get(me.lower(), me)] = round(amount - sum(shares.values()), 2)
+        if abs(sum(shares.values()) - amount) > 1 or any(v < 0 for v in shares.values()):
+            raise HTTPException(400, f"The shares add up to ₹{sum(shares.values()):,.2f}, not ₹{amount:,.2f}")
+    import card_details
+    title = card_details.merchant_name(t.get("description") or "") or "Card spend"
+    e = create_expense(ExpenseCreate(
+        group_id=group_id, date=day, title=title, amount=amount, paid_by=names.get(me.lower(), me),
+        participants=",".join(shares.keys() if shares else split), divider=len(shares or split),
+        split_json=json.dumps(shares) if shares else None, payment_mode="credit_card",
+        category=t.get("category"), subcategory=t.get("subcategory"),
+        notes=f"From the card bill: {t.get('description') or ''}"[:500], recorded_by=me), background_tasks, db, caller)
+    row = db.get(Expense, e.id)
+    row.card_ref = ref
+    db.commit()
+    return {"group_id": group_id, "group": g.name, "created": created, "expense_id": e.id}

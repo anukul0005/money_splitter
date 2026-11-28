@@ -41,7 +41,10 @@ export const passable = (x) => { const e = emiOf(x); return e ? r2(x.amount * (e
  * you, in their You owe, and in both Loans sections; anyone not on the app
  * is simply named.
  */
-export function PassOnSheet({ x, all = [], refKey, source, dueDate, already = 0, booking, onDone, onClose }) {
+export function PassOnSheet({ x, all = [], refKey, source, dueDate, already = 0, booking, onGroup, onDone, onClose }) {
+  // A card line can go, whole, into the group for its date instead (onGroup)
+  const [mode, setMode] = useState(onGroup && !already ? 'group' : 'loan')
+  const grouping = mode === 'group'
   const e = emiOf(x)
   // The bank turned this purchase into an EMI (backend card_emi.plan): passed
   // on with its instalments, interest, GST and fee - each due a few days
@@ -72,17 +75,29 @@ export function PassOnSheet({ x, all = [], refKey, source, dueDate, already = 0,
   const [people, setPeople] = useState([])
   const [friends, setFriends] = useState([])
   const [withMe, setWithMe] = useState(false)
+  useEffect(() => { setWithMe(grouping); setAmts({}) }, [grouping])
   const [amts, setAmts] = useState({})              // name -> amount typed (others follow the even share)
   const [due, setDue] = useState(() => addDays(todayIso(), 30))
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   useEffect(() => { getFriends().then((r) => setFriends(r.data.map((f) => f.name))).catch(() => {}) }, [])
-  const left = r2((bank ? bank.total : asEmi ? perInst * nInst : x.amount) - already)
+  const left = grouping ? r2(x.amount) : r2((bank ? bank.total : asEmi ? perInst * nInst : x.amount) - already)
   const even = people.length ? r2(left / (people.length + (withMe ? 1 : 0))) : 0
   const share = (n) => (amts[n] !== undefined && amts[n] !== '' ? parseFloat(amts[n]) || 0 : even)
   const total = r2(people.reduce((s, n) => s + share(n), 0))
   const save = async () => {
     setErr('')
+    if (grouping) {
+      if (!people.length) return setErr('Pick who it was with.')
+      const typed = Object.keys(amts).some((n) => amts[n] !== '')
+      if (total > left + 0.5) return setErr(`That's ${INR(total)} - more than the ${INR(left)} spent.`)
+      setBusy(true)
+      try {
+        await onGroup({ people, with_me: withMe, shares: typed ? Object.fromEntries(people.map((n) => [n, share(n)])) : null })
+        onDone()
+      } catch (e) { setErr(e.response?.data?.detail || 'Could not put it in a group.'); setBusy(false) }
+      return
+    }
     if (!people.length) return setErr('Pick who to pass it on to.')
     if (total <= 0) return setErr('Enter the amounts.')
     if (total > left + 0.5) return setErr(`That's ${INR(total)} - more than the ${INR(left)} left on this spend.`)
@@ -126,7 +141,23 @@ export function PassOnSheet({ x, all = [], refKey, source, dueDate, already = 0,
           </div>
           <button type="button" onClick={onClose} className="text-xs font-bold text-gray-400">Close</button>
         </div>
-        {booking && (
+        {onGroup && (
+          <div className="flex gap-1.5">
+            {[['group', 'Put it in a group'], ['loan', 'Pass on as a loan']].map(([v, label]) => (
+              <button key={v} type="button" disabled={v === 'group' && already > 0} onClick={() => setMode(v)}
+                className={`flex-1 py-1.5 text-xs font-bold border rounded-md disabled:opacity-40 ${mode === v ? 'border-brand-600 bg-brand-600 text-white' : 'border-gray-300 bg-white text-gray-700'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+        {grouping && (
+          <p className="text-[11px] text-gray-600 bg-amber-50 border border-amber-200 rounded-md p-2">
+            The whole {INR(x.amount)} goes into your group for <b>{day(x.date)}</b> - or a new one of that name if there isn't one -
+            paid by your card and split with the people you pick. Anyone not in that group is added to it.
+          </p>
+        )}
+        {!grouping && booking && (
           <div className="bg-amber-50 border border-amber-200 rounded-md p-3 space-y-2">
             <label className="flex items-start gap-2 text-xs font-bold text-gray-800">
               <input type="checkbox" className="mt-0.5" checked={withBank} onChange={(ev) => { setWithBank(ev.target.checked); setAmts({}) }} />
@@ -157,7 +188,7 @@ export function PassOnSheet({ x, all = [], refKey, source, dueDate, already = 0,
             )}
           </div>
         )}
-        {e && !bank && (
+        {!grouping && e && !bank && (
           <div className="bg-amber-50 border border-amber-200 rounded-md p-3 space-y-2">
             <label className="flex items-center gap-2 text-xs font-bold text-gray-800">
               <input type="checkbox" checked={asEmi} onChange={(ev) => { setAsEmi(ev.target.checked); setAmts({}) }} />
@@ -196,12 +227,12 @@ export function PassOnSheet({ x, all = [], refKey, source, dueDate, already = 0,
           </div>
         )}
         <PeoplePicker options={friends} selected={people} onChange={(v) => { setPeople(v); setAmts({}) }}
-          placeholder="Who pays you back? (on the app or not)" allowNew />
+          placeholder={grouping ? 'Who was it with? (on the app or not)' : 'Who pays you back? (on the app or not)'} allowNew />
         {people.length > 0 && (
           <>
             <label className="flex items-center gap-2 text-xs text-gray-700">
               <input type="checkbox" checked={withMe} onChange={(e) => { setWithMe(e.target.checked); setAmts({}) }} />
-              I'm in the split too (my share stays mine)
+              {grouping ? "I'm in the split too" : "I'm in the split too (my share stays mine)"}
             </label>
             <div className="space-y-1.5">
               {people.map((n) => (
@@ -215,10 +246,10 @@ export function PassOnSheet({ x, all = [], refKey, source, dueDate, already = 0,
                 </div>
               ))}
               <p className="text-[11px] text-gray-500">
-                {withMe ? `Your share: ${INR(r2(left - total))} · ` : ''}Passing on {INR(total)} of {INR(left)}
+                {withMe ? `Your share: ${INR(r2(left - total))} · ` : ''}{grouping ? 'Theirs' : 'Passing on'} {INR(total)} of {INR(left)}
               </p>
             </div>
-            {!asEmi && !bank && (
+            {!grouping && !asEmi && !bank && (
               <div>
                 <p className="text-[10px] font-bold text-gray-500 mb-1">Pay back by</p>
                 <DatePicker value={due} onChange={setDue} />
@@ -228,9 +259,11 @@ export function PassOnSheet({ x, all = [], refKey, source, dueDate, already = 0,
         )}
         {err && <p className="text-xs text-red-600">{err}</p>}
         <button type="button" onClick={save} disabled={busy || !people.length} className="btn-primary py-2.5 text-sm w-full disabled:opacity-50">
-          {busy ? 'Saving…' : people.length ? `Pass on ${INR(total)}` : 'Pass on'}
+          {busy ? 'Saving…' : grouping ? `Put ${INR(x.amount)} in the ${day(x.date)} group` : people.length ? `Pass on ${INR(total)}` : 'Pass on'}
         </button>
-        <p className="text-[10px] text-gray-400">Each share becomes money they owe you - in your Owed to you, their You owe, and Loans.</p>
+        <p className="text-[10px] text-gray-400">{grouping
+          ? 'It settles like any group expense, and your card total counts it in the group instead.'
+          : 'Each share becomes money they owe you - in your Owed to you, their You owe, and Loans.'}</p>
       </div>
     </div>,
     document.body,
