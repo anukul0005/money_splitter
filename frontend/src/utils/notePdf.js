@@ -3,6 +3,8 @@
 // each row, and the link that opens it in the app.
 
 // jsPDF's built-in font has no ₹ (or other non-Latin letters)
+import { dn } from './displayName'
+
 const clean = (t) => String(t ?? '').replace(/₹/g, 'Rs ').replace(/[​]/g, '')
 
 const num = (c) => {
@@ -17,16 +19,16 @@ export async function downloadNotePdf(note, rows, { me, link }) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: note.columns.length > 5 ? 'landscape' : 'portrait' })
   const W = doc.internal.pageSize.getWidth()
   const M = 36
-  const who = (n) => (n && n.toLowerCase() === (me || '').toLowerCase() ? `${n} (you)` : n || '')
+  const who = (n) => (n && n.toLowerCase() === (me || '').toLowerCase() ? `${dn(n)} (you)` : dn(n) || '')
   let y = M + 6
 
   doc.setFont('helvetica', 'bold'); doc.setFontSize(18)
   doc.splitTextToSize(clean(note.title), W - 2 * M).forEach((l) => { doc.text(l, M, y); y += 22 })
 
   doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(100)
-  const people = (note.people || []).map((p) => p.name + (p.on_app ? '' : ' (not on the app)'))
+  const people = (note.people || []).map((p) => dn(p.name) + (p.on_app ? '' : ' (not on the app)'))
   const lines = [
-    `Made by ${note.owner}${people.length ? ` · with ${people.join(', ')}` : ''}`,
+    `Made by ${dn(note.owner)}${people.length ? ` · with ${people.join(', ')}` : ''}`,
     `${rows.length} row${rows.length === 1 ? '' : 's'} · downloaded ${new Date().toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })}`,
   ]
   lines.forEach((l) => { doc.splitTextToSize(clean(l), W - 2 * M).forEach((x) => { doc.text(x, M, y); y += 12 }) })

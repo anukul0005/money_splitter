@@ -10,8 +10,8 @@ import { dn as displayName } from '../utils/displayName'
 // "only you" / "with Anjali, Shreya" / "by Utkarsh, with you"
 const sharedLine = (n, me) => {
   const lower = (me || '').toLowerCase()
-  const others = (n.people || []).map((p) => (p.name.toLowerCase() === lower ? 'you' : p.name))
-  if (n.owner.toLowerCase() !== lower) return `by ${n.owner}, with ${others.join(', ') || 'you'}`
+  const others = (n.people || []).map((p) => (p.name.toLowerCase() === lower ? 'you' : displayName(p.name)))
+  if (n.owner.toLowerCase() !== lower) return `by ${displayName(n.owner)}, with ${others.join(', ') || 'you'}`
   if (others.length) return `with ${others.join(', ')}`
   return n.group ? `shared with ${n.group}` : 'only you'
 }

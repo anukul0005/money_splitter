@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { dn } from '../utils/displayName'
 import { listUsersBasic } from '../api/index.js'
 
 /**
@@ -35,7 +36,7 @@ export default function NotePeople({ me, people, setPeople }) {
           {people.map((p) => (
             <span key={p.name} className={`flex items-center gap-1 text-[11px] font-bold pl-2 pr-1 py-0.5 border ${
               p.on_app ? 'bg-brand-50 border-brand-200 text-gray-800' : 'bg-amber-50 border-amber-200 text-gray-700'}`}>
-              {p.name}{!p.on_app && <span className="font-normal text-gray-400"> · not on app</span>}
+              {p.on_app ? dn(p.name) : p.name}{!p.on_app && <span className="font-normal text-gray-400"> · not on app</span>}
               <button type="button" onClick={() => setPeople(people.filter((x) => x.name !== p.name))}
                 className="text-gray-400 hover:text-red-600 px-0.5" aria-label={`Remove ${p.name}`}>✕</button>
             </span>

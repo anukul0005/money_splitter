@@ -6,6 +6,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser } from '../UserContext'
 import { ago } from './Discussions'
 import NotePeople from '../components/NotePeople'
+import { dn } from '../utils/displayName'
 import { AddByText, Insights, nameCol, nameKey, sameName } from '../components/NoteAI'
 
 // The number a cell starts with - "3*" is 3, "₹1,200" is 1200; null if none
@@ -45,7 +46,7 @@ function Summary({ columns, rows, me }) {
   const total = sums(rows)
   // "3*" is tentative - may change either way
   const tent = columns.map((_, ci) => (numeric[ci] ? rows.reduce((t, r) => t + (String(r.cells[ci] || '').includes('*') ? num(r.cells[ci]) || 0 : 0), 0) : 0))
-  const name = (n) => (n.toLowerCase() === (me || '').toLowerCase() ? 'You' : n)
+  const name = (n) => (n.toLowerCase() === (me || '').toLowerCase() ? 'You' : dn(n))
   const cellB = 'border border-amber-200 px-2 py-1.5'
   return (
     <div className="card max-w-2xl space-y-3">
@@ -265,7 +266,7 @@ export default function NoteDetail() {
   }
   const delRow = (ri) => { const next = rows.filter((_, i) => i !== ri); setRows(next); save({ rows: next }) }
   const needle = q.trim().toLowerCase()
-  const shown = rows.map((r, i) => [r, i]).filter(([r]) => !needle || [...r.cells, r.by || ''].some((c) => c.toLowerCase().includes(needle)))
+  const shown = rows.map((r, i) => [r, i]).filter(([r]) => !needle || [...r.cells, r.by || '', dn(r.by) || ''].some((c) => c.toLowerCase().includes(needle)))
   const mine = note.owner.toLowerCase() === user?.name?.toLowerCase()
   // a row is only ever edited by whoever added it
   // Each column's share of the width, from what it holds: its longest word
@@ -339,9 +340,9 @@ export default function NoteDetail() {
         {notice && <p className="text-[11px] text-brand-300 mt-2">{notice}</p>}
         <h1 className="text-2xl font-black mt-2 tracking-tight break-words">{note.title}</h1>
         <p className="text-slate-300/70 text-xs mt-1">
-          {note.people?.length ? `With ${note.people.map((p) => p.name).join(', ')}` : note.group ? `Shared with ${note.group}` : 'Only you'}
-          {!mine && ` · ${note.owner}'s`} · {rows.length} row{rows.length === 1 ? '' : 's'}
-          {note.updated_at ? ` · edited ${ago(note.updated_at)}${note.updated_by && note.updated_by !== user?.name ? ` by ${note.updated_by}` : ''}` : ''}
+          {note.people?.length ? `With ${note.people.map((p) => dn(p.name)).join(', ')}` : note.group ? `Shared with ${note.group}` : 'Only you'}
+          {!mine && ` · ${dn(note.owner)}'s`} · {rows.length} row{rows.length === 1 ? '' : 's'}
+          {note.updated_at ? ` · edited ${ago(note.updated_at)}${note.updated_by && note.updated_by !== user?.name ? ` by ${dn(note.updated_by)}` : ''}` : ''}
         </p>
         <div className="flex gap-4 mt-3 text-[11px] font-bold">
           <button onClick={() => { setEditCols((v) => !v); setSharing(false); setCols(note.columns); setColFrom(note.columns.map((_, i) => i)); setTitle(note.title); setNewCol('') }} className="text-brand-300 hover:text-white">{editCols ? 'Close' : 'Edit columns & name'}</button>
@@ -394,7 +395,7 @@ export default function NoteDetail() {
         {here.length > 0 && (
           <p className="flex items-center gap-1.5 text-[11px] text-gray-600">
             <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            {here.map((h) => `${h.name} ${h.doing === 'adding' ? 'is adding rows' : h.doing === 'editing' ? 'is typing' : 'is here'}`).join(' · ')}
+            {here.map((h) => `${dn(h.name)} ${h.doing === 'adding' ? 'is adding rows' : h.doing === 'editing' ? 'is typing' : 'is here'}`).join(' · ')}
           </p>
         )}
         {/* Adding rows and searching them, in one line above the table */}
@@ -437,8 +438,8 @@ export default function NoteDetail() {
                   <td className="text-center align-top pt-1.5 pb-1 px-0.5">
                     <span className="block text-[10px] text-gray-400 leading-tight">{ri + 1}</span>
                     {/* who added the row - set from their profile, for good */}
-                    <span className="block text-[8px] text-gray-400 leading-tight truncate" title={`Added by ${r.by}`}>
-                      {r.by?.toLowerCase() === user?.name?.toLowerCase() ? 'You' : r.by}
+                    <span className="block text-[8px] text-gray-400 leading-tight truncate" title={`Added by ${dn(r.by)}`}>
+                      {r.by?.toLowerCase() === user?.name?.toLowerCase() ? 'You' : dn(r.by)}
                     </span>
                   </td>
                   {note.columns.map((c, ci) => (
@@ -456,7 +457,7 @@ export default function NoteDetail() {
                   <tr>
                     <td colSpan={note.columns.length + 2} className="bg-amber-50 border-y border-amber-300 px-3 py-2">
                       <p className="text-[11px] text-amber-900">
-                        <b>{dup.name.trim()}</b> is already in row {dup.rows.map((n) => `${n}${rows[n - 1]?.by ? ` (${rows[n - 1].by.toLowerCase() === user?.name?.toLowerCase() ? 'you' : rows[n - 1].by})` : ''}`).join(', ')}. Same person?
+                        <b>{dup.name.trim()}</b> is already in row {dup.rows.map((n) => `${n}${rows[n - 1]?.by ? ` (${rows[n - 1].by.toLowerCase() === user?.name?.toLowerCase() ? 'you' : dn(rows[n - 1].by)})` : ''}`).join(', ')}. Same person?
                       </p>
                       <div className="flex gap-3 mt-1.5 text-[11px] font-bold">
                         <button onClick={() => { okDup.current.add(`${r.id}|${nameKey(dup.name)}`); setDup(null) }} className="text-brand-600">Different person - keep it</button>
