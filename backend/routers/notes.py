@@ -345,10 +345,27 @@ def join_note(note_id: int, payload: JoinIn, db: Session = Depends(get_db), call
 
 # ── AI: rows from what someone typed or said, and a read of the table ─────
 
+_UNITS = {"k": 1e3, "thousand": 1e3, "hazar": 1e3, "hazaar": 1e3, "hajar": 1e3,
+          "l": 1e5, "lac": 1e5, "lacs": 1e5, "lakh": 1e5, "lakhs": 1e5,
+          "cr": 1e7, "crore": 1e7, "crores": 1e7, "m": 1e6, "mn": 1e6, "million": 1e6}
+_N, _U = r"(\d+(?:\.\d+)?)", r"(k|thousand|ha[jz]aa?r|lakhs?|lacs?|l|crores?|cr|million|mn|m)?"
+
+
 def _num(c) -> float | None:
+    """What a cell's number means, as people write it: "3*" 3, "₹1,200" 1200,
+    "10k" 10000, "1.5 lakh" 150000, "Under 40k" 40000; a range ("10-20k")
+    its top end. Same as the page's utils/noteNum.js."""
     import re
-    m = re.match(r"^-?\d+(\.\d+)?", str(c or "").replace(",", "").replace("₹", "").replace(" ", ""))
-    return float(m.group(0)) if m else None
+    s = re.sub(r"₹|\brs\.?|\binr\b", " ", str(c if c is not None else "").lower())
+    s = re.sub(r"(\d),(?=\d)", r"\1", s)
+    r = re.search(_N + r"\s*" + _U + r"\s*(?:-|–|to)\s*" + _N + r"\s*" + _U + r"(?![a-z])", s)
+    if r:
+        return float(r.group(3)) * _UNITS.get(r.group(4) or r.group(2) or "", 1)
+    m = re.search(_N + r"\s*" + _U + r"(?![a-z0-9.])", s)
+    if not m:
+        return None
+    v = float(m.group(1)) * _UNITS.get(m.group(2) or "", 1)
+    return -v if re.match(r"\s*-", s) else v
 
 
 class FillIn(BaseModel):

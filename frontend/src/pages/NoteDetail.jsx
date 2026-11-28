@@ -9,12 +9,8 @@ import NotePeople from '../components/NotePeople'
 import { dn } from '../utils/displayName'
 import { AddByText, Insights, nameCol, nameKey, sameName } from '../components/NoteAI'
 
-// The number a cell starts with - "3*" is 3, "₹1,200" is 1200; null if none
-const num = (c) => {
-  const m = String(c || '').replace(/[₹,\s]/g, '').match(/^-?\d+(\.\d+)?/)
-  return m ? Number(m[0]) : null
-}
-const fmt = (n) => n.toLocaleString('en-IN', { maximumFractionDigits: 2 })
+// What a cell's number means - "10k" is 10000, "Under 40k" 40000 (utils/noteNum)
+import { num, fmt } from '../utils/noteNum'
 
 // A heading may break after a comma or slash, not inside a word
 const soft = (t) => String(t).replace(/([,/])/g, '$1\u200B')

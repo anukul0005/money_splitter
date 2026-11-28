@@ -4,14 +4,10 @@
 
 // jsPDF's built-in font has no ₹ (or other non-Latin letters)
 import { dn } from './displayName'
+import { num, fmt } from './noteNum'
 
 const clean = (t) => String(t ?? '').replace(/₹/g, 'Rs ').replace(/[​]/g, '')
 
-const num = (c) => {
-  const m = String(c || '').replace(/[₹,\s]/g, '').match(/^-?\d+(\.\d+)?/)
-  return m ? Number(m[0]) : null
-}
-const fmt = (n) => n.toLocaleString('en-IN', { maximumFractionDigits: 2 })
 
 export async function downloadNotePdf(note, rows, { me, link }) {
   const [{ jsPDF }, at] = await Promise.all([import('jspdf'), import('jspdf-autotable')])
