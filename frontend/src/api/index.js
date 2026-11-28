@@ -261,6 +261,8 @@ export const setCardSkip        = (key, counted) => api.post('/salary/card-skips
 // with remember, for every line from that merchant from now on
 export const getSalaryCards     = (month)   => api.get('/salary/cards', { params: { month } })
 export const setCardCheck       = (keys, status, remember = false) => api.post('/salary/card-check', { keys, status, remember })
+export const cardQuestions      = (month) => api.get('/salary/cards/questions', { params: { month } })
+export const identifyPayee      = (data)  => api.post('/salary/cards/identify', data)
 export const getSalaryMerchants = (month)   => api.get('/salary/merchants', { params: { month } })
 // A monthly expense that was really money to a person / an investment - and undo
 export const moveMonthlyExpense = (expenseId, kind, remember) => api.post('/salary/move', { expense_id: expenseId, kind, remember })

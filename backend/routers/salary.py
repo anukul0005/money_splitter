@@ -30,8 +30,8 @@ from sqlalchemy.orm import Session
 
 from auth import caller_groups, current_user
 from database import get_db
-from models import (CreditCardStatement, Expense, Loan, ManualInvestment, RecurringBill, RecurringCharge,
-                    SalaryCardSkip, StatementSkip, User)
+from models import (CardMerchantName, CreditCardStatement, Expense, Loan, ManualInvestment, RecurringBill,
+                    RecurringCharge, SalaryCardSkip, StatementSkip, User)
 
 
 def line_key(statement_id: int, t: dict | None = None) -> str:
@@ -54,7 +54,29 @@ router = APIRouter(prefix="/salary", tags=["salary"])
 #   mine      counts
 #   group     already in a group
 #   not_mine  someone else's, a refund, a transfer - not spending
-CHECKS = ("mine", "group", "not_mine")
+#   bill      paid through a recurring bill you pay (Claude, Netflix): your
+#             share is counted under Recurring already - found by itself when
+#             the line names the bill and its amount is the bill's (±20%, for
+#             a foreign currency's rate)
+CHECKS = ("mine", "group", "not_mine", "bill")
+
+# Words in a bill's title that don't identify it
+_BILL_FILLER = {"bill", "plan", "subscription", "sub", "monthly", "pro", "premium", "the", "and", "for", "with",
+                "account", "share", "family", "annual", "yearly", "basic", "standard", "max", "plus"}
+
+
+def _bill_words(title: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z0-9]+", (title or "").lower()) if len(w) >= 3 and w not in _BILL_FILLER}
+
+
+def _recurring_match(bills: list, l: dict):
+    """The recurring bill the caller pays that this card line is a payment
+    of: the line names it, and its amount is the bill's within 20%."""
+    words = set(re.findall(r"[a-z0-9]+", (l["title"] or "").lower()))
+    for b, bw in bills:
+        if bw & words and b.amount and abs(l["amount"] - b.amount) <= 0.2 * b.amount:
+            return b
+    return None
 
 
 def _inr(n: float) -> str:
@@ -171,6 +193,10 @@ def _card_lines(db: Session, caller: User, want: set[str], groups: dict | None =
     for l in sorted(out, key=lambda l: l["date"]):
         if l.get("entered") and not l["brand"]:
             learnt[l["payee_key"]] = tidy(l["entered"]["venue"] or l["entered"]["title"])
+    # the name you gave it in the questionnaire comes first
+    for k, n in db.query(CardMerchantName.merchant_key, CardMerchantName.name).filter(
+            CardMerchantName.user_id == caller.id):
+        learnt[k] = n
     keys = {l["payee_key"] for l in out if not l["brand"]} - set(learnt)
     if keys:
         from merchant_memory import key as _mkey, labels_for
@@ -195,8 +221,11 @@ def _card_lines(db: Session, caller: User, want: set[str], groups: dict | None =
             l["note"] = n                     # "We fit - Swiggy order", on this line only
         else:
             l["merchant"] = n
+    for l in out:
+        l["named"] = l["payee_key"] in learnt
 
     # 3. counted or not, and why
+    my_bills = [(b, _bill_words(b.title)) for b in db.query(RecurringBill).filter(RecurringBill.payer.ilike(caller.name))]
     for l in out:
         if l["passed_to"]:                      # money someone else owes you back - never yours
             l["status"], l["why"] = "passed", f"passed on to {l['passed_to']}"
@@ -208,6 +237,10 @@ def _card_lines(db: Session, caller: User, want: set[str], groups: dict | None =
             l["group_id"] = e["group_id"]
         elif l["payee_key"] in rules:
             l["status"], l["why"], l["fixed"] = rules[l["payee_key"]], f"your rule for {l['payee']}", "rule"
+        elif not l.get("whole_bill") and (rb := _recurring_match(my_bills, l)):
+            members = [m for m in rb.members.split(",") if m]
+            l["status"], l["why"] = "bill", (f"paid for the recurring bill {rb.title} - your share "
+                                             f"{_inr(rb.amount / max(len(members), 1))} counts under Recurring")
         else:
             l["status"], l["why"] = "mine", None
         l.pop("entered", None)
@@ -408,7 +441,7 @@ def dashboard(months: int = 12, db: Session = Depends(get_db), caller: User = De
             "cats": c,
             "needs": round(sum(v for k, v in c.items() if k in NEEDS), 2),
             "cards": {"gross": round(sum(card[ym].values()), 2),
-                      **{k: round(card[ym][k], 2) for k in ("mine", "group", "not_mine", "passed")},
+                      **{k: round(card[ym][k], 2) for k in ("mine", "group", "not_mine", "passed", "bill")},
                       "count": sum(card_n[ym].values()), "counted": card_n[ym]["mine"]},
             # in date order - each with how many expenses and who else was in it
             "groups": sorted(
@@ -752,7 +785,7 @@ class CardCheckIn(BaseModel):
 @router.post("/card-check", response_model=dict)
 def card_check(payload: CardCheckIn, db: Session = Depends(get_db), caller: User = Depends(current_user)):
     if payload.status not in (*CHECKS, "auto"):
-        raise HTTPException(400, "Mine, in a group, not mine - or back to automatic")
+        raise HTTPException(400, "Mine, in a group, not mine, in a recurring bill - or back to automatic")
     keys = list(dict.fromkeys(k.strip()[:300] for k in payload.keys if k and k.strip()))[:500]
     if not keys:
         raise HTTPException(400, "Nothing to fix")
@@ -854,3 +887,87 @@ def merchants(month: str, db: Session = Depends(get_db), caller: User = Depends(
             "gone": {"count": len(gone), "amount": round(sum(m["prev_amount"] for m in gone), 2),
                      "top": [{"name": m["name"], "amount": round(m["prev_amount"], 2)}
                              for m in sorted(gone, key=lambda m: -m["prev_amount"])[:5]]}}
+
+
+# ── the questionnaire: who's behind the card payees the app can't name ────────
+
+def _unsure(l: dict) -> bool:
+    """A counted line whose payee the app has no name for and that isn't a
+    known brand - a person's name on a UPI, or filed as Other."""
+    import merchant_memory
+    if l["status"] != "mine" or l.get("whole_bill") or l["brand"] or l.get("named"):
+        return False
+    if l.get("category") == "Card fees & interest":
+        return False
+    return (l.get("category") in (None, "Other")) or merchant_memory._person(l["payee"])
+
+
+@router.get("/cards/questions", response_model=dict)
+def card_questions(month: str, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """The payees to ask about, one card per payee, biggest spend first."""
+    month = _month(month)
+    from routers.stats import get_history
+    hist = get_history(db=db, caller=caller)
+    lines = _card_lines(db, caller, {month}, {g["id"]: g for g in hist["groups"]})
+    asks: dict[str, dict] = {}
+    for l in lines:
+        if not _unsure(l):
+            continue
+        q = asks.setdefault(l["payee_key"], {"payee_key": l["payee_key"], "payee": l["payee"], "shown": l["merchant"],
+                                             "category": l.get("category"), "amount": 0.0, "lines": []})
+        q["amount"] += l["amount"]
+        q["lines"].append({"key": l["key"], "date": l["date"], "amount": l["amount"], "title": l["title"], "card": l["card"]})
+    out = sorted(asks.values(), key=lambda q: -q["amount"])
+    for q in out:
+        q["amount"] = round(q["amount"], 2)
+        q["lines"].sort(key=lambda x: x["date"], reverse=True)
+    from spend_categories import TAXONOMY
+    return {"questions": out, "categories": {c: subs for c, subs in TAXONOMY.items()}}
+
+
+class IdentifyIn(BaseModel):
+    payee_key: str
+    payee: str
+    name: str | None = None
+    category: str | None = None
+    subcategory: str | None = None
+    status: str = "mine"             # mine | group | not_mine | bill - from now on, for this payee
+
+
+@router.post("/cards/identify", response_model=dict)
+def identify_payee(payload: IdentifyIn, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """An answer to the questionnaire: what the payee is called, its kind of
+    spend, and whether it's yours - kept for every bill from now on."""
+    import merchant_memory
+    from spend_categories import TAXONOMY
+    k = (payload.payee_key or "").strip()[:200]
+    if not k:
+        raise HTTPException(400, "Which payee?")
+    if payload.status not in CHECKS:
+        raise HTTPException(400, "Mine, in a group, not mine, or in a recurring bill")
+    if payload.category and (payload.category not in TAXONOMY or
+                             (payload.subcategory and payload.subcategory not in TAXONOMY[payload.category])):
+        raise HTTPException(400, "Pick a category from the list")
+    name = " ".join((payload.name or "").split())[:120]
+    row = db.query(CardMerchantName).filter(CardMerchantName.user_id == caller.id,
+                                            CardMerchantName.merchant_key == k).first()
+    if name:
+        if row:
+            row.name = name
+        else:
+            db.add(CardMerchantName(user_id=caller.id, merchant_key=k, name=name))
+    if payload.category:
+        # filed for this user (a UPI to a person's name stays theirs alone)
+        merchant_memory.learn(db, payload.payee, payload.category, payload.subcategory, caller.name, venue=name or None,
+                              shared=not merchant_memory._person(payload.payee))
+    rk = f"rule:{k}"
+    rule = db.query(SalaryCardSkip).filter(SalaryCardSkip.user_id == caller.id, SalaryCardSkip.line_key == rk).first()
+    if payload.status == "mine":
+        if rule:
+            db.delete(rule)
+    elif rule:
+        rule.status = payload.status
+    else:
+        db.add(SalaryCardSkip(user_id=caller.id, line_key=rk, status=payload.status))
+    db.commit()
+    return {"ok": True}

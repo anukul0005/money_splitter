@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getSalaryCards, setCardCheck } from '../../api/index.js'
+import MerchantQuiz from './MerchantQuiz'
 
 const INR = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const day = (iso) => (iso ? `${+iso.slice(8, 10)} ${MON[+iso.slice(5, 7) - 1]}` : '')
 
-const LABEL = { mine: 'Counted', group: 'In a group', not_mine: 'Not mine', passed: 'Passed on' }
-const FIXES = [['not_mine', 'Not mine'], ['group', 'Already in a group'], ['mine', 'Count it']]
+const LABEL = { mine: 'Counted', group: 'In a group', not_mine: 'Not mine', passed: 'Passed on', bill: 'In a recurring bill' }
+const FIXES = [['not_mine', 'Not mine'], ['group', 'Already in a group'], ['bill', 'In a recurring bill'], ['mine', 'Count it']]
 
 function Line({ l, onFix, busy }) {
   const nav = useNavigate()
@@ -73,6 +74,7 @@ export default function CardCheck({ ym, onChanged }) {
   const [show, setShow] = useState(null)        // null | 'counted' | 'not'
   const [all, setAll] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [quiz, setQuiz] = useState(false)
 
   const load = () => getSalaryCards(ym).then((r) => { setData(r.data); setErr('') }).catch(() => setErr("Couldn't load the card spends."))
   useEffect(() => { setData(null); setShow(null); load() }, [ym])
@@ -103,8 +105,8 @@ export default function CardCheck({ ym, onChanged }) {
           <p className="text-2xl font-black text-gray-900 mt-1">{INR(t.mine)}</p>
           <p className="text-[11px] text-gray-500">
             counted from {data.bills.length} bill{data.bills.length === 1 ? '' : 's'}
-            {(t.group || t.passed || t.not_mine) ? ' · left out: ' : ''}
-            {[t.group && `in groups ${INR(t.group)}`, t.passed && `passed on ${INR(t.passed)}`, t.not_mine && `not mine ${INR(t.not_mine)}`].filter(Boolean).join(' · ')}
+            {(t.group || t.passed || t.not_mine || t.bill) ? ' · left out: ' : ''}
+            {[t.group && `in groups ${INR(t.group)}`, t.bill && `in recurring bills ${INR(t.bill)}`, t.passed && `passed on ${INR(t.passed)}`, t.not_mine && `not mine ${INR(t.not_mine)}`].filter(Boolean).join(' · ')}
           </p>
 
           <div className="mt-2 space-y-1">
@@ -131,6 +133,10 @@ export default function CardCheck({ ym, onChanged }) {
               </button>
             )}
           </div>
+          <button onClick={() => setQuiz((v) => !v)} className="mt-2 text-[11px] font-bold text-brand-600">
+            {quiz ? 'Close questions' : 'Help name the payees ›'}
+          </button>
+          {quiz && <MerchantQuiz ym={ym} onDone={() => { load(); onChanged?.() }} onClose={() => setQuiz(false)} />}
           {show && (
             <div className="mt-1">
               {shown.map((l) => <Line key={l.key} l={{ ...l, merchant_key: l.payee_key }} onFix={fix} busy={busy} />)}
@@ -157,7 +163,7 @@ export default function CardCheck({ ym, onChanged }) {
           )}
           {err && <p className="text-xs text-red-600 mt-1">{err}</p>}
           <p className="text-[10px] text-gray-400 mt-2">
-            Counted on its own. Left out: spends you already entered in a group or Monthly, and ones passed on as loans. Tap Fix on anything wrong.
+            Counted on its own. Left out: spends you already entered in a group or Monthly, ones paying a recurring bill you split (your share counts under Recurring), and ones passed on as loans. Tap Fix on anything wrong.
           </p>
         </>
       )}

@@ -1992,3 +1992,17 @@ class NoteVersion(Base):
     reason = Column(String(200), nullable=True)
     changed_by = Column(String(100), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class CardMerchantName(Base):
+    """What a card spend's payee really is, as the user told the salary
+    dashboard's questionnaire ("UPI-PREM SINGH" is the milkman). Theirs
+    alone - the same payee can be a shop to one and a friend to another."""
+    __tablename__ = "card_merchant_names"
+    __table_args__ = (UniqueConstraint("user_id", "merchant_key", name="ux_card_merchant_name"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    merchant_key = Column(String(200), nullable=False)
+    name = Column(String(120), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
