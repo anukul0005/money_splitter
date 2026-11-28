@@ -6,6 +6,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser } from '../UserContext'
 import { ago } from './Discussions'
 import NotePeople from '../components/NotePeople'
+import Dropdown from '../components/Dropdown'
 import { dn } from '../utils/displayName'
 import { AddByText, Insights, nameCol, nameKey, sameName } from '../components/NoteAI'
 
@@ -456,11 +457,9 @@ export default function NoteDetail() {
             {aiOpen ? 'Close' : '+ Type, speak or photo'}
           </button>
           {adders.length > 1 && (
-            <select value={byWho} onChange={(e) => setByWho(e.target.value)} aria-label="Show rows added by"
-              className="input text-xs py-1.5 w-auto max-w-[10rem]">
-              <option value="">Everyone's rows</option>
-              {adders.map(([k, n]) => <option key={k} value={k}>{k === (user?.name || '').toLowerCase() ? 'My rows' : `${dn(n)}'s rows`}</option>)}
-            </select>
+            <Dropdown size="sm" value={byWho} onChange={setByWho} className="w-auto max-w-[11rem]"
+              options={[{ value: '', label: "Everyone's rows" },
+                ...adders.map(([k, n]) => ({ value: k, label: k === (user?.name || '').toLowerCase() ? 'My rows' : `${dn(n)}'s rows` }))]} />
           )}
           {rows.length > 1 && (
             <input value={q} onChange={(e) => setQ(e.target.value)} className="input text-xs py-1.5 flex-1 min-w-[8rem] max-w-xs" placeholder="Search the rows" />
