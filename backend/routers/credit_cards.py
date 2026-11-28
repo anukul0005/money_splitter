@@ -708,9 +708,55 @@ def _entered(db: Session, caller: User, t: dict, taken: set | None = None):
             gap = abs((_d.fromisoformat((e.date or "")[:10]) - day).days)
         except ValueError:
             continue
-        if gap <= 2 and (best is None or gap < best[0]):
-            best = (gap, e)
-    return best[1] if best else None
+        fit = _fits(t, e)
+        if gap <= 2 and fit and (best is None or (-fit, gap) < (-best[0], best[1])):
+            best = (fit, gap, e)
+    return best[2] if best else None
+
+
+# Words that don't tell one merchant from another
+_WEAK = {"food", "foods", "order", "orders", "online", "upi", "paid", "bill", "shop", "store", "stores", "cafe",
+         "restaurant", "restaurants", "kitchen", "ventures", "private", "limited", "pvt", "ltd", "india", "new",
+         "delhi", "payments", "commerce", "marketplace", "services", "the", "and", "from", "for", "with", "mall",
+         "gurgaon", "gurugram", "noida", "ghaziabad", "bangalore", "bengaluru", "mumbai", "plaza", "sector", "sec"}
+# Apps a spend goes through - an expense that names one is that app's charge
+_APPS = {"swiggy", "zomato", "blinkit", "zepto", "bigbasket", "amazon", "flipkart", "myntra", "uber", "ola",
+         "rapido", "airbnb", "dunzo", "eatsure", "magicpin"}
+# Categories that say nothing about what the spend was
+_VAGUE = {None, "", "Other", "Small vendors", "One-off payments"}
+# Kinds of spend one place can be filed under either way
+_NEAR = [{"Food & Dining", "Alcohol"}]
+
+
+def _words(*texts) -> set[str]:
+    import re
+    s = " ".join(x or "" for x in texts).lower().replace("blink commerce", "blinkit").replace("grofers", "blinkit")
+    return {w for w in re.findall(r"[a-z0-9]+", s) if len(w) >= 3 and not w.isdigit() and w not in _WEAK}
+
+
+def _same_word(a: str, b: str) -> bool:
+    if a == b:
+        return True
+    short, long_ = sorted((a, b), key=len)
+    return len(short) >= 4 and long_.startswith(short)
+
+
+def _fits(t: dict, e) -> int:
+    """Could this expense be this card spend, by what each says it was? 2 -
+    they name the same place ("KHAN CHACHA GURGAON" / "Khan chacha"); 1 -
+    nothing names it but they're the same kind of spend; 0 - they can't be:
+    another app named ("Blinkit - diet coke" for a SWIGGY line) or another
+    kind of spend ("Chhajarsi toll plaza", a toll, for a Swiggy order)."""
+    card = _words(t.get("description"), t.get("venue"))
+    mine = _words(e.title, e.venue, e.notes)
+    if any(_same_word(a, b) for a in card for b in mine):
+        return 2
+    if any(a in _APPS and not any(_same_word(a, b) for b in card) for a in mine):
+        return 0
+    c1, c2 = t.get("category"), e.category
+    if c1 in _VAGUE or c2 in _VAGUE or c1 == c2 or any({c1, c2} <= s for s in _NEAR):
+        return 1
+    return 0
 
 
 def _in_groups(db: Session, bill_id: int, caller: User | None = None, txns: list | None = None) -> dict:
