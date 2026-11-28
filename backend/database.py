@@ -198,6 +198,7 @@ def create_tables():
 _ADDED_COLUMNS = [
     ("note_tables", "shared_with", "TEXT"),
     ("note_tables", "invite_token", "VARCHAR(40)"),
+    ("note_tables", "requests_json", "TEXT"),
     ("salary_card_skips", "status", "VARCHAR(20)"),
     ("expenses", "guests", "TEXT"),
     ("credit_cards", "pass_on_gap", "INTEGER NOT NULL DEFAULT 2"),

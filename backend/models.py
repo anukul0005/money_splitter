@@ -1970,6 +1970,10 @@ class NoteTable(Base):
     # The owner's invite link (routers/notes.py join): whoever opens it, once
     # logged in, is added to shared_with.
     invite_token = Column(String(40), nullable=True, index=True)
+    # Changes asked for to someone else's rows (routers/notes.py requests):
+    # JSON [{id, row_id, by, changes {column: new}, was {column: old}, message, at}]
+    # - the row's adder accepts (applied) or declines (dropped).
+    requests_json = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_by = Column(String(100), nullable=True)

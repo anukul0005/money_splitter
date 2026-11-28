@@ -510,3 +510,6 @@ export const joinNote       = (id, token) => api.post(`/notes/${id}/join`, { tok
 export const fillNoteRows  = (id, text, image = null) => api.post(`/notes/${id}/fill`, { text, image }, { timeout: 120000 })
 export const noteInsights  = (id)       => api.post(`/notes/${id}/insights`, {}, { timeout: 60000 })
 export const noteLive      = (id, rev, doing) => api.get(`/notes/${id}/live`, { params: { rev, doing } })
+export const askNoteChange    = (id, row_id, cells, message) => api.post(`/notes/${id}/requests`, { row_id, cells, message })
+export const acceptNoteChange = (id, rid) => api.post(`/notes/${id}/requests/${rid}/accept`)
+export const declineNoteChange = (id, rid) => api.post(`/notes/${id}/requests/${rid}/decline`)

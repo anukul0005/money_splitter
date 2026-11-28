@@ -168,8 +168,16 @@ def _rows(raw: list, n: int, old: list[dict], caller: str, remap: bool = False) 
 def _rev(n: NoteTable) -> str:
     """A fingerprint of everything shown - changes whenever anyone edits."""
     import hashlib
-    raw = "\x1f".join([n.title or "", n.columns_json or "", n.rows_json or "", n.shared_with or ""])
+    raw = "\x1f".join([n.title or "", n.columns_json or "", n.rows_json or "", n.shared_with or "",
+                       n.requests_json or ""])
     return hashlib.sha1(raw.encode()).hexdigest()[:16]
+
+
+def _requests(n: NoteTable) -> list[dict]:
+    try:
+        return json.loads(n.requests_json) if n.requests_json else []
+    except ValueError:
+        return []
 
 
 def _out(n: NoteTable, groups: dict[int, str], full: bool = True) -> dict:
@@ -177,7 +185,7 @@ def _out(n: NoteTable, groups: dict[int, str], full: bool = True) -> dict:
     rows = _stored(n)
     d = {"id": n.id, "title": n.title, "owner": n.owner, "columns": cols, "count": len(rows),
          "group_id": n.group_id, "group": groups.get(n.group_id) if n.group_id else None,
-         "people": _shared(n),
+         "people": _shared(n), "requests": _requests(n),
          "updated_at": n.updated_at, "updated_by": n.updated_by, "rev": _rev(n)}
     if full:
         d["rows"] = rows
@@ -270,6 +278,14 @@ def edit_note(note_id: int, payload: NoteEdit, db: Session = Depends(get_db),
             for r in _stored(n):
                 cells = list(r["cells"])
                 moved.append({**r, "cells": [cells[k] if k is not None and k < len(cells) else "" for k in src]})
+            # changes waiting on rows follow their columns' new names
+            rename = {cols[k]: new[j] for j, k in enumerate(src) if k is not None}
+            reqs = []
+            for q in _requests(n):
+                ch = {rename[c]: v for c, v in q["changes"].items() if c in rename}
+                if ch:
+                    reqs.append({**q, "changes": ch, "was": {rename[c]: v for c, v in q["was"].items() if c in rename}})
+            n.requests_json = json.dumps(reqs) if reqs else None
             n.columns_json, n.rows_json, cols = json.dumps(new), json.dumps(moved), new
     elif payload.rows is not None:
         old = _stored(n)
@@ -586,3 +602,92 @@ def live(note_id: int, rev: str = "", doing: str = "", db: Session = Depends(get
     if rev != out["rev"]:
         out["note"] = _out(n, _group_names(db, caller))
     return out
+
+
+# ── asking for a change to someone else's row ─────────────────────────────
+
+class RequestIn(BaseModel):
+    row_id: str
+    cells: list[str]                 # the row as the asker would have it
+    message: str | None = None
+
+
+@router.post("/{note_id}/requests")
+def ask_change(note_id: int, payload: RequestIn, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """A change to a row someone else added - it waits for them to accept.
+    Only the cells that differ are kept, by column name (so it still lands
+    right if columns move meanwhile). A newer ask for the same row replaces
+    the asker's older one."""
+    n = _note(db, note_id, caller)
+    cols = json.loads(n.columns_json)
+    row = next((r for r in _stored(n) if r["id"] == payload.row_id), None)
+    if row is None:
+        raise HTTPException(404, "That row isn't there any more")
+    if (row.get("by") or "").lower() == caller.name.lower():
+        raise HTTPException(400, "It's your row - edit it directly")
+    changes, was = {}, {}
+    for ci, c in enumerate(cols):
+        new = str(payload.cells[ci] if ci < len(payload.cells) and payload.cells[ci] is not None else "")[:MAX_CELL]
+        old = row["cells"][ci] if ci < len(row["cells"]) else ""
+        if new != old:
+            changes[c], was[c] = new, old
+    if not changes:
+        raise HTTPException(400, "Nothing was changed")
+    me = caller.name.lower()
+    reqs = [q for q in _requests(n) if not (q["row_id"] == row["id"] and q["by"].lower() == me)]
+    if len(reqs) >= 200:
+        raise HTTPException(400, "Too many changes are waiting on this note")
+    reqs.append({"id": uuid.uuid4().hex[:10], "row_id": row["id"], "by": caller.name, "to": row.get("by"),
+                 "changes": changes, "was": was, "message": (payload.message or "").strip()[:300] or None,
+                 "at": datetime.now(timezone.utc).isoformat()})
+    n.requests_json = json.dumps(reqs)
+    db.commit()
+    db.refresh(n)
+    return _out(n, _group_names(db, caller))
+
+
+def _pending(n: NoteTable, req_id: str) -> tuple[list[dict], dict]:
+    reqs = _requests(n)
+    q = next((x for x in reqs if x["id"] == req_id), None)
+    if q is None:
+        raise HTTPException(404, "That request was already answered")
+    return reqs, q
+
+
+@router.post("/{note_id}/requests/{req_id}/accept")
+def accept_change(note_id: int, req_id: str, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """The row's adder takes the change: its cells are written in."""
+    n = _note(db, note_id, caller)
+    reqs, q = _pending(n, req_id)
+    rows = _stored(n)
+    row = next((r for r in rows if r["id"] == q["row_id"]), None)
+    if row is not None and (row.get("by") or "").lower() != caller.name.lower():
+        raise HTTPException(403, f"Only {row.get('by')} can accept changes to their row")
+    if row is not None:
+        cols = json.loads(n.columns_json)
+        cells = list(row["cells"]) + [""] * (len(cols) - len(row["cells"]))
+        for c, v in q["changes"].items():
+            if c in cols:
+                cells[cols.index(c)] = v
+        row["cells"] = cells[:len(cols)]
+        n.rows_json = json.dumps(rows)
+        n.updated_at, n.updated_by = datetime.now(timezone.utc), caller.name
+    n.requests_json = json.dumps([x for x in reqs if x["id"] != req_id]) or None
+    db.commit()
+    db.refresh(n)
+    return _out(n, _group_names(db, caller))
+
+
+@router.post("/{note_id}/requests/{req_id}/decline")
+def decline_change(note_id: int, req_id: str, db: Session = Depends(get_db), caller: User = Depends(current_user)):
+    """The row's adder says no - or the asker takes it back."""
+    n = _note(db, note_id, caller)
+    reqs, q = _pending(n, req_id)
+    me = caller.name.lower()
+    row = next((r for r in _stored(n) if r["id"] == q["row_id"]), None)
+    if q["by"].lower() != me and row is not None and (row.get("by") or "").lower() != me:
+        raise HTTPException(403, "Only the row's adder or the asker can drop this")
+    n.requests_json = json.dumps([x for x in reqs if x["id"] != req_id]) or None
+    db.commit()
+    db.refresh(n)
+    return _out(n, _group_names(db, caller))

@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { getNote, editNote, deleteNote, noteInviteLink, joinNote, noteLive } from '../api/index.js'
+import { getNote, editNote, deleteNote, noteInviteLink, joinNote, noteLive, askNoteChange, acceptNoteChange, declineNoteChange } from '../api/index.js'
 import { downloadNotePdf } from '../utils/notePdf'
 import LoadingSpinner from '../components/LoadingSpinner'
 import { useUser } from '../UserContext'
@@ -119,6 +119,8 @@ export default function NoteDetail() {
   const [title, setTitle] = useState('')
   const [q, setQ] = useState('')
   const [aiOpen, setAiOpen] = useState(false)
+  const [asking, setAsking] = useState(null)    // { id, cells, message } - a change asked to someone's row
+  const [reqBusy, setReqBusy] = useState('')
   const [dup, setDup] = useState(null)          // { id, name, rows } - a name typed that's already there
   const before = useRef('')                     // a cell's text when it was tapped into
   const okDup = useRef(new Set())               // "id|name" kept anyway after the warning
@@ -310,6 +312,31 @@ export default function NoteDetail() {
     finally { setBusyTop('') }
   }
   const isMine = (r) => (r.by || '').toLowerCase() === (user?.name || '').toLowerCase()
+  // Changes asked to rows: to my rows (mine to answer), and the ones I asked
+  const meLc = (user?.name || '').toLowerCase()
+  const rowAt = Object.fromEntries(rows.map((r, i) => [r.id, i]))
+  const reqs = (note.requests || []).filter((q) => q.row_id in rowAt)
+  const forMe = reqs.filter((q) => isMine(rows[rowAt[q.row_id]]))
+  const byMe = reqs.filter((q) => q.by.toLowerCase() === meLc)
+  const askedOn = new Set(reqs.map((q) => q.row_id))
+  const answer = async (fn, q, label) => {
+    setReqBusy(q.id); setErr('')
+    try { const { data } = await fn(id, q.id); mergeRef.current(data); if (label) setNotice(label) }
+    catch (e) { setErr(e.response?.data?.detail || "Couldn't do that - try again.") }
+    finally { setReqBusy('') }
+  }
+  const sendAsk = async () => {
+    setReqBusy('ask'); setErr('')
+    try {
+      const { data } = await askNoteChange(id, asking.id, asking.cells, asking.message)
+      mergeRef.current(data); setAsking(null)
+      const owner = rows[rowAt[asking.id]]?.by
+      setNotice(`Sent - ${dn(owner)} will see it on this note and can accept it.`)
+    } catch (e) { setErr(e.response?.data?.detail || "Couldn't send that - try again.") }
+    finally { setReqBusy('') }
+  }
+  const changeLine = (q) => Object.keys(q.changes).map((c) => `${c}: ${q.was?.[c] || '(empty)'} → ${q.changes[c] || '(empty)'}`).join(' · ')
+  const rowLabel = (q) => { const i = rowAt[q.row_id]; const first = rows[i]?.cells[nameCol(note.columns)]; return `row ${i + 1}${first ? ` (${first.trim()})` : ''}` }
 
   const saveCols = async () => {
     const add = newCol.trim()
@@ -398,6 +425,30 @@ export default function NoteDetail() {
             {here.map((h) => `${dn(h.name)} ${h.doing === 'adding' ? 'is adding rows' : h.doing === 'editing' ? 'is typing' : 'is here'}`).join(' · ')}
           </p>
         )}
+        {(forMe.length > 0 || byMe.length > 0) && (
+          <div className="border border-amber-300 bg-amber-50 p-3 space-y-2">
+            {forMe.length > 0 && <p className="text-xs font-black text-amber-900">Changes asked to your rows ({forMe.length})</p>}
+            {forMe.map((q) => (
+              <div key={q.id} className="bg-white border border-amber-200 p-2 text-[11px] space-y-1">
+                <p className="text-gray-800"><b>{dn(q.by)}</b> asks to change {rowLabel(q)}:</p>
+                <p className="text-gray-700 break-words">{changeLine(q)}</p>
+                {q.message && <p className="text-gray-500 italic break-words">"{q.message}"</p>}
+                <div className="flex gap-3 font-bold pt-0.5">
+                  <button disabled={!!reqBusy} onClick={() => answer(acceptNoteChange, q, 'Change accepted.')} className="text-brand-600 disabled:opacity-50">Accept</button>
+                  <button disabled={!!reqBusy} onClick={() => answer(declineNoteChange, q, 'Change declined.')} className="text-gray-500 disabled:opacity-50">Decline</button>
+                </div>
+              </div>
+            ))}
+            {byMe.length > 0 && <p className="text-xs font-black text-amber-900">Your asks, waiting ({byMe.length})</p>}
+            {byMe.map((q) => (
+              <div key={q.id} className="bg-white border border-amber-200 p-2 text-[11px] space-y-1">
+                <p className="text-gray-800">{rowLabel(q)} - waiting for <b>{dn(q.to)}</b></p>
+                <p className="text-gray-700 break-words">{changeLine(q)}</p>
+                <button disabled={!!reqBusy} onClick={() => answer(declineNoteChange, q, 'Taken back.')} className="font-bold text-gray-500 disabled:opacity-50">Take back</button>
+              </div>
+            ))}
+          </div>
+        )}
         {/* Adding rows and searching them, in one line above the table */}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <button onClick={addRow} className="text-xs font-bold text-brand-600 whitespace-nowrap">+ Add row</button>
@@ -441,6 +492,7 @@ export default function NoteDetail() {
                     <span className="block text-[8px] text-gray-400 leading-tight truncate" title={`Added by ${dn(r.by)}`}>
                       {r.by?.toLowerCase() === user?.name?.toLowerCase() ? 'You' : dn(r.by)}
                     </span>
+                    {askedOn.has(r.id) && <span className="block text-[8px] font-bold text-amber-700 leading-tight">change asked</span>}
                   </td>
                   {note.columns.map((c, ci) => (
                     <td key={c} className="border-l border-amber-100 p-0 align-top">
@@ -451,8 +503,34 @@ export default function NoteDetail() {
                   ))}
                   <td className="text-center align-top pt-1.5">
                     {isMine(r) && <button onClick={() => window.confirm(`Delete row ${ri + 1}?`) && delRow(ri)} className="text-gray-300 hover:text-red-600" aria-label={`Delete row ${ri + 1}`}>✕</button>}
+                    {!isMine(r) && (
+                      <button onClick={() => setAsking(asking?.id === r.id ? null : { id: r.id, cells: note.columns.map((_, ci) => r.cells[ci] ?? ''), message: '' })}
+                        className="text-gray-400 hover:text-brand-600" title={`Ask ${dn(r.by)} to change this row`} aria-label={`Ask to change row ${ri + 1}`}>✎</button>
+                    )}
                   </td>
                 </tr>
+                {asking?.id === r.id && (
+                  <tr>
+                    <td colSpan={note.columns.length + 2} className="bg-sky-50 border-y border-sky-200 px-3 py-2 space-y-2">
+                      <p className="text-[11px] text-sky-900">This is <b>{dn(r.by)}</b>'s row - write the change and they can accept it.</p>
+                      <div className="grid sm:grid-cols-2 gap-2">
+                        {note.columns.map((c, ci) => (
+                          <label key={c} className="block text-[10px] font-bold text-gray-600">{c}
+                            <input value={asking.cells[ci]} onChange={(e) => setAsking((a) => ({ ...a, cells: a.cells.map((x, j) => (j === ci ? e.target.value : x)) }))}
+                              className={`input text-xs py-1.5 mt-0.5 ${asking.cells[ci] !== (r.cells[ci] ?? '') ? 'border-sky-500 bg-white' : ''}`} />
+                          </label>
+                        ))}
+                      </div>
+                      <input value={asking.message} onChange={(e) => setAsking((a) => ({ ...a, message: e.target.value }))}
+                        className="input text-xs py-1.5" placeholder="A note for them (optional)" maxLength={300} />
+                      <div className="flex gap-3 items-center text-[11px] font-bold">
+                        <button onClick={sendAsk} disabled={reqBusy === 'ask' || asking.cells.every((x, ci) => x === (r.cells[ci] ?? ''))}
+                          className="btn-primary !w-auto text-xs px-3 py-1.5 disabled:opacity-50">{reqBusy === 'ask' ? 'Sending…' : `Ask ${dn(r.by)}`}</button>
+                        <button onClick={() => setAsking(null)} className="text-gray-500">Cancel</button>
+                      </div>
+                    </td>
+                  </tr>
+                )}
                 {dup?.id === r.id && (
                   <tr>
                     <td colSpan={note.columns.length + 2} className="bg-amber-50 border-y border-amber-300 px-3 py-2">
