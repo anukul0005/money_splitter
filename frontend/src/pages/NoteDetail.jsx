@@ -28,7 +28,7 @@ function Cell({ value, ...rest }) {
  * The note at a glance: how many rows, the total of every column that holds
  * numbers, and the same for each person who added rows.
  */
-function Summary({ columns, rows, me }) {
+function Summary({ columns, rows, me, pick, onPick }) {
   if (!rows.length) return null
   // A column is a number column when most of its filled cells start with one
   const numeric = columns.map((_, ci) => {
@@ -75,7 +75,8 @@ function Summary({ columns, rows, me }) {
           {byWho.map(([who, rs]) => {
             const s2 = sums(rs)
             return (
-              <tr key={who}>
+              <tr key={who} onClick={() => onPick?.(pick === who.toLowerCase() ? '' : who.toLowerCase())}
+                className={`cursor-pointer hover:bg-amber-50 ${pick === who.toLowerCase() ? 'bg-amber-100' : ''}`} title="Show only their rows">
                 <td className={`${cellB} font-bold text-gray-800`}>{name(who)}</td>
                 <td className={`${cellB} text-right font-black text-gray-900 tabular-nums`}>{rs.length}</td>
                 {columns.map((c, ci) => numeric[ci] && <td key={c} className={`${cellB} text-right font-black text-gray-900 tabular-nums`}>{fmt(s2[ci])}</td>)}
@@ -114,6 +115,7 @@ export default function NoteDetail() {
   const [newCol, setNewCol] = useState('')
   const [title, setTitle] = useState('')
   const [q, setQ] = useState('')
+  const [byWho, setByWho] = useState('')
   const [aiOpen, setAiOpen] = useState(false)
   const [asking, setAsking] = useState(null)    // { id, cells, message } - a change asked to someone's row
   const [reqBusy, setReqBusy] = useState('')
@@ -264,7 +266,9 @@ export default function NoteDetail() {
   }
   const delRow = (ri) => { const next = rows.filter((_, i) => i !== ri); setRows(next); save({ rows: next }) }
   const needle = q.trim().toLowerCase()
-  const shown = rows.map((r, i) => [r, i]).filter(([r]) => !needle || [...r.cells, r.by || '', dn(r.by) || ''].some((c) => c.toLowerCase().includes(needle)))
+  // whose rows to show: '' everyone, else one adder's (lower-cased username)
+  const adders = [...new Map(rows.map((r) => [(r.by || '').toLowerCase(), r.by || ''])).entries()]
+  const shown = rows.map((r, i) => [r, i]).filter(([r]) => !byWho || (r.by || '').toLowerCase() === byWho).filter(([r]) => !needle || [...r.cells, r.by || '', dn(r.by) || ''].some((c) => c.toLowerCase().includes(needle)))
   const mine = note.owner.toLowerCase() === user?.name?.toLowerCase()
   // a row is only ever edited by whoever added it
   // Each column's share of the width, from what it holds: its longest word
@@ -412,7 +416,7 @@ export default function NoteDetail() {
           </div>
         )}
 
-        <Summary columns={note.columns} rows={rows} me={user?.name} />
+        <Summary columns={note.columns} rows={rows} me={user?.name} pick={byWho} onPick={setByWho} />
         <Insights noteId={id} rowCount={rows.length} stamp={JSON.stringify([note.columns, rows.map((r) => r.cells)])} />
 
         {here.length > 0 && (
@@ -451,12 +455,25 @@ export default function NoteDetail() {
           <button onClick={() => setAiOpen((v) => !v)} className="text-xs font-bold text-brand-600 whitespace-nowrap">
             {aiOpen ? 'Close' : '+ Type, speak or photo'}
           </button>
+          {adders.length > 1 && (
+            <select value={byWho} onChange={(e) => setByWho(e.target.value)} aria-label="Show rows added by"
+              className="input text-xs py-1.5 w-auto max-w-[10rem]">
+              <option value="">Everyone's rows</option>
+              {adders.map(([k, n]) => <option key={k} value={k}>{k === (user?.name || '').toLowerCase() ? 'My rows' : `${dn(n)}'s rows`}</option>)}
+            </select>
+          )}
           {rows.length > 1 && (
             <input value={q} onChange={(e) => setQ(e.target.value)} className="input text-xs py-1.5 flex-1 min-w-[8rem] max-w-xs" placeholder="Search the rows" />
           )}
           <span className="text-[10px] text-gray-400 whitespace-nowrap">{saving ? 'Saving…' : dirty ? 'Unsaved - tap outside the cell' : 'Saved'}</span>
           {err && <span className="text-[11px] text-red-600">{err}</span>}
         </div>
+        {byWho && (
+          <p className="text-[11px] text-gray-700">
+            Showing {shown.length} row{shown.length === 1 ? '' : 's'} added by <b>{byWho === (user?.name || '').toLowerCase() ? 'you' : dn(adders.find(([k]) => k === byWho)?.[1] || byWho)}</b>
+            {' · '}<button onClick={() => setByWho('')} className="font-bold text-brand-600">Show everyone's</button>
+          </p>
+        )}
         <p className="text-[11px] text-gray-500">
           <b className="text-gray-700">*</b> after a number means <b className="text-gray-700">tentative</b> (may go up or down) - e.g. write <b className="text-gray-700">3*</b> if you're not sure.
         </p>
