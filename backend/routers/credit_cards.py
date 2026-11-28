@@ -596,7 +596,7 @@ def bill_details(bill_id: int, db: Session = Depends(get_db), caller: User = Dep
             # Lines passed on to someone as a loan: line -> [{loan_id, to, amount}]
             "transfers": _transfers(db, bill.id, caller),
             # Lines put into a group: line -> {group_id, group, expense_id}
-            "in_groups": _in_groups(db, bill.id),
+            "in_groups": {},
             # Later instalments of an EMI already passed on from an earlier bill
             "emi_covered": {**_booking_covered(db, bill, caller), **_emi_covered(db, bill, caller)}}
     live = card_details.status(bill.id)
@@ -621,6 +621,7 @@ def bill_details(bill_id: int, db: Session = Depends(get_db), caller: User = Dep
                                       saved.get("read_at"), _cycle(bill))
         saved.pop("source_text", None)
         fresh.pop("source_text", None)
+        head["in_groups"] = _in_groups(db, bill.id, caller, ts)
         return {**head, "status": "ready", **saved, **fresh, "emi_bookings": _emi_bookings(db, bill, card, ts, caller)}
     return {**head, **(live or {"status": "none"})}
 
@@ -682,12 +683,55 @@ def scan_progress(caller: User = Depends(current_user)):
 _MON = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
 
 
-def _in_groups(db: Session, bill_id: int) -> dict:
+def _entered(db: Session, caller: User, t: dict, taken: set | None = None):
+    """An expense the caller already entered in one of their groups for this
+    card spend: paid by them, the same amount (within a rupee), dated within
+    2 days, and not tied to another card line - entered by hand before the
+    bill came ("We fit - Swiggy order" for SWIGGY ₹472). Nearest date first."""
+    from datetime import date as _d
+    from auth import caller_groups
+    from models import Expense
+    try:
+        day = _d.fromisoformat((t.get("date") or "")[:10])
+        amount = float(t.get("amount") or 0)
+    except (TypeError, ValueError):
+        return None
+    gids = [g.id for g in caller_groups(db, caller, history=False)]
+    if not gids or amount <= 0:
+        return None
+    best = None
+    for e in (db.query(Expense).filter(Expense.group_id.in_(gids), Expense.paid_by.ilike(caller.name),
+                                       Expense.card_ref.is_(None), Expense.amount.between(amount - 1, amount + 1))):
+        if taken and e.id in taken:
+            continue
+        try:
+            gap = abs((_d.fromisoformat((e.date or "")[:10]) - day).days)
+        except ValueError:
+            continue
+        if gap <= 2 and (best is None or gap < best[0]):
+            best = (gap, e)
+    return best[1] if best else None
+
+
+def _in_groups(db: Session, bill_id: int, caller: User | None = None, txns: list | None = None) -> dict:
+    """line -> the group expense a card line is in: put there from the bill
+    (card_ref), or entered by hand already (matched - see _entered)."""
     from models import Expense, Group
     out = {}
     for e, g in (db.query(Expense, Group).join(Group, Group.id == Expense.group_id)
                  .filter(Expense.card_ref.like(f"bill:{bill_id}:%"))):
         out[e.card_ref.rsplit(":", 1)[1]] = {"group_id": g.id, "group": g.name, "expense_id": e.id}
+    if caller is not None and txns:
+        taken = {v["expense_id"] for v in out.values()}
+        for i, t in enumerate(txns):
+            if str(i) in out or t.get("type") != "debit" or t.get("excluded"):
+                continue
+            e = _entered(db, caller, t, taken)
+            if e is not None:
+                taken.add(e.id)
+                g = db.get(Group, e.group_id)
+                out[str(i)] = {"group_id": g.id, "group": g.name, "expense_id": e.id,
+                               "matched": e.title or e.venue or "an expense"}
     return out
 
 
@@ -721,6 +765,7 @@ def line_to_group(bill_id: int, line: int, payload: ToGroupIn, background_tasks:
     from auth import caller_groups
     from models import Expense
     from routers.expenses import create_expense
+    from models import Group
     from routers.groups import create_group, update_group
     from schemas import ExpenseCreate, GroupCreate, GroupUpdate
     bill = _own_bill(db, bill_id, caller)
@@ -733,6 +778,15 @@ def line_to_group(bill_id: int, line: int, payload: ToGroupIn, background_tasks:
     ref = f"bill:{bill.id}:{line}"
     if db.query(Expense.id).filter(Expense.card_ref == ref).first():
         raise HTTPException(400, "This spend is in a group already")
+    # Entered by hand already (same amount, within 2 days): tied to this line
+    # instead of a second copy
+    have = _entered(db, caller, t)
+    if have is not None:
+        have.card_ref = ref
+        db.commit()
+        g = db.get(Group, have.group_id)
+        return {"group_id": g.id, "group": g.name, "created": False, "expense_id": have.id,
+                "already": have.title or have.venue or "an expense"}
     me = caller.name
     people = []
     for n in payload.people:
@@ -760,7 +814,6 @@ def line_to_group(bill_id: int, line: int, payload: ToGroupIn, background_tasks:
         group_id, created = group.id, False
     split = [me, *people] if payload.with_me else people
     names = {}
-    from models import Group
     g = db.get(Group, group_id)
     for mb in g.members:
         names[mb.name.lower()] = mb.name

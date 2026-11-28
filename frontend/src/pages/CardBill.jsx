@@ -496,7 +496,7 @@ function BillBreakup({ billId: id }) {
                     {d.in_groups?.[String(line)] && (
                       <button onClick={() => nav(`/groups/${d.in_groups[String(line)].group_id}`)}
                         className="text-[10px] font-bold text-green-700 bg-green-50 border border-green-200 rounded px-1.5 py-px mt-0.5">
-                        → in {d.in_groups[String(line)].group}
+                        → {d.in_groups[String(line)].matched ? `already in ${d.in_groups[String(line)].group} as "${d.in_groups[String(line)].matched}"` : `in ${d.in_groups[String(line)].group}`}
                       </button>
                     )}
                     {!covered && !d.in_groups?.[String(line)] && x.category !== 'Card fees & interest' && (x.type === 'debit' || emiOf(x)) && sentTotal < (booking ? booking.total : passable(x)) - 0.5 && (
